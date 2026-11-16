@@ -1,0 +1,136 @@
+/* Environment lab page only (not loaded by the app). */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #151b28;
+  font-family: Overpass, system-ui, sans-serif;
+  color: #1b2433;
+}
+
+.env-lab__stage {
+  position: fixed;
+  inset: 0;
+}
+
+.env-lab__world {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  outline: none;
+}
+
+.env-lab__world:focus-visible {
+  box-shadow: inset 0 0 0 3px #ffd166;
+}
+
+.env-lab__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.env-lab__title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.env-lab__panel {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: 300px;
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.94);
+  box-shadow: 0 8px 30px rgb(10 20 40 / 0.25);
+  font-size: 13px;
+  line-height: 1.35;
+  z-index: 10;
+}
+
+.env-lab__panel h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.env-lab__readout {
+  margin: 0 0 6px;
+  font-family: 'Overpass Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: #33415c;
+}
+
+.env-lab__group {
+  margin: 10px 0 0;
+  padding: 8px 10px 10px;
+  border: 1px solid #d5dbe6;
+  border-radius: 10px;
+}
+
+.env-lab__group legend {
+  padding: 0 4px;
+  font-weight: 700;
+}
+
+.env-lab__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.env-lab__row input[type='range'],
+.env-lab__row select,
+.env-lab__row input[type='text'] {
+  flex: 1 1 auto;
+  max-width: 150px;
+}
+
+.env-lab__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.env-lab__panel button {
+  padding: 5px 9px;
+  border: 1px solid #b8c2d4;
+  border-radius: 8px;
+  background: #f4f6fa;
+  color: #1b2433;
+  font: inherit;
+  cursor: pointer;
+}
+
+.env-lab__panel button:hover {
+  background: #e6ebf3;
+}
+
+.env-lab__panel :focus-visible {
+  outline: 3px solid #2457d6;
+  outline-offset: 2px;
+}
+
+.env-lab--clean .env-lab__panel {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .env-lab__panel {
+    top: auto;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: 38vh;
+  }
+}
