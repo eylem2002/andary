@@ -1,0 +1,6 @@
+#!/bin/sh
+# Fast quality gate before every push: lint, typecheck, unit + integration tests, licences and a
+# secrets scan. Enable once per clone with `npm run hooks:install`.
+# The full suite (audit + end-to-end + accessibility) is `npm run check`.
+echo "andary pre-push: running fast checks (skip once with git push --no-verify)"
+exec npm run --silent check:fast
