@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Single-line credential formats. */
-export const RULES = [
+const RULES = [
   { id: 'aws-access-key', re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ },
   { id: 'github-token', re: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b/ },
   { id: 'github-pat', re: /\bgithub_pat_[A-Za-z0-9_]{60,}\b/ },

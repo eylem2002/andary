@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import { STATUS_CODES } from 'node:http';
 import { CLOSE_CODE, OPCODE, WsProtocolError, createFrameParser, encodeClosePayload, encodeFrame } from './ws-frame.mjs';
 
-export const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 /** How long to wait for the peer's close frame (or for the TCP close) before cutting the socket. */
 const CLOSE_TIMEOUT_MS = 2000;
 

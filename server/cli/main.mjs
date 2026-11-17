@@ -89,6 +89,9 @@ const COMMANDS = {
   },
 };
 
+const VERSION_ARGS = ['--version', '-v', 'version'];
+const HELP_ARGS = ['--help', '-h', 'help'];
+
 /** @returns {string} */
 function generalHelp() {
   const width = Math.max(...Object.values(COMMANDS).map((c) => c.usage.length));
@@ -109,11 +112,10 @@ Environment:
 }
 
 /**
- * @param {string} name
  * @param {Command} command
  * @returns {string}
  */
-function commandHelp(name, command) {
+function commandHelp(command) {
   return `Usage: andary ${command.usage}\n\n${command.summary}.${command.help ? `\n\n${command.help}` : ''}`;
 }
 
@@ -125,11 +127,11 @@ function commandHelp(name, command) {
  */
 export async function main(argv, io = processIo()) {
   const [first] = argv;
-  if (first === '--version' || first === '-v' || first === 'version') {
+  if (VERSION_ARGS.includes(first)) {
     io.out(readVersion());
     return 0;
   }
-  if (first === '--help' || first === '-h' || first === 'help') {
+  if (HELP_ARGS.includes(first)) {
     io.out(generalHelp());
     return 0;
   }
@@ -142,20 +144,31 @@ export async function main(argv, io = processIo()) {
     return 2;
   }
   try {
-    const { values, positionals } = parseArgs({
-      args: named ? argv.slice(1) : argv,
-      options: { ...command.options, help: { type: 'boolean', short: 'h' } },
-      allowPositionals: Boolean(command.positionals),
-      strict: true,
-    });
-    if (values.help) {
-      io.out(commandHelp(name, command));
-      return 0;
-    }
-    return await command.run(values, positionals, io);
+    return await runCommand(command, named ? argv.slice(1) : argv, io);
   } catch (error) {
     if (!(error instanceof UsageError) && !String(error?.code).startsWith('ERR_PARSE_ARGS')) throw error;
     io.err(`${error.message}\nRun "andary ${name} --help" for usage.`);
     return 2;
   }
+}
+
+/**
+ * Parses a command's options and runs it, or prints its usage for `--help`.
+ * @param {Command} command
+ * @param {string[]} args the arguments after the command name
+ * @param {import('./io.mjs').CliIo} io
+ * @returns {Promise<number>}
+ */
+async function runCommand(command, args, io) {
+  const { values, positionals } = parseArgs({
+    args,
+    options: { ...command.options, help: { type: 'boolean', short: 'h' } },
+    allowPositionals: Boolean(command.positionals),
+    strict: true,
+  });
+  if (values.help) {
+    io.out(commandHelp(command));
+    return 0;
+  }
+  return command.run(values, positionals, io);
 }

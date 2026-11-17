@@ -90,7 +90,7 @@ const WILDCARD_HOSTS = new Set(['', '0.0.0.0', '::', '[::]']);
  * @param {string|undefined} host
  * @returns {boolean}
  */
-export function isWildcardHost(host) {
+function isWildcardHost(host) {
   return WILDCARD_HOSTS.has(host ?? '');
 }
 
@@ -108,7 +108,7 @@ export function isLoopbackHost(host) {
  * @param {string} host
  * @returns {string}
  */
-export function stripBrackets(host) {
+function stripBrackets(host) {
   return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
 }
 

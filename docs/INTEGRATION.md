@@ -155,8 +155,10 @@ Off by default. Turn them on in the town (Settings → Remote approvals) or star
 `--remote-approvals`.
 
 - **On, with a browser connected:** a permission prompt waits for the town. Allow or Deny answers
-  Claude Code directly (a deny can carry a reason, which Claude sees as
-  `Denied from Andary: <reason>`). Claude Code's own deny and ask rules still apply.
+  Claude Code directly; Claude sees a denial as `Denied from Andary`, so it can try another
+  approach. (The protocol also accepts a reason, shown as `Denied from Andary: <reason>`; the
+  approval card does not offer a field for one yet.) Claude Code's own deny and ask rules still
+  apply.
 - **Only what the town can show in full.** A request whose input had to be shortened or had
   credentials masked goes straight to the terminal (the card says why), and the card shows full
   paths, every input field and any invisible or direction-changing characters. Allow and Deny

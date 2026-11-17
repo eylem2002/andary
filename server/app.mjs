@@ -69,28 +69,9 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @returns {Promise<TownServer>}
  */
 export async function startTownServer(options = {}) {
-  const config = {
-    port: options.port ?? DEFAULT_PORT,
-    host: options.host ?? DEFAULT_HOST,
-    home: options.home ?? resolveHome(),
-    publicDir: options.publicDir ?? PUBLIC_DIR,
-    approvalTimeoutMs: options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS,
-    writeState: options.writeState ?? true,
-    log: options.log ?? (() => {}),
-  };
+  const config = withDefaults(options);
   const ctx = createContext(config, options);
-  const server = createServer((req, res) => {
-    handleRequest(ctx, req, res).catch((error) => {
-      // Name and code only: an error message could quote request data.
-      ctx.log(`Internal error while answering a request (${error?.code ?? error?.name ?? 'unknown'})`);
-      sendText(res, 500, 'Internal error\n');
-    });
-  });
-  server.on('upgrade', (req, socket, head) => handleUpgrade(ctx, req, socket, head));
-  // Bodies are small and local; a slow upload is not a real client. Held hook responses are not
-  // affected: these limits cover receiving the request, not answering it.
-  server.requestTimeout = 30_000;
-  server.headersTimeout = 10_000;
+  const server = createHttpServer(ctx);
   await listen(server, config.port, config.host);
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : config.port;
@@ -121,6 +102,39 @@ export async function startTownServer(options = {}) {
     browserCount: () => ctx.hub.size,
     stop: once(() => stopServer(ctx, server, config)),
   };
+}
+
+/** @param {ServerOptions} options */
+function withDefaults(options) {
+  return {
+    port: options.port ?? DEFAULT_PORT,
+    host: options.host ?? DEFAULT_HOST,
+    home: options.home ?? resolveHome(),
+    publicDir: options.publicDir ?? PUBLIC_DIR,
+    approvalTimeoutMs: options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS,
+    writeState: options.writeState ?? true,
+    log: options.log ?? (() => {}),
+  };
+}
+
+/**
+ * The HTTP server: routes, WebSocket upgrades and request time limits.
+ * @param {TownContext} ctx
+ */
+function createHttpServer(ctx) {
+  const server = createServer((req, res) => {
+    handleRequest(ctx, req, res).catch((error) => {
+      // Name and code only: an error message could quote request data.
+      ctx.log(`Internal error while answering a request (${error?.code ?? error?.name ?? 'unknown'})`);
+      sendText(res, 500, 'Internal error\n');
+    });
+  });
+  server.on('upgrade', (req, socket, head) => handleUpgrade(ctx, req, socket, head));
+  // Bodies are small and local; a slow upload is not a real client. Held hook responses are not
+  // affected: these limits cover receiving the request, not answering it.
+  server.requestTimeout = 30_000;
+  server.headersTimeout = 10_000;
+  return server;
 }
 
 /**

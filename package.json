@@ -38,6 +38,7 @@
     "demo": "node bin/andary.mjs demo",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json",
+    "deadcode": "node scripts/find-unused-exports.mjs",
     "test": "node --test --test-reporter=spec \"test/**/*.test.mjs\"",
     "test:unit": "node --test --test-reporter=spec \"test/unit/**/*.test.mjs\"",
     "test:integration": "node --test --test-reporter=spec \"test/integration/**/*.test.mjs\"",

@@ -166,7 +166,7 @@ function attachBrowser(ctx, connection) {
  * @param {import('./websocket.mjs').WsConnection} connection
  * @param {string} text
  */
-export function handleBrowserMessage(ctx, connection, text) {
+function handleBrowserMessage(ctx, connection, text) {
   let message;
   try {
     message = JSON.parse(text);

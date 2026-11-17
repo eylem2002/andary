@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, mock, test } from 'node:test';
-import { DEMO_APPROVAL_MS, createDemo, normalizeAgentId } from '../../../public/js/ui/demo-mode.js';
+import { DEMO_APPROVAL_MS, createDemo } from '../../../public/js/ui/demo-mode.js';
 
 function fakeStore() {
   /** @type {any[]} */
@@ -125,12 +125,5 @@ describe('demo mode', () => {
     assert.deepEqual(await answer, { decision: 'allow' });
     demo.setPaused(false);
     assert.equal(store.approvals.at(-1).status, 'allowed', 'resuming does not bring a settled request back');
-  });
-
-  test('agent ids lose their "agent-" prefix', () => {
-    assert.equal(normalizeAgentId('agent-x1'), 'x1');
-    assert.equal(normalizeAgentId('x1'), 'x1');
-    assert.equal(normalizeAgentId(''), null);
-    assert.equal(normalizeAgentId(undefined), null);
   });
 });

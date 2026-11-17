@@ -44,7 +44,9 @@ const AGENT_END_EVENTS = new Set(['Stop', 'SubagentStop']);
  * @returns {string|null}
  */
 export function normalizeAgentId(id) {
-  return typeof id === 'string' && id !== '' ? id.replace(/^agent-/, '') : null;
+  const value = typeof id === 'string' ? id.trim() : '';
+  if (!value) return null;
+  return value.startsWith('agent-') && value.length > 6 ? value.slice(6) : value;
 }
 
 /**

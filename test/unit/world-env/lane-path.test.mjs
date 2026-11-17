@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { angleDelta, createPath, offsetPolyline, rightOf, roundCorners } from '../../../public/js/world/env/lane-path.js';
+import { createPath, offsetPolyline, rightOf, roundCorners } from '../../../public/js/world/env/lane-path.js';
 import { ringRoadCorners } from '../../../public/js/world/layout.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
@@ -63,9 +63,4 @@ test('open paths clamp at their ends', () => {
   assert.equal(out.x, 3);
   path.sample(-5, out);
   assert.equal(out.x, 0);
-});
-
-test('angleDelta picks the short way round', () => {
-  assert.ok(near(angleDelta(0.1, -0.1), -0.2));
-  assert.ok(near(angleDelta(Math.PI - 0.1, -Math.PI + 0.1), 0.2));
 });

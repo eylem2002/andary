@@ -215,7 +215,7 @@ export function parseHookBody(raw) {
 }
 
 /** Why a request the town could otherwise answer goes to the terminal (Approval.message). */
-export const NOT_SHOWN_IN_FULL = 'The town cannot show this request in full (it is very long or holds credentials)';
+const NOT_SHOWN_IN_FULL = 'The town cannot show this request in full (it is very long or holds credentials)';
 
 /**
  * Whether sanitizing left a tool input exactly as Claude Code sent it. Redaction and truncation
@@ -226,7 +226,7 @@ export const NOT_SHOWN_IN_FULL = 'The town cannot show this request in full (it 
  * @param {unknown} sanitized
  * @returns {boolean}
  */
-export function shownInFull(raw, sanitized) {
+function shownInFull(raw, sanitized) {
   return JSON.stringify(raw ?? null) === JSON.stringify(sanitized ?? null);
 }
 

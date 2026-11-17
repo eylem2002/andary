@@ -7,7 +7,7 @@ import { UI_COOKIE } from './auth.mjs';
 import { APP_ID } from './config.mjs';
 import { connectHost, hostWithPort } from './security.mjs';
 
-export const STATE_FILE = 'server.json';
+const STATE_FILE = 'server.json';
 
 /**
  * @typedef {object} ServerState
@@ -26,7 +26,7 @@ export const STATE_FILE = 'server.json';
  * @param {string} home
  * @returns {string}
  */
-export function stateFilePath(home) {
+function stateFilePath(home) {
   return join(home, STATE_FILE);
 }
 

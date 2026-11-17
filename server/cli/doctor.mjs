@@ -138,6 +138,8 @@ async function checkServer(report, home) {
 async function checkRoundTrip(report, home, io) {
   const state = readStateFile(home);
   const script = existsSync(forwarderPath(home)) ? forwarderPath(home) : HOOK_SOURCE;
+  // The browser ignores this prefix (DOCTOR_SESSION_PREFIX in public/js/core/events.js), so the
+  // probe proves delivery without leaving a crew in the town.
   const sessionId = `andary-doctor-${randomUUID()}`;
   const env = { ...io.env, ANDARY_HOME: home };
   const base = { session_id: sessionId, cwd: io.cwd, transcript_path: '', permission_mode: 'default' };
@@ -147,7 +149,7 @@ async function checkRoundTrip(report, home, io) {
       headers: { Cookie: `andary_ui=${state.uiToken}` },
     });
     await waitForMessage(socket, (m) => m?.t === 'hello', 5000);
-    const payload = { ...base, hook_event_name: 'Notification', notification_type: 'token_town_doctor', message: 'Andary doctor: the hook pipeline works' };
+    const payload = { ...base, hook_event_name: 'Notification', notification_type: 'andary_doctor', message: 'Andary doctor: the hook pipeline works' };
     const run = await runHookScript({ script, payload, env });
     if (run.code !== 0 || run.stdout !== '' || run.stderr !== '') {
       report('fail', 'The hook forwarder misbehaved', `exit code ${run.code}, ${run.stdout.length + run.stderr.length} bytes of unexpected output`);

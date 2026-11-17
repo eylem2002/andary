@@ -15,7 +15,7 @@ import { BUILDING_KEYS, CREW_COLORS } from '../../core/catalog.js';
 import { ACTIVITY_NAMES } from '../agents/activities.js';
 import { EFFECT_KINDS } from '../agents/effects.js';
 import { HATS } from '../agents/looks.js';
-import { createStubEnvironment } from '../agents/dev/stub-env.js';
+import { createStubEnvironment } from './stub-env.js';
 import { SCENARIOS, TEMPLATES, chaos } from './scenarios.js';
 import { button, checkbox, section, select, slider, textInput } from './panel.js';
 
@@ -27,8 +27,8 @@ async function environmentFactory() {
   try {
     await import('../env/environment.js');
     return undefined; // createWorld's default
-  } catch (err) {
-    console.warn('Real environment unavailable, using the stub:', err);
+  } catch (error) {
+    console.warn('Real environment unavailable, using the stub:', error);
     return createStubEnvironment;
   }
 }
@@ -177,10 +177,10 @@ async function main() {
       timeOfDay: Number.isFinite(hour) ? hour : 'auto',
       envFactory: await environmentFactory(),
     });
-  } catch (err) {
+  } catch (error) {
     const message = document.getElementById('lab-error');
     message.hidden = false;
-    message.textContent = `The world could not start: ${err?.message ?? err}`;
+    message.textContent = `The world could not start: ${error?.message ?? error}`;
     return;
   }
   const lab = createLab(world);

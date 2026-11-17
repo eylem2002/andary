@@ -80,7 +80,7 @@ function pillPriority(a, screenY) {
 
 /** @param {number} n */
 function crowdPill(n) {
-  return pills[n] ?? (pills[n] = { x: 0, y: 0, w: 0, h: 0, priority: 0, compact: false, agent: null });
+  return (pills[n] ??= { x: 0, y: 0, w: 0, h: 0, priority: 0, compact: false, agent: null });
 }
 
 /**
@@ -101,14 +101,14 @@ function settleCrowd(count, scale) {
  * Screen pixels per world unit for an orthographic camera (a fixed guess otherwise).
  * @param {THREE.Camera} camera @param {number} height viewport CSS px
  */
-export function pixelsPerUnit(camera, height) {
+function pixelsPerUnit(camera, height) {
   const cam = /** @type {THREE.OrthographicCamera} */ (camera);
   if (!cam.isOrthographicCamera) return NATURAL_PPU;
   return (height * cam.zoom) / Math.max(1e-6, cam.top - cam.bottom);
 }
 
 /** Tag scale for a zoom level: grows and shrinks a little with the map, but stays legible. @param {number} ppu */
-export function tagScale(ppu) {
+function tagScale(ppu) {
   return clamp(Math.sqrt(ppu / NATURAL_PPU), 0.8, 1.15);
 }
 
@@ -133,7 +133,7 @@ export function iconBoost(view) {
 
 /** @param {number} n */
 function box(n) {
-  return boxes[n] ?? (boxes[n] = { x: 0, bottom: 0, w: 0, h: 0, dy: 0, fixed: false, tag: null });
+  return (boxes[n] ??= { x: 0, bottom: 0, w: 0, h: 0, dy: 0, fixed: false, tag: null });
 }
 
 /**

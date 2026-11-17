@@ -136,9 +136,9 @@ class World {
   createRenderer() {
     try {
       this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-    } catch (err) {
-      throw new Error(`WebGL could not start (${err?.message ?? 'unknown error'}), so the 3D town cannot be drawn.`, {
-        cause: err,
+    } catch (error) {
+      throw new Error(`WebGL could not start (${error?.message ?? 'unknown error'}), so the 3D town cannot be drawn.`, {
+        cause: error,
       });
     }
     this.renderer.setPixelRatio(this.pixelRatio());
@@ -217,8 +217,8 @@ class World {
       this.view.faceYaw = Math.atan2(-this.dir.x, -this.dir.z);
       this.crowd.tick(dt, this.view);
       this.env.render();
-    } catch (err) {
-      this.warnOnce('frame', err);
+    } catch (error) {
+      this.warnOnce('frame', error);
     }
     this.drawCalls = this.renderer.info.render.calls;
   }
@@ -244,8 +244,8 @@ class World {
     let key = null;
     try {
       key = this.env.pickBuilding(this.raycaster);
-    } catch (err) {
-      this.warnOnce('pickBuilding', err);
+    } catch (error) {
+      this.warnOnce('pickBuilding', error);
     }
     return isBuilding(key) ? { type: 'building', key } : null;
   }
@@ -290,8 +290,8 @@ class World {
     for (const cb of this.listeners[event]) {
       try {
         cb(sel);
-      } catch (err) {
-        console.error(err);
+      } catch (error) {
+        console.error(error);
       }
     }
   }
@@ -300,17 +300,17 @@ class World {
   envCall(name, ...args) {
     try {
       return this.env?.[name]?.(...args);
-    } catch (err) {
-      this.warnOnce(name, err);
+    } catch (error) {
+      this.warnOnce(name, error);
       return undefined;
     }
   }
 
-  /** @param {string} what @param {unknown} err */
-  warnOnce(what, err) {
+  /** @param {string} what @param {unknown} error */
+  warnOnce(what, error) {
     if (this.warned.has(what)) return;
     this.warned.add(what);
-    console.warn(`[world] ${what} failed:`, err);
+    console.warn(`[world] ${what} failed:`, error);
   }
 
   // ── World API: lifecycle and view ───────────────────────────────────────────
@@ -607,9 +607,9 @@ export async function createWorld(container, options = {}) {
   const world = new World(container, options);
   try {
     await world.init(options.envFactory);
-  } catch (err) {
+  } catch (error) {
     world.teardown(); // leave the container as we found it, for the app's fallback view
-    throw err;
+    throw error;
   }
   world.setTimeOfDay(options.timeOfDay ?? 'auto');
   return world;

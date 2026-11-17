@@ -7,15 +7,15 @@ import { safeColor } from './color.js';
 
 export const HATS = Object.freeze(['hardhat', 'cap', 'crown', 'beret', 'sunhat', 'wizard', 'none']);
 
-export const SKIN_TONES = Object.freeze(['#F7D7BC', '#EDBB93', '#D9A06F', '#B97D4E', '#8F5A36', '#5E3B25']);
-export const HAIR_COLORS = Object.freeze(['#2B1B12', '#4A2E1C', '#7A4A24', '#C9944A', '#1C1C1F', '#9E3B1F', '#A7A9AE']);
-export const PANTS_COLORS = Object.freeze(['#2F3B57', '#3A3F48', '#5E5140', '#25496E']);
+const SKIN_TONES = Object.freeze(['#F7D7BC', '#EDBB93', '#D9A06F', '#B97D4E', '#8F5A36', '#5E3B25']);
+const HAIR_COLORS = Object.freeze(['#2B1B12', '#4A2E1C', '#7A4A24', '#C9944A', '#1C1C1F', '#9E3B1F', '#A7A9AE']);
+const PANTS_COLORS = Object.freeze(['#2F3B57', '#3A3F48', '#5E5140', '#25496E']);
 
 /**
  * Figures are modelled about 1 unit tall; drawn 1.3× so they read next to the town's doors and
  * lamp posts (toy proportions), while still fitting the 0.8-unit spacing of work spots.
  */
-export const FIGURE_SCALE = 1.3;
+const FIGURE_SCALE = 1.3;
 
 /**
  * Things worn on the body (always visible), as opposed to the "kit" carried in a hand.
@@ -61,7 +61,7 @@ export function wearableFor(role, type) {
 }
 
 /** @param {string} role */
-export function defaultHat(role) {
+function defaultHat(role) {
   return role === 'lead' ? 'hardhat' : 'cap';
 }
 
@@ -71,7 +71,7 @@ export function normalizeHat(hat, role) {
 }
 
 /** @param {unknown} role @returns {'lead'|'subagent'|'teammate'} */
-export function normalizeRole(role) {
+function normalizeRole(role) {
   return role === 'lead' || role === 'teammate' ? role : 'subagent';
 }
 

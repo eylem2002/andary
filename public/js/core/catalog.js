@@ -75,9 +75,6 @@ export const TOOL_BUILDING = Object.freeze({
   Task: 'hall',
 });
 
-/** Tools that spawn a subagent or teammate. "Task" is the pre-2026 name of the Agent tool. */
-export const SPAWN_TOOLS = Object.freeze(['Agent', 'Task']);
-
 /** @type {Readonly<Record<BuildingKey, Activity>>} */
 export const BUILDING_ACTIVITY = Object.freeze({
   hall: 'think',
@@ -143,7 +140,27 @@ export const CREW_COLORS = Object.freeze([
 ]);
 
 /** Hats signal the model a session runs on; unknown models keep the role hat. */
-export const MODEL_HATS = Object.freeze({ opus: 'crown', sonnet: 'beret', haiku: 'sunhat', fable: 'wizard', mythos: 'wizard' });
+const MODEL_HATS = Object.freeze({ opus: 'crown', sonnet: 'beret', haiku: 'sunhat', fable: 'wizard', mythos: 'wizard' });
+
+/**
+ * Human model name: "claude-opus-5-5" → "Opus 5.5", "claude-3-5-sonnet-20241022" → "Sonnet 3.5".
+ * The version may come after the family (current ids) or before it (older ids), and a trailing
+ * date stamp is never read as a version. Unknown ids are returned as they are, clipped.
+ * @param {unknown} modelId
+ * @returns {string}
+ */
+export function modelLabel(modelId) {
+  if (modelId == null || modelId === '') return '';
+  const raw = String(modelId).trim();
+  const id = raw.toLowerCase();
+  const family = Object.keys(MODEL_HATS).find((name) => id.includes(name));
+  if (!family) return raw.length > 24 ? `${raw.slice(0, 23)}…` : raw;
+  const name = family[0].toUpperCase() + family.slice(1);
+  const after = id.match(new RegExp(`${family}-(\\d{1,2})(?:[-.](\\d{1,2}))?(?!\\d)`));
+  const before = id.match(new RegExp(`(\\d)-(\\d)-${family}`));
+  const version = (after ? [after[1], after[2]] : before ? [before[1], before[2]] : []).filter(Boolean).join('.');
+  return version ? `${name} ${version}` : name;
+}
 
 /**
  * @param {string} [modelId] e.g. "claude-opus-5-5"

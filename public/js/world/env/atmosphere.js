@@ -13,7 +13,7 @@ const ENV_HOUR_STEP = 0.2;
  * @param {number[]} rgb sRGB triplet
  * @param {THREE.Color} out
  */
-export function toColor(rgb, out) {
+function toColor(rgb, out) {
   return out.setRGB(rgb[0], rgb[1], rgb[2], THREE.SRGBColorSpace);
 }
 

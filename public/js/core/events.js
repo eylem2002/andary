@@ -83,6 +83,8 @@ const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 // tool named "constructor" or "__proto__" from reaching Object.prototype.
 
 /**
+ * A table's own entry for a key from hook data. Inherited keys are ignored, so a tool or event
+ * named "constructor" or "__proto__" cannot reach Object.prototype.
  * @template T
  * @param {Readonly<Record<string, T>>} table
  * @param {unknown} key
@@ -232,16 +234,6 @@ export function hostPath(url, max = 50) {
   } catch {
     return clip(raw, max);
   }
-}
-
-/** "claude-opus-5-5" → "Opus 5.5"; unknown ids stay as they are. @param {unknown} model */
-export function modelLabel(model) {
-  const id = str(model);
-  const match = /(opus|sonnet|haiku|fable|mythos)[-_ ]?(\d+)?(?:[-_.](\d+))?/i.exec(id);
-  if (!match) return id;
-  const family = match[1][0].toUpperCase() + match[1].slice(1).toLowerCase();
-  const version = [match[2], match[3]].filter(Boolean).join('.');
-  return version ? `${family} ${version}` : family;
 }
 
 /** @param {unknown} url */
@@ -701,10 +693,17 @@ function payloadOf(envelope) {
  * @param {() => number} now
  * @returns {TownEvent[]}
  */
+/**
+ * `andary doctor` sends a probe through the real pipeline under this session-id prefix
+ * (server/cli/doctor.mjs). It proves delivery, so the town shows nothing for it: no crew, no log
+ * entry, no achievement.
+ */
+const DOCTOR_SESSION_PREFIX = 'andary-doctor-';
+
 function normalizeEnvelope(envelope, now) {
   if (!isObject(envelope)) return [];
   const payload = payloadOf(envelope);
-  if (!payload) return [];
+  if (!payload || str(payload.session_id).startsWith(DOCTOR_SESSION_PREFIX)) return [];
   const base = baseOf(envelope, payload, now);
   const kind = own(KIND_BY_HOOK, payload.hook_event_name) ?? 'unknown';
   const build = own(DATA, kind);

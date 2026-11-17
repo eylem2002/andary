@@ -157,23 +157,23 @@ export function connectLive({
   /** @param {unknown} raw */
   function handle(raw) {
     const message = parseMessage(raw);
-    if (message?.t === 'hello') {
-      attempt = 0;
-      store.reset();
-      for (const envelope of message.history ?? []) ingest(envelope);
-      for (const approval of message.approvals ?? []) store.setApproval(approval);
-      onSettings(message.settings ?? {});
-      setStatus('live');
-      startPing();
-    } else if (message?.t === 'hook' && message.e) {
-      ingest(message.e);
-    } else if (message?.t === 'approval' && message.a) {
-      store.setApproval(message.a);
-    } else if (message?.t === 'settings') {
-      onSettings(message.settings ?? {});
-    } else if (message?.t === 'error') {
-      onError(String(message.message ?? 'The server reported an error.'));
-    }
+    if (!message) return;
+    if (message.t === 'hello') applyHello(message);
+    else if (message.t === 'hook' && message.e) ingest(message.e);
+    else if (message.t === 'approval' && message.a) store.setApproval(message.a);
+    else if (message.t === 'settings') onSettings(message.settings ?? {});
+    else if (message.t === 'error') onError(String(message.message ?? 'The server reported an error.'));
+  }
+
+  /** `hello` carries the server's whole state, so the store is rebuilt from it. @param {Record<string, any>} message */
+  function applyHello(message) {
+    attempt = 0;
+    store.reset();
+    for (const envelope of message.history ?? []) ingest(envelope);
+    for (const approval of message.approvals ?? []) store.setApproval(approval);
+    onSettings(message.settings ?? {});
+    setStatus('live');
+    startPing();
   }
 
   /** One malformed event must not stop the stream. @param {unknown} envelope */

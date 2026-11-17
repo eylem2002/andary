@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BUILDINGS, BUILDING_KEYS, TOOL_BUILDING, BUILDING_ACTIVITY, CREW_COLORS,
-  buildingForTool, activityForTool, hatForModel,
+  buildingForTool, activityForTool, hatForModel, modelLabel,
 } from '../../../public/js/core/catalog.js';
 
 test('every tool maps to a real building and every building has an activity', () => {
@@ -50,4 +50,17 @@ test('model ids map to hats by family', () => {
 test('crew colours are distinct hex colours', () => {
   assert.equal(new Set(CREW_COLORS).size, CREW_COLORS.length);
   for (const c of CREW_COLORS) assert.match(c, /^#[0-9A-F]{6}$/i);
+});
+
+test('model labels read the version on either side of the family, never a date stamp', () => {
+  assert.equal(modelLabel('claude-opus-5-5'), 'Opus 5.5');
+  assert.equal(modelLabel('claude-sonnet-4-5-20250929'), 'Sonnet 4.5');
+  assert.equal(modelLabel('claude-opus-4-20250514'), 'Opus 4');
+  assert.equal(modelLabel('claude-3-5-sonnet-20241022'), 'Sonnet 3.5');
+  assert.equal(modelLabel('claude-haiku-5'), 'Haiku 5');
+  assert.equal(modelLabel('claude-fable-5-2'), 'Fable 5.2');
+  assert.equal(modelLabel('sonnet'), 'Sonnet');
+  assert.equal(modelLabel('gpt-something'), 'gpt-something');
+  assert.equal(modelLabel('a-very-long-model-name-from-another-vendor'), 'a-very-long-model-name-…');
+  assert.equal(modelLabel(undefined), '');
 });

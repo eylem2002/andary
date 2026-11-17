@@ -7,7 +7,8 @@
 // Events older than HISTORIC_MS (history replayed when a browser connects) only place agents;
 // they play no effects and say nothing.
 
-import { agentKeyOf, clip, hostOf, isObject, modelLabel, normalizeAgentId, oneLine, own, shortCommand, str } from './events.js';
+import { modelLabel } from './catalog.js';
+import { agentKeyOf, clip, hostOf, isObject, normalizeAgentId, oneLine, own, shortCommand, str } from './events.js';
 import * as defaultHumor from './humor.js';
 
 /** @typedef {import('./catalog.js').BuildingKey} BuildingKey */

@@ -11,7 +11,7 @@ export const BLEND_SECONDS = 0.28;
 /** Seconds a prop takes to pop in or out of a hand. */
 export const PROP_SECONDS = 0.2;
 /** Walk-cycle radians per world unit travelled (one full cycle is two steps). */
-export const GAIT_PER_UNIT = (Math.PI * 2) / 0.78;
+const GAIT_PER_UNIT = (Math.PI * 2) / 0.78;
 /** Nominal speeds, used when a gait plays in place. */
 export const WALK_SPEED = 2.2;
 export const RUN_SPEED = 4.5;

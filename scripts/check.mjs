@@ -14,6 +14,7 @@ const STEPS = [
   { name: 'Lint', cmd: npm, args: ['run', '--silent', 'lint'] },
   { name: 'Config lint (JSON, shell, workflows)', cmd: npm, args: ['run', '--silent', 'lint:config'] },
   { name: 'Typecheck', cmd: npm, args: ['run', '--silent', 'typecheck'] },
+  { name: 'Dead code', cmd: npm, args: ['run', '--silent', 'deadcode'] },
   { name: 'Unit + integration tests', cmd: npm, args: ['run', '--silent', 'test'] },
   { name: 'Licences', cmd: npm, args: ['run', '--silent', 'licenses'] },
   { name: 'Secrets scan', cmd: npm, args: ['run', '--silent', 'secrets'] },
@@ -43,9 +44,10 @@ for (const step of STEPS) {
 }
 
 console.log('\nSummary');
+const nameWidth = Math.max(...results.map((r) => r.name.length));
 for (const r of results) {
   const note = r.note ? `  (${r.note})` : '';
-  console.log(`  ${r.status.padEnd(7)} ${r.name.padEnd(34)} ${r.seconds.toFixed(1).padStart(6)}s${note}`);
+  console.log(`  ${r.status.padEnd(7)} ${r.name.padEnd(nameWidth)} ${r.seconds.toFixed(1).padStart(6)}s${note}`);
 }
 const failed = results.filter((r) => r.status === 'FAIL');
 if (failed.length) {

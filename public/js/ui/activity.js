@@ -12,7 +12,7 @@ import { formatAgo, isCommandText } from './format.js';
 /** @typedef {import('./types.js').StoreState} StoreState */
 /** @typedef {import('./types.js').LogEntry} LogEntry */
 
-export const MAX_ROWS = 200;
+const MAX_ROWS = 200;
 
 /** @type {Record<string, string>} */
 const KIND_ICONS = {

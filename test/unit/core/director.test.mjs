@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createDirector } from '../../../public/js/core/director.js';
-import { modelLabel } from '../../../public/js/core/events.js';
+import { modelLabel } from '../../../public/js/core/catalog.js';
 import { createStore } from '../../../public/js/core/store.js';
 import { CREW_COLORS } from '../../../public/js/core/catalog.js';
 import { CWD, FIXTURES, SESSION, createFakeClock, createRecordingWorld, flush, hook } from './helpers.mjs';

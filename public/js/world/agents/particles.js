@@ -55,7 +55,7 @@ export function curveScale(curve, u) {
  * keeps spawning allocation-free (rain spawns every frame).
  * @type {SpawnSpec}
  */
-export const SPAWN = {
+const SPAWN = {
   x: 0,
   y: 0,
   z: 0,
