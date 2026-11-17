@@ -78,6 +78,9 @@ The repository is also a Claude Code plugin and a one-plugin marketplace:
   `node "${CLAUDE_PLUGIN_ROOT}/hooks/hook.mjs" # andary` in place,
 - `commands/town.md` adds `/andary:town`, which starts the server in the background
   (`start --detach`) if needed and opens the town. Only you can run it (the model cannot).
+  To run its one command without a prompt, it pre-approves `node` commands for that turn
+  (`allowed-tools: Bash(node *)`); no narrower pattern helps, because `node -e …` would match it
+  too. If you would rather approve nothing in advance, run `andary start` in a terminal instead.
 
 The plugin's forwarder finds the server exactly like the installed copy: `ANDARY_HOME` if set,
 otherwise `~/.andary/server.json`. Use either the plugin or settings hooks, not both, or every
