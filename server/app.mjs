@@ -33,6 +33,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {string} version
  * @property {string} secret
  * @property {string} uiToken
+ * @property {string} responseKey     signs /api/hook replies (see auth.signHookReply)
  * @property {{ remoteApprovals: boolean, approvalTimeoutMs: number }} settings
  * @property {Set<string>} allowedHosts
  * @property {Record<string, string>} headers
@@ -101,6 +102,7 @@ export async function startTownServer(options = {}) {
     host: config.host,
     secret: ctx.secret,
     uiToken: ctx.uiToken,
+    responseKey: ctx.responseKey,
     version: ctx.version,
     startedAt: Date.now(),
     approvalTimeoutMs: config.approvalTimeoutMs,
@@ -133,10 +135,11 @@ function createContext(config, options) {
     version: readVersion(),
     secret: generateToken(),
     uiToken: generateToken(),
+    responseKey: generateToken(),
     settings: { remoteApprovals: Boolean(options.remoteApprovals), approvalTimeoutMs: config.approvalTimeoutMs },
     allowedHosts: new Set(),
     headers: securityHeaders(buildCsp(computeImportMapHashes(config.publicDir))),
-    history: createHistory({ size: LIMITS.historySize }),
+    history: createHistory({ size: LIMITS.historySize, maxBytes: LIMITS.historyBytes }),
     broker: createApprovalBroker({
       timeoutMs: config.approvalTimeoutMs,
       maxPending: LIMITS.pendingApprovals,
@@ -165,9 +168,11 @@ function ingest(ctx, { ts, event }) {
   ctx.counts.events += 1;
   const envelope = { id: ctx.counts.events, ts, rx: Date.now(), event: sanitize(event) };
   if (envelope.id === 1) ctx.log('Receiving hook events from Claude Code');
-  ctx.history.push(envelope);
+  // Serialised once: its length is the envelope's share of the history budget.
+  const text = JSON.stringify(envelope);
+  ctx.history.push(envelope, text.length);
   ctx.recorder?.write(envelope);
-  ctx.hub.broadcast({ t: 'hook', e: envelope });
+  ctx.hub.broadcastText(`{"t":"hook","e":${text}}`);
   return envelope;
 }
 

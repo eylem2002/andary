@@ -1,7 +1,7 @@
 // `andary status`: is the server up, and where are the hooks registered?
 import { readVersion, resolveHome } from '../config.mjs';
 import { HOOK_REGISTRATIONS, inspectInstallations } from '../installer.mjs';
-import { loginUrl, probeServer, readStateFile, serverOrigin } from '../state-file.mjs';
+import { isProcessAlive, loginUrl, probeServer, readStateFile, serverOrigin } from '../state-file.mjs';
 import { cliInvocation, tildify } from './io.mjs';
 
 /**
@@ -13,7 +13,7 @@ import { cliInvocation, tildify } from './io.mjs';
 export async function runStatus(_values, _positionals, io) {
   const home = resolveHome(io.env);
   const state = readStateFile(home);
-  const hello = state ? await probeServer(state) : null;
+  const hello = state && isProcessAlive(state.pid) ? await probeServer(state, 1500, { token: state.uiToken }) : null;
   io.out(`Andary ${readVersion()}`);
   if (hello && state) {
     io.out(`  Server:    running on ${serverOrigin(state)} (pid ${state.pid}, up ${formatDuration(Date.now() - state.startedAt)})`);

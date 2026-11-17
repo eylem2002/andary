@@ -200,12 +200,13 @@ export function createApprovalBroker({
      * Registers a PermissionRequest. `response` resolves with the hook output: a decision object
      * if the town decides, otherwise null (immediately when not held).
      * @param {Record<string, any>} event sanitized PermissionRequest payload
-     * @param {{ hold: boolean }} options
+     * @param {{ hold: boolean, message?: string }} options  message: why it was not held
      * @returns {{ approval: Approval, response: Promise<object|null> }}
      */
-    create(event, { hold }) {
+    create(event, { hold, message }) {
       makeRoom();
       const approval = newApproval(event, hold, now(), timeoutMs);
+      if (message) approval.message = message;
       /** @type {Entry} */
       const entry = { approval, respond: null, timer: null, settledOrder: 0 };
       const response = new Promise((resolve) => {

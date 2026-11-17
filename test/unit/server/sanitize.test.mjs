@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import {
+import { MAX_KEY_CHARS, MAX_OBJECT_KEYS, MORE_KEYS,
   DEPTH_PLACEHOLDER,
   MAX_ARRAY_ITEMS,
   MAX_DEPTH,
@@ -141,5 +141,19 @@ describe('sanitize', () => {
 
   it('passes numbers, booleans and null through', () => {
     assert.deepEqual(sanitize({ a: 1, b: false, c: null, d: [true, 2.5] }), { a: 1, b: false, c: null, d: [true, 2.5] });
+  });
+});
+
+describe('object keys', () => {
+  it('shortens long keys, redacts secrets in keys and caps the number of keys', () => {
+    const wide = Object.fromEntries(Array.from({ length: MAX_OBJECT_KEYS + 25 }, (_, i) => [`k${i}`, i]));
+    const out = sanitize({ ['x'.repeat(900_000)]: 1, [fake('sk-ant-api03-', 30)]: true, wide });
+    const keys = Object.keys(out);
+    assert.ok(keys[0].length < MAX_KEY_CHARS + 30, `key kept ${keys[0].length} chars`);
+    assert.equal(keys[1], REDACTED);
+    assert.equal(Object.keys(out.wide).length, MAX_OBJECT_KEYS + 1);
+    assert.equal(out.wide[MORE_KEYS], '[+25 keys]');
+    assert.equal(out.wide.k99, 99);
+    assert.equal(out.wide.k100, undefined);
   });
 });

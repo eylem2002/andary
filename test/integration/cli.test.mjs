@@ -93,7 +93,7 @@ describe('server lifecycle', () => {
     const town = await startTown();
     const statePath = join(town.home, 'server.json');
     const state = JSON.parse(readFileSync(statePath, 'utf8'));
-    assert.deepEqual(Object.keys(state).sort(), ['approvalTimeoutMs', 'host', 'pid', 'port', 'secret', 'startedAt', 'uiToken', 'version']);
+    assert.deepEqual(Object.keys(state).sort(), ['approvalTimeoutMs', 'host', 'pid', 'port', 'responseKey', 'secret', 'startedAt', 'uiToken', 'version']);
     assert.equal(state.host, '127.0.0.1');
     assert.match(state.secret, /^[A-Za-z0-9_-]{43}$/);
     assert.match(state.uiToken, /^[A-Za-z0-9_-]{43}$/);

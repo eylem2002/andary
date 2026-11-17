@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { HOOK_SOURCE } from '../../../server/config.mjs';
+import { ensureHome } from '../../../server/state-file.mjs';
 import {
   ASYNC_EVENTS,
   HOOK_REGISTRATIONS,
@@ -340,5 +341,28 @@ describe('inspection helpers', () => {
     assert.equal(refreshForwarder(home), true);
     assert.equal(readFileSync(forwarderPath(home), 'utf8'), readFileSync(HOOK_SOURCE, 'utf8'));
     assert.equal(refreshForwarder(home), false);
+  });
+});
+
+describe('hostile folders', () => {
+  it('does not write through a symlink planted at a temp-file name in the project', () => {
+    const settings = join(dir, 'project', '.claude', 'settings.local.json');
+    writeJson(settings, { note: '$(touch /tmp/pwned)' });
+    const victim = join(dir, 'victim-bashrc');
+    writeFileSync(victim, 'alias ll="ls -l"\n');
+    // The names older versions used; a repository can ship links for a whole range of pids.
+    for (const pid of [process.pid, process.pid + 1]) symlinkSync(victim, `${settings}.andary-${pid}.tmp`);
+    run('install', 'local');
+    assert.equal(readFileSync(victim, 'utf8'), 'alias ll="ls -l"\n');
+    assert.ok(readJson(settings).hooks.PermissionRequest, 'the settings file itself was updated');
+  });
+
+  it('makes an existing home folder private again and refuses one owned by someone else', { skip: process.platform === 'win32' }, () => {
+    mkdirSync(home, { recursive: true });
+    chmodSync(home, 0o777);
+    run('install');
+    assert.equal(statSync(home).mode & 0o777, 0o700);
+    const owner = statSync(home).uid;
+    assert.throws(() => ensureHome(home, { uid: owner + 1 }), (/** @type {any} */ error) => error.code === 'EUNSAFEHOME' && /another user/.test(error.message));
   });
 });

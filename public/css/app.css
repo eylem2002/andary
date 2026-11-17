@@ -240,7 +240,8 @@ body {
   background: var(--paper-2);
 }
 
-.hud-btn:disabled {
+.hud-btn:disabled,
+.hud-btn[aria-disabled="true"] {
   cursor: default;
   opacity: 0.6;
 }

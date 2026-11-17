@@ -164,33 +164,76 @@ export function isCommandText(text) {
   return typeof text === 'string' && (text.startsWith('$ ') || text.startsWith('PS> '));
 }
 
-/** @type {Record<string, (input: any, path: (p: unknown) => string) => { action: string, detail: string }>} */
+/**
+ * Characters that change how text looks without being seen: C0/C1 controls (tab and newline
+ * excepted), bidirectional overrides and isolates ("Trojan Source"), zero-width and other
+ * invisible characters, line/paragraph separators and Unicode tag characters.
+ */
+const HIDDEN_CHARS =
+  // eslint-disable-next-line no-control-regex -- finding control characters is the point
+  /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD\u061C\u115F\u1160\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u3164\uFEFF\uFFA0\uFFF9-\uFFFB]|\uDB40[\uDC00-\uDC7F]/g;
+/** Three or more line breaks in a row (blank or whitespace-only lines between them). */
+const BLANK_RUN = /\n(?:[ \t]*\n){2,}/g;
+
+/**
+ * Makes text safe to judge by eye: hidden characters become visible markers such as ⟨U+202E⟩, and
+ * runs of blank lines (which can push the end of a command out of view) are collapsed into one
+ * marker line. Used where the viewer approves exactly what they read.
+ * @param {unknown} text
+ * @returns {string}
+ */
+export function revealHidden(text) {
+  return String(text ?? '')
+    .replace(HIDDEN_CHARS, (ch) => `⟨U+${ch.codePointAt(0)?.toString(16).toUpperCase().padStart(4, '0')}⟩`)
+    .replace(BLANK_RUN, (run) => `\n⟨${run.split('\n').length - 2} blank lines⟩\n`);
+}
+
+/** @type {Record<string, (input: any, path: (p: unknown) => string, text: (t: unknown) => string) => { action: string, detail: string }>} */
 const APPROVAL_WORDING = {
-  Bash: (input) => ({ action: 'run a command', detail: `$ ${input.command ?? ''}` }),
-  PowerShell: (input) => ({ action: 'run a command', detail: `PS> ${input.command ?? ''}` }),
+  Bash: (input, _path, text) => ({ action: 'run a command', detail: `$ ${text(input.command)}` }),
+  PowerShell: (input, _path, text) => ({ action: 'run a command', detail: `PS> ${text(input.command)}` }),
   Write: (input, path) => ({ action: 'write a file', detail: path(input.file_path) }),
   Edit: (input, path) => ({ action: 'edit a file', detail: path(input.file_path) }),
   MultiEdit: (input, path) => ({ action: 'edit a file', detail: path(input.file_path) }),
   NotebookEdit: (input, path) => ({ action: 'edit a notebook', detail: path(input.notebook_path) }),
   Read: (input, path) => ({ action: 'read a file', detail: path(input.file_path) }),
-  WebFetch: (input) => ({ action: 'fetch a web page', detail: String(input.url ?? '') }),
-  WebSearch: (input) => ({ action: 'search the web', detail: String(input.query ?? '') }),
+  WebFetch: (input, _path, text) => ({ action: 'fetch a web page', detail: text(input.url) }),
+  WebSearch: (input, _path, text) => ({ action: 'search the web', detail: text(input.query) }),
 };
 
 /**
- * What a permission request asks for, in words plus the exact detail to show in mono.
+ * What a permission request asks for, in words plus the detail to show in mono. The default is a
+ * short form for summaries. `exact` is for the approval card, where the viewer decides: full paths
+ * (never shortened in the middle), every input field for tools without special wording, and
+ * hidden characters revealed (see revealHidden).
  * @param {{ toolName?: string, toolInput?: any, cwd?: string }} approval
+ * @param {{ exact?: boolean }} [options]
  * @returns {{ action: string, detail: string }}
  */
-export function describeApproval({ toolName = '', toolInput, cwd }) {
+export function describeApproval({ toolName = '', toolInput, cwd }, { exact = false } = {}) {
   const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
+  const text = exact ? revealHidden : (/** @type {unknown} */ t) => String(t ?? '');
+  const path = exact ? revealHidden : (/** @type {unknown} */ p) => shortenPath(p, { cwd, max: 80 });
   const wording = Object.hasOwn(APPROVAL_WORDING, toolName) ? APPROVAL_WORDING[toolName] : null;
-  if (wording) return wording(input, (p) => shortenPath(p, { cwd, max: 80 }));
+  if (wording) return wording(input, path, text);
+  const detail = exact ? allFields(input) : firstText(input);
   if (toolName.startsWith('mcp__')) {
     const [, server = '', tool = ''] = toolName.split('__');
-    return { action: `use ${tool || 'a tool'} from ${server || 'an MCP server'}`, detail: firstText(input) };
+    return { action: `use ${tool || 'a tool'} from ${server || 'an MCP server'}`, detail };
   }
-  return { action: `use ${toolName || 'a tool'}`, detail: firstText(input) };
+  return { action: `use ${toolName || 'a tool'}`, detail };
+}
+
+/**
+ * Every field of a tool input as "name: value" lines (values that are not text as JSON), with
+ * hidden characters revealed: nothing the tool will receive is left out.
+ * @param {Record<string, unknown>} input
+ * @returns {string}
+ */
+function allFields(input) {
+  return Object.entries(input)
+    .map(([key, value]) => `${revealHidden(key)}: ${revealHidden(typeof value === 'string' ? value : JSON.stringify(value))}`)
+    .join('\n');
 }
 
 /**

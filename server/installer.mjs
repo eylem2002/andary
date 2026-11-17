@@ -2,6 +2,7 @@
 // Settings files belong to the user and often to other tools too, so the merge is conservative:
 // unrelated settings and other hooks are kept as they are, a malformed file is never touched,
 // a timestamped backup is written before every change, and running install twice changes nothing.
+import { randomBytes } from 'node:crypto';
 import {
   chmodSync,
   constants,
@@ -487,8 +488,11 @@ function backupFile(filePath, now) {
  */
 function writeFileAtomic(filePath, text) {
   const mode = existsSync(filePath) ? statSync(filePath).mode & 0o777 : 0o644;
-  const temp = `${filePath}.andary-${process.pid}.tmp`;
-  writeFileSync(temp, text, { mode });
+  // A project's .claude/ folder comes from its repository, which may be hostile: a predictable
+  // temp name could be a planted symlink that redirects this write (to ~/.bashrc, say). The name
+  // is random and created exclusively ('wx' fails on anything already there, links included).
+  const temp = `${filePath}.andary-${randomBytes(8).toString('hex')}.tmp`;
+  writeFileSync(temp, text, { mode, flag: 'wx' });
   chmodSync(temp, mode);
   renameSync(temp, filePath);
 }

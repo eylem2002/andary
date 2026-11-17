@@ -131,6 +131,12 @@ export class WsConnection extends EventEmitter {
 
     if ('setNoDelay' in socket && typeof socket.setNoDelay === 'function') socket.setNoDelay(true);
     socket.on('data', (chunk) => this.receive(chunk));
+    // HTTP servers keep half-open sockets: a peer that sends FIN without a close frame would
+    // otherwise sit in CLOSE_WAIT until the heartbeat notices.
+    socket.on('end', () => {
+      this.endSocket();
+      this.finish();
+    });
     socket.on('error', () => this.finish());
     socket.on('close', () => this.finish());
     if (options.heartbeatMs) this.startHeartbeat(options.heartbeatMs);
@@ -219,7 +225,10 @@ export class WsConnection extends EventEmitter {
         this.failConnection(CLOSE_CODE.UNSUPPORTED_DATA, 'Only text messages are supported');
         break;
       case 'ping':
-        if (this.state === 'open') this.writeFrame(OPCODE.PONG, message.data);
+        // Pongs count towards the same backlog limit as messages: a peer that sends pings but
+        // never reads must not make the server queue pongs without bound.
+        if (this.socket.writableLength > this.maxBufferedBytes) this.terminate();
+        else if (this.state === 'open') this.writeFrame(OPCODE.PONG, message.data);
         break;
       case 'pong':
         this.emit('pong');

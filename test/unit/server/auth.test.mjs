@@ -1,6 +1,7 @@
+import { createHmac } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { UI_COOKIE, generateToken, hasHookSecret, hasUiCookie, loginCookie, parseCookies, safeEqual } from '../../../server/auth.mjs';
+import { signHookReply, UI_COOKIE, generateToken, hasHookSecret, hasUiCookie, loginCookie, parseCookies, safeEqual } from '../../../server/auth.mjs';
 
 describe('generateToken', () => {
   it('returns 32 random bytes as base64url', () => {
@@ -58,5 +59,15 @@ describe('request checks', () => {
     assert.ok(hasHookSecret(req({ 'x-andary-secret': 's3' }), 's3'));
     assert.ok(!hasHookSecret(req({ 'x-andary-secret': 's4' }), 's3'));
     assert.ok(!hasHookSecret(req({}), 's3'));
+  });
+});
+
+describe('signHookReply', () => {
+  it('signs nonce and body with the response key, and needs a usable nonce', () => {
+    const signature = signHookReply('key', 'nonce-1', '{"output":null}');
+    assert.equal(signature, createHmac('sha256', 'key').update('nonce-1\n{"output":null}').digest('base64url'));
+    assert.notEqual(signHookReply('key', 'nonce-2', '{"output":null}'), signature, 'bound to the nonce');
+    assert.notEqual(signHookReply('key', 'nonce-1', '{"output":{}}'), signature, 'bound to the body');
+    for (const nonce of [undefined, '', 'x'.repeat(129), ['a']]) assert.equal(signHookReply('key', nonce, '{}'), null);
   });
 });

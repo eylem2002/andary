@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import {
+import { MAX_FRAGMENTS,
   CLOSE_CODE,
   OPCODE,
   WsProtocolError,
@@ -134,6 +134,14 @@ describe('createFrameParser', () => {
     const parser = serverParser(10);
     parser.push(encodeFrame(OPCODE.TEXT, '123456', { fin: false, mask: true }));
     assertProtocolError(() => parser.push(encodeFrame(OPCODE.CONTINUATION, '7890a', { mask: true })), CLOSE_CODE.MESSAGE_TOO_BIG);
+  });
+
+  it('rejects a message split into too many fragments, even empty ones (1009)', () => {
+    const parser = serverParser(1000);
+    parser.push(encodeFrame(OPCODE.TEXT, 'a', { fin: false, mask: true }));
+    const empty = encodeFrame(OPCODE.CONTINUATION, '', { fin: false, mask: true });
+    for (let i = 1; i < MAX_FRAGMENTS; i += 1) parser.push(empty);
+    assertProtocolError(() => parser.push(empty), CLOSE_CODE.MESSAGE_TOO_BIG);
   });
 
   it('rejects invalid UTF-8 in text messages and close reasons (1007)', () => {
