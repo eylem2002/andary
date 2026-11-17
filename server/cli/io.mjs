@@ -13,6 +13,23 @@ import { CLI_PATH } from '../config.mjs';
  * @property {(question: string) => Promise<string>} ask
  */
 
+let pipesGuarded = false;
+
+/**
+ * A reader that stops early (`andary status | head -1`) closes the pipe, and Node turns the next
+ * write into an unhandled EPIPE error with a stack trace. Nobody is reading any more, so the
+ * output is dropped quietly instead; any other stream error still surfaces.
+ */
+function guardPipes() {
+  if (pipesGuarded) return;
+  pipesGuarded = true;
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on('error', (/** @type {NodeJS.ErrnoException} */ error) => {
+      if (error?.code !== 'EPIPE') throw error;
+    });
+  }
+}
+
 const TERMINAL_CONTROLS =
   // eslint-disable-next-line no-control-regex -- removing terminal control characters is the point
   /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g;
@@ -30,6 +47,7 @@ export function printable(text) {
 
 /** @returns {CliIo} */
 export function processIo() {
+  guardPipes();
   return {
     out: (line = '') => process.stdout.write(`${printable(line)}\n`),
     err: (line = '') => process.stderr.write(`${printable(line)}\n`),

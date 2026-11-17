@@ -246,10 +246,15 @@ function updatePrefs(ctx, patch) {
 function trackSheets(board, others) {
   const root = document.documentElement.style;
   const heightOf = (/** @type {HTMLElement} */ sheet) => (sheet.hidden ? 0 : Math.round(sheet.getBoundingClientRect().height));
-  const observer = new ResizeObserver(() => {
+  const measure = () => {
     root.setProperty('--board-h', `${heightOf(board)}px`);
     root.setProperty('--sheet-h', `${Math.max(heightOf(board), ...others.map(heightOf))}px`);
-  });
+  };
+  // Measured once right away, before the first paint: left to the observer, the first frame
+  // showed the toolbar at the bottom of the screen and then moved it above the sheet, a layout
+  // shift (CLS 0.13 on phones).
+  measure();
+  const observer = new ResizeObserver(measure);
   for (const sheet of [board, ...others]) observer.observe(sheet);
 }
 

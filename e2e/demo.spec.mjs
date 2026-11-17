@@ -51,6 +51,21 @@ test('crews fill with agents, the log grows and tasks appear', async ({ page }) 
   await expect(page.getByTestId('task-item').first()).toBeVisible({ timeout: 45_000 });
 });
 
+test('the toolbar is placed above the board from the first frame (no layout shift)', async ({ page }) => {
+  await page.addInitScript(() => {
+    /** @type {any} */ (window).__shifts = [];
+    new PerformanceObserver((list) => {
+      for (const entry of /** @type {any[]} */ (list.getEntries())) {
+        /** @type {any} */ (window).__shifts.push({ value: entry.value, nodes: entry.sources.map((/** @type {any} */ s) => s.node?.className ?? '') });
+      }
+    }).observe({ type: 'layout-shift', buffered: true });
+  });
+  await page.goto(demoUrl('&world=fake'));
+  await expect(page.getByTestId('agent-row').first()).toBeAttached({ timeout: 45_000 });
+  const shifts = await page.evaluate(() => /** @type {any} */ (window).__shifts);
+  expect(shifts.filter((/** @type {any} */ s) => s.nodes.some((/** @type {string} */ n) => String(n).includes('hud-toolbar')))).toEqual([]);
+});
+
 test('an agent row opens the inspector', async ({ page }) => {
   await page.goto(demoUrl());
   const row = page.getByTestId('agent-row').first();

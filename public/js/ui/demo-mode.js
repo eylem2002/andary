@@ -1,7 +1,8 @@
 // Demo mode: runs the built-in simulation and feeds its hook payloads to the store exactly as the
 // server would (wrapped as envelopes). A PermissionRequest becomes a held approval that the HUD
 // can answer; the simulation waits on it and continues with the decision, or after 25 seconds of
-// story time without one (so the card's countdown runs faster at 2× and 4×, like the story).
+// story time without one (so the card's countdown runs faster at 2× and 4×, like the story, and
+// stands still while the demo is paused).
 
 /** @typedef {import('./types.js').Approval} Approval */
 
@@ -26,7 +27,12 @@ export function normalizeAgentId(id) {
 export function createDemo({ store, createSimulation, seed, speed = 1, approvalMs = DEMO_APPROVAL_MS, now = Date.now }) {
   let sequence = 0;
   let currentSpeed = speed;
-  /** @type {Map<string, { approval: Approval, resolve: (value: object) => void, timer: ReturnType<typeof setTimeout> }>} */
+  let paused = false;
+  /**
+   * Requests waiting for an answer. `left` is set while the demo is paused: the time the request
+   * still had when the story stopped.
+   * @type {Map<string, { approval: Approval, resolve: (value: object) => void, timer: ReturnType<typeof setTimeout>|undefined, left?: number }>}
+   */
   const waiting = new Map();
 
   /** @param {any} payload */
@@ -54,11 +60,40 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
       createdAt: ts,
       expiresAt: ts + wait,
     };
-    store.setApproval(approval);
     return new Promise((resolve) => {
-      const timer = setTimeout(() => settle(approval.id, 'expired', 'timeout'), wait);
-      waiting.set(approval.id, { approval, resolve, timer });
+      const entry = { approval, resolve, timer: undefined, left: paused ? wait : undefined };
+      waiting.set(approval.id, entry);
+      if (paused) store.setApproval({ ...approval, expiresAt: null });
+      else {
+        store.setApproval(approval);
+        entry.timer = setTimeout(() => settle(approval.id, 'expired', 'timeout'), wait);
+      }
     });
+  }
+
+  /**
+   * Pausing the demo stops the countdown of every waiting request as well (WCAG 2.2.1): the card
+   * hides its timer, and the request keeps the time it had left for when the story resumes.
+   */
+  function freezeApprovals() {
+    for (const entry of waiting.values()) {
+      if (entry.left !== undefined) continue;
+      clearTimeout(entry.timer);
+      entry.left = Math.max(0, entry.approval.expiresAt - now());
+      store.setApproval({ ...entry.approval, expiresAt: null });
+    }
+  }
+
+  /** Restarts each countdown with the time it had left, moved forward by the pause. */
+  function resumeApprovals() {
+    for (const [id, entry] of waiting) {
+      if (entry.left === undefined) continue;
+      const shift = now() + entry.left - entry.approval.expiresAt;
+      entry.approval = { ...entry.approval, createdAt: entry.approval.createdAt + shift, expiresAt: entry.approval.expiresAt + shift };
+      store.setApproval(entry.approval);
+      entry.timer = setTimeout(() => settle(id, 'expired', 'timeout'), entry.left);
+      entry.left = undefined;
+    }
   }
 
   /**
@@ -80,10 +115,16 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
 
   return {
     start: () => simulation.start(),
-    /** @param {boolean} paused */
-    setPaused(paused) {
-      if (paused) simulation.stop();
-      else simulation.start();
+    /** @param {boolean} on */
+    setPaused(on) {
+      paused = on;
+      if (on) {
+        simulation.stop();
+        freezeApprovals();
+      } else {
+        resumeApprovals();
+        simulation.start();
+      }
     },
     /** @param {number} value */
     setSpeed(value) {
