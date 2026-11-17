@@ -23,6 +23,17 @@ describe('parsePrefs', () => {
     assert.deepEqual(bad, DEFAULT_PREFS);
   });
 
+  test('the director camera starts on and the side panels follow the page by default', () => {
+    assert.equal(DEFAULT_PREFS.directorCam, true);
+    assert.equal(DEFAULT_PREFS.panels, 'auto');
+    const prefs = parsePrefs(JSON.stringify({ directorCam: false, panels: 'hidden' }));
+    assert.equal(prefs.directorCam, false);
+    assert.equal(prefs.panels, 'hidden');
+    const bad = parsePrefs(JSON.stringify({ directorCam: 'off', panels: 'gone' }));
+    assert.equal(bad.directorCam, true);
+    assert.equal(bad.panels, 'auto');
+  });
+
   test('ignores keys inherited from the prototype', () => {
     const prefs = parsePrefs('{"__proto__": {"sound": true}}');
     assert.equal(prefs.sound, false);

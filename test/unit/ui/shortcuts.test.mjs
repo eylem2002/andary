@@ -17,6 +17,10 @@ describe('shortcutFor', () => {
       n: 'cycle-time',
       m: 'toggle-sound',
       a: 'approvals',
+      c: 'director',
+      C: 'director',
+      h: 'toggle-panels',
+      H: 'toggle-panels',
       '?': 'help',
     };
     for (const [key, action] of Object.entries(cases)) assert.equal(shortcutFor({ key }), action, key);

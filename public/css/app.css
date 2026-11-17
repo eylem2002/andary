@@ -1855,6 +1855,200 @@ body {
   background: var(--paper-2);
 }
 
+/* ---- director camera: the caption and the full-screen town -------------------------------- */
+
+/* A platform display for the shot on screen: the crew's line colour down the left edge, who is
+   in the shot and what they are doing. It takes the open middle above the toolbar, the spot the
+   building card uses, which never shows at the same time (the director stops on a selection). */
+.hud-cinema {
+  --crew: #5D6874;
+  position: fixed;
+  bottom: calc(var(--gap) + var(--tools-h, var(--toolbar-h)) + 12px);
+  left: 50%;
+  z-index: 24;
+  display: flex;
+  width: max-content;
+  min-width: 260px;
+  max-width: min(460px, calc(100vw - var(--left-w) - var(--right-w) - var(--gap) * 4));
+  overflow: hidden;
+  border-radius: 9px;
+  background: var(--band);
+  color: var(--band-ink);
+  box-shadow: var(--shadow-lift);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.hud-cinema__bar {
+  flex: none;
+  width: 6px;
+  background: var(--crew);
+  transform-origin: bottom;
+}
+
+.hud-cinema__text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding: 9px 16px 10px 13px;
+}
+
+/* On each cut the line colour wipes up and the text slides in. A new subject swaps the
+   animation's name, which restarts it. Only transforms move, so the text is readable from the
+   first frame on a slow device too. */
+.hud-cinema[data-cut="a"] .hud-cinema__bar {
+  animation: hud-wipe-a 0.4s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.hud-cinema[data-cut="b"] .hud-cinema__bar {
+  animation: hud-wipe-b 0.4s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.hud-cinema[data-cut="a"] .hud-cinema__text {
+  animation: hud-slide-a 0.34s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.hud-cinema[data-cut="b"] .hud-cinema__text {
+  animation: hud-slide-b 0.34s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@keyframes hud-wipe-a {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes hud-wipe-b {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes hud-slide-a {
+  from {
+    transform: translateX(-8px);
+  }
+}
+
+@keyframes hud-slide-b {
+  from {
+    transform: translateX(-8px);
+  }
+}
+
+.hud-cinema__head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.hud-cinema__name {
+  overflow: hidden;
+  padding-top: 2px;
+  font: 800 18px/1.15 var(--font-ui);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hud-cinema__tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: var(--band-ink-2);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.hud-cinema__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: var(--band-ink-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hud-cinema__role {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hud-cinema__place {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+}
+
+.hud-cinema__doing {
+  overflow: hidden;
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Narrow windows with the boards out leave no open middle for the caption. */
+@media (max-width: 1023px) {
+  html:not(.hud-panels-hidden) .hud-cinema {
+    display: none;
+  }
+}
+
+/* The full-screen town (H, or a demo on a static host): the boards slide out past their own edge
+   and stop being drawn. Transitions start once the town is on screen, so a page that opens this
+   way shows the town straight away instead of boards leaving. */
+.hud-ready .hud-left,
+.hud-ready .hud-board {
+  transition: transform 0.36s cubic-bezier(0.2, 0.7, 0.2, 1), visibility 0s linear;
+}
+
+.hud-panels-hidden .hud-left,
+.hud-panels-hidden .hud-board {
+  visibility: hidden;
+}
+
+.hud-ready.hud-panels-hidden .hud-left,
+.hud-ready.hud-panels-hidden .hud-board {
+  transition: transform 0.3s cubic-bezier(0.5, 0, 0.75, 0), visibility 0s linear 0.3s;
+}
+
+.hud-panels-hidden .hud-left {
+  transform: translateX(calc(-100% - var(--gap) - 24px));
+}
+
+.hud-panels-hidden .hud-board {
+  transform: translateX(calc(100% + var(--gap) + 24px));
+}
+
+.hud-panels-hidden .hud-cinema {
+  max-width: min(480px, calc(100vw - var(--gap) * 2));
+}
+
+.hud-panels-hidden .hud-center {
+  right: var(--gap);
+  left: var(--gap);
+}
+
+.hud-panels-hidden .hud-toasts {
+  right: var(--gap);
+  left: var(--gap);
+}
+
+@media (min-width: 1440px) {
+  .hud-panels-hidden .hud-inspector {
+    left: var(--gap);
+  }
+
+  .hud-panels-hidden[data-inspector="open"] .hud-toasts {
+    left: calc(var(--gap) * 2 + var(--insp-w));
+  }
+}
+
 /* ---- notices over the town ---------------------------------------------------------------- */
 
 .hud-center {
@@ -2427,6 +2621,36 @@ body {
   }
 }
 
+/* ---- phones, full-screen town: the sheet drops below the screen and the toolbar settles at the
+   bottom, clear of the home indicator; the caption rides on the toolbar. ------------------------ */
+@media (max-width: 640px) {
+  .hud-panels-hidden .hud-board {
+    transform: translateY(calc(100% + 24px));
+  }
+
+  .hud-panels-hidden .hud-toolbar {
+    bottom: calc(var(--sheet-h) + 8px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .hud-cinema {
+    bottom: calc(var(--sheet-h) + var(--tools-h, var(--toolbar-h)) + 16px + env(safe-area-inset-bottom, 0px));
+    min-width: 0;
+    width: calc(100vw - 16px);
+  }
+
+  .hud-panels-hidden .hud-cinema {
+    max-width: none;
+  }
+
+  .hud-cinema__name {
+    font-size: 16px;
+  }
+
+  .hud-cinema__doing {
+    font-size: 13px;
+  }
+}
+
 /* Short screens (a phone on its side, a desktop window at 200 % zoom): a slimmer sheet and sign,
    one toast at a time, so the toolbar never runs into the sign. */
 @media (max-width: 640px) and (max-height: 540px) {
@@ -2459,6 +2683,7 @@ body {
 
 /* ---- reduced motion ----------------------------------------------------------------------- */
 
+[data-motion="reduce"] .hud,
 [data-motion="reduce"] .hud *,
 [data-motion="reduce"] .hud *::before,
 [data-motion="reduce"] .hud *::after {

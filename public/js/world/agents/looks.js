@@ -12,10 +12,10 @@ const HAIR_COLORS = Object.freeze(['#2B1B12', '#4A2E1C', '#7A4A24', '#C9944A', '
 const PANTS_COLORS = Object.freeze(['#2F3B57', '#3A3F48', '#5E5140', '#25496E']);
 
 /**
- * Figures are modelled about 1 unit tall; drawn 1.3× so they read next to the town's doors and
- * lamp posts (toy proportions), while still fitting the 0.8-unit spacing of work spots.
+ * Figures are modelled about 1 unit tall; drawn 1.6× so they read as people at a glance, the way
+ * game characters are (toy proportions), while still fitting the 0.75-unit spacing of work spots.
  */
-const FIGURE_SCALE = 1.3;
+const FIGURE_SCALE = 1.6;
 
 /**
  * Things worn on the body (always visible), as opposed to the "kit" carried in a hand.

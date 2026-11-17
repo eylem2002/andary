@@ -16,6 +16,8 @@
  * @property {boolean} errorsOnly     activity log filter
  * @property {boolean} announce       read out activity summaries to screen readers
  * @property {boolean} setupSeen      the "run it yourself" dialog was shown once
+ * @property {boolean} directorCam    the camera follows the action by itself
+ * @property {'auto'|'shown'|'hidden'} panels  side panels; auto hides them in a hosted demo
  */
 
 /** @type {Readonly<Prefs>} */
@@ -32,6 +34,8 @@ export const DEFAULT_PREFS = Object.freeze({
   errorsOnly: false,
   announce: true,
   setupSeen: false,
+  directorCam: true,
+  panels: 'auto',
 });
 
 export const STORAGE_KEY = 'andary:prefs';
@@ -44,6 +48,7 @@ const CHOICES = {
   theme: ['auto', 'light', 'dark'],
   tab: ['crews', 'tasks', 'activity', 'approvals'],
   speed: [1, 2, 4],
+  panels: ['auto', 'shown', 'hidden'],
 };
 
 /**

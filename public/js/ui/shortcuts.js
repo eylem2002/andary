@@ -3,7 +3,7 @@
 
 /**
  * @typedef {'follow'|'escape'|'rotate-left'|'rotate-right'|'zoom-in'|'zoom-out'|'reset-view'|
- *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|`crew-${number}`} ShortcutAction
+ *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|'director'|'toggle-panels'|`crew-${number}`} ShortcutAction
  */
 
 /**
@@ -11,6 +11,8 @@
  * @type {ReadonlyArray<{ keys: string[], label: string, demoOnly?: boolean }>}
  */
 export const SHORTCUT_HELP = Object.freeze([
+  { keys: ['C'], label: 'Director camera: follow the action by itself' },
+  { keys: ['H'], label: 'Full-screen town: put the side boards away or bring them back' },
   { keys: ['F'], label: 'Follow the selected agent (or the busiest one)' },
   { keys: ['Esc'], label: 'Close the open panel, stop following' },
   { keys: ['[', ']'], label: 'Rotate the view' },
@@ -42,6 +44,10 @@ const KEY_ACTIONS = {
   M: 'toggle-sound',
   a: 'approvals',
   A: 'approvals',
+  c: 'director',
+  C: 'director',
+  h: 'toggle-panels',
+  H: 'toggle-panels',
   '?': 'help',
 };
 
