@@ -57,7 +57,9 @@ test('place labels sit on the buildings: names where they fit, more as you zoom 
   await page.goto(demoUrl());
   const signs = page.locator('.tt-sign[data-building]');
   await expect.poll(() => signs.count(), { timeout: 45_000 }).toBe(15);
-  const count = (/** @type {string} */ state) => page.locator(`.tt-sign[data-building].is-${state}`).count();
+  // A name shows as "full" (with its stat chip) or "name" (the chip waits for room).
+  const selector = (/** @type {string} */ state) => (state === 'name' ? '.tt-sign[data-building]:is(.is-full, .is-name)' : `.tt-sign[data-building].is-${state}`);
+  const count = (/** @type {string} */ state) => page.locator(selector(state)).count();
   // The whole town: the small places show just their icon.
   await expect.poll(() => count('icon'), { timeout: 30_000 }).toBeGreaterThan(0);
   const namesBefore = await count('name');

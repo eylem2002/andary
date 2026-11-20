@@ -28,7 +28,7 @@ import { LOT_Y } from './terrain.js';
 /**
  * @typedef {import('./sign-layout.js').LabelBox & {
  *   id: string, el: HTMLElement, anchor: THREE.Vector3, groundAt: THREE.Vector3,
- *   corners: THREE.Vector3[]|null, roomUnits: number, measured: boolean,
+ *   corners: THREE.Vector3[]|null, roomUnits: number, measured: boolean, fadeUntil: number,
  *   shown: string, shownFaded: boolean, shownFocused: boolean, lx: number, ly: number, ls: number, z: number,
  *   stat?: HTMLElement, name?: string,
  * }} Placed
@@ -38,12 +38,14 @@ const _v = new THREE.Vector3();
 /** Size of the round icon-only label; keep in sync with --sign-size in env.css. */
 const ICON_SIZE = 24;
 /** Share of a lot's width on screen a name may take: lots have yards around the building. */
-const ROOM_FILL = 0.55;
+const ROOM_FILL = 0.64;
 /** Height of a label on its building, as a share of the building's height. */
 const LABEL_HEIGHT = 0.68;
 /** World width a decor label (Sandbox, node_modules) may use before it shrinks to its icon. */
 const DECOR_ROOM = 3.2;
-const STATES = /** @type {const} */ (['name', 'icon', 'hidden']);
+const STATES = /** @type {const} */ (['full', 'name', 'icon', 'hidden']);
+/** A fade lasts at least this long (ms), so a figure on the edge of "in front" cannot make it blink. */
+const MIN_FADE_MS = 600;
 
 /**
  * @param {{container: HTMLElement, records: Record<BuildingKey, SignRecord>, onSelect?: (key: BuildingKey) => void}} opts
@@ -60,6 +62,8 @@ export function createSigns({ container, records, onSelect }) {
   const placed = new Map();
   /** @type {Placed[]} placing order, reused */
   const order = [];
+  /** @type {Placed[]} labels to measure this frame, reused */
+  const unmeasured = [];
   /** @type {PlaceNames} */
   let mode = 'auto';
   /** @type {string|null} */
@@ -71,7 +75,10 @@ export function createSigns({ container, records, onSelect }) {
   /** @type {() => ReadonlyArray<FigureBox>} */
   let figures = () => [];
   const focus = () => {
-    for (const item of placed.values()) item.focused = item.id === selected || item.id === pointed || item.id === touched;
+    for (const item of placed.values()) {
+      item.focused = item.id === selected || item.id === pointed;
+      item.held = item.id === touched;
+    }
   };
   const hover = (/** @type {string|null} */ id) => {
     touched = id;
@@ -90,10 +97,19 @@ export function createSigns({ container, records, onSelect }) {
     update(camera, width, height, zoom) {
       const scale = signScale(zoom);
       const ppu = pixelsPerUnit(camera, height);
-      for (const item of list) project(item, camera, width, height, ppu);
+      unmeasured.length = 0;
+      for (const item of list) {
+        project(item, camera, width, height, ppu);
+        if (item.visible && !item.measured) unmeasured.push(item);
+      }
+      if (unmeasured.length) measure(unmeasured);
       placeLabels(list, mode, scale, order);
       const people = figures();
-      for (const item of list) write(item, scale, item.state !== 'hidden' && coversFigure(item, people));
+      const now = performance.now();
+      for (const item of list) {
+        if (item.state !== 'hidden' && coversFigure(item, people)) item.fadeUntil = now + MIN_FADE_MS;
+        write(item, scale, item.state !== 'hidden' && !item.held && now < item.fadeUntil);
+      }
     },
     /** @param {BuildingKey} key @param {string|null} text */
     setStat(key, text) {
@@ -162,10 +178,10 @@ export function createSigns({ container, records, onSelect }) {
  */
 function placedItem(parts) {
   return {
-    x: 0, y: 0, wName: 0, wIcon: 0, h: 0, room: Infinity, depth: 0, ground: 0,
-    focused: false, visible: false, state: 'hidden', faded: false,
+    x: 0, y: 0, wFull: 0, wName: 0, wIcon: 0, h: 0, room: Infinity, depth: 0, ground: 0,
+    focused: false, held: false, visible: false, state: 'hidden',
     left: 0, top: 0, right: 0, bottom: 0,
-    corners: null, roomUnits: 0, measured: false,
+    corners: null, roomUnits: 0, measured: false, fadeUntil: 0,
     shown: 'hidden', shownFaded: false, shownFocused: false, lx: NaN, ly: NaN, ls: NaN, z: 0,
     ...parts,
   };
@@ -205,9 +221,10 @@ function makeSign(key, record, root, onSelect, hover) {
   const sign = record.signAnchor;
   const top = Math.min(LOT_Y + record.height, sign.y);
   const anchor = new THREE.Vector3(sign.x, LOT_Y + (top - LOT_Y) * LABEL_HEIGHT, sign.z);
+  // The lot's ground corners: the camera keeps world up, so screen x does not depend on height.
   const box = record.pickBox;
   const corners = [];
-  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) corners.push(new THREE.Vector3(x, y, z));
+  for (const x of [box.min.x, box.max.x]) for (const z of [box.min.z, box.max.z]) corners.push(new THREE.Vector3(x, box.min.y, z));
   return placedItem({
     id: key, el, kind: 'building', align: 'center', anchor,
     groundAt: new THREE.Vector3(sign.x, LOT_Y, sign.z), corners, stat, name: info.name,
@@ -238,6 +255,7 @@ function makeLabel(label, root) {
     id: label.id, el, kind, align: 'bottom', anchor: label.position,
     // The ground under the label, read every frame like the label itself.
     groundAt: new THREE.Vector3(), roomUnits: kind === 'decor' ? DECOR_ROOM : 0,
+    // Decor and tree labels have no stat: full and name are the same width (measure sets both).
     wIcon: kind === 'decor' && label.icon ? ICON_SIZE : 0,
   });
 }
@@ -286,22 +304,26 @@ function project(item, camera, width, height, ppu) {
   } else {
     item.room = item.roomUnits > 0 ? item.roomUnits * ppu : Infinity;
   }
-  if (!item.measured) measure(item);
 }
 
 /**
- * Reads the label's size with its name showing (a layout read, only after creation, font loads and
- * stat changes).
- * @param {Placed} item
+ * Reads the labels' sizes with their name and stat, then with the name alone: two layout reads
+ * for the whole batch, only after creation, font loads and stat changes.
+ * @param {Placed[]} items
  */
-function measure(item) {
-  const el = item.el;
-  el.classList.add('is-measuring');
-  item.wName = el.offsetWidth;
-  item.h = el.offsetHeight;
-  el.classList.remove('is-measuring');
-  if (item.kind === 'building') item.wIcon = ICON_SIZE;
-  item.measured = item.wName > 0;
+function measure(items) {
+  for (const item of items) item.el.classList.add('is-measuring');
+  for (const item of items) {
+    item.wFull = item.el.offsetWidth;
+    item.h = item.el.offsetHeight;
+  }
+  for (const item of items) item.el.classList.add('is-measuring-name');
+  for (const item of items) item.wName = item.el.offsetWidth;
+  for (const item of items) {
+    item.el.classList.remove('is-measuring', 'is-measuring-name');
+    if (item.kind === 'building') item.wIcon = ICON_SIZE;
+    item.measured = item.wName > 0;
+  }
 }
 
 /**
@@ -320,9 +342,10 @@ function write(item, scale, faded) {
     el.classList.toggle('is-faded', faded);
     item.shownFaded = faded;
   }
-  if (item.focused !== item.shownFocused) {
-    el.classList.toggle('is-focused', item.focused);
-    item.shownFocused = item.focused;
+  const lit = item.focused || item.held;
+  if (lit !== item.shownFocused) {
+    el.classList.toggle('is-focused', lit);
+    item.shownFocused = lit;
   }
   if (item.state === 'hidden') return;
   if (Math.abs(item.x - item.lx) > 0.1 || Math.abs(item.y - item.ly) > 0.1 || scale !== item.ls) {
@@ -332,7 +355,7 @@ function write(item, scale, faded) {
     const lift = item.align === 'center' ? '-50%' : '-100%';
     el.style.transform = `translate3d(${item.x.toFixed(1)}px, ${item.y.toFixed(1)}px, 0) translate(-50%, ${lift}) scale(${scale.toFixed(3)})`;
   }
-  const z = item.focused ? 5000 : Math.round(item.y / 4) + 100;
+  const z = lit ? 5000 : Math.round(item.y / 4) + 100;
   if (z !== item.z) {
     item.z = z;
     el.style.zIndex = String(z);

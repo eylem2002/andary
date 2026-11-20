@@ -25,14 +25,18 @@ Options considered:
   It never floats over the street behind.
 - In `auto` (the default) the name shows only when it fits on the building at the current zoom
   (a share of the lot's width on screen); otherwise the label is the building's icon alone. Zoom
-  in and the names appear.
+  in and the names appear. A stat chip ("42 reads") shows only when the name and the chip both
+  fit, so a busy building never loses its name to its own counter.
 - Agents come first. A figure standing in front of a label (its feet on the near side of the
-  building, its body across the label) fades the label to 10% and takes the clicks. Figures
-  behind a building are hidden by the building itself, so they do not fade its label.
-- When labels collide the one nearer the camera keeps its place; the farther one shrinks to its
-  icon, and hides if even that collides. Nothing moves up.
+  building, its body across the label) fades the label to 10% and takes the clicks, for at least
+  600 ms so a figure on the edge cannot make it blink. Figures behind a building are hidden by
+  the building itself, so they do not fade its label. Only the pointer resting on the label
+  itself keeps it readable; a selected building, or one pointed at in the 3D view, shows its
+  name but still makes way for a figure in front of it.
+- When labels collide the one nearer the camera keeps its place; the farther one drops its stat,
+  then shrinks to its icon, and hides if even that collides. Nothing moves up.
 - The hovered and the selected building always show their name, whatever the mode. Worktree tags
-  (data, not place names) always show.
+  (data, not place names) always show; tags that meet stack upward within the grove, as before.
 - `P` and Settings → Place names switch between `auto`, `always` (every name, nearer on top)
   and `off` (no labels until you point at a building). The choice is saved with the other
   preferences.
@@ -45,7 +49,8 @@ Options considered:
 
 ## Consequences
 
-- The whole-town view shows names on the larger buildings and icons on the small ones; the help
+- The whole-town view on a laptop (1440×900) shows nine names and six icons: the names that fit,
+  which are mostly the larger buildings. Two zoom steps show nearly all of them. The help
   dialog's building list and the HUD carry every name as text, as before.
 - A label can blink out while someone walks past it. The fade is a short transition (none with
   reduced motion), and only figures in front count.
