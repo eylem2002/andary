@@ -1,12 +1,13 @@
 // A small WebSocket client on top of node:http, for `andary doctor` and the test suites.
-// Node's global WebSocket (Node ≥ 22 only) cannot send the Cookie and Origin headers the server
-// checks, so this client lets callers set any handshake header.
+// Node's global WebSocket (Node ≥ 22 only) cannot send the Origin header the server checks, so this
+// client lets callers set any handshake header (the sign-in rides in Sec-WebSocket-Protocol).
 import { request } from 'node:http';
 import { WsConnection, acceptKeyFor, generateClientKey } from './websocket.mjs';
 
 /**
- * @typedef {WsConnection & { messages: any[] }} ClientConnection
- *   `messages` collects every parsed JSON message, in arrival order.
+ * @typedef {WsConnection & { messages: any[], protocol: string|null }} ClientConnection
+ *   `messages` collects every parsed JSON message, in arrival order; `protocol` is the subprotocol
+ *   the server confirmed, if any.
  */
 
 /**
@@ -41,6 +42,7 @@ export function connectWebSocket(url, { headers = {}, timeoutMs = 5000, maxMessa
       }
       const connection = /** @type {ClientConnection} */ (new WsConnection(socket, { role: 'client', maxMessageBytes }));
       connection.messages = [];
+      connection.protocol = typeof res.headers['sec-websocket-protocol'] === 'string' ? res.headers['sec-websocket-protocol'] : null;
       connection.on('message', (text) => {
         try {
           connection.messages.push(JSON.parse(text));

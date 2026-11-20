@@ -1,5 +1,5 @@
 // Helpers for the integration suites: raw HTTP (fetch cannot set Host), the hook POST, and a
-// browser-like WebSocket client that sends the Cookie and Origin headers the server checks.
+// browser-like WebSocket client that sends the Origin header and the sign-in subprotocols.
 import { request } from 'node:http';
 import { connectWebSocket, waitForMessage } from '../../server/ws-client.mjs';
 
@@ -50,13 +50,15 @@ export function postHook(town, event, { secret = town.secret, rawBody, agent } =
 }
 
 /**
- * Connects to /ws like a signed-in browser (override cookie/origin to test refusals).
+ * Connects to /ws like a signed-in browser, which offers its sign-in as subprotocols (ADR 0015);
+ * override protocols/origin to test refusals.
  * @param {{ baseUrl: string, uiToken: string }} town
- * @param {{ cookie?: string|null, origin?: string|null }} [options]
+ * @param {{ protocols?: string|null, cookie?: string|null, origin?: string|null }} [options]
  */
-export function connectBrowser(town, { cookie = `andary_ui=${town.uiToken}`, origin = town.baseUrl } = {}) {
+export function connectBrowser(town, { protocols = `andary, andary.token.${town.uiToken}`, cookie = null, origin = town.baseUrl } = {}) {
   /** @type {Record<string, string>} */
   const headers = {};
+  if (protocols) headers['Sec-WebSocket-Protocol'] = protocols;
   if (cookie) headers.Cookie = cookie;
   if (origin) headers.Origin = origin;
   return connectWebSocket(`${town.baseUrl.replace(/^http/, 'ws')}/ws`, { headers });

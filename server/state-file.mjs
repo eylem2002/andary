@@ -3,7 +3,7 @@
 import { randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { UI_COOKIE } from './auth.mjs';
+import { UI_TOKEN_HEADER } from './auth.mjs';
 import { APP_ID } from './config.mjs';
 import { connectHost, hostWithPort } from './security.mjs';
 
@@ -125,7 +125,8 @@ export function serverOrigin(state) {
 }
 
 /**
- * The sign-in link: opening it stores the UI token in a cookie and redirects to the town.
+ * The sign-in link: opening it hands the UI token to the town's page, which keeps it for its own
+ * origin only (ADR 0015).
  * @param {Pick<ServerState, 'host'|'port'|'uiToken'>} state
  * @param {Record<string, string>} [params] extra query parameters, e.g. { demo: '1' }
  * @returns {string}
@@ -160,7 +161,7 @@ export function isProcessAlive(pid) {
  */
 export async function probeServer(state, timeoutMs = 1500, { token } = {}) {
   try {
-    const headers = token ? { cookie: `${UI_COOKIE}=${token}` } : undefined;
+    const headers = token ? { [UI_TOKEN_HEADER]: token } : undefined;
     const res = await fetch(`${serverOrigin(state)}/api/hello`, { headers, signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return null;
     const hello = await res.json();

@@ -6,9 +6,10 @@ import { backoffDelay, connectLive, fetchHello, parseMessage, socketUrl } from '
 class FakeSocket {
   /** @type {FakeSocket[]} */
   static all = [];
-  /** @param {string} url */
-  constructor(url) {
+  /** @param {string} url @param {string[]} [protocols] */
+  constructor(url, protocols = []) {
     this.url = url;
+    this.protocols = protocols;
     this.readyState = 0;
     /** @type {any[]} */
     this.sent = [];
@@ -138,7 +139,17 @@ describe('connectLive', () => {
     assert.equal(FakeSocket.all.length, 2);
   });
 
-  test('starting signed out waits for a valid cookie before opening the socket', async () => {
+  test('the socket offers the andary subprotocol and the sign-in, read afresh for each connection', () => {
+    let token = 'first-token-abcdef';
+    connectLive({ store: fakeStore(), WebSocketImpl: /** @type {any} */ (FakeSocket), url: 'ws://x/ws', credentials: () => ({ token, view: null }) });
+    assert.deepEqual(FakeSocket.all[0].protocols, ['andary', 'andary.token.first-token-abcdef']);
+    token = 'second-token-abcdef';
+    FakeSocket.all[0].close();
+    connectLive({ store: fakeStore(), WebSocketImpl: /** @type {any} */ (FakeSocket), url: 'ws://x/ws', credentials: () => ({ token: null, view: 'viewer-token-abcdef' }) });
+    assert.deepEqual(FakeSocket.all.at(-1).protocols, ['andary', 'andary.view.viewer-token-abcdef']);
+  });
+
+  test('starting signed out waits for a valid sign-in before opening the socket', async () => {
     const statuses = [];
     const hello = async () => ({ app: 'andary', authenticated: true });
     const link = connectLive({ store: fakeStore(), authenticated: false, WebSocketImpl: /** @type {any} */ (FakeSocket), url: 'ws://x/ws', hello, onStatus: (s) => statuses.push(s) });
@@ -195,5 +206,17 @@ describe('helpers', () => {
       throw new TypeError('network');
     };
     assert.equal(await fetchHello({ base, fetchImpl: /** @type {any} */ (failing) }), null);
+  });
+
+  test('fetchHello sends the sign-in as a header, never as a cookie', async () => {
+    /** @type {any} */
+    let sent = null;
+    const fetchImpl = async (/** @type {unknown} */ _url, /** @type {any} */ init) => {
+      sent = init;
+      return { ok: true, json: async () => ({ app: 'andary', authenticated: true }) };
+    };
+    await fetchHello({ base: 'http://127.0.0.1:4747/', fetchImpl: /** @type {any} */ (fetchImpl), credentials: () => ({ token: 'tok-abcdefghijklmnop', view: null }) });
+    assert.equal(sent.headers['x-andary-token'], 'tok-abcdefghijklmnop');
+    assert.equal(sent.credentials, undefined);
   });
 });

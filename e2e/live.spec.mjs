@@ -57,11 +57,28 @@ test('the sign-in link connects live and drops the token from the address bar', 
   await signIn(page);
   const url = new URL(page.url());
   expect(url.searchParams.has('token')).toBe(false);
+  expect(url.hash).toBe('');
   expect(url.searchParams.get('world')).toBe('fake');
-  const cookies = await page.context().cookies();
-  const cookie = cookies.find((c) => c.name === 'andary_ui');
-  expect(cookie?.httpOnly).toBe(true);
-  expect(cookie?.sameSite).toBe('Strict');
+  // ADR 0015: no cookie (it would reach every port on 127.0.0.1); the page keeps the sign-in in
+  // its own origin's storage, which another port cannot read.
+  expect(await page.context().cookies()).toEqual([]);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('andary:signin') ?? 'null')?.token)).toBe(town.uiToken);
+});
+
+test('another tab on the same town is signed in too; a page on another port is not', async ({ page, context }) => {
+  await signIn(page);
+  const second = await context.newPage();
+  await second.goto(`${town.baseUrl}/?${PAGE_OPTIONS}`);
+  await expect(second.getByTestId('connection-status')).toContainText('Live');
+  const other = await startTown();
+  try {
+    const elsewhere = await context.newPage();
+    await elsewhere.goto(`${other.baseUrl}/?${PAGE_OPTIONS}`);
+    await expect(elsewhere.getByTestId('connection-status')).toContainText('Sign in');
+    expect(await elsewhere.evaluate(() => localStorage.getItem('andary:signin'))).toBeNull();
+  } finally {
+    await other.stop();
+  }
 });
 
 test('hook events show up as a crew, agent rows and log entries', async ({ page }) => {

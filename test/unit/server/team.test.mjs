@@ -104,11 +104,11 @@ test('--share-to and --team-key go together and must look right', () => {
 });
 
 test('browsers are the owner, a viewer, or nobody', () => {
-  const req = (/** @type {string} */ cookie) => /** @type {any} */ ({ headers: { cookie } });
-  assert.equal(browserRole(req('andary_ui=owner-token'), 'owner-token', 'view-token'), 'owner');
-  assert.equal(browserRole(req('andary_view=view-token'), 'owner-token', 'view-token'), 'viewer');
-  assert.equal(browserRole(req('andary_view=view-token'), 'owner-token', null), null);
-  assert.equal(browserRole(req('andary_view=wrong'), 'owner-token', 'view-token'), null);
+  const req = (/** @type {string} */ protocols) => /** @type {any} */ ({ headers: { 'sec-websocket-protocol': protocols } });
+  assert.equal(browserRole(req('andary, andary.token.owner-token'), 'owner-token', 'view-token'), 'owner');
+  assert.equal(browserRole(req('andary, andary.view.view-token'), 'owner-token', 'view-token'), 'viewer');
+  assert.equal(browserRole(req('andary, andary.view.view-token'), 'owner-token', null), null);
+  assert.equal(browserRole(req('andary, andary.view.wrong'), 'owner-token', 'view-token'), null);
 });
 
 test('viewers can never take the owner\'s last connections', () => {

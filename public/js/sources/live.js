@@ -3,7 +3,9 @@
 // On `hello` the store is rebuilt from the server's history; afterwards every hook envelope and
 // approval update is applied as it arrives. A dropped connection is retried with exponential
 // backoff; before each retry `/api/hello` tells apart "server down" (Offline) from "this browser's
-// token no longer valid" (Sign in — e.g. the server restarted with a new token).
+// token no longer valid" (Sign in — e.g. the server restarted with a new token). Both carry the
+// page's sign-in (credentials.js): a header for fetch, a subprotocol for the WebSocket.
+import { readCredentials, signInHeaders, signInProtocols } from './credentials.js';
 
 /** @typedef {'connecting'|'live'|'offline'|'signin'} LinkStatus */
 
@@ -22,14 +24,15 @@ const OPEN = 1;
 
 /**
  * Asks the server who it is. Null when no Andary server answers (static hosting, server down).
- * @param {{ fetchImpl?: typeof fetch, base?: string }} [options]
+ * @param {{ fetchImpl?: typeof fetch, base?: string, credentials?: () => import('./credentials.js').Credentials }} [options]
  * @returns {Promise<Hello|null>}
  */
-export async function fetchHello({ fetchImpl = globalThis.fetch, base = globalThis.location?.href } = {}) {
+export async function fetchHello({ fetchImpl = globalThis.fetch, base = globalThis.location?.href, credentials = () => readCredentials() } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HELLO_TIMEOUT_MS);
   try {
-    const response = await fetchImpl(new URL('./api/hello', base), { cache: 'no-store', headers: { accept: 'application/json' }, signal: controller.signal });
+    const headers = { accept: 'application/json', ...signInHeaders(credentials()) };
+    const response = await fetchImpl(new URL('./api/hello', base), { cache: 'no-store', headers, signal: controller.signal });
     if (!response.ok) return null;
     const body = await response.json();
     return body && body.app === 'andary' ? { ...body, authenticated: body.authenticated === true } : null;
@@ -77,13 +80,14 @@ export function socketUrl(pageUrl) {
 /**
  * @typedef {object} LiveOptions
  * @property {{ ingest: (e: any) => any, setApproval: (a: any) => void, setUsage?: (u: unknown, days?: unknown) => void, reset: () => void }} store
- * @property {boolean} [authenticated]   false starts in "Sign in" and waits for a valid cookie
+ * @property {boolean} [authenticated]   false starts in "Sign in" and waits for a valid sign-in
  * @property {(status: LinkStatus) => void} [onStatus]
  * @property {(settings: object) => void} [onSettings]
  * @property {(message: string) => void} [onError]
  * @property {(progress: unknown) => void} [onProgress]  the town's growth and busy days (§4.9)
  * @property {(ok: boolean) => void} [onNotifyTest]  the answer to notifyTest()
- * @property {new (url: string) => WebSocket} [WebSocketImpl]
+ * @property {new (url: string, protocols?: string[]) => WebSocket} [WebSocketImpl]
+ * @property {() => import('./credentials.js').Credentials} [credentials]
  * @property {() => Promise<Hello|null>} [hello]
  * @property {string} [url]
  */
@@ -101,7 +105,8 @@ export function connectLive({
   onProgress = () => {},
   onNotifyTest = () => {},
   WebSocketImpl = globalThis.WebSocket,
-  hello = () => fetchHello(),
+  credentials = () => readCredentials(),
+  hello = () => fetchHello({ credentials }),
   url = socketUrl(globalThis.location?.href ?? 'http://127.0.0.1/'),
 }) {
   /** @type {WebSocket|null} */
@@ -123,7 +128,7 @@ export function connectLive({
   }
 
   function open() {
-    const ws = new WebSocketImpl(url);
+    const ws = new WebSocketImpl(url, signInProtocols(credentials()));
     socket = ws;
     ws.addEventListener('message', (event) => handle(event.data));
     ws.addEventListener('close', () => {
@@ -150,7 +155,7 @@ export function connectLive({
       setStatus('offline');
       scheduleRetry(backoffDelay(attempt++));
     } else if (!info.authenticated) {
-      // The login link may be opened in another tab; the cookie it sets is shared with this one.
+      // The sign-in link may be opened in another tab; what it stores is shared with this one.
       setStatus('signin');
       retryTimer = setTimeout(probe, SIGNIN_POLL_MS);
     } else {

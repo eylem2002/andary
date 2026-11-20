@@ -143,11 +143,14 @@ that data as private.
 - **DNS-rebinding defence.** Every request must carry `Host: 127.0.0.1:<port>`, `localhost:<port>`
   or `[::1]:<port>` (plus the `--host` address, when one is given); anything else gets `403`.
 - **Browser sign-in.** Each start creates a new random UI token (32 bytes). Opening the sign-in
-  link stores it in a `andary_ui` cookie (`HttpOnly; SameSite=Strict; Path=/`) and redirects to the
-  same page without the token, so it does not stay in the address bar or history. A wrong token
-  gets a `403` page. Static files need no sign-in: they contain no data.
-- **WebSocket.** `/ws` requires the cookie and an `Origin` that is the server's own (non-browser
-  clients may leave it out). At most 16 browsers; messages up to 64 KiB; a browser that floods
+  link hands it to the page in the URL fragment; the page keeps it in its own storage, which only
+  pages of this exact address (port included) can read, and takes it out of the address bar. It
+  sends it with each request: a header for `fetch`, a subprotocol for the WebSocket. There is no
+  cookie: a cookie for `127.0.0.1` would also go to every other local server you open in the same
+  browser (ADR 0015). A wrong token gets a `403` page. Static files need no sign-in: they contain
+  no data.
+- **WebSocket.** `/ws` requires the sign-in subprotocol and an `Origin` that is the server's own
+  (non-browser clients may leave it out). At most 16 browsers; messages up to 64 KiB; a browser that floods
   messages is disconnected.
 - **Hook secret.** Hooks authenticate with a second random value in the `x-andary-secret`
   header, compared in constant time. Requests without it get `401` before they can touch the

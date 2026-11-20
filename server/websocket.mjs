@@ -1,6 +1,6 @@
 // Minimal RFC 6455 WebSocket: the server handshake and a connection object shared by the server
 // (browsers) and the tiny client used by `andary doctor` and the tests. Text messages only,
-// no extensions, no subprotocols.
+// no extensions; the one subprotocol the town speaks is confirmed when a client offers it.
 import { createHash, randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { STATUS_CODES } from 'node:http';
@@ -87,16 +87,15 @@ export function rejectUpgrade(socket, status, message, headers = {}) {
  * @param {import('node:stream').Duplex} socket
  * @param {string} key validated Sec-WebSocket-Key
  * @param {Buffer} head bytes that arrived with the upgrade request
- * @param {Omit<ConnectionOptions, 'role'>} options
+ * @param {Omit<ConnectionOptions, 'role'> & { protocol?: string|null }} options  `protocol`: the
+ *   subprotocol to confirm (one the client offered), or none
  * @returns {WsConnection}
  */
-export function acceptUpgrade(socket, key, head, options) {
-  socket.write(
-    'HTTP/1.1 101 Switching Protocols\r\n' +
-      'Upgrade: websocket\r\n' +
-      'Connection: Upgrade\r\n' +
-      `Sec-WebSocket-Accept: ${acceptKeyFor(key)}\r\n\r\n`,
-  );
+export function acceptUpgrade(socket, key, head, { protocol = null, ...options }) {
+  const lines = ['HTTP/1.1 101 Switching Protocols', 'Upgrade: websocket', 'Connection: Upgrade'];
+  if (protocol) lines.push(`Sec-WebSocket-Protocol: ${protocol}`);
+  lines.push(`Sec-WebSocket-Accept: ${acceptKeyFor(key)}`);
+  socket.write(`${lines.join('\r\n')}\r\n\r\n`);
   const connection = new WsConnection(socket, { ...options, role: 'server' });
   if (head && head.length > 0) connection.receive(head);
   return connection;

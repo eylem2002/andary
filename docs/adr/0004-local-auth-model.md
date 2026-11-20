@@ -1,6 +1,6 @@
 # 0004 — Local authentication: UI token cookie, hook secret, Host and Origin checks
 
-Status: Accepted
+Status: Accepted; the cookie is replaced by ADR 0015 (the sign-in is kept per origin)
 
 ## Context
 

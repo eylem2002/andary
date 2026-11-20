@@ -35,9 +35,11 @@ describe('public endpoints', () => {
     assert.match(hello.version, /^\d+\.\d+\.\d+/);
   });
 
-  it('reports authenticated: true with the UI cookie', async () => {
-    const hello = await rawRequest(town.port, { path: '/api/hello', headers: { cookie: `andary_ui=${town.uiToken}` } });
+  it('reports authenticated: true with the sign-in header, and never for a cookie', async () => {
+    const hello = await rawRequest(town.port, { path: '/api/hello', headers: { 'x-andary-token': town.uiToken } });
     assert.equal(JSON.parse(hello.text).authenticated, true);
+    const cookie = await rawRequest(town.port, { path: '/api/hello', headers: { cookie: `andary_ui=${town.uiToken}` } });
+    assert.equal(JSON.parse(cookie.text).authenticated, false, 'a cookie for 127.0.0.1 reaches every port, so it signs nothing in');
   });
 
   it('sends the security headers on pages, APIs and errors', async () => {
@@ -53,16 +55,13 @@ describe('public endpoints', () => {
 });
 
 describe('sign-in', () => {
-  it('sets an HttpOnly SameSite=Strict cookie and redirects without the token', async () => {
+  it('moves the token into the fragment for the page to keep, and sets no cookie', async () => {
     const res = await rawRequest(town.port, { path: `/?demo=1&token=${town.uiToken}&x=2` });
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/?demo=1&x=2');
-    const cookie = String(res.headers['set-cookie']);
-    assert.match(cookie, new RegExp(`^andary_ui=${town.uiToken};`));
-    assert.match(cookie, /HttpOnly/);
-    assert.match(cookie, /SameSite=Strict/);
-    assert.match(cookie, /Path=\//);
-    assert.equal((await rawRequest(town.port, { path: `/?token=${town.uiToken}` })).headers.location, '/');
+    assert.equal(res.headers.location, `/?demo=1&x=2#signin=${town.uiToken}`);
+    assert.equal(res.headers['set-cookie'], undefined);
+    assert.equal(res.headers['cache-control'], 'no-store');
+    assert.equal((await rawRequest(town.port, { path: `/?token=${town.uiToken}` })).headers.location, `/#signin=${town.uiToken}`);
   });
 
   it('answers a wrong token with a 403 page and no cookie', async () => {

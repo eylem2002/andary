@@ -3,6 +3,7 @@
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { TOKEN_PROTOCOL_PREFIX, WS_PROTOCOL } from '../auth.mjs';
 import { HOOK_SOURCE, resolveHome } from '../config.mjs';
 import { runHookScript } from '../hook-runner.mjs';
 import { forwarderPath, inspectInstallations } from '../installer.mjs';
@@ -154,7 +155,7 @@ async function checkRoundTrip(report, home, io) {
   let socket = null;
   try {
     socket = await connectWebSocket(`${serverOrigin(state).replace(/^http/, 'ws')}/ws`, {
-      headers: { Cookie: `andary_ui=${state.uiToken}` },
+      headers: { 'Sec-WebSocket-Protocol': `${WS_PROTOCOL}, ${TOKEN_PROTOCOL_PREFIX}${state.uiToken}` },
     });
     await waitForMessage(socket, (m) => m?.t === 'hello', 5000);
     const payload = { ...base, hook_event_name: 'Notification', notification_type: 'andary_doctor', message: 'Andary doctor: the hook pipeline works' };

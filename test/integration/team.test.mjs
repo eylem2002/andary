@@ -78,13 +78,12 @@ describe('Team town', () => {
     assert.equal((await rawRequest(host.port, { path: `/?view=${view}`, headers: { host: `andary-host.tailnet.example:${host.port}` } })).status, 302);
     const login = await rawRequest(host.port, { path: `/?view=${view}` });
     assert.equal(login.status, 302);
-    assert.equal(login.headers.location, '/');
-    assert.match(String(login.headers['set-cookie']), /^andary_view=.*HttpOnly; SameSite=Strict/);
-    const cookie = `andary_view=${view}`;
-    const hello = JSON.parse((await rawRequest(host.port, { path: '/api/hello', headers: { cookie } })).text);
+    assert.equal(login.headers.location, `/#view=${view}`);
+    assert.equal(login.headers['set-cookie'], undefined);
+    const hello = JSON.parse((await rawRequest(host.port, { path: '/api/hello', headers: { 'x-andary-view': view } })).text);
     assert.equal(hello.authenticated, true);
 
-    const viewer = await connectBrowser(host, { cookie });
+    const viewer = await connectBrowser(host, { protocols: `andary, andary.view.${view}` });
     const greeting = await waitForMessage(viewer, (m) => m?.t === 'hello');
     assert.equal(greeting.settings.team.role, 'viewer');
     assert.equal(greeting.settings.remoteApprovals, false);

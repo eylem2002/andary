@@ -102,7 +102,8 @@ Andary added and nothing else.
 ## 4. Use the town
 
 `andary start` prints a sign-in link and opens it. The link holds a private token, so don't share
-it; the browser trades it for a cookie on the first visit.
+it; the page keeps it for this town only (no other site or local server can read it) and takes it
+out of the address bar. Other tabs on the same town are signed in too.
 
 ### What the buildings mean
 
@@ -234,8 +235,10 @@ Andary sees what your agents see, so it is locked down:
 
 - the server listens on `127.0.0.1` only (unless you choose `--host` or host a team town), checks
   the `Host` header (DNS rebinding) and the WebSocket `Origin` (cross-site hijacking);
-- browsers sign in with a random per-start token, traded for an `HttpOnly`, `SameSite=Strict`
-  cookie; hooks use a separate secret; both live in `~/.andary/server.json`, readable only by you;
+- browsers sign in with a random per-start token that the page keeps for its own address only
+  and sends with each request; there is no cookie, which would also reach every other local
+  server on `127.0.0.1` (ADR 0015); hooks use a separate secret; both live in
+  `~/.andary/server.json`, readable only by you;
 - the hook forwarder only talks to a live server of yours and only obeys replies signed with a
   key that never leaves `~/.andary`, so a stale state file cannot hand your prompts, or control
   of your agent, to whoever takes the old port;
