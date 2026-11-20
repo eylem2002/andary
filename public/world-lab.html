@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Andary — world lab</title>
+<link rel="icon" href="data:,">
+<meta name="description" content="Development lab for Andary's characters: spawn agents, play every activity and effect.">
+<link rel="stylesheet" href="./vendor/fonts/fonts.css">
+<link rel="stylesheet" href="./css/env.css">
+<link rel="stylesheet" href="./css/world.css">
+<link rel="stylesheet" href="./js/world/lab/lab.css">
+<script type="importmap">{"imports":{"three":"./vendor/three/three.module.js","three/addons/":"./vendor/three/addons/"}}</script>
+<script type="module" src="./js/world/lab/lab.js"></script>
+</head>
+<body class="tt-lab">
+<main class="tt-lab__stage">
+<h1 class="tt-lab__title">Andary world lab</h1>
+<div id="world" class="tt-lab__world" data-testid="world"></div>
+<p class="tt-lab__error" id="lab-error" role="alert" hidden></p>
+</main>
+<aside class="tt-lab__panel" id="lab-panel" aria-label="Lab controls"></aside>
+</body>
+</html>

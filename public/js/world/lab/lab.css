@@ -1,0 +1,147 @@
+/* World lab page only (public/world-lab.html): layout, control panel, and the stub
+   environment's building labels. Not loaded by the app. */
+
+.tt-lab {
+  margin: 0;
+  height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 312px;
+  background: #0e141b;
+  color: #0f172a;
+  font-family: 'Overpass', system-ui, sans-serif;
+}
+
+.tt-lab--bare {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tt-lab--bare .tt-lab__panel {
+  display: none;
+}
+
+.tt-lab__stage {
+  position: relative;
+  min-width: 0;
+}
+
+.tt-lab__title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.tt-lab__world {
+  position: absolute;
+  inset: 0;
+}
+
+.tt-lab__error {
+  position: absolute;
+  inset: auto 16px 16px;
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: #7f1d1d;
+  color: #ffffff;
+}
+
+.tt-lab__panel {
+  overflow-y: auto;
+  padding: 12px 14px 32px;
+  background: #f8fafc;
+  border-left: 1px solid #cbd5e1;
+  font-size: 13px;
+}
+
+.tt-lab__panel h2 {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #334155;
+}
+
+.tt-lab__readout {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #a7f3d0;
+  font-family: 'Overpass Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.tt-lab__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.tt-lab__panel button,
+.tt-lab__panel select,
+.tt-lab__panel input {
+  font: inherit;
+  font-size: 12px;
+  color: #0f172a;
+}
+
+.tt-lab__panel button {
+  padding: 4px 8px;
+  border: 1px solid #94a3b8;
+  border-radius: 5px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.tt-lab__panel button:hover {
+  background: #e2e8f0;
+}
+
+.tt-lab__panel button:focus-visible,
+.tt-lab__panel select:focus-visible,
+.tt-lab__panel input:focus-visible {
+  outline: 3px solid #1d4ed8;
+  outline-offset: 1px;
+}
+
+.tt-lab__panel label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0;
+}
+
+.tt-lab__panel input[type='text'] {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid #94a3b8;
+  border-radius: 5px;
+}
+
+/* Stub environment building labels (agents/dev/stub-env.js). */
+.tt-stub-labels {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.tt-stub-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 3px 8px 2px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1e293b;
+  font: 700 11px/1.3 'Overpass', system-ui, sans-serif;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 20%);
+}

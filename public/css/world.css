@@ -1,0 +1,311 @@
+/* In-world overlay owned by public/js/world (world.js + agents/overlay.js): the canvas, agent name
+   pills, speech bubbles and emote pops. The overlay is decorative (aria-hidden); the HUD carries
+   the same information as text. Text contrast: white on crew colours is kept ≥ 4.5:1 in code. */
+
+.tt-world {
+  overflow: hidden;
+  outline: none;
+}
+
+.tt-world:focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: -3px;
+  box-shadow: inset 0 0 0 6px #1d4ed8;
+}
+
+.tt-world__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.tt-world__canvas.is-pointing {
+  cursor: pointer;
+}
+
+/* ── tags ───────────────────────────────────────────────────────────────── */
+
+.tt-agents {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 3;
+  font-family: 'Overpass', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.tt-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.tt-tag.is-offscreen {
+  visibility: hidden;
+}
+
+.tt-tag__stack {
+  position: absolute;
+  left: 0;
+  bottom: 4px; /* a little air between the hat and the pill */
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px; /* BUBBLE_GAP in overlay.js */
+}
+
+.tt-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px; /* PILL_HEIGHT in tags.js */
+  max-width: 180px;
+  padding: 1px 9px 0 8px;
+  box-sizing: border-box;
+  border-radius: 6px;
+  background: var(--crew, #2457d6);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  box-shadow: 0 1px 0 rgb(0 0 0 / 18%), 0 3px 8px rgb(10 20 40 / 22%);
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+  transition: transform 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+.tt-pill__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The little mouse-pointer arrow on the pill's corner. */
+.tt-pill__cursor {
+  position: absolute;
+  left: -8px;
+  top: -9px;
+  width: 12px;
+  height: 14px;
+  fill: var(--crew, #2457d6);
+  stroke: #ffffff;
+  stroke-width: 1.3;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 30%));
+}
+
+.tt-pill__badge {
+  margin-left: 1px;
+  padding: 2px 5px 1px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--crew, #2457d6);
+  font-weight: 800;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+/* In a crowd, lower-priority pills shrink to their status dot (tags.js decides; COMPACT_W). */
+.tt-tag.is-compact .tt-pill {
+  gap: 0;
+  padding: 1px 6px 0;
+}
+
+.tt-tag.is-compact .tt-pill__name,
+.tt-tag.is-compact .tt-pill__badge,
+.tt-tag.is-compact .tt-pill__cursor {
+  display: none;
+}
+
+.tt-tag.is-hovered .tt-pill {
+  transform: translateY(-1px) scale(1.06);
+}
+
+.tt-tag.is-selected .tt-pill {
+  outline: 2px solid #ffffff;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px var(--crew, #2457d6), 0 4px 12px rgb(10 20 40 / 35%);
+}
+
+/* Status dots differ in shape as well as colour, so they read without colour vision. */
+.tt-pill__status {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  box-sizing: border-box;
+}
+
+.tt-pill__status--working {
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 0 1.5px #ffffff;
+  animation: tt-status-pulse 1.6s ease-in-out infinite;
+}
+
+.tt-pill__status--waiting {
+  width: 7px;
+  height: 7px;
+  margin: 0 1px;
+  background: #fbbf24;
+  box-shadow: 0 0 0 1.5px #ffffff;
+  transform: rotate(45deg);
+}
+
+.tt-pill__status--idle {
+  border-radius: 50%;
+  border: 2px solid #e5e7eb;
+}
+
+.tt-pill__status--error {
+  border-radius: 1px;
+  background: #f87171;
+  box-shadow: 0 0 0 1.5px #ffffff;
+}
+
+.tt-pill__status--done {
+  width: 5px;
+  height: 9px;
+  margin: -2px 2px 0;
+  border-right: 2.5px solid #bbf7d0;
+  border-bottom: 2.5px solid #bbf7d0;
+  transform: rotate(45deg);
+}
+
+@keyframes tt-status-pulse {
+  50% {
+    box-shadow: 0 0 0 1.5px #ffffff, 0 0 0 4px rgb(74 222 128 / 45%);
+  }
+}
+
+/* ── bubbles ────────────────────────────────────────────────────────────── */
+
+.tt-bubble {
+  position: relative;
+  width: max-content;
+  max-width: 220px;
+  padding: 6px 9px 5px;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1f2937;
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: left;
+  overflow-wrap: anywhere;
+  box-shadow: 0 2px 8px rgb(10 20 40 / 22%);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 150ms ease-out, visibility 0s linear 150ms;
+}
+
+.tt-bubble.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 150ms ease-out;
+}
+
+/* Tail pointing down at the speaker. */
+.tt-bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  background: inherit;
+  transform: rotate(45deg);
+  border-radius: 0 0 2px 0;
+}
+
+.tt-bubble--thought {
+  border-radius: 16px;
+  background: #f5f3ff;
+  color: #312e81;
+  font-style: italic;
+}
+
+.tt-bubble--thought::before,
+.tt-bubble--thought::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  border-radius: 50%;
+  background: #f5f3ff;
+  box-shadow: 0 1px 3px rgb(10 20 40 / 20%);
+  transform: none;
+}
+
+.tt-bubble--thought::before {
+  bottom: -7px;
+  width: 8px;
+  height: 8px;
+  margin-left: -9px;
+}
+
+.tt-bubble--thought::after {
+  bottom: -12px;
+  width: 5px;
+  height: 5px;
+  margin-left: -4px;
+}
+
+.tt-bubble--shout {
+  background: #ffe45c;
+  color: #1f1300;
+  font-weight: 800;
+  border: 2px solid #1f1300;
+  rotate: -1.5deg;
+}
+
+.tt-bubble--code {
+  border-radius: 6px;
+  background: #111827;
+  color: #a7f3d0;
+  font-family: 'Overpass Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-weight: 400;
+  font-size: 11.5px;
+}
+
+/* ── emotes ─────────────────────────────────────────────────────────────── */
+
+/* Lives inside the pill so it always pops beside its top-right corner. */
+.tt-emote {
+  position: absolute;
+  right: -26px;
+  top: -18px;
+  font-size: 22px;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 2px rgb(0 0 0 / 25%));
+}
+
+/* ── reduced motion (system setting, or the in-app toggle) ──────────────── */
+
+.tt-agents--still .tt-pill,
+.tt-agents--still .tt-bubble {
+  transition: none;
+}
+
+.tt-agents--still .tt-pill__status--working {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tt-pill,
+  .tt-bubble {
+    transition: none;
+  }
+
+  .tt-pill__status--working {
+    animation: none;
+  }
+}
