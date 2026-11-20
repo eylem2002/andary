@@ -1,6 +1,6 @@
 # README: a guide to using Andary, connecting Claude Code or Codex, and sharing it
 
-Part 26 of 26 · base: `refactor/architecture` · merge last
+Part 26 of 27 · base: `refactor/architecture`
 
 ## What changed
 

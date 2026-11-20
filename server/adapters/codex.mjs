@@ -9,8 +9,11 @@
 //   - a shell command that ends with a non-zero exit code becomes PostToolUseFailure (Codex has no
 //     failure event), so failures still bring rain;
 //   - `Interrupt` becomes `Stop`.
-// Permission requests are never rewritten: the town must show exactly what it would approve.
+// A renamed tool call keeps Codex's own name in `andary_tool`, so the approval it may have needed
+// (asked under that name) settles when it runs. Permission requests are never rewritten: the town
+// must show exactly what it would approve.
 import { isAbsolute, join } from 'node:path';
+import { shellWords } from '../../public/js/core/text.js';
 import { parsePatch } from './apply-patch.mjs';
 
 /** @typedef {Record<string, any>} Payload */
@@ -41,8 +44,8 @@ export function fromCodex(payload) {
  * @returns {Payload[]}
  */
 function toolEvents(event) {
-  if (event.tool_name === 'apply_patch') return patchEvents(event);
-  if (event.tool_name === 'spawn_agent') return [spawnEvent(event)];
+  if (event.tool_name === 'apply_patch') return patchEvents({ ...event, andary_tool: 'apply_patch' });
+  if (event.tool_name === 'spawn_agent') return [spawnEvent({ ...event, andary_tool: 'spawn_agent' })];
   const shell = event.tool_name === 'Bash' ? withShellCommand(event) : event;
   return [failed(shell) ?? shell];
 }
@@ -84,14 +87,15 @@ function spawnEvent(event) {
 }
 
 /**
- * Codex may pass a shell command as an argument list; the town reads it as one line.
+ * Codex may pass a shell command as an argument list; the town reads it as one line, each argument
+ * quoted as a shell would need it.
  * @param {Payload} event
  * @returns {Payload}
  */
 function withShellCommand(event) {
   const command = event.tool_input?.command;
   if (!Array.isArray(command)) return event;
-  return { ...event, tool_input: { ...event.tool_input, command: command.map(String).join(' ') } };
+  return { ...event, tool_input: { ...event.tool_input, command: shellWords(command) } };
 }
 
 /**

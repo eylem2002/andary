@@ -1,13 +1,14 @@
 # Andary: final report
 
-Date: 2026-11-17; game view, sunset coast and nine more features added 2026-11-20 ·
+Date: 2026-11-17; game view, sunset coast and nine more features added 2026-11-20; Codex
+support, an architecture refactor and a usage guide added the same day ·
 Repository: `eylem2002/andary` · Licence: MIT
 
-Andary is a local web app that shows every Claude Code session on your machine as a crew of
-tiny workers in a living 3D town. Agents walk to the building for the tool they are using, talk
-about what they are doing, and queue at the Permit Office when they need your approval, which
-you can give from the town. It connects through Claude Code hooks, runs only on your machine,
-and has no runtime dependencies.
+Andary is a local web app that shows every Claude Code or OpenAI Codex session on your machine
+as a crew of tiny workers in a living 3D town. Agents walk to the building for the tool they are
+using, talk about what they are doing, and queue at the Permit Office when they need your
+approval, which you can give from the town. It connects through the agents' own hooks, runs only
+on your machine, and has no runtime dependencies.
 
 ## 1. Features
 
@@ -73,10 +74,34 @@ and has no runtime dependencies.
 - A built-in simulation of three projects powers the demo, so the town also works without
   Claude Code (and on any static host).
 
+### Connecting Codex (part 24)
+- `andary install codex` registers the same forwarder in Codex's `hooks.json` (user or project
+  scope); Codex asks you to trust the hooks once. Its events are translated on the server into
+  the town's one event format (ADR 0013), so every board, building and animation works the same.
+- `apply_patch` edits become one Write or Edit per file, with diffs; `spawn_agent` brings a
+  helper; failed commands bring rain; Codex crews carry a "Codex" badge and GPT model labels.
+- Permission prompts can be answered from the town, in Codex's own reply format.
+- Not yet: Codex costs (Andary reads Claude Code's transcripts only).
+
+### Clean structure (part 25)
+- An independent architecture review found 2 must-fix and 6 should-fix problems; all are done:
+  one ingest pipeline with a policy table per origin (ADR 0014), pure core modules shared by the
+  browser and the server, smaller store and director modules, event sources in one folder,
+  tests that mirror the source tree.
+- Layer rules are now enforced: `npm run boundaries` fails the build when, say, the HUD imports
+  the 3D world or the CLI imports more than the pure core. See
+  [ARCHITECTURE.md](ARCHITECTURE.md).
+
+### The usage guide (part 26)
+- The README is now a guide: install, connect Claude Code, connect Codex, use the town, share it
+  (team town, a static demo, recordings), security, troubleshooting, every command, how it works
+  and how to develop it. The in-app setup steps mention Codex too.
+
 ## 2. Workflows
 
-1. **First run**: `npm install -g github:eylem2002/andary`, `andary install`, `andary start`. The
-   browser opens signed in; run `claude` in any project and the bus brings the crew.
+1. **First run**: `npm install -g github:eylem2002/andary`, `andary install` (and
+   `andary install codex` for Codex), `andary start`. The browser opens signed in; run `claude`
+   or `codex` in any project and the bus brings the crew.
 2. **Watching work**: click a crew or agent to follow it; the inspector shows its tools, files
    and last message; the activity log and tasks show the same information as text.
 3. **Approving from the town**: turn on Remote approvals in Settings; a permission request shows
@@ -102,7 +127,7 @@ that fails without its fix** ([full report](reviews/security-review-2026-11-17.m
 | SR-03 | Medium | Masking or truncation could hide code in an approval. | Such requests go to the terminal, never held in the town. |
 | SR-04 | Medium | Cards shortened paths, hid MCP arguments, passed hidden/bidi characters. | Exact request shown, hidden characters made visible. |
 | SR-05 | Medium | Unbounded object keys; a crash path when greeting a browser. | Key limits, history size cap, crash-proof greeting. |
-| SR-06 | Medium | The installer followed symlinks planted in a project's `.claude/`. | Symlinked settings paths refused. |
+| SR-06 | Medium | A link planted at the installer's temporary file name in a project's `.claude/` let a hostile repository overwrite another file of yours. | Temporary files get random names and are created exclusively, so a planted link is never followed. |
 | SR-07 | Medium | A state folder owned by someone else, or world-writable, was used. | Must belong to the user; made 0700. |
 | SR-08 | Low | `stop` could signal a recycled pid. | Checks the process first. |
 | SR-09 | Low | WebSocket frame and half-close limits. | Added. |
@@ -133,9 +158,17 @@ view link cannot be forged, only the team endpoint skips the Host check, teammat
 their name, their events never reach the usage reader, the approval broker or the phone
 notifier, and viewers get nothing of the owner's.
 
+The architecture was reviewed before the clean-up (2 must-fix, 6 should-fix, all done in part 25;
+[report](reviews/architecture-review-2026-11-20.md)). Codex support, the clean-up and the new
+README were then reviewed by another reviewer who had not seen them: no must-fix, 7 should-fix
+(the clearest: a Codex command sent as an argument list could look like a different command on an
+approval card; approvals for Codex patches answered in the terminal did not settle) and several
+nits, all fixed in part 27 with tests ([report](reviews/codex-architecture-review-2026-11-20.md)).
+Spoofing the source, the member or the approval match from a hook is not possible.
+
 ## 4. Test results and scores
 
-Final verification, 2026-11-20, from a fresh clone of the complete stack (23 branches) with a
+Final verification, 2026-11-20, from a fresh clone of the complete stack (27 branches) with a
 clean `npm ci` (Node 22.23, npm 10.9, Linux, Chrome 153 with software WebGL):
 
 | Check | Result |
@@ -145,17 +178,18 @@ clean `npm ci` (Node 22.23, npm 10.9, Linux, Chrome 153 with software WebGL):
 | Config lint (JSON, shellcheck, actionlint, yamllint) | pass |
 | Typecheck (`tsc --checkJs`) | 0 errors |
 | Dead code (`npm run deadcode`) | 0 dead exports |
-| Unit + integration tests (`node:test`) | **782 / 782 pass**, 125 suites (710 before the nine features) |
-| End-to-end + accessibility (Playwright, desktop and mobile) | **80 pass**, 12 skipped by design (keyboard-only cases on the phone profile) |
+| Layer boundaries (`npm run boundaries`, 16 rules, 199 files) | none crossed |
+| Unit + integration tests (`node:test`) | **822 / 822 pass**, 132 suites (710 before the nine features, 782 after them, 800 after Codex and the clean-up) |
+| End-to-end + accessibility (Playwright, desktop and mobile) | **82 pass**, 12 skipped by design (keyboard-only cases on the phone profile) |
 | axe, WCAG 2.0/2.1/2.2 A and AA (main view light and dark, inspector, help, settings, setup, approval card, diff, usage and leaderboard dialogs) | 0 violations |
 | Licences (98 installed packages, vendored three.js and fonts) | all on the allow-list |
 | Secrets (working tree and full git history) | none found |
 | Build: vendored files regenerated from `node_modules` | identical |
-| Build: `npm pack` → global install → `andary install`, `start`, `doctor`, `team invite`, `stop`, `uninstall` | all pass; `doctor` confirms hook → server → town |
-| Publishing: `scripts/publish-github.sh` from a clone of the bundle, against a stand-in GitHub | main and 23 branches pushed unchanged, 23 stacked pull requests with their prepared descriptions, public only after a second secrets scan |
-| Each branch checked out on its own (pre-push gate) | all 23 pass (24 to 782 tests as the stack grows) |
+| Build: `npm pack` → global install → `andary install`, `install codex`, `start`, `doctor`, `stop`, `uninstall` (and `team invite` at part 23) | all pass; `doctor` confirms both agents' hooks and hook → server → town |
+| Publishing: `scripts/publish-github.sh` from a clone of the bundle, against a stand-in GitHub | main and 27 branches pushed unchanged, 27 stacked pull requests with their prepared descriptions, public only after a second secrets scan. The first rehearsal stopped before pushing: part 24's line in ORDER.md broke the script's branch list; fixed in part 27, with a test |
+| Each branch checked out on its own (pre-push gate) | all 27 pass (24 to 822 tests as the stack grows) |
 
-**Lighthouse 13.6** (`npm run perf`, demo page):
+**Lighthouse 13.6** (`npm run perf`, demo page, measured at part 23; parts 24–27 add one small module to the page):
 
 | | Performance | Accessibility | Best practices | SEO | First paint | Layout shift |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -204,28 +238,31 @@ Each item says what to do about it. None blocks normal use on a personal machine
 
 **Product**
 
-10. **Real GPUs were not available here.** Frame rate was measured only with software rendering;
+10. **Codex was not available here.** The Codex connection follows Codex's published hook
+   format and is tested with recorded-style payloads, not a live Codex. If a Codex crew looks
+   wrong, `andary doctor` and `--record` show what arrived (ASSUMPTIONS 63).
+11. **Real GPUs were not available here.** Frame rate was measured only with software rendering;
    once, the view went blank on High quality while following an agent there. Check on real
    hardware (High quality, follow an agent for 30 s), and watch the director camera for a minute:
    its moves between shots were only seen with software rendering and a slowed clock.
-11. **The plugin's `bin/` folder lands on Claude's `PATH`**, and claude.ai/Cowork reject plugins
+12. **The plugin's `bin/` folder lands on Claude's `PATH`**, and claude.ai/Cowork reject plugins
    with a `bin/` folder; the CLI install route is unaffected. Fixing it means moving the CLI.
-12. **No field for a deny reason** in the approval card (the protocol supports one).
-13. **First content waits for the 3D world** on slow devices (LCP); the store could start first.
-14. **Minor edge cases**: crew numbers shift when ended crews are pruned; an event without a
+13. **No field for a deny reason** in the approval card (the protocol supports one).
+14. **First content waits for the 3D world** on slow devices (LCP); the store could start first.
+15. **Minor edge cases**: crew numbers shift when ended crews are pruned; an event without a
     session id makes a crew that never ends; split-pane teammates appear as their own crew; two
     subagents of the same type started together can swap labels briefly; cars can pass through
     agents at the south-row doors.
-15. **Only tested on Linux.** Windows and macOS paths (opening the browser, `stop`) and the
+16. **Only tested on Linux.** Windows and macOS paths (opening the browser, `stop`) and the
     `/andary:town` command inside a live Claude Code session were not exercised. The team town
     was tested with two towns on one machine, not across two computers; ambient sound and
     notifications were checked in headless Chrome, not by ear or on a phone.
-16. **CI has not run on GitHub yet**, because nothing could be pushed from here; the same checks
+17. **CI has not run on GitHub yet**, because nothing could be pushed from here; the same checks
     pass locally (`npm run check`).
 
 ## 6. What you need to do
 
 See [OWNER-SETUP.md](OWNER-SETUP.md): publish the code (one script, or give Claude's GitHub App
-access), merge the 23 pull requests in order, optionally turn on branch protection and
+access), merge the 26 pull requests in order, optionally turn on branch protection and
 Dependabot alerts, then `node bin/andary.mjs install && node bin/andary.mjs start`.
 

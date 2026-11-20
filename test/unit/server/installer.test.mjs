@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { HOOK_SOURCE } from '../../../server/config.mjs';
 import { ensureHome } from '../../../server/state-file.mjs';
 import {
-  HOOK_REGISTRATIONS,
   SettingsError,
   applyHooksChange,
   buildHooksConfig,
@@ -21,6 +20,9 @@ import {
   withoutAndaryHooks,
 } from '../../../server/installer.mjs';
 import { CLIENTS } from '../../../server/clients.mjs';
+
+/** Claude Code's registrations, the installer's default client. */
+const HOOK_REGISTRATIONS = CLIENTS.claude.registrations;
 
 /** @type {string} */
 let dir;

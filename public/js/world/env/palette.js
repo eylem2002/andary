@@ -1,9 +1,9 @@
 // The town's colours (sRGB hex) and surface kinds. The default look is a sunset coast of pastel
 // stucco and white trims, turquoise water, palms, lush lawns and neon that comes on at dusk; the
-// other looks (look.js, look-palettes.js) override these tones, the paint, the neon and the style.
+// other looks (core/looks.js, look-palettes.js) override these tones, the paint, the neon and the style.
 // Each building is repainted from the shared stucco tones (PAINT, applied by the kit), so the
 // building code keeps naming materials ("stone", "gold") while every block gets its own colour.
-import { LOOK } from './look.js';
+import { LOOK } from '../../page.js';
 import { COAST_STYLE, LOOK_PALETTES } from './look-palettes.js';
 
 /** The overrides of the look this page was built with (none for the sunset coast). */

@@ -48,8 +48,9 @@ browser) reads one format. A new agent is one new adapter (ADR 0013).
 
 **One ingest pipeline.** `server/ingest.mjs` is the only way an event enters the town. Routes
 only authenticate and parse. What an event does besides appearing in the town is decided by where
-it came from, in one table (`POLICIES`): a local event counts toward usage, growth, notifications
-and approvals and is relayed to a team host; a teammate's event grows the town and nothing else.
+it came from, in one table (`POLICIES`): a local event counts toward growth, notifications and
+approvals and is relayed to a team host; a teammate's event grows the town and nothing else.
+Token usage is read before the adapter, and only for Claude Code (its transcripts).
 
 **Security at every boundary.** The forwarder only talks to a live server of yours and only obeys
 replies signed with a key that never leaves `~/.andary` (ADR 0012). The server checks the `Host`
@@ -60,12 +61,13 @@ are HMACs of one secret and a view-only role that sees the town but cannot act.
 
 **The browser has one store and one source.** `sources/live.js` (the WebSocket link) and
 `sources/demo.js` (the simulation, which also plays the server's part for approvals, usage and
-growth) share one `EventSource` shape; `main.js` holds exactly one. Both feed `core/store.js`,
+growth) share one `TownSource` shape; `main.js` holds exactly one. Both feed `core/store.js`,
 the single source of truth: the HUD renders it, and the director turns its changes into
 choreography for the 3D world.
 
 **Pure core.** `public/js/core/` has no DOM and no I/O, so it runs anywhere and is unit-tested in
-Node. The server reuses the few core modules both sides must read the same way: identifiers,
+Node. What the page was opened with (the town look, from the address or saved preferences) is read
+once, in `page.js`, and the HUD and the town's environment take it from there. The server reuses the few core modules both sides must read the same way: identifiers,
 dates, text helpers, prices and the growth rules.
 
 **The world behind a facade.** The app talks to the 3D world only through `world/world.js`
@@ -84,10 +86,11 @@ references may cross.
 | `server/cli/`, `bin/` | the server, those core modules, the simulation (for `andary simulate`) |
 | `public/js/core/` | `core/` only |
 | `public/js/sources/` | `sources/`, `core/` |
-| `public/js/ui/` | `ui/`, `core/` (the world only as a JSDoc type) |
+| `public/js/page.js` | `core/` only |
+| `public/js/ui/` | `ui/`, `page.js`, `core/` (the world only as a JSDoc type) |
 | `public/js/sim/` | `sim/` only |
 | `public/js/world/world.js` | `agents/`, `env/environment.js`, `layout.js`, `core/`, three.js |
-| `public/js/world/env/` | `env/`, `layout.js`, `core/`, three.js |
+| `public/js/world/env/` | `env/`, `layout.js`, `page.js`, `core/`, three.js |
 | `public/js/world/agents/` | `agents/`, `layout.js`, `core/`, three.js |
 | `public/js/main.js` | anything in the app: it wires the parts together |
 
@@ -104,7 +107,7 @@ references may cross.
 | crews, agents, the log | `public/js/core/store.js`, `crews.js` |
 | who walks where, and what they say | `public/js/core/director.js`, `director-queue.js`, `humor.js` |
 | the HUD | `public/js/ui/` (`hud.js` composes it) |
-| the town's buildings, sea, sky and looks | `public/js/world/env/`, `core/looks.js` |
+| the town's buildings, sea, sky and looks | `public/js/world/env/`, `core/looks.js`, `page.js` |
 | the people and their animations | `public/js/world/agents/` |
 | the demo's story | `public/js/sim/` |
 

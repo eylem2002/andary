@@ -117,7 +117,7 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
 
   const simulation = createSimulation({ seed, speed, emit });
 
-  /** @type {import('./types.js').EventSource & { start(): void }} */
+  /** @type {import('./types.js').TownSource & { start(): void }} */
   const source = {
     mode: 'demo',
     start: () => simulation.start(),

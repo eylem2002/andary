@@ -24,11 +24,12 @@ export const MILESTONES = Object.freeze([
 const POINT_EVENTS = new Set(['Stop', 'SubagentStop', 'TaskCompleted']);
 
 /**
- * Whether a hook event earns a point.
+ * Whether a hook event earns a point. A turn you interrupted (Codex's Interrupt) is not finished
+ * work.
  * @param {Record<string, any>|null|undefined} event  a raw hook payload
  */
 export function earnsPoint(event) {
-  return POINT_EVENTS.has(event?.hook_event_name);
+  return POINT_EVENTS.has(event?.hook_event_name) && event?.stop_reason !== 'interrupted';
 }
 
 /**

@@ -1,8 +1,8 @@
 // Colours and styles of each town look other than the sunset coast (palette.js holds that one):
 // overrides of the shared tones, each building's paint, the neon, the sea, the island's sides,
-// the trees and the beach. All original; see look.js for the list.
+// the trees and the beach. All original; see core/looks.js for the list.
 
-/** @typedef {import('./look.js').LookId} LookId */
+/** @typedef {import('../../core/looks.js').LookId} LookId */
 /** @typedef {number[]} RGB  [r, g, b] */
 
 /**

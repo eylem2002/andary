@@ -184,6 +184,13 @@ describe('terminal resolution of non-held approvals', () => {
     assert.ok(broker.list().every((a) => a.status === 'resolved'));
   });
 
+  it("settles a Codex approval when the tool runs under the town's name for it (apply_patch → Edit)", () => {
+    const { broker } = setup();
+    broker.create(request({ tool_name: 'apply_patch', tool_input: { command: '*** Begin Patch' } }), { hold: false });
+    assert.equal(broker.observe({ hook_event_name: 'PostToolUse', session_id: 's1', tool_name: 'Edit', andary_tool: 'apply_patch' }), 1);
+    assert.equal(broker.list()[0].status, 'resolved');
+  });
+
   it('never resolves held approvals from terminal events', () => {
     const { broker } = setup();
     broker.create(request(), { hold: true });

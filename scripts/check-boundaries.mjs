@@ -26,6 +26,7 @@ const AREAS = Object.freeze([
   ['hooks/', 'hooks'],
   ['scripts/', 'scripts'],
   ['public/js/main.js', 'main'],
+  ['public/js/page.js', 'page'],
   ['public/js/core/', 'core'],
   ['public/js/sources/', 'sources'],
   ['public/js/ui/', 'ui'],
@@ -48,17 +49,18 @@ export const RULES = Object.freeze({
   server: { areas: ['server', 'core'], bare: /^node:/ },
   hooks: { areas: [], bare: /^node:/ },
   scripts: { areas: ['scripts', 'server', 'core'], bare: /./ },
-  main: { areas: ['core', 'sources', 'ui', 'sim', 'dev', 'world'], bare: null },
+  main: { areas: ['core', 'page', 'sources', 'ui', 'sim', 'dev', 'world'], bare: null },
+  page: { areas: ['core'], bare: null },
   core: { areas: ['core'], bare: null },
   sources: { areas: ['sources', 'core'], bare: null },
-  ui: { areas: ['ui', 'core'], bare: null },
+  ui: { areas: ['ui', 'page', 'core'], bare: null },
   sim: { areas: ['sim'], bare: null },
   dev: { areas: ['dev', 'core'], bare: null },
   world: { areas: ['world', 'env', 'agents', 'layout', 'core'], bare: /^three(\/|$)/ },
-  env: { areas: ['env', 'layout', 'core'], bare: /^three(\/|$)/ },
+  env: { areas: ['env', 'layout', 'page', 'core'], bare: /^three(\/|$)/ },
   agents: { areas: ['agents', 'layout', 'core'], bare: /^three(\/|$)/ },
   layout: { areas: ['core'], bare: null },
-  lab: { areas: ['lab', 'world', 'env', 'agents', 'layout', 'core', 'dev'], bare: /^three(\/|$)/ },
+  lab: { areas: ['lab', 'world', 'env', 'agents', 'layout', 'page', 'core', 'dev'], bare: /^three(\/|$)/ },
 });
 
 /** Narrower rules on top of the area table. */
@@ -68,6 +70,12 @@ const EXTRA = Object.freeze([
     applies: (/** @type {string} */ from, /** @type {string} */ to) => (areaOf(from) === 'server' || areaOf(from) === 'cli') && areaOf(to) === 'core',
     allowed: (/** @type {string} */ _from, /** @type {string} */ to) => SERVER_CORE.includes(to),
     why: 'the server may only use the pure core modules listed in SERVER_CORE',
+  },
+  {
+    // …and what those modules load comes with them, so it must be shared too.
+    applies: (/** @type {string} */ from, /** @type {string} */ to) => SERVER_CORE.includes(from) && areaOf(to) === 'core',
+    allowed: (/** @type {string} */ _from, /** @type {string} */ to) => SERVER_CORE.includes(to),
+    why: 'a module the server shares may only import other modules listed in SERVER_CORE',
   },
   {
     // The town's environment is reached through its facade only.
@@ -86,20 +94,34 @@ export function areaOf(file) {
   return null;
 }
 
+/** `import … from '…'` and `import '…'` at the start of a line; the names may span lines. */
+const STATIC_IMPORT = /^[ \t]*import\s*(?:[\w$*{}\s,]+?\s*from\s*)?['"]([^'"]+)['"]/gm;
+/** `export * from '…'`, `export { … } from '…'`; the braces may span lines. */
+const RE_EXPORT = /^[ \t]*export\s*(?:\*(?:\s+as\s+[\w$]+)?|\{[^}]*\})\s*from\s*['"]([^'"]+)['"]/gm;
+/** `import('…')` with a literal path. */
+const DYNAMIC_IMPORT = /\bimport\(\s*['"]([^'"]+)['"]/g;
+
 /**
- * Runtime import specifiers of a module: static imports and re-exports, and dynamic imports with
- * a literal path. Comment lines (JSDoc type references) are skipped.
+ * Runtime import specifiers of a module, in order: static imports and re-exports (also when they
+ * are wrapped over several lines), and dynamic imports with a literal path. Dynamic imports on
+ * comment lines (JSDoc type references) are skipped.
  * @param {string} text
  * @returns {string[]}
  */
 export function importsOf(text) {
-  const specs = [];
+  /** @type {{ at: number, spec: string }[]} */
+  const found = [];
+  for (const pattern of [STATIC_IMPORT, RE_EXPORT]) {
+    for (const match of text.matchAll(pattern)) found.push({ at: match.index ?? 0, spec: match[1] });
+  }
+  let offset = 0;
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
-    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
-    for (const match of trimmed.matchAll(/(?:^import\s[^'"]*?from\s*|^import\s*|^export\s[^'"]*?from\s*|\bimport\(\s*)['"]([^'"]+)['"]/g)) specs.push(match[1]);
+    const comment = trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*');
+    if (!comment) for (const match of line.matchAll(DYNAMIC_IMPORT)) found.push({ at: offset + (match.index ?? 0), spec: match[1] });
+    offset += line.length + 1;
   }
-  return specs;
+  return found.sort((a, b) => a.at - b.at).map(({ spec }) => spec);
 }
 
 /**

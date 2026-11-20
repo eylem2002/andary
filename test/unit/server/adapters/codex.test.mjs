@@ -1,63 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { parsePatch } from '../../../server/adapters/apply-patch.mjs';
-import { fromCodex } from '../../../server/adapters/codex.mjs';
-import { sourceOf, toTownPayloads } from '../../../server/adapters/index.mjs';
-
-const PATCH = [
-  '*** Begin Patch',
-  '*** Add File: src/new.ts',
-  '+export const a = 1;',
-  '+export const b = 2;',
-  '*** Update File: src/app.ts',
-  '@@ function main()',
-  ' const x = 1;',
-  '-const y = 2;',
-  '+const y = 3;',
-  '@@',
-  '-old()',
-  '+renewed()',
-  '*** Update File: src/old-name.ts',
-  '*** Move to: src/new-name.ts',
-  '@@',
-  '-a',
-  '+b',
-  '*** Delete File: src/gone.ts',
-  '*** End Patch',
-].join('\n');
-
-/** A Codex hook payload, as its hooks send them. @param {string} event @param {Record<string, any>} [extra] */
-const codex = (event, extra = {}) => ({
-  session_id: 'thr_123',
-  transcript_path: '/home/dev/.codex/sessions/2026/11/20/rollout-1.jsonl',
-  cwd: '/home/dev/code/app',
-  hook_event_name: event,
-  model: 'gpt-5.3-codex',
-  permission_mode: 'default',
-  turn_id: 'turn_1',
-  ...extra,
-});
-
-describe('parsePatch', () => {
-  it('reads added, updated (with hunks and a move) and deleted files', () => {
-    const files = parsePatch(PATCH);
-    assert.deepEqual(files.map((f) => [f.op, f.path, f.moveTo, f.hunks.length]), [
-      ['add', 'src/new.ts', null, 1],
-      ['update', 'src/app.ts', null, 2],
-      ['update', 'src/old-name.ts', 'src/new-name.ts', 1],
-      ['delete', 'src/gone.ts', null, 0],
-    ]);
-    assert.deepEqual(files[0].hunks[0], { before: '', after: 'export const a = 1;\nexport const b = 2;' });
-    assert.deepEqual(files[1].hunks[0], { before: 'const x = 1;\nconst y = 2;', after: 'const x = 1;\nconst y = 3;' });
-    assert.deepEqual(files[1].hunks[1], { before: 'old()', after: 'renewed()' });
-  });
-
-  it('is empty for anything that is not a patch, and copes with CRLF', () => {
-    for (const bad of [undefined, 42, '', 'diff --git a/x b/x', '*** Update File: x']) assert.deepEqual(parsePatch(bad), []);
-    assert.equal(parsePatch(PATCH.replace(/\n/g, '\r\n')).length, 4);
-  });
-});
+import { fromCodex } from '../../../../server/adapters/codex.mjs';
+import { PATCH, codex } from './fixtures.mjs';
 
 describe('fromCodex', () => {
   it('turns a patch into one Write, Edit or MultiEdit per file, with paths in the session folder', () => {
@@ -91,6 +36,33 @@ describe('fromCodex', () => {
     assert.equal(shell.tool_input.command, 'npm test');
   });
 
+  it('quotes list arguments, so one argument with a space never reads as two', () => {
+    const line = (/** @type {string[]} */ command) => fromCodex(codex('PreToolUse', { tool_name: 'Bash', tool_use_id: 'b', tool_input: { command } }))[0].tool_input.command;
+    assert.equal(line(['rm', 'a b']), "rm 'a b'");
+    assert.equal(line(['rm', 'a', 'b']), 'rm a b');
+    assert.equal(line(['sh', '-c', "echo 'hi'; ls"]), `sh -c 'echo '\\''hi'\\''; ls'`);
+  });
+
+  it("keeps Codex's own tool name on calls it renames, so approvals asked under it settle", () => {
+    const patch = fromCodex(codex('PostToolUse', { tool_name: 'apply_patch', tool_use_id: 'p', tool_input: { command: PATCH } }));
+    assert.ok(patch.every((event) => event.andary_tool === 'apply_patch'));
+    const [spawn] = fromCodex(codex('PostToolUse', { tool_name: 'spawn_agent', tool_use_id: 's', tool_input: { message: 'Go' } }));
+    assert.equal(spawn.andary_tool, 'spawn_agent');
+    const [shell] = fromCodex(codex('PostToolUse', { tool_name: 'Bash', tool_use_id: 'b', tool_input: { command: 'ls' } }));
+    assert.equal(shell.andary_tool, undefined);
+  });
+
+  it('leaves events it already translated as they are (a replayed recording)', () => {
+    const first = fromCodex(codex('PostToolUse', { tool_name: 'apply_patch', tool_use_id: 'p', tool_input: { command: PATCH }, tool_response: { exit_code: 0 } }));
+    const failure = fromCodex(codex('PostToolUse', { tool_name: 'Bash', tool_use_id: 'b', tool_input: { command: ['npm', 'test'] }, tool_response: { exit_code: 1, stderr: 'x' } }));
+    const stop = fromCodex(codex('Interrupt'));
+    for (const event of [...first, ...failure, ...stop]) {
+      const { andary_tool: _tool, ...recorded } = event;
+      const [again] = fromCodex(recorded);
+      assert.deepEqual([again.hook_event_name, again.tool_name, again.tool_input, again.andary_source], [event.hook_event_name, event.tool_name, event.tool_input, 'codex']);
+    }
+  });
+
   it('a command that exits with an error is a failure, so it rains', () => {
     const [failure] = fromCodex(codex('PostToolUse', { tool_name: 'Bash', tool_use_id: 'b', tool_input: { command: 'npm test' }, tool_response: { exit_code: 1, stderr: '2 tests failed' } }));
     assert.equal(failure.hook_event_name, 'PostToolUseFailure');
@@ -112,11 +84,3 @@ describe('fromCodex', () => {
   });
 });
 
-describe('toTownPayloads', () => {
-  it('passes Claude Code payloads through, without fields only the server may set', () => {
-    assert.deepEqual(toTownPayloads('claude', { hook_event_name: 'Stop', andary_member: 'Mallory', andary_source: 'codex' }), [{ hook_event_name: 'Stop' }]);
-    assert.equal(toTownPayloads('codex', { hook_event_name: 'Stop', andary_member: 'Mallory' })[0].andary_member, undefined);
-    assert.equal(sourceOf('codex'), 'codex');
-    for (const other of [undefined, 'claude', 'gemini', 7]) assert.equal(sourceOf(other), 'claude');
-  });
-});

@@ -1,13 +1,14 @@
 {
   "name": "andary",
   "version": "0.1.0",
-  "description": "A living 3D town where your Claude Code sessions, subagents and agent teams show up as tiny workers, live, through Claude Code hooks.",
+  "description": "A living 3D town where your Claude Code and Codex sessions, subagents and agent teams show up as tiny workers, live, through their hooks.",
   "type": "module",
   "license": "MIT",
   "author": "eylem2002",
   "keywords": [
     "claude-code",
     "claude",
+    "codex",
     "agents",
     "multi-agent",
     "hooks",

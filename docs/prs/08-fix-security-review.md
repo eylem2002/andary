@@ -1,6 +1,6 @@
 # Fixes from the independent security review
 
-Part 8 of 26 · base: `feat/hud-and-app-shell`
+Part 8 of 27 · base: `feat/hud-and-app-shell`
 
 ## What changed
 

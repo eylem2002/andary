@@ -1,6 +1,6 @@
 # Cost and token meter
 
-Part 15 of 26 · base: `feat/file-diffs`
+Part 15 of 27 · base: `feat/file-diffs`
 
 ## What changed
 

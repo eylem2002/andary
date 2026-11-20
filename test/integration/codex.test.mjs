@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFile, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { after, before, describe, it } from 'node:test';
 import { decisionOutput } from '../../server/approvals.mjs';
 import { closeBrowser, connectBrowser, startTown, waitForMessage } from './helpers.mjs';
 
 const CLI = fileURLToPath(new URL('../../bin/andary.mjs', import.meta.url));
+const run = promisify(execFile);
 
 /** A Codex hook payload (Codex uses Claude Code's field names). @param {string} event @param {Record<string, any>} [extra] */
 const codex = (event, extra = {}) => ({
@@ -81,6 +83,53 @@ describe('Codex', () => {
       assert.equal(bad.status, 2);
       const removed = spawnSync(process.execPath, [CLI, 'uninstall', 'codex'], { env, encoding: 'utf8', cwd: root });
       assert.match(removed.stdout, /Removed \d+ Andary hook entries/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a patch approved in the terminal settles when it runs, though the town calls it an Edit', async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    // Too long to show in full, so it is not held: Codex asks in its terminal.
+    const patch = `*** Begin Patch\n*** Update File: src/big.ts\n@@\n-${'a'.repeat(2500)}\n+b\n*** End Patch`;
+    const ask = await town.sendHook(codex('PermissionRequest', { session_id: 'thr_term', tool_name: 'apply_patch', tool_input: { command: patch } }), { args: ['codex'] });
+    assert.equal(ask.stdout, '', 'left to the terminal');
+    await waitForMessage(browser, (m) => m?.t === 'approval' && m.a.sessionId === 'thr_term' && m.a.status === 'pending');
+    await town.sendHook(codex('PostToolUse', { session_id: 'thr_term', tool_name: 'apply_patch', tool_use_id: 'call_t', tool_input: { command: patch }, tool_response: { output: 'Success' } }), { args: ['codex'] });
+    const settled = await waitForMessage(browser, (m) => m?.t === 'approval' && m.a.sessionId === 'thr_term' && m.a.status !== 'pending');
+    assert.deepEqual([settled.a.status, settled.a.decidedBy], ['resolved', 'terminal']);
+    await closeBrowser(browser);
+  });
+
+  it('a replayed Codex recording keeps its Codex mark', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'andary-codex-replay-'));
+    try {
+      const recording = join(root, 'codex.jsonl');
+      const event = { ...codex('SessionStart', { session_id: 'thr_replay', source: 'startup' }), andary_source: 'codex' };
+      writeFileSync(recording, `${JSON.stringify({ id: 1, ts: Date.now(), rx: Date.now(), event })}\n`);
+      const browser = await connectBrowser(town);
+      await waitForMessage(browser, (m) => m?.t === 'hello');
+      await run(process.execPath, [CLI, 'replay', recording], { env: { ...process.env, ANDARY_HOME: town.home } });
+      const replayed = await waitForMessage(browser, (m) => m?.t === 'hook' && m.e.event.session_id === 'thr_replay');
+      assert.equal(replayed.e.event.andary_source, 'codex');
+      await closeBrowser(browser);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('doctor: Codex next to the Claude Code plugin is no double registration, and its fixes name codex', () => {
+    const root = mkdtempSync(join(tmpdir(), 'andary-codex-doctor-'));
+    try {
+      const env = { ...process.env, ANDARY_HOME: join(root, 'home'), CLAUDE_CONFIG_DIR: join(root, 'claude'), CODEX_HOME: join(root, 'codex') };
+      mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: true });
+      writeFileSync(join(env.CLAUDE_CONFIG_DIR, 'settings.json'), JSON.stringify({ enabledPlugins: { 'andary@andary': true } }));
+      assert.equal(spawnSync(process.execPath, [CLI, 'install', 'codex'], { env, encoding: 'utf8', cwd: root }).status, 0);
+      rmSync(join(root, 'home', 'hook.mjs'));
+      const doctor = spawnSync(process.execPath, [CLI, 'doctor'], { env, encoding: 'utf8', cwd: root });
+      assert.doesNotMatch(doctor.stdout, /both the plugin and settings/);
+      assert.match(doctor.stdout, /The hook forwarder is missing[\s\S]*install codex/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

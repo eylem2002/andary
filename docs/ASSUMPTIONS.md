@@ -250,3 +250,14 @@ section.
 66. **No session id prefix for Codex.** Codex and Claude Code both use random session ids, so they
     cannot collide; the crew's "Codex" badge comes from `andary_source`, not from the id.
 
+67. **A command given as a list is shown with shell quoting.** Codex may send `Bash`'s command as
+    an argument list. Joining it with spaces would make `['rm', 'a b']` and `['rm', 'a', 'b']`
+    look the same on an approval card, so each argument that needs it is quoted the way a POSIX
+    shell would (`rm 'a b'`), both in the town's events and on the card.
+68. **A renamed tool keeps Codex's name in `andary_tool`.** The town calls an `apply_patch` an Edit
+    or Write, but Codex asked permission for `apply_patch`; the approval settles when either name
+    runs. Every `andary_` field is the server's to set and is dropped from what a hook sends.
+69. **An interrupted turn earns no growth point.** Codex's Interrupt becomes a Stop for the crews
+    board, but the town grows only for finished work.
+70. **The page's look is read in `public/js/page.js`.** `core/` stays free of browser state; the
+    HUD and the town's environment read the look from one small module that does nothing else.

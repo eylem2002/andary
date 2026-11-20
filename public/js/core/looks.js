@@ -1,7 +1,7 @@
 // The town's looks (Settings → Town look): which palette, sky, sea and trees the town is built
 // with. Shared by the HUD (the setting) and the world (the build). The look is read once when the
-// page loads (from ?look= or the saved preference), because the town's geometry carries its
-// colours; changing it reloads the page. Pure data.
+// page loads (page.js, from ?look= or the saved preference), because the town's geometry carries
+// its colours; changing it reloads the page. Pure: data, and a reader that is given its inputs.
 
 /** @typedef {'coast'|'snow'|'neon'|'desert'|'amman'} LookId */
 
@@ -21,11 +21,11 @@ const IDS = new Set(LOOKS.map((look) => look.id));
 
 /**
  * The look to build: ?look= wins (for links and tests), then the saved preference.
- * @param {string} [search]  location.search
- * @param {Pick<Storage, 'getItem'>|null} [storage]
+ * @param {string} search  location.search
+ * @param {Pick<Storage, 'getItem'>|null} storage  where the HUD keeps its preferences
  * @returns {LookId}
  */
-export function readLook(search = globalThis.location?.search ?? '', storage = safeStorage()) {
+export function readLook(search, storage) {
   const asked = new URLSearchParams(search).get('look');
   if (asked && IDS.has(/** @type {LookId} */ (asked))) return /** @type {LookId} */ (asked);
   try {
@@ -35,15 +35,4 @@ export function readLook(search = globalThis.location?.search ?? '', storage = s
     // unreadable preferences: the default look
   }
   return 'coast';
-}
-
-/** The look this page was built with. */
-export const LOOK = readLook();
-
-function safeStorage() {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    return null;
-  }
 }

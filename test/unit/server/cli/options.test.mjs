@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { cliInvocation, printable, tildify } from '../../../server/cli/io.mjs';
-import { UsageError, parseApprovalTimeout, parseClient, parsePort, parseScope, parseSeed, parseSpeed } from '../../../server/cli/options.mjs';
-import { formatDuration } from '../../../server/cli/status.mjs';
+import { cliInvocation, printable, tildify } from '../../../../server/cli/io.mjs';
+import { UsageError, parseApprovalTimeout, parseClient, parsePort, parseScope, parseSeed, parseSpeed } from '../../../../server/cli/options.mjs';
+import { formatDuration } from '../../../../server/cli/status.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
