@@ -107,6 +107,8 @@ describe('CLI basics', () => {
 
 describe('server lifecycle', () => {
   it('writes a private server.json and removes it on SIGTERM', async () => {
+    // On Windows, kill() ends the process at once (there is no SIGTERM), so the server cannot
+    // remove its file; `andary stop` does that there (see the status and stop test).
     const town = await startTown();
     const statePath = join(town.home, 'server.json');
     const state = JSON.parse(readFileSync(statePath, 'utf8'));
@@ -126,7 +128,7 @@ describe('server lifecycle', () => {
     const stateBefore = readStateFile(home);
     await town.stop();
     assert.ok(stateBefore);
-    assert.ok(!existsSync(statePath));
+    if (process.platform !== 'win32') assert.ok(!existsSync(statePath));
     assert.equal(await probeServer(/** @type {any} */ (stateBefore), 500), null);
   });
 
@@ -167,6 +169,7 @@ describe('server lifecycle', () => {
     const stop = await runCli(['stop'], { env });
     assert.equal(stop.code, 0);
     assert.match(stop.stdout, /stopped/);
+    assert.ok(!existsSync(join(town.home, 'server.json')), 'no stale server.json, on Windows too');
     const after = await runCli(['status'], { env });
     assert.equal(after.code, 1);
     assert.match(after.stdout, /not running/);

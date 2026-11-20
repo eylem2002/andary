@@ -1,0 +1,6 @@
+# Check out with LF endings on every OS: the tests and scripts read these files line by line
+# (front matter, the PR order, import scans), and Windows would otherwise turn them into CRLF.
+* text=auto eol=lf
+*.woff2 binary
+*.webp binary
+*.png binary

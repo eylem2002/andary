@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { HOOK_SOURCE } from '../../../server/config.mjs';
 import { ensureHome } from '../../../server/state-file.mjs';
+import { CANNOT_SYMLINK } from './helpers.mjs';
 import {
   SettingsError,
   applyHooksChange,
@@ -347,7 +348,7 @@ describe('inspection helpers', () => {
 });
 
 describe('hostile folders', () => {
-  it('does not write through a symlink planted at a temp-file name in the project', () => {
+  it('does not write through a symlink planted at a temp-file name in the project', { skip: CANNOT_SYMLINK }, () => {
     const settings = join(dir, 'project', '.claude', 'settings.local.json');
     writeJson(settings, { note: '$(touch /tmp/pwned)' });
     const victim = join(dir, 'victim-bashrc');

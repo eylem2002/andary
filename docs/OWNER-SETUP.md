@@ -40,6 +40,8 @@ next pull request to `main`. Nothing is merged until you decide.
 ## 3. Optional repository settings (free)
 
 - **Settings → Branches → Add rule** for `main`: require a pull request and the `CI` checks.
+  Leave the Windows test job out of the required checks until it has passed for a while (it
+  may fail without failing the workflow).
 - **Settings → Code security**: turn on Dependabot alerts and security updates (the update
   schedule is already in `.github/dependabot.yml`).
 - **GitHub Pages**, only if you want the demo online: add a Pages workflow that uploads the

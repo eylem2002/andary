@@ -259,8 +259,11 @@ Run `andary doctor` first: it checks every link of the chain and prints the fix.
 - **Windows.** Claude Code runs hook commands with Git Bash, or PowerShell when Git Bash is not
   installed; the registered command works in both (forward slashes, `#` starts a comment in each).
   File modes do not apply: `~/.andary` is protected by your user profile's permissions.
-  `andary stop` ends the server abruptly on Windows, so a `server.json` may stay behind; the
-  next start notices that nothing answers and replaces it.
+  Windows has no SIGTERM, so `andary stop` ends the server at once and then removes its
+  `server.json` itself. A server closed any other way may leave the file behind; the next start
+  notices that nothing answers and replaces it.
+- **Tested on** Linux (every check), and macOS and Windows (unit and integration tests in CI;
+  Windows is not yet required to pass). The end-to-end tests run on Linux only.
 - **WSL and containers.** Run Andary where Claude Code runs. Browsers on the host reach it
   through `localhost` forwarding; the Host check accepts `localhost:<port>`.
 

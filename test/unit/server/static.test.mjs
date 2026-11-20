@@ -5,6 +5,7 @@ import { join, resolve, sep } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { after, before, describe, it } from 'node:test';
 import { acceptsGzip, contentTypeFor, createStaticHandler, etagMatches, isCompressible, resolveStaticPath } from '../../../server/static.mjs';
+import { CANNOT_SYMLINK } from './helpers.mjs';
 
 describe('contentTypeFor', () => {
   it('maps the file types the app ships', () => {
@@ -108,7 +109,7 @@ describe('createStaticHandler', () => {
     writeFileSync(join(root, 'vendor', 'lib.js'), 'export {};\n');
     writeFileSync(join(root, '.env'), 'SECRET=1');
     writeFileSync(join(dir, 'outside.txt'), 'outside');
-    symlinkSync(join(dir, 'outside.txt'), join(root, 'link.txt'));
+    if (!CANNOT_SYMLINK) symlinkSync(join(dir, 'outside.txt'), join(root, 'link.txt'));
     serve = createStaticHandler({ root, notFound: (_req, res) => res.writeHead(404).end('nf') });
   });
 

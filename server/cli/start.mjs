@@ -8,7 +8,7 @@ import { applyHooksChange, inspectInstallations, planHooksChange, refreshForward
 import { openBrowser } from '../open-browser.mjs';
 import { isLoopbackHost } from '../security.mjs';
 import { savedTopicUrl } from '../notify.mjs';
-import { ensureHome, findRunningServer, loginUrl, probeServer, readStateFile } from '../state-file.mjs';
+import { ensureHome, findRunningServer, loginUrl, probeServer, readStateFile, removeStateFileIfOwned } from '../state-file.mjs';
 import { cliInvocation, sleep, tildify } from './io.mjs';
 import { UsageError, parseApprovalTimeout, parseNotifyUrl, parsePort, parseShareTo, parseTeamHosts, parseTls } from './options.mjs';
 
@@ -363,7 +363,8 @@ async function waitForServer(home, child, timeoutMs) {
 }
 
 /**
- * `andary stop`: asks the running server to shut down (SIGTERM) and waits for it.
+ * `andary stop`: asks the running server to shut down (SIGTERM) and waits for it. Windows has no
+ * SIGTERM: the server is ended at once and cannot remove its server.json, so stop does.
  * @param {Record<string, any>} _values
  * @param {string[]} _positionals
  * @param {import('./io.mjs').CliIo} io
@@ -384,6 +385,7 @@ export async function runStop(_values, _positionals, io) {
   }
   for (let waited = 0; waited < 5000; waited += 100) {
     if (!(await probeServer(state, 500))) {
+      removeStateFileIfOwned(home, { pid: state.pid, secret: state.secret });
       io.out('Andary stopped.');
       return 0;
     }

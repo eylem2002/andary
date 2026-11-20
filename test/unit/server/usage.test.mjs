@@ -8,6 +8,7 @@ import { createUsageTracker, isInside, readAppended, readUsageLine, resolveInsid
 import { resolveClaudeConfigDir } from '../../../server/config.mjs';
 import { localDate as dayOf } from '../../../public/js/core/dates.js';
 import { messageCost } from '../../../public/js/core/prices.js';
+import { CANNOT_SYMLINK } from './helpers.mjs';
 
 /** One assistant line as Claude Code writes it. */
 const line = (/** @type {string} */ id, /** @type {Record<string, number>} */ usage, model = 'claude-opus-5-5', ts = '2026-11-20T10:00:00.000Z') =>
@@ -66,11 +67,13 @@ test('isInside accepts only .jsonl files under the projects folder, symlinks res
   const outside = join(root, 'secret.jsonl');
   writeFileSync(outside, '');
   const sneaky = join(project, 'link.jsonl');
-  symlinkSync(outside, sneaky);
   const projects = join(claudeDir, 'projects');
   assert.equal(isInside(inside, projects), true);
   assert.equal(isInside(outside, projects), false);
-  assert.equal(isInside(sneaky, projects), false);
+  if (!CANNOT_SYMLINK) {
+    symlinkSync(outside, sneaky);
+    assert.equal(isInside(sneaky, projects), false);
+  }
   assert.equal(isInside(join(project, '..', '..', '..', 'secret.jsonl'), projects), false);
   assert.equal(isInside('relative/s.jsonl', projects), false);
   assert.equal(isInside(join(project, 'notes.txt'), projects), false);
@@ -126,7 +129,7 @@ test('the tracker counts each message once, per agent and per day, reading only 
   rmSync(root, { recursive: true, force: true });
 });
 
-test('a message copied into another transcript (a resumed session) or read by another name counts once', async () => {
+test('a message copied into another transcript (a resumed session) or read by another name counts once', { skip: CANNOT_SYMLINK }, async () => {
   const { root, claudeDir, project } = fixture();
   const first = join(project, 's1.jsonl');
   const resumed = join(project, 's2.jsonl');

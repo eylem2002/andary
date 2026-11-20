@@ -366,6 +366,7 @@ Handy pages: `/world-lab.html` (characters and effects), `/world-env-lab.html` (
 an installed Chrome: `CHROME_PATH=/usr/bin/google-chrome npm run check`.
 
 GitHub Actions ([ci.yml](.github/workflows/ci.yml)) runs the same checks on every pull request
+on Linux, and the unit and integration tests on macOS and Windows
 (free on public repositories); Dependabot keeps dependencies and pinned actions current.
 
 ### Project layout
