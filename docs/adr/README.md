@@ -18,3 +18,4 @@ Accepted or Superseded. Add a new record (next number) instead of rewriting an a
 | [0011](0011-dev-tool-licences.md) | Lighthouse runs through npx to keep the dependency tree permissive | Accepted |
 | [0012](0012-signed-hook-replies-and-safe-approvals.md) | Signed hook replies; approvals only for what the town can show | Accepted |
 | [0013](0013-codex-through-hooks-and-adapters.md) | Connect Codex through its hooks and a server-side adapter | Accepted |
+| [0014](0014-one-pipeline-and-enforced-layers.md) | One ingest pipeline, one event source, enforced layers | Accepted |

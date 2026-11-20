@@ -1,5 +1,6 @@
 // Shared constants and path helpers for the server, the CLI and the installer.
-// Limits live here (not scattered through modules) so CONTRACTS.md §4 can be checked in one place.
+// Limits that more than one module needs (request sizes, rates, connection counts) live in LIMITS;
+// a limit only one module uses is a named constant at the top of that module (CONTRACTS.md §3).
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
