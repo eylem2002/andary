@@ -1,6 +1,7 @@
 # Andary: final report
 
-Date: 2026-11-17, game view added 2026-11-20 · Repository: `eylem2002/andary` · Licence: MIT
+Date: 2026-11-17; game view, sunset coast and nine more features added 2026-11-20 ·
+Repository: `eylem2002/andary` · Licence: MIT
 
 Andary is a local web app that shows every Claude Code session on your machine as a crew of
 tiny workers in a living 3D town. Agents walk to the building for the tool they are using, talk
@@ -44,6 +45,23 @@ and has no runtime dependencies.
 - Toolbar and keyboard shortcuts for the camera, time of day, quality, sound and the demo.
 - Light and dark themes, a phone layout with a bottom sheet, screen-reader announcements,
   reduced motion, synthesised sound effects (off by default).
+
+### The nine features you picked (2026-11-20, parts 14–22)
+- **File diffs**: an agent's finished edits are listed in its inspector; each opens as a diff.
+- **Cost and tokens**: each crew shows what it has cost, estimated at API list prices from
+  Claude Code's own transcripts; `U` opens today's total and a 14-day chart.
+- **Weather**: rain when commands fail, a storm when they keep failing, a rainbow when tests
+  pass again, fog while a crew thinks for long.
+- **The town grows**: finished work earns points, and points build six landmarks, from
+  bunting to a golden dome on the Town Hall.
+- **Leaderboard** (`L`): the town's growth, the busy-day streak, records and the busiest agents.
+- **Notifications**: on this computer while the tab is in the background, and on your phone
+  through the free ntfy app (`--notify`, no account); phone messages never name your project.
+- **Ambient sound**: waves, gulls or crickets, a city hum and soft chords that follow the work,
+  all synthesised.
+- **Five town looks**: sunset coast, snowy village, neon city, desert oasis, Amman old town.
+- **Team town**: `andary start --team` hosts; `andary team invite <name>` gives each teammate a
+  key to share their sessions and a view-only link; their crews carry their name.
 
 ### Connecting Claude Code
 - `andary install` registers a tiny forwarder for 19 hook events in the user (or project, or
@@ -104,6 +122,16 @@ split the most complex functions and gated dead code in CI
 review: 3 must-fix problems (approvals unreachable with the boards put away, the director holding
 on to a follow, focus lost when the boards hide), 4 should-fix and a few nits, all fixed with
 tests; no security findings ([report](reviews/game-view-review-2026-11-20.md)).
+
+The sunset coast had its own review (3 should-fix, all fixed;
+[report](reviews/sunset-theme-review-2026-11-20.md)). The nine features were reviewed by two
+more reviewers who had not seen them: features 1–4 had no must-fix and 12 should-fix; features
+5–9 had **2 must-fix** (the team town's view link refused at a VPN name, and one oversized batch
+stalling a teammate's relay) and 7 should-fix. All are fixed in part 23 with tests
+([report](reviews/feature-review-2026-11-20.md)). The team town's core held up: keys and the
+view link cannot be forged, only the team endpoint skips the Host check, teammates cannot fake
+their name, their events never reach the usage reader, the approval broker or the phone
+notifier, and viewers get nothing of the owner's.
 
 ## 4. Test results and scores
 
@@ -166,29 +194,38 @@ Each item says what to do about it. None blocks normal use on a personal machine
 6. **`--host` other than loopback** sends secrets in clear; the CLI warns, keep the default.
 7. **Dev tooling**: CI installs two linters by pinned version without hashes; `npm run perf`
    fetches Lighthouse through `npx` (pinned top-level version).
+8. **The team town is plain HTTP.** Keys, events and the view link travel unencrypted, and the
+   view link shows every crew's prompts, commands and edits to whoever holds it. Use it on a
+   network you trust or over a private network such as Tailscale (`--team-host`), and run
+   `andary team reset` if a link or key gets out. It is off unless you start with `--team`.
+9. **Phone notifications go through ntfy.sh**, a free third-party service; anyone who learns the
+   random topic can read them. They only ever say what happened ("A crew needs your
+   permission"), never a project, file or command; `--notify-url` points at your own server.
 
 **Product**
 
-8. **Real GPUs were not available here.** Frame rate was measured only with software rendering;
+10. **Real GPUs were not available here.** Frame rate was measured only with software rendering;
    once, the view went blank on High quality while following an agent there. Check on real
    hardware (High quality, follow an agent for 30 s), and watch the director camera for a minute:
    its moves between shots were only seen with software rendering and a slowed clock.
-9. **The plugin's `bin/` folder lands on Claude's `PATH`**, and claude.ai/Cowork reject plugins
+11. **The plugin's `bin/` folder lands on Claude's `PATH`**, and claude.ai/Cowork reject plugins
    with a `bin/` folder; the CLI install route is unaffected. Fixing it means moving the CLI.
-10. **No field for a deny reason** in the approval card (the protocol supports one).
-11. **First content waits for the 3D world** on slow devices (LCP); the store could start first.
-12. **Minor edge cases**: crew numbers shift when ended crews are pruned; an event without a
+12. **No field for a deny reason** in the approval card (the protocol supports one).
+13. **First content waits for the 3D world** on slow devices (LCP); the store could start first.
+14. **Minor edge cases**: crew numbers shift when ended crews are pruned; an event without a
     session id makes a crew that never ends; split-pane teammates appear as their own crew; two
     subagents of the same type started together can swap labels briefly; cars can pass through
     agents at the south-row doors.
-13. **Only tested on Linux.** Windows and macOS paths (opening the browser, `stop`) and the
-    `/andary:town` command inside a live Claude Code session were not exercised.
-14. **CI has not run on GitHub yet**, because nothing could be pushed from here; the same checks
+15. **Only tested on Linux.** Windows and macOS paths (opening the browser, `stop`) and the
+    `/andary:town` command inside a live Claude Code session were not exercised. The team town
+    was tested with two towns on one machine, not across two computers; ambient sound and
+    notifications were checked in headless Chrome, not by ear or on a phone.
+16. **CI has not run on GitHub yet**, because nothing could be pushed from here; the same checks
     pass locally (`npm run check`).
 
 ## 6. What you need to do
 
 See [OWNER-SETUP.md](OWNER-SETUP.md): publish the code (one script, or give Claude's GitHub App
-access), merge the 13 pull requests in order, optionally turn on branch protection and
+access), merge the 23 pull requests in order, optionally turn on branch protection and
 Dependabot alerts, then `node bin/andary.mjs install && node bin/andary.mjs start`.
 
