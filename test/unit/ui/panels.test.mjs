@@ -150,7 +150,7 @@ describe('effects', () => {
   });
 
   test('achievements only when just unlocked', () => {
-    const fresh = { id: 'a', title: 'T', description: 'D', unlockedAt: now - 10 };
+    const fresh = { id: 'a', title: 'T', description: 'D', icon: 'spark', unlockedAt: now - 10 };
     assert.equal(effectFor({ type: 'achievement', achievement: fresh }, new Set(), now)?.type, 'achievement');
     assert.equal(effectFor({ type: 'achievement', achievement: { ...fresh, unlockedAt: 0 } }, new Set(), now), null);
   });

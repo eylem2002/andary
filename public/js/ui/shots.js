@@ -1,7 +1,7 @@
 // The director camera's taste and memory: which moments deserve a close-up, when to cut to them,
 // and when to stand back for the viewer. No DOM and no 3D here (cinema.js connects it to the HUD
 // and draws the caption), so every choice is unit-tested.
-import { HISTORIC_MS } from '../core/director.js';
+import { isHistoric } from '../core/director.js';
 
 /**
  * How worth watching each kind of town event is, 0–10. Kinds not listed never draw the camera.
@@ -151,8 +151,7 @@ export function directorOn(choice, motionReduced) {
  * @param {{ ts?: number, rx?: number }} event @param {number} now
  */
 export function isNews(event, now) {
-  const at = Number(event.rx ?? event.ts);
-  return !Number.isFinite(at) || now - at <= HISTORIC_MS;
+  return !isHistoric(event, now);
 }
 
 /**
