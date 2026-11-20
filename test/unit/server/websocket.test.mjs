@@ -90,7 +90,7 @@ async function rawClient() {
   /** @type {(value?: unknown) => void} */
   let onUpgraded = () => {};
   const upgradedNow = new Promise((resolve) => (onUpgraded = resolve));
-  socket.on('data', (chunk) => {
+  socket.on('data', (/** @type {Buffer} */ chunk) => {
     if (upgraded) {
       received.push(...parser.push(chunk));
       return;

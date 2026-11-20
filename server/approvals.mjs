@@ -44,9 +44,10 @@ const AGENT_END_EVENTS = new Set(['Stop', 'SubagentStop']);
  * The hook output for a town decision (CONTRACTS §4.5).
  * @param {'allow'|'deny'} decision
  * @param {string} [note] optional reason typed in the town; shown to Claude on deny
- * @returns {object}
+ * @returns {{ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow'|'deny', message?: string } } }}
  */
 export function decisionOutput(decision, note = '') {
+  /** @type {{ behavior: 'allow'|'deny', message?: string }} */
   const verdict =
     decision === 'allow'
       ? { behavior: 'allow' }

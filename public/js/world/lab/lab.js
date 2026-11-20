@@ -49,7 +49,7 @@ function createLab(world) {
     zoom: Number.isFinite(zoom) && zoom > 0 ? zoom : null,
     at: Number.isInteger(at) && at >= 0 ? at : null,
     face: params.get('face'),
-    /** @param {string} template @param {object} [overrides] */
+    /** @param {string} template @param {{ name?: string } & Record<string, unknown>} [overrides] */
     spawn(template, overrides = {}) {
       const id = `lab:${template}-${++counter}`;
       const base = TEMPLATES[template] ?? TEMPLATES.builder;

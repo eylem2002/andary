@@ -17,6 +17,10 @@ export default defineConfig({
   use: {
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    // Playwright's full Chromium in new headless mode, not its stripped "headless shell" (which
+    // cannot grant notification permission, among other gaps): the same kind of browser as a
+    // local CHROME_PATH run.
+    channel: executablePath ? undefined : 'chromium',
     launchOptions: { args: chromiumArgs, executablePath },
   },
   projects: [

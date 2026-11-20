@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { Agent } from 'node:http';
+import { connect } from 'node:net';
 import { gunzipSync } from 'node:zlib';
 import { after, before, describe, it } from 'node:test';
 import { hookPayload, postHook, rawRequest, startTown } from './helpers.mjs';
@@ -185,10 +186,20 @@ describe('POST /api/hook', () => {
     assert.equal((await postHook(town, null, { rawBody: JSON.stringify({ v: 1, event: 'Stop' }) })).status, 400);
   });
 
-  it('rejects bodies over 1 MiB with 413', async () => {
-    const big = JSON.stringify({ v: 1, ts: 1, event: { hook_event_name: 'Stop', blob: 'x'.repeat(1024 * 1024) } });
-    const res = await postHook(town, null, { rawBody: big });
-    assert.equal(res.status, 413);
+  it('rejects bodies over 1 MiB with 413, before reading them', async () => {
+    // The server answers from the declared length and closes without reading the body, so the
+    // client sends the headers only: a client still writing 1 MiB would race the close (EPIPE).
+    const reply = await new Promise((resolve, reject) => {
+      const socket = connect(town.port, '127.0.0.1', () => {
+        socket.write(`POST /api/hook HTTP/1.1\r\nHost: 127.0.0.1:${town.port}\r\nx-andary-secret: ${town.secret}\r\ncontent-type: application/json\r\ncontent-length: ${1024 * 1024 + 1}\r\n\r\n`);
+      });
+      let text = '';
+      socket.on('data', (chunk) => (text += chunk));
+      socket.on('close', () => resolve(text));
+      socket.on('error', reject);
+    });
+    assert.match(String(reply), /^HTTP\/1\.1 413 /);
+    assert.match(String(reply), /Connection: close/i);
   });
 
   it('rate-limits floods with 429 (and only after authentication)', async () => {
