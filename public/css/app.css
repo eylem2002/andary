@@ -2374,7 +2374,8 @@ body {
 /* Toasts sit at the top of the open middle of the town, clear of the side boards. */
 .hud-toasts {
   position: fixed;
-  top: var(--gap);
+  /* Below the top row, so a toast never covers the buttons there ("waiting for you" above all). */
+  top: calc(var(--gap) * 2 + var(--top-h));
   right: calc(var(--gap) * 2 + var(--right-w));
   left: calc(var(--gap) * 2 + var(--left-w));
   z-index: 60;
@@ -2926,6 +2927,11 @@ body {
 
   .hud-waiting__words {
     display: none;
+  }
+
+  /* The sign makes room for the waiting button beside the status and settings. */
+  .hud-masthead:has(.hud-waiting:not([hidden])) .hud-sign {
+    max-width: calc(100vw - 190px - 72px);
   }
 
   .hud-status {

@@ -1,15 +1,18 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  BUBBLE_DWELL_MS,
   BUBBLE_MAX_CHARS,
   BUBBLE_MIN_VISIBLE_MS,
   bubbleDurationMs,
   bubblePriority,
   createBubbleSlot,
   deOverlap,
+  NEVER_SHOWN,
   normalizeTone,
   offerBubble,
   pickBubbles,
+  takeTurns,
   tickBubble,
   truncateText,
 } from '../../../../public/js/world/agents/bubbles.js';
@@ -129,14 +132,52 @@ describe('the bubble budget', () => {
     assert.deepEqual(pair.map((t) => t.muted), [false, false, false]);
   });
 
-  test('priority: the selected agent, then urgent lines, then the newest; a shown bubble keeps a head start', () => {
-    const base = { selected: false, hovered: false, tone: 'speech', shownAt: 10_000, muted: false };
-    assert.ok(bubblePriority({ ...base, selected: true, shownAt: 0 }) > bubblePriority({ ...base, tone: 'shout' }));
-    assert.ok(bubblePriority({ ...base, tone: 'shout', shownAt: 0 }) > bubblePriority({ ...base, shownAt: 60_000 }));
-    assert.ok(bubblePriority({ ...base, shownAt: 12_000 }) > bubblePriority(base));
-    // A new line two seconds younger does not push a showing one out…
-    assert.ok(bubblePriority(base) > bubblePriority({ ...base, shownAt: 12_000, muted: true }));
-    // …but one much newer does.
-    assert.ok(bubblePriority({ ...base, shownAt: 30_000, muted: true }) > bubblePriority(base));
+  test('priority: the selected agent, then agents that need you, then whoever talked least recently', () => {
+    const now = 60_000;
+    // Tiers beat everything below them, however the turns stand.
+    assert.ok(bubblePriority(true, false, -1, now - 100, now) > bubblePriority(false, true, now - 100, 0, now));
+    assert.ok(bubblePriority(false, true, -1, now - 100, now) > bubblePriority(false, false, now - 100, NEVER_SHOWN, now));
+    // A bubble that just became visible keeps its place for the dwell…
+    assert.ok(bubblePriority(false, false, now - 1000, 0, now) > bubblePriority(false, false, -1, NEVER_SHOWN, now));
+    // …then gives way to any agent waiting its turn…
+    assert.ok(bubblePriority(false, false, -1, now - 100, now) > bubblePriority(false, false, now - BUBBLE_DWELL_MS, 0, now));
+    // …the one waiting longest first; and of two showing, the one showing longer yields first.
+    assert.ok(bubblePriority(false, false, -1, 10_000, now) > bubblePriority(false, false, -1, 30_000, now));
+    assert.ok(bubblePriority(false, false, 50_000, 0, now) > bubblePriority(false, false, 20_000, 0, now));
+  });
+
+  test('turn-taking is fair: five chatty agents share four places without flicker', () => {
+    // Far apart, always talking: the budget (4) is the only limit.
+    const list = [0, 1, 2, 3, 4].map((i) => ({ x: i * 300, y: 300, w: 120, h: 30, priority: 0, muted: false, focused: false, urgent: false, visibleSince: -1, lastShown: NEVER_SHOWN, fresh: false }));
+    const visibleMs = [0, 0, 0, 0, 0];
+    const switches = [0, 0, 0, 0, 0];
+    const scratch = new Int32Array(5);
+    let shortest = Infinity;
+    const since = [0, 0, 0, 0, 0];
+    for (let now = 0; now < 60_000; now += 100) {
+      const before = list.map((t) => t.muted);
+      takeTurns(list, 5, scratch, now);
+      assert.equal(list.filter((t) => !t.muted).length, 4);
+      list.forEach((t, i) => {
+        if (!t.muted) visibleMs[i] += 100;
+        if (before[i] !== t.muted && now > 0) {
+          switches[i]++;
+          if (!t.muted) since[i] = now;
+          else shortest = Math.min(shortest, now - since[i]);
+        }
+      });
+    }
+    const fewest = Math.min(...visibleMs);
+    const most = Math.max(...visibleMs);
+    assert.ok(fewest >= most * 0.6, `everyone gets turns (${visibleMs.join(', ')})`);
+    assert.ok(shortest >= BUBBLE_DWELL_MS, `a bubble stays at least the dwell (${shortest} ms)`);
+  });
+
+  test('a bubble that comes back is marked fresh, once', () => {
+    const t = { x: 0, y: 0, w: 100, h: 30, priority: 0, muted: true, focused: false, urgent: false, visibleSince: -1, lastShown: 500, fresh: false };
+    takeTurns([t], 1, new Int32Array(1), 1000);
+    assert.deepEqual([t.muted, t.fresh, t.visibleSince], [false, true, 1000]);
+    takeTurns([t], 1, new Int32Array(1), 1100);
+    assert.deepEqual([t.fresh, t.visibleSince], [false, 1000]);
   });
 });

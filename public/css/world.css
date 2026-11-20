@@ -298,7 +298,8 @@
 /* ── reduced motion (system setting, or the in-app toggle) ──────────────── */
 
 .tt-agents--still .tt-pill,
-.tt-agents--still .tt-bubble {
+.tt-agents--still .tt-bubble,
+.tt-agents--still .tt-bubble.is-visible.is-muted {
   transition: none;
 }
 
@@ -308,7 +309,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .tt-pill,
-  .tt-bubble {
+  .tt-bubble,
+  .tt-bubble.is-visible.is-muted {
     transition: none;
   }
 

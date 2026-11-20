@@ -41,19 +41,26 @@ export function createToasts() {
     toast.dataset.timer = String(setTimeout(() => dismiss(toast), toast.dataset.action ? ACTION_DURATION_MS : DURATION_MS));
   }
 
-  /**
-   * Makes room for a new toast: the oldest one without a button goes first, so a burst of
-   * achievements cannot push away an offer the reader has yet to reach.
-   */
+  /** Toasts in the list, newest first, as pickEviction reads them. */
+  function entries() {
+    const toasts = /** @type {HTMLElement[]} */ ([...list.children]);
+    return toasts.map((toast) => ({ toast, action: Boolean(toast.dataset.action), group: toast.dataset.group ?? '', held: toast.matches(':hover, :focus-within') }));
+  }
+
+  /** Makes room for a new toast (pickEviction says which goes); one under the hand stays. */
   function overflow() {
     while (list.children.length > MAX_VISIBLE) {
-      const toasts = /** @type {HTMLElement[]} */ ([...list.children]);
-      const plain = toasts.findLast((toast) => !toast.dataset.action);
-      dismiss(plain ?? toasts[toasts.length - 1]);
+      const all = entries();
+      const index = pickEviction(all);
+      if (index < 0) return; // every toast is being read or used: let the list grow for now
+      dismiss(all[index].toast);
     }
   }
 
-  /** @param {ToastOptions} options */
+  /**
+   * @param {ToastOptions} options
+   * @returns {boolean} whether the toast is on screen (a burst can push it straight out)
+   */
   function show(options) {
     const toast = build(options, dismiss);
     // Reading a toast pauses its timer: hover or keyboard focus keeps it open.
@@ -63,15 +70,36 @@ export function createToasts() {
     toast.addEventListener('focusout', () => arm(toast));
     if (options.action) toast.dataset.action = 'true';
     if (options.group) {
-      for (const old of /** @type {HTMLElement[]} */ ([...list.children])) if (old.dataset.group === options.group) dismiss(old);
+      // The older toast of the group goes, unless the pointer or the keyboard is on it.
+      for (const old of entries()) if (old.group === options.group && !old.held) dismiss(old.toast);
       toast.dataset.group = options.group;
     }
     list.prepend(toast);
     overflow();
+    if (!toast.isConnected) return false;
     arm(toast);
+    return true;
   }
 
   return { el, show };
+}
+
+/**
+ * Which toast makes room for a newer one: never one the pointer or the keyboard is on; first the
+ * oldest without a button, then the oldest crew arrival (the Crews panel has them all), and an
+ * approval's toast last. -1 when every toast is held.
+ * @param {ReadonlyArray<{ action: boolean, group: string, held: boolean }>} toasts  newest first
+ * @returns {number}
+ */
+export function pickEviction(toasts) {
+  const rank = (/** @type {{ action: boolean, group: string }} */ t) => (!t.action ? 0 : t.group ? 1 : 2);
+  let pick = -1;
+  for (let i = toasts.length - 1; i >= 0; i--) {
+    const t = toasts[i];
+    if (t.held) continue;
+    if (pick < 0 || rank(t) < rank(toasts[pick])) pick = i;
+  }
+  return pick;
 }
 
 /**

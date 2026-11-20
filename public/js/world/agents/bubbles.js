@@ -199,17 +199,59 @@ export function pickBubbles(list, count, scratch, max = MAX_BUBBLES, stack = MAX
   }
 }
 
+/** A bubble that has just become visible keeps its place this long (ms): time to read most lines. */
+export const BUBBLE_DWELL_MS = 4000;
+/** `lastShown` of an agent never seen talking: earlier than anyone else. */
+export const NEVER_SHOWN = -1000;
+
 /**
- * Who keeps a bubble when there are too many: the agent you selected or point at, then urgent
- * lines (shouts: failures, waiting for you), then the newest. A bubble already showing keeps a
- * head start of a few seconds, so two lines never take turns every frame.
- * @param {{selected: boolean, hovered: boolean, tone: string, shownAt: number, muted: boolean}} b
+ * Who keeps a bubble when there are too many: the agent you selected or point at, then agents
+ * that need you or are failing (status waiting or error), then whoever has been seen talking
+ * least recently, so every agent gets turns. A bubble that has just become visible keeps its
+ * place for BUBBLE_DWELL_MS; after that it is being seen now, so a waiting agent goes first, and
+ * of two bubbles past their dwell the one showing longer yields first. Allocation-free.
+ * @param {boolean} focused  selected or pointed at
+ * @param {boolean} urgent   the agent waits for you or failed
+ * @param {number} visibleSince  ms the bubble became visible, or -1 when it is not
+ * @param {number} lastShown     ms the agent's last visible bubble ended (NEVER_SHOWN if never)
+ * @param {number} now ms
  */
-export function bubblePriority(b) {
-  const focus = b.selected || b.hovered ? 4e6 : 0;
-  const urgent = b.tone === 'shout' ? 1e6 : 0;
-  const steady = b.muted ? 0 : 8;
-  return focus + urgent + steady + b.shownAt / 1000;
+export function bubblePriority(focused, urgent, visibleSince, lastShown, now) {
+  const tier = (focused ? 4e6 : 0) + (urgent ? 1e6 : 0);
+  if (visibleSince >= 0) {
+    if (now - visibleSince < BUBBLE_DWELL_MS) return tier + 5e5;
+    return tier - (2 * now - visibleSince) / 1000;
+  }
+  return tier - lastShown / 1000;
+}
+
+/**
+ * @typedef {BubbleCandidate & {focused: boolean, urgent: boolean, visibleSince: number, lastShown: number, fresh: boolean}} Talker
+ */
+
+/**
+ * One frame of turn-taking: ranks the talkers (bubblePriority), picks who shows (pickBubbles) and
+ * keeps the books: when each bubble became visible, when each agent was last seen talking, and
+ * which bubbles have just come back (`fresh`). Allocation-free.
+ * @param {Talker[]} list @param {number} count @param {Int32Array} scratch @param {number} now ms
+ */
+export function takeTurns(list, count, scratch, now) {
+  for (let i = 0; i < count; i++) {
+    const t = list[i];
+    t.priority = bubblePriority(t.focused, t.urgent, t.visibleSince, t.lastShown, now);
+  }
+  pickBubbles(list, count, scratch);
+  for (let i = 0; i < count; i++) {
+    const t = list[i];
+    t.fresh = false;
+    if (t.muted) {
+      if (t.visibleSince >= 0) t.lastShown = now;
+      t.visibleSince = -1;
+    } else if (t.visibleSince < 0) {
+      t.visibleSince = now;
+      t.fresh = true;
+    }
+  }
 }
 
 /** Sort key: obstacles first, then bubbles from the bottom of the screen up. @param {BubbleBox} a @param {BubbleBox} b */

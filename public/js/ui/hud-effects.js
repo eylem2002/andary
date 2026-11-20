@@ -11,7 +11,8 @@ import { approvalAgentKey, crewNumber, findSession } from './parts.js';
 /** Events older than this are history: they render but don't toast. */
 export const FRESH_MS = 15_000;
 const MAX_QUEUED = 20;
-const MAX_TOASTS_PER_FRAME = 3;
+/** As many as the toast list shows (toasts.js MAX_VISIBLE): more in one frame would push each other out. */
+const MAX_TOASTS_PER_FRAME = 2;
 
 /**
  * @typedef {{ type: 'session', sessionId: string }

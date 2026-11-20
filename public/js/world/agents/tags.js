@@ -5,7 +5,7 @@
 // Transforms only (no layout reads), and no allocations once the box pool has grown.
 
 import * as THREE from 'three';
-import { bubblePriority, deOverlap, pickBubbles } from './bubbles.js';
+import { NEVER_SHOWN, deOverlap, takeTurns } from './bubbles.js';
 import { BUBBLE_GAP } from './overlay.js';
 import { clamp, damp } from './easing.js';
 
@@ -29,7 +29,7 @@ let order = new Int32Array(64);
 /** Visible pills this frame, for the crowd pass; reused across frames. @type {CrowdPill[]} */
 const pills = [];
 let pillOrder = new Int32Array(64);
-/** Bubbles that want to show this frame, for the budget pass; reused across frames. @type {Array<import('./bubbles.js').BubbleCandidate & {tag: import('./overlay.js').AgentTag|null}>} */
+/** Bubbles that want to show this frame, for the budget pass; reused across frames. @type {Array<import('./bubbles.js').Talker & {tag: import('./overlay.js').AgentTag|null}>} */
 const talkers = [];
 let talkOrder = new Int32Array(64);
 
@@ -80,7 +80,7 @@ export function pickCompactPills(list, count, scratch) {
  */
 function pillPriority(a, screenY) {
   if (a.tag.selected || a.tag.hovered) return 3e6 + screenY;
-  if (a.tag.bubbleShown) return 2e6 + screenY;
+  if (a.tag.bubbleShown && !a.tag.bubbleMuted) return 2e6 + screenY;
   return screenY;
 }
 
@@ -173,31 +173,42 @@ function obstaclesAndBubbles(count, scale) {
   return n;
 }
 
+/** A muted line with less than this left (ms) stays muted rather than flash up and vanish. */
+const LAST_MOMENT_MS = 1000;
+
 /**
- * Mutes the bubbles over the budget (pickBubbles): the selected agent, urgent lines and the newest
- * keep theirs.
- * @param {number} count visible pills @param {number} scale
+ * Mutes the bubbles over the budget (pickBubbles, bubblePriority): the selected agent, agents that
+ * need you, then whoever has been seen talking least recently.
+ * @param {number} count visible pills @param {number} scale @param {number} now crowd ms
  */
-function settleBubbles(count, scale) {
+function settleBubbles(count, scale, now) {
   let n = 0;
   for (let i = 0; i < count; i++) {
     const agent = pills[i].agent;
     const tag = agent.tag;
     if (!tag.bubbleShown) continue;
-    const t = (talkers[n++] ??= { x: 0, y: 0, w: 0, h: 0, priority: 0, muted: false, tag: null });
+    if (tag.bubbleMuted && (agent.bubble.current?.until ?? 0) - now < LAST_MOMENT_MS) continue;
+    const t = (talkers[n++] ??= { x: 0, y: 0, w: 0, h: 0, priority: 0, muted: false, focused: false, urgent: false, visibleSince: -1, lastShown: NEVER_SHOWN, fresh: false, tag: null });
     t.x = pills[i].x;
     t.y = pills[i].y - (PILL_HEIGHT + BUBBLE_GAP) * scale;
     t.w = tag.bubbleW * scale;
     t.h = tag.bubbleH * scale;
     t.muted = tag.bubbleMuted;
-    t.priority = bubblePriority({ selected: tag.selected, hovered: tag.hovered, tone: tag.bubbleTone, shownAt: agent.bubble.current?.shownAt ?? 0, muted: tag.bubbleMuted });
+    t.focused = tag.selected || tag.hovered;
+    t.urgent = tag.statusName === 'waiting' || tag.statusName === 'error';
+    t.visibleSince = tag.visibleSince;
+    t.lastShown = tag.lastShown;
     t.tag = tag;
   }
   if (talkOrder.length < n) talkOrder = new Int32Array(n * 2);
-  pickBubbles(talkers, n, talkOrder);
+  takeTurns(talkers, n, talkOrder, now);
   for (let i = 0; i < n; i++) {
-    talkers[i].tag.setBubbleMuted(talkers[i].muted);
-    talkers[i].tag = null;
+    const t = talkers[i];
+    t.tag.visibleSince = t.visibleSince;
+    t.tag.lastShown = t.lastShown;
+    if (t.fresh) t.tag.bubbleFresh = true;
+    t.tag.setBubbleMuted(t.muted);
+    t.tag = null;
   }
 }
 
@@ -205,8 +216,9 @@ function settleBubbles(count, scale) {
  * @param {import('./agent.js').Agent[]} agents
  * @param {{camera: THREE.Camera, width: number, height: number}} view
  * @param {number} dt
+ * @param {number} [now] crowd clock in ms (bubble turns)
  */
-export function layoutTags(agents, view, dt) {
+export function layoutTags(agents, view, dt, now = 0) {
   const { camera, width, height } = view;
   const ppu = pixelsPerUnit(camera, height);
   const scale = tagScale(ppu);
@@ -222,7 +234,10 @@ export function layoutTags(agents, view, dt) {
     a.screen.y = y;
     a.screen.visible = visible;
     a.tag.place(x, y, scale, visible);
-    if (!visible) continue;
+    if (!visible) {
+      a.tag.endVisible(now);
+      continue;
+    }
     // The whole figure, head to feet, for the building labels to make way for (env/signs.js).
     _v.copy(a.position).project(camera);
     a.screen.feet = (1 - _v.y) * 0.5 * height;
@@ -238,7 +253,7 @@ export function layoutTags(agents, view, dt) {
     p.agent = a;
   }
   settleCrowd(visibleCount, scale);
-  settleBubbles(visibleCount, scale);
+  settleBubbles(visibleCount, scale, now);
   const n = obstaclesAndBubbles(visibleCount, scale);
   if (order.length < n) order = new Int32Array(n * 2);
   deOverlap(boxes, n, order, 4);
@@ -248,8 +263,11 @@ export function layoutTags(agents, view, dt) {
     if (!b.tag) continue;
     const target = b.dy / scale;
     const shift = b.tag.shift;
-    // Slide toward the de-overlapped place; snap when close so it settles exactly.
-    b.tag.setBubbleShift(Math.abs(target - shift) < 2 ? target : shift + (target - shift) * k);
+    // Slide toward the de-overlapped place; snap when close so it settles exactly, and when the
+    // bubble has just come back from waiting (it was not on screen to slide from anywhere).
+    const fresh = b.tag.bubbleFresh;
+    b.tag.bubbleFresh = false;
+    b.tag.setBubbleShift(fresh || Math.abs(target - shift) < 2 ? target : shift + (target - shift) * k);
     b.tag = null;
   }
 }

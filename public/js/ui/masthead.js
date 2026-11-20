@@ -43,6 +43,8 @@ export function createMasthead(ctx) {
   function render(state) {
     setText(subtitle, subtitleFor(state, ctx.view));
     const pending = pendingCount(state);
+    // Answered elsewhere while the button had the keyboard: keep focus in the cluster.
+    if (pending === 0 && document.activeElement === waiting) settingsButton.focus();
     setHidden(waiting, pending === 0);
     setText(waitingCount, String(pending));
     setText(waitingWords, pending === 1 ? 'approval waiting for you' : 'approvals waiting for you');
