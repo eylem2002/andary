@@ -3,6 +3,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { startStatic, watchConsole } from './helpers/static.mjs';
+import { startTown } from './helpers/town.mjs';
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 
@@ -112,4 +113,23 @@ test('an approval card has no violations', async ({ page }) => {
   await page.getByRole('tab', { name: /^Approvals/ }).click();
   await expect(page.getByTestId('approve').first()).toBeVisible();
   expect(await violations(page)).toEqual([]);
+});
+
+test('an approval card for a file edit (diff and reason field) has no violations', async ({ page }) => {
+  const town = await startTown({ remoteApprovals: true });
+  try {
+    await page.addInitScript(() => localStorage.setItem('andary:prefs', JSON.stringify({ theme: 'dark', setupSeen: true })));
+    await page.goto(`${town.loginUrl}&world=fake`);
+    await expect(page.getByTestId('connection-status')).toContainText('Live');
+    const pending = town.sendHook({ session_id: 'a11y', cwd: '/work/app', hook_event_name: 'PermissionRequest', tool_name: 'MultiEdit', tool_input: { file_path: '/work/app/a.ts', edits: [{ old_string: 'one\ntwo', new_string: 'one\n2' }, { old_string: 'x', new_string: 'y' }] } });
+    const card = page.getByTestId('approval-card').first();
+    await expect(card).toBeAttached();
+    if (!(await card.isVisible())) await page.getByRole('tab', { name: /^Approvals/ }).click();
+    await expect(card.getByTestId('deny-reason')).toBeVisible();
+    expect(await violations(page)).toEqual([]);
+    await card.getByTestId('approve').click();
+    await pending;
+  } finally {
+    await town.stop();
+  }
 });

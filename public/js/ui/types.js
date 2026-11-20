@@ -38,7 +38,7 @@
 /**
  * What the HUD asks of the app shell (main.js).
  * @typedef {object} Controls
- * @property {(id: string, decision: 'allow'|'deny') => boolean} decide
+ * @property {(id: string, decision: 'allow'|'deny', message?: string) => boolean} decide  `message`: why, for a denial
  * @property {(on: boolean) => void} setRemoteApprovals
  * @property {() => void} startDemo
  * @property {() => void} leaveDemo

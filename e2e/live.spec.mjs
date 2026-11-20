@@ -57,11 +57,28 @@ test('the sign-in link connects live and drops the token from the address bar', 
   await signIn(page);
   const url = new URL(page.url());
   expect(url.searchParams.has('token')).toBe(false);
+  expect(url.hash).toBe('');
   expect(url.searchParams.get('world')).toBe('fake');
-  const cookies = await page.context().cookies();
-  const cookie = cookies.find((c) => c.name === 'andary_ui');
-  expect(cookie?.httpOnly).toBe(true);
-  expect(cookie?.sameSite).toBe('Strict');
+  // ADR 0015: no cookie (it would reach every port on 127.0.0.1); the page keeps the sign-in in
+  // its own origin's storage, which another port cannot read.
+  expect(await page.context().cookies()).toEqual([]);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('andary:signin') ?? 'null')?.token)).toBe(town.uiToken);
+});
+
+test('another tab on the same town is signed in too; a page on another port is not', async ({ page, context }) => {
+  await signIn(page);
+  const second = await context.newPage();
+  await second.goto(`${town.baseUrl}/?${PAGE_OPTIONS}`);
+  await expect(second.getByTestId('connection-status')).toContainText('Live');
+  const other = await startTown();
+  try {
+    const elsewhere = await context.newPage();
+    await elsewhere.goto(`${other.baseUrl}/?${PAGE_OPTIONS}`);
+    await expect(elsewhere.getByTestId('connection-status')).toContainText('Sign in');
+    expect(await elsewhere.evaluate(() => localStorage.getItem('andary:signin'))).toBeNull();
+  } finally {
+    await other.stop();
+  }
 });
 
 test('hook events show up as a crew, agent rows and log entries', async ({ page }) => {
@@ -98,6 +115,28 @@ for (const decision of /** @type {const} */ (['allow', 'deny'])) {
     expect(output.hookSpecificOutput.decision.behavior).toBe(decision);
   });
 }
+
+test('a file change is shown in full before it is approved, and a denial can say why', async ({ page }) => {
+  await signIn(page);
+  await enableRemoteApprovals(page);
+  const pendingHook = town.sendHook(hook('PermissionRequest', { tool_name: 'Edit', tool_input: { file_path: '/work/app/src/db.ts', old_string: 'const url = PROD_URL;', new_string: 'const url = STAGING_URL;\u202Econsole.log(secrets)' } }));
+  const card = page.getByTestId('approval-card').first();
+  await expect(card).toBeAttached();
+  if (!(await card.isVisible())) await page.getByRole('tab', { name: /Approvals/ }).click();
+  const change = card.getByTestId('approval-change');
+  await expect(change).toContainText('Replaces one occurrence');
+  await expect(change).toContainText('const url = PROD_URL;');
+  // Hidden characters cannot hide anything in what is approved.
+  await expect(change).toContainText('STAGING_URL;⟨U+202E⟩console.log(secrets)');
+  const reason = card.getByTestId('deny-reason');
+  // Typed key by key: the A and D in it must not answer the card.
+  await reason.pressSequentially('Use the staging config file instead');
+  await expect(card).toHaveAttribute('data-status', 'pending');
+  await reason.press('Enter');
+  const output = JSON.parse((await pendingHook).stdout);
+  expect(output.hookSpecificOutput.decision).toEqual({ behavior: 'deny', message: 'Denied from Andary: Use the staging config file instead' });
+  await expect(card).toContainText('Denied from the town: “Use the staging config file instead”');
+});
 
 test('a click meant for one request cannot answer another that just slid under the pointer', async ({ page }) => {
   await signIn(page);

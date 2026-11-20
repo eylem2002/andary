@@ -174,6 +174,6 @@ export function isAllowedHost(hostHeader, allowed) {
 export function isAllowedOrigin(originHeader, allowedHosts) {
   if (originHeader === undefined) return true;
   if (typeof originHeader !== 'string') return false;
-  const match = /^http:\/\/([^/]+)$/i.exec(originHeader.trim());
+  const match = /^https?:\/\/([^/]+)$/i.exec(originHeader.trim());
   return match !== null && allowedHosts.has(match[1].toLowerCase());
 }

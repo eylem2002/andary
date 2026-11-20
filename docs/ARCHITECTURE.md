@@ -19,7 +19,7 @@ How Andary is put together, and why. The exact interfaces (payloads, messages, A
  │                                                        │ record  → sanitize, history,    │ │
  │                                                        │   recording, broadcast          │ │
  │                                                        └──────────────┬──────────────────┘ │
- │                                                       WebSocket /ws   │  (cookie sign-in) │
+ │                                                       WebSocket /ws   │  (token sign-in)  │
  │                                                                       ▼                   │
  │  Browser ┌──────────── sources/ ─────────────┐   ┌──────── core/ (pure) ──────────────┐   │
  │          │ live.js (WebSocket)  or  demo.js  │──▶│ events: payload → TownEvents       │   │
@@ -52,12 +52,13 @@ it came from, in one table (`POLICIES`): a local event counts toward growth, not
 approvals and is relayed to a team host; a teammate's event grows the town and nothing else.
 Token usage is read before the adapter, and only for Claude Code (its transcripts).
 
-**Security at every boundary.** The forwarder only talks to a live server of yours and only obeys
-replies signed with a key that never leaves `~/.andary` (ADR 0012). The server checks the `Host`
-header (DNS rebinding) and the WebSocket `Origin`, signs browsers in with a per-start token in an
-`HttpOnly` cookie, sanitizes every payload (secrets redacted, sizes capped) before anything is kept
-or sent, and never holds a permission request it cannot show in full. A team town adds keys that
-are HMACs of one secret and a view-only role that sees the town but cannot act.
+**Security at every boundary.** The forwarder only talks to a live server of yours that proves it
+holds a key that never leaves `~/.andary`, and only obeys replies signed with it (ADR 0012). The server checks the `Host`
+header (DNS rebinding) and the WebSocket `Origin`, signs browsers in with a per-start token the
+page keeps for its own origin (ADR 0015; no cookie, which every port would see), sanitizes every
+payload (secrets redacted, sizes capped) before anything is kept or sent, and never holds a
+permission request it cannot show in full. A team town adds keys that are HMACs of one secret and a
+view-only role that sees the town but cannot act.
 
 **The browser has one store and one source.** `sources/live.js` (the WebSocket link) and
 `sources/demo.js` (the simulation, which also plays the server's part for approvals, usage and

@@ -102,7 +102,8 @@ Andary added and nothing else.
 ## 4. Use the town
 
 `andary start` prints a sign-in link and opens it. The link holds a private token, so don't share
-it; the browser trades it for a cookie on the first visit.
+it; the page keeps it for this town only (no other site or local server can read it) and takes it
+out of the address bar. Other tabs on the same town are signed in too.
 
 ### What the buildings mean
 
@@ -148,7 +149,9 @@ building to see who is inside.
 Off by default. Turn on **Remote approvals** in Settings (or start with
 `andary start --remote-approvals`). A permission request then gets **Allow** and **Deny** buttons
 and a countdown; if nobody answers within two minutes, the normal prompt appears in your
-terminal. The card shows the exact request; a request the town cannot show in full (a secret
+terminal. The card shows the exact request, and for a file change the change itself: a new
+file's content, or an edit as a diff. To tell the agent why you said no, type a reason before
+**Deny** (or press Enter in the reason field). A request the town cannot show in full (a secret
 was masked, a long value was cut) is never held there and goes straight to your terminal.
 
 ### Everything else
@@ -201,9 +204,22 @@ What is shared and what is not:
   host's too, so keep it within the team.
 - **Not shared:** costs (they stay on each computer), phone notifications, and control: each
   person answers their own permission prompts, and viewers cannot change anything.
-- **Network:** plain HTTP, for a network you trust. Across the internet, use a private network
-  such as Tailscale and start the host with `--team-host <its-vpn-name>` so the link works at
-  that name.
+- **Network:** plain HTTP unless you give the host a certificate (below), so only on a network
+  you trust. Across the internet, use a private network such as Tailscale and start the host
+  with `--team-host <its-vpn-name>` so the link works at that name.
+- **Encrypted (HTTPS):** start the host with a certificate for the name teammates use, for
+  example one from `tailscale cert` (free on Tailscale):
+
+  ```sh
+  tailscale cert my-laptop.tailnet.ts.net
+  andary start --team --team-host my-laptop.tailnet.ts.net \
+    --tls-cert my-laptop.tailnet.ts.net.crt --tls-key my-laptop.tailnet.ts.net.key
+  ```
+
+  Other computers must then use `https://`: the invite and the view link say so, and plain
+  HTTP is refused from the network. Your own computer keeps using plain HTTP on `127.0.0.1`,
+  which never leaves it. A self-signed certificate works too if every teammate trusts it
+  (`NODE_EXTRA_CA_CERTS=<cert> andary start --share-to …`, and in their browser).
 - **Revoke:** `andary team reset` on the host invalidates every key and the view link.
 
 ### A demo anyone can open
@@ -234,11 +250,13 @@ Andary sees what your agents see, so it is locked down:
 
 - the server listens on `127.0.0.1` only (unless you choose `--host` or host a team town), checks
   the `Host` header (DNS rebinding) and the WebSocket `Origin` (cross-site hijacking);
-- browsers sign in with a random per-start token, traded for an `HttpOnly`, `SameSite=Strict`
-  cookie; hooks use a separate secret; both live in `~/.andary/server.json`, readable only by you;
-- the hook forwarder only talks to a live server of yours and only obeys replies signed with a
-  key that never leaves `~/.andary`, so a stale state file cannot hand your prompts, or control
-  of your agent, to whoever takes the old port;
+- browsers sign in with a random per-start token that the page keeps for its own address only
+  and sends with each request; there is no cookie, which would also reach every other local
+  server on `127.0.0.1` (ADR 0015); hooks use a separate secret; both live in
+  `~/.andary/server.json`, readable only by you;
+- the hook forwarder only talks to a live server of yours that first proves it holds a key that
+  never leaves `~/.andary`, and only obeys replies signed with it, so a stale state file cannot
+  hand your prompts, the hook secret or control of your agent to whoever takes the old port;
 - secrets that look like API keys, tokens or passwords are redacted before anything is kept or
   sent; prompts and commands are never written to disk unless you pass `--record` (small state
   files in `~/.andary` keep usage totals with the transcript paths they came from, and the
@@ -271,7 +289,8 @@ andary [command] [options]
   start                 start the town and open it (the default command)
                         --port <n>, --host <address>, --no-open, --detach, --record,
                         --remote-approvals, --approval-timeout <s>, --notify, --notify-url <url>,
-                        --team [--team-host <name>], --share-to <address> (key in ANDARY_TEAM_KEY)
+                        --team [--team-host <name>], --share-to <address> (key in ANDARY_TEAM_KEY),
+                        --tls-cert <file> --tls-key <file> (HTTPS for other computers)
   demo                  start the town with the built-in simulation
   stop                  stop the running town
   install [codex]       add the hooks for Claude Code (default) or Codex
@@ -287,7 +306,7 @@ andary [command] [options]
 
 Environment: `ANDARY_HOME` (default `~/.andary`), `ANDARY_PORT` (default 4747),
 `CLAUDE_CONFIG_DIR` (default `~/.claude`), `CODEX_HOME` (default `~/.codex`),
-`ANDARY_NOTIFY_URL`, `ANDARY_SHARE_TO`, `ANDARY_TEAM_KEY`.
+`ANDARY_NOTIFY_URL`, `ANDARY_SHARE_TO`, `ANDARY_TEAM_KEY`, `ANDARY_TLS_CERT`, `ANDARY_TLS_KEY`.
 
 ## 9. How it works
 

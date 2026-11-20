@@ -37,7 +37,7 @@ async function boot() {
     store,
     prefs,
     controls: {
-      decide: (id, decision) => source?.decide(id, decision) ?? false,
+      decide: (id, decision, message) => source?.decide(id, decision, message) ?? false,
       setRemoteApprovals: (on) => source?.setRemoteApprovals?.(on),
       startDemo: () => switchToDemo(),
       leaveDemo: () => location.assign(withoutParam('demo')),

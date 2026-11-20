@@ -1,8 +1,8 @@
 // Browsers connect over /ws (CONTRACTS §4.5). This module accepts them (after the Host, Origin and
-// cookie checks), sends the hello snapshot, and handles their decide/settings/ping messages.
+// sign-in checks), sends the hello snapshot, and handles their decide/settings/ping messages.
 // On a team host (§4.11) a browser is either the owner (signed in) or a teammate watching with
 // the view link: viewers get the town but not the owner's prompts, costs, settings or topic.
-import { browserRole } from './auth.mjs';
+import { WS_PROTOCOL, browserRole, offersAndaryProtocol } from './auth.mjs';
 import { LIMITS } from './config.mjs';
 import { createTokenBucket } from './rate-limit.mjs';
 import { isAllowedHost, isAllowedOrigin } from './security.mjs';
@@ -156,6 +156,7 @@ function upgrade(ctx, req, socket, head) {
     return;
   }
   const connection = acceptUpgrade(socket, verdict.key, head, {
+    protocol: offersAndaryProtocol(req) ? WS_PROTOCOL : null,
     maxMessageBytes: LIMITS.wsMessageBytes,
     maxBufferedBytes: LIMITS.wsBufferedBytes,
     heartbeatMs: LIMITS.wsHeartbeatMs,

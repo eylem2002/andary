@@ -103,6 +103,14 @@ describe('held approvals', () => {
     assert.equal(broker.list()[0].message, 'n'.repeat(500));
   });
 
+  it('keeps a reason on one line, without control characters', async () => {
+    const { broker } = setup();
+    const { approval, response } = broker.create(request(), { hold: true });
+    broker.decide(approval.id, 'deny', 'not\nthis\u0007 one\u001b[31m');
+    const output = /** @type {any} */ (await response);
+    assert.equal(output.hookSpecificOutput.decision.message, `${DENY_MESSAGE}: not this one [31m`);
+  });
+
   it('expires after the timeout and answers null', async () => {
     const { broker, fireTimers, changes } = setup();
     const { response } = broker.create(request(), { hold: true });

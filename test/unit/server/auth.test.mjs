@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { signHookReply, UI_COOKIE, generateToken, hasHookSecret, hasUiCookie, loginCookie, parseCookies, safeEqual } from '../../../server/auth.mjs';
+import { browserCredentials, browserRole, generateToken, hasHookSecret, offersAndaryProtocol, proveServer, safeEqual, signHookReply } from '../../../server/auth.mjs';
 
 describe('generateToken', () => {
   it('returns 32 random bytes as base64url', () => {
@@ -28,34 +28,31 @@ describe('safeEqual', () => {
   });
 });
 
-describe('parseCookies', () => {
-  it('parses several cookies with spaces, quotes and encoding', () => {
-    assert.deepEqual({ ...parseCookies('a=1; andary_ui=abc-_123 ;b="quoted"; c=caf%C3%A9') }, { a: '1', andary_ui: 'abc-_123', b: 'quoted', c: 'café' });
-  });
-
-  it('keeps the first of duplicate names and skips malformed pairs', () => {
-    assert.deepEqual({ ...parseCookies('andary_ui=first; junk; =novalue; andary_ui=second; bad=%E0%A4%A') }, { andary_ui: 'first', bad: '%E0%A4%A' });
-  });
-
-  it('handles missing headers and is safe with __proto__', () => {
-    assert.deepEqual({ ...parseCookies(undefined) }, {});
-    const cookies = parseCookies('__proto__=x');
-    assert.equal(cookies.__proto__, 'x');
-    assert.equal(/** @type {any} */ ({}).x, undefined);
-  });
-});
-
 describe('request checks', () => {
   const req = (/** @type {Record<string, string>} */ headers) => /** @type {any} */ ({ headers });
 
-  it('builds the login cookie the contract asks for', () => {
-    assert.equal(loginCookie('tok'), `${UI_COOKIE}=tok; HttpOnly; SameSite=Strict; Path=/`);
+  it('reads the sign-in from headers (pages) or subprotocols (WebSockets), never from a cookie', () => {
+    assert.deepEqual(browserCredentials(req({ 'x-andary-token': 'tok', 'x-andary-view': 'v' })), { token: 'tok', view: 'v' });
+    assert.deepEqual(browserCredentials(req({ 'sec-websocket-protocol': 'andary, andary.token.tok, andary.view.v' })), { token: 'tok', view: 'v' });
+    assert.deepEqual(browserCredentials(req({ cookie: 'andary_ui=tok; andary_view=v' })), { token: null, view: null });
+    assert.deepEqual(browserCredentials(req({ 'sec-websocket-protocol': 'andary.token.' })), { token: null, view: null });
   });
 
-  it('accepts only the right UI cookie and hook secret', () => {
-    assert.ok(hasUiCookie(req({ cookie: 'other=1; andary_ui=tok' }), 'tok'));
-    assert.ok(!hasUiCookie(req({ cookie: 'andary_ui=nope' }), 'tok'));
-    assert.ok(!hasUiCookie(req({}), 'tok'));
+  it('knows the owner, a viewer, and nobody', () => {
+    assert.equal(browserRole(req({ 'x-andary-token': 'tok' }), 'tok', 'v'), 'owner');
+    assert.equal(browserRole(req({ 'sec-websocket-protocol': 'andary, andary.view.v' }), 'tok', 'v'), 'viewer');
+    assert.equal(browserRole(req({ 'sec-websocket-protocol': 'andary, andary.view.v' }), 'tok', null), null, 'no view role off a team host');
+    assert.equal(browserRole(req({ 'x-andary-token': 'nope' }), 'tok', null), null);
+    assert.equal(browserRole(req({ cookie: 'andary_ui=tok' }), 'tok', null), null, 'an old cookie no longer signs in');
+  });
+
+  it('confirms the andary subprotocol only when it was offered', () => {
+    assert.ok(offersAndaryProtocol(req({ 'sec-websocket-protocol': 'andary.token.x,andary' })));
+    assert.ok(!offersAndaryProtocol(req({ 'sec-websocket-protocol': 'andary.token.x' })));
+    assert.ok(!offersAndaryProtocol(req({})));
+  });
+
+  it('accepts only the right hook secret', () => {
     assert.ok(hasHookSecret(req({ 'x-andary-secret': 's3' }), 's3'));
     assert.ok(!hasHookSecret(req({ 'x-andary-secret': 's4' }), 's3'));
     assert.ok(!hasHookSecret(req({}), 's3'));
@@ -69,5 +66,14 @@ describe('signHookReply', () => {
     assert.notEqual(signHookReply('key', 'nonce-2', '{"output":null}'), signature, 'bound to the nonce');
     assert.notEqual(signHookReply('key', 'nonce-1', '{"output":{}}'), signature, 'bound to the body');
     for (const nonce of [undefined, '', 'x'.repeat(129), ['a']]) assert.equal(signHookReply('key', nonce, '{}'), null);
+  });
+});
+
+describe('proveServer', () => {
+  it('answers the forwarder\'s challenge with a proof no signed reply can stand in for', () => {
+    const nonce = 'n0nce-abcdefghijklm';
+    assert.equal(proveServer('key', nonce), createHmac('sha256', 'key').update(`andary-proof\n${nonce}`).digest('base64url'));
+    assert.notEqual(proveServer('key', nonce), signHookReply('key', nonce, 'andary-proof'));
+    for (const bad of [undefined, '', 'short', 'has space in it here', 'x'.repeat(129), 'line\nbreak-abcdefghijk']) assert.equal(proveServer('key', bad), null, String(bad));
   });
 });

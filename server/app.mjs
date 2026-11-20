@@ -1,6 +1,5 @@
 // The Andary server: composes the HTTP routes, the WebSocket hub, the approval broker and the
 // history, and owns the lifecycle (listen, server.json, shutdown).
-import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { generateToken } from './auth.mjs';
 import { createApprovalBroker } from './approvals.mjs';
@@ -12,6 +11,7 @@ import { createTeamHost, createTeamRelay, lanAddresses, teamSecret } from './tea
 import { DEFAULT_APPROVAL_TIMEOUT_MS, DEFAULT_HOST, DEFAULT_PORT, LIMITS, PUBLIC_DIR, readVersion, resolveClaudeConfigDir, resolveHome } from './config.mjs';
 import { createHistory, createRecorder, recordingPath } from './history.mjs';
 import { NOT_FOUND_PAGE, sendHtml, sendText } from './http-util.mjs';
+import { createListener } from './listener.mjs';
 import { createTokenBucket } from './rate-limit.mjs';
 import { handleRequest } from './routes.mjs';
 import { allowedHostHeaders, buildCsp, computeImportMapHashes, connectHost, hostWithPort, isWildcardHost, securityHeaders } from './security.mjs';
@@ -32,6 +32,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {string[]} [teamHosts]        names teammates reach a team host by (a VPN name), besides its addresses
  * @property {{ url: string, key: string }|null} [shareTo]  send this town's events to a team host
  * @property {number} [approvalTimeoutMs]
+ * @property {{ cert: Buffer|string, key: Buffer|string }|null} [tls]  serve HTTPS to the network with this certificate (ADR 0016)
  * @property {boolean} [record]            append every envelope to <home>/recordings/*.jsonl
  * @property {boolean} [writeState]        write server.json (default true)
  * @property {(message: string) => void} [log]  lifecycle lines only, never payload content
@@ -87,7 +88,8 @@ import { CLOSE_CODE } from './ws-frame.mjs';
 export async function startTownServer(options = {}) {
   const config = withDefaults(options);
   const ctx = createContext(config, options);
-  const server = createHttpServer(ctx);
+  const listener = createHttpServer(ctx, options.tls ?? null);
+  const server = listener.front;
   await listen(server, config.port, config.host);
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : config.port;
@@ -115,6 +117,9 @@ export async function startTownServer(options = {}) {
     startedAt: Date.now(),
     approvalTimeoutMs: config.approvalTimeoutMs,
     ...(ctx.team ? { team: true } : {}),
+    // What `andary team invite` needs to print a link that matches the certificate.
+    ...(listener.tls ? { tls: true } : {}),
+    ...(teamHosts.length ? { teamHosts } : {}),
   };
   if (config.writeState) writeStateFile(config.home, state);
 
@@ -128,9 +133,9 @@ export async function startTownServer(options = {}) {
     recordingPath: ctx.recorder?.path ?? null,
     state,
     notifyUrl: ctx.notifier.url,
-    viewUrl: ctx.team ? `http://${hostWithPort(extraHosts[0] ?? connectHost(config.host), port)}/?view=${ctx.team.view}` : null,
+    viewUrl: ctx.team ? `${listener.tls ? 'https' : 'http'}://${hostWithPort(extraHosts[0] ?? connectHost(config.host), port)}/?view=${ctx.team.view}` : null,
     browserCount: () => ctx.hub.size,
-    stop: once(() => stopServer(ctx, server, config)),
+    stop: once(() => stopServer(ctx, listener, config)),
   };
 }
 
@@ -148,23 +153,23 @@ function withDefaults(options) {
 }
 
 /**
- * The HTTP server: routes, WebSocket upgrades and request time limits.
+ * The server's socket (listener.mjs): routes and WebSocket upgrades, over plain HTTP, or with a
+ * certificate HTTPS for the network and plain HTTP for this computer only.
  * @param {TownContext} ctx
+ * @param {{ cert: Buffer|string, key: Buffer|string }|null} tls
  */
-function createHttpServer(ctx) {
-  const server = createServer((req, res) => {
-    handleRequest(ctx, req, res).catch((error) => {
-      // Name and code only: an error message could quote request data.
-      ctx.log(`Internal error while answering a request (${error?.code ?? error?.name ?? 'unknown'})`);
-      sendText(res, 500, 'Internal error\n');
-    });
-  });
-  server.on('upgrade', (req, socket, head) => handleUpgrade(ctx, req, socket, head));
-  // Bodies are small and local; a slow upload is not a real client. Held hook responses are not
-  // affected: these limits cover receiving the request, not answering it.
-  server.requestTimeout = 30_000;
-  server.headersTimeout = 10_000;
-  return server;
+function createHttpServer(ctx, tls) {
+  return createListener(
+    (req, res) => {
+      handleRequest(ctx, req, res).catch((error) => {
+        // Name and code only: an error message could quote request data.
+        ctx.log(`Internal error while answering a request (${error?.code ?? error?.name ?? 'unknown'})`);
+        sendText(res, 500, 'Internal error\n');
+      });
+    },
+    (req, socket, head) => handleUpgrade(ctx, req, socket, head),
+    tls,
+  );
 }
 
 /**
@@ -222,7 +227,7 @@ function createContext(config, options) {
 }
 
 /**
- * @param {import('node:http').Server} server
+ * @param {import('node:net').Server} server
  * @param {number} port
  * @param {string} host
  * @returns {Promise<void>}
@@ -241,10 +246,10 @@ function listen(server, port, host) {
  * Gives held prompts back to the terminal, says goodbye to browsers, closes connections and
  * removes server.json if it is still ours.
  * @param {TownContext} ctx
- * @param {import('node:http').Server} server
+ * @param {import('./listener.mjs').Listener} listener
  * @param {{ home: string, writeState: boolean }} config
  */
-async function stopServer(ctx, server, config) {
+async function stopServer(ctx, listener, config) {
   if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
   if (ctx.hostTimer) clearInterval(ctx.hostTimer);
   ctx.broker.releaseAll();
@@ -254,10 +259,10 @@ async function stopServer(ctx, server, config) {
   ctx.usage.dispose();
   ctx.progress.dispose();
   ctx.hub.closeAll(CLOSE_CODE.GOING_AWAY, 'Andary is shutting down');
-  const closed = new Promise((resolve) => server.close(() => resolve(undefined)));
-  server.closeIdleConnections();
+  const closed = new Promise((resolve) => listener.front.close(() => resolve(undefined)));
+  listener.closeIdle();
   const force = setTimeout(() => {
-    server.closeAllConnections();
+    listener.closeAll();
     ctx.hub.terminateAll();
   }, 1000);
   force.unref();

@@ -91,7 +91,9 @@ describe('Host and Origin checks', () => {
     assert.ok(isAllowedOrigin(undefined, allowed));
     assert.ok(isAllowedOrigin('http://127.0.0.1:4747', allowed));
     assert.ok(isAllowedOrigin('http://localhost:4747', allowed));
-    for (const origin of ['null', 'http://evil.example', 'http://127.0.0.1:9999', 'https://127.0.0.1:4747', 'http://127.0.0.1:4747/path', '']) {
+    // Only this server can answer on its own host and port, over HTTPS too (ADR 0016).
+    assert.ok(isAllowedOrigin('https://127.0.0.1:4747', allowed));
+    for (const origin of ['null', 'http://evil.example', 'https://evil.example', 'http://127.0.0.1:9999', 'ftp://127.0.0.1:4747', 'http://127.0.0.1:4747/path', '']) {
       assert.ok(!isAllowedOrigin(origin, allowed), origin);
     }
   });

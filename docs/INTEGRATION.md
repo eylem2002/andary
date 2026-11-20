@@ -140,14 +140,23 @@ that data as private.
 - **Loopback only.** The server binds `127.0.0.1` by default. `--host` with any other address
   prints a loud warning: anyone who can reach the port and obtain the sign-in link could watch
   your sessions and, with remote approvals on, approve tool calls.
+- **HTTPS for other computers.** With `--tls-cert <file> --tls-key <file>` (PEM, or
+  `ANDARY_TLS_CERT` / `ANDARY_TLS_KEY`) the same port speaks HTTPS to the network and refuses
+  plain HTTP from it; this computer's own clients (the forwarder, the CLI, a browser on
+  `127.0.0.1`) keep plain HTTP on loopback, which never leaves the machine (ADR 0016). A team
+  host then prints `https://` invites and view links at its first `--team-host` name, which
+  should be the name on the certificate.
 - **DNS-rebinding defence.** Every request must carry `Host: 127.0.0.1:<port>`, `localhost:<port>`
   or `[::1]:<port>` (plus the `--host` address, when one is given); anything else gets `403`.
 - **Browser sign-in.** Each start creates a new random UI token (32 bytes). Opening the sign-in
-  link stores it in a `andary_ui` cookie (`HttpOnly; SameSite=Strict; Path=/`) and redirects to the
-  same page without the token, so it does not stay in the address bar or history. A wrong token
-  gets a `403` page. Static files need no sign-in: they contain no data.
-- **WebSocket.** `/ws` requires the cookie and an `Origin` that is the server's own (non-browser
-  clients may leave it out). At most 16 browsers; messages up to 64 KiB; a browser that floods
+  link hands it to the page in the URL fragment; the page keeps it in its own storage, which only
+  pages of this exact address (port included) can read, and takes it out of the address bar. It
+  sends it with each request: a header for `fetch`, a subprotocol for the WebSocket. There is no
+  cookie: a cookie for `127.0.0.1` would also go to every other local server you open in the same
+  browser (ADR 0015). A wrong token gets a `403` page. Static files need no sign-in: they contain
+  no data.
+- **WebSocket.** `/ws` requires the sign-in subprotocol and an `Origin` that is the server's own
+  (non-browser clients may leave it out). At most 16 browsers; messages up to 64 KiB; a browser that floods
   messages is disconnected.
 - **Hook secret.** Hooks authenticate with a second random value in the `x-andary-secret`
   header, compared in constant time. Requests without it get `401` before they can touch the
@@ -184,13 +193,14 @@ Off by default. Turn them on in the town (Settings → Remote approvals) or star
 `--remote-approvals`.
 
 - **On, with a browser connected:** a permission prompt waits for the town. Allow or Deny answers
-  Claude Code directly; Claude sees a denial as `Denied from Andary`, so it can try another
-  approach. (The protocol also accepts a reason, shown as `Denied from Andary: <reason>`; the
-  approval card does not offer a field for one yet.) Claude Code's own deny and ask rules still
-  apply.
+  the agent directly; it sees a denial as `Denied from Andary`, or `Denied from Andary: <reason>`
+  when you type a reason in the card (one line, at most 500 characters; Enter in that field
+  denies), so it can try another approach. The agent's own deny and ask rules still apply.
 - **Only what the town can show in full.** A request whose input had to be shortened or had
   credentials masked goes straight to the terminal (the card says why), and the card shows full
-  paths, every input field and any invisible or direction-changing characters. Allow and Deny
+  paths, every input field and any invisible or direction-changing characters. A file change is
+  shown in full: a Write's whole content, an Edit's or MultiEdit's diff, a notebook cell's new
+  source. Allow and Deny
   ignore clicks for a second after a card appears or moves, so a new request sliding under the
   pointer cannot be approved by accident.
 - **No answer in time:** after `--approval-timeout` seconds (default 120, at most 140 because
@@ -209,7 +219,7 @@ At most 50 prompts wait at once; beyond that the oldest is handed back to the te
 
 | Command | What it does |
 | --- | --- |
-| `start` (default) | Runs the server in the foreground. `--port` (default 4747, `ANDARY_PORT`, `0` = any free port), `--host`, `--no-open`, `--remote-approvals`, `--approval-timeout <s>`, `--record`, `--detach` (run in the background and return). If a server is already running for this `ANDARY_HOME`, prints its link and exits. |
+| `start` (default) | Runs the server in the foreground. `--port` (default 4747, `ANDARY_PORT`, `0` = any free port), `--host`, `--tls-cert <file> --tls-key <file>` (HTTPS for other computers), `--no-open`, `--remote-approvals`, `--approval-timeout <s>`, `--record`, `--detach` (run in the background and return). If a server is already running for this `ANDARY_HOME`, prints its link and exits. |
 | `demo` | Like `start`, opening the simulation (`/?demo=1`). |
 | `stop` | Stops the running server. |
 | `install` / `uninstall` | `--scope user\|project\|local`, `--dir`, `--dry-run`, `--print`. |

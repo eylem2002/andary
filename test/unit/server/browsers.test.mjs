@@ -29,7 +29,7 @@ describe('handleUpgrade', () => {
         connection: 'Upgrade',
         'sec-websocket-version': '13',
         'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
-        cookie: 'andary_ui=token',
+        'sec-websocket-protocol': 'andary, andary.token.token',
       },
     });
     const socket = new PassThrough();

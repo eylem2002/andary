@@ -1,14 +1,21 @@
-// Credentials: the hook secret (sent by the forwarder) and the UI token (held by the browser in an
-// HttpOnly cookie). Both are fresh random values on every server start.
+// Credentials: the hook secret (sent by the forwarder) and the UI token (kept by the browser in
+// its storage for this town's origin, sent in a header or a WebSocket subprotocol; ADR 0015). Both
+// are fresh random values on every server start.
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
-export const UI_COOKIE = 'andary_ui';
-/** The team town's view-only cookie (server/team.mjs). */
-export const VIEW_COOKIE = 'andary_view';
+/** Where a page sends the owner's sign-in token, and a team viewer's view token. */
+export const UI_TOKEN_HEADER = 'x-andary-token';
+export const VIEW_TOKEN_HEADER = 'x-andary-view';
+/** The WebSocket subprotocol the town speaks; credentials ride along as `andary.token.<token>`. */
+export const WS_PROTOCOL = 'andary';
+export const TOKEN_PROTOCOL_PREFIX = 'andary.token.';
+export const VIEW_PROTOCOL_PREFIX = 'andary.view.';
 const HOOK_SECRET_HEADER = 'x-andary-secret';
 /** The forwarder's per-request nonce, and the server's signature over nonce + reply body. */
 export const HOOK_NONCE_HEADER = 'x-andary-nonce';
 export const HOOK_SIGNATURE_HEADER = 'x-andary-signature';
+/** The server's answer to the forwarder's challenge (GET /api/proof). */
+export const PROOF_HEADER = 'x-andary-proof';
 const MAX_NONCE_CHARS = 128;
 
 /**
@@ -34,56 +41,38 @@ export function safeEqual(supplied, expected) {
 }
 
 /**
- * Parses a Cookie header. The first occurrence of a name wins (browsers send the most specific
- * cookie first). Malformed pairs are skipped.
- * @param {string|undefined} header
- * @returns {Record<string, string>}
- */
-export function parseCookies(header) {
-  /** @type {Record<string, string>} */
-  const cookies = Object.create(null);
-  if (typeof header !== 'string' || header === '') return cookies;
-  for (const pair of header.split(';')) {
-    const eq = pair.indexOf('=');
-    if (eq <= 0) continue;
-    const name = pair.slice(0, eq).trim();
-    if (!name || name in cookies) continue;
-    cookies[name] = decodeCookieValue(pair.slice(eq + 1).trim());
-  }
-  return cookies;
-}
-
-/**
- * @param {string} raw
- * @returns {string}
- */
-function decodeCookieValue(raw) {
-  const unquoted = raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1) : raw;
-  try {
-    return decodeURIComponent(unquoted);
-  } catch {
-    return unquoted;
-  }
-}
-
-/**
- * The login cookie. No Max-Age: it lasts for the browser session, and the token changes on every
- * server start anyway. HttpOnly keeps it away from page scripts; SameSite=Strict keeps other sites
- * from riding on it.
- * @param {string} uiToken
- * @returns {string}
- */
-export function loginCookie(uiToken) {
-  return `${UI_COOKIE}=${uiToken}; HttpOnly; SameSite=Strict; Path=/`;
-}
-
-/**
+ * The browser credentials a request carries (ADR 0015). Pages send them in headers; a WebSocket,
+ * which cannot set headers, offers them as subprotocols next to the `andary` protocol. Nothing is a
+ * cookie: a cookie for 127.0.0.1 goes to every port on it, so another local web server opened in
+ * the same browser would receive it. Page storage is per origin (port included).
  * @param {import('node:http').IncomingMessage} req
- * @param {string} uiToken
+ * @returns {{ token: string|null, view: string|null }}
+ */
+export function browserCredentials(req) {
+  const header = (/** @type {string} */ name) => {
+    const value = req.headers[name];
+    return typeof value === 'string' && value !== '' ? value : null;
+  };
+  const offered = String(req.headers['sec-websocket-protocol'] ?? '')
+    .split(',')
+    .map((part) => part.trim());
+  const fromProtocol = (/** @type {string} */ prefix) => offered.find((part) => part.startsWith(prefix))?.slice(prefix.length) || null;
+  return {
+    token: header(UI_TOKEN_HEADER) ?? fromProtocol(TOKEN_PROTOCOL_PREFIX),
+    view: header(VIEW_TOKEN_HEADER) ?? fromProtocol(VIEW_PROTOCOL_PREFIX),
+  };
+}
+
+/**
+ * Whether a WebSocket handshake offered the `andary` subprotocol, which the server then names in
+ * its answer (a browser that offers subprotocols drops a connection whose answer names none).
+ * @param {import('node:http').IncomingMessage} req
  * @returns {boolean}
  */
-export function hasUiCookie(req, uiToken) {
-  return safeEqual(parseCookies(req.headers.cookie)[UI_COOKIE], uiToken);
+export function offersAndaryProtocol(req) {
+  return String(req.headers['sec-websocket-protocol'] ?? '')
+    .split(',')
+    .some((part) => part.trim() === WS_PROTOCOL);
 }
 
 /**
@@ -110,24 +99,28 @@ export function signHookReply(responseKey, nonce, body) {
 }
 
 /**
- * The view-only cookie for a team town: same protections as the sign-in cookie.
- * @param {string} token
- */
-export function viewCookie(token) {
-  return `${VIEW_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/`;
-}
-
-/**
- * Who a browser is: the owner (signed in), a teammate watching (view cookie), or nobody.
+ * Who a browser is: the owner (signed in), a teammate watching (view token), or nobody.
  * @param {import('node:http').IncomingMessage} req
  * @param {string} uiToken
  * @param {string|null} view  the team's view token, null when this is not a team host
  * @returns {'owner'|'viewer'|null}
  */
 export function browserRole(req, uiToken, view) {
-  const cookies = parseCookies(req.headers.cookie);
-  if (safeEqual(cookies[UI_COOKIE], uiToken)) return 'owner';
-  if (view && safeEqual(cookies[VIEW_COOKIE], view)) return 'viewer';
+  const credentials = browserCredentials(req);
+  if (safeEqual(credentials.token, uiToken)) return 'owner';
+  if (view && safeEqual(credentials.view, view)) return 'viewer';
   return null;
 }
 
+/**
+ * Proves to the forwarder, before it sends anything, that this is the server that wrote
+ * server.json: HMAC-SHA256(responseKey, "andary-proof\n" + nonce), base64url. The prefix keeps a
+ * proof from ever doubling as a signed reply (those sign nonce + "\n" + a JSON body).
+ * @param {string} responseKey
+ * @param {unknown} nonce the forwarder's x-andary-nonce header: base64url, 16 to 128 characters
+ * @returns {string|null} null for a missing or malformed nonce
+ */
+export function proveServer(responseKey, nonce) {
+  if (typeof nonce !== 'string' || !/^[\w-]{16,128}$/.test(nonce)) return null;
+  return createHmac('sha256', responseKey).update(`andary-proof\n${nonce}`).digest('base64url');
+}

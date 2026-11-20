@@ -1,7 +1,10 @@
 // Validation for command-line values. Bad input raises UsageError (exit code 2) with a message
 // that says what was expected.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { DEFAULT_PORT, MAX_APPROVAL_TIMEOUT_MS } from '../config.mjs';
 import { CLIENTS, clientById } from '../clients.mjs';
+import { checkTls } from '../listener.mjs';
 import { checkNotifyUrl } from '../notify.mjs';
 import { cleanMemberName } from '../team.mjs';
 
@@ -108,6 +111,33 @@ export function parseNotifyUrl(value) {
   return url;
 }
 
+/**
+ * --tls-cert and --tls-key (or ANDARY_TLS_CERT and ANDARY_TLS_KEY): PEM files for serving HTTPS to
+ * other computers (ADR 0016). Both or neither; read and checked here, so a wrong file fails at
+ * once with a clear message instead of on the first connection.
+ * @param {string|undefined} certPath
+ * @param {string|undefined} keyPath
+ * @param {{ readFile?: (path: string) => Buffer, check?: (tls: { cert: Buffer, key: Buffer }) => void }} [deps]
+ * @returns {{ cert: Buffer, key: Buffer, certPath: string, keyPath: string }|null}
+ */
+export function parseTls(certPath, keyPath, { readFile = (path) => readFileSync(path), check = checkTls } = {}) {
+  if (!certPath && !keyPath) return null;
+  if (!certPath || !keyPath) throw new UsageError('HTTPS needs both --tls-cert <file> and --tls-key <file> (PEM), for example from "tailscale cert".');
+  const read = (/** @type {string} */ path, /** @type {string} */ what) => {
+    try {
+      return readFile(resolve(path));
+    } catch {
+      throw new UsageError(`Cannot read the ${what} file ${path}.`);
+    }
+  };
+  const tls = { cert: read(certPath, 'certificate'), key: read(keyPath, 'key'), certPath: resolve(certPath), keyPath: resolve(keyPath) };
+  try {
+    check(tls);
+  } catch {
+    throw new UsageError('The certificate and key could not be used together: check that both are PEM files and that the key belongs to the certificate.');
+  }
+  return tls;
+}
 
 /**
  * A team host's base URL (for --share-to and `team invite --url`): http or https, no path.

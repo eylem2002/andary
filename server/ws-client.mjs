@@ -1,25 +1,30 @@
 // A small WebSocket client on top of node:http, for `andary doctor` and the test suites.
-// Node's global WebSocket (Node ≥ 22 only) cannot send the Cookie and Origin headers the server
-// checks, so this client lets callers set any handshake header.
-import { request } from 'node:http';
+// Node's global WebSocket (Node ≥ 22 only) cannot send the Origin header the server checks, so this
+// client lets callers set any handshake header (the sign-in rides in Sec-WebSocket-Protocol).
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { WsConnection, acceptKeyFor, generateClientKey } from './websocket.mjs';
 
 /**
- * @typedef {WsConnection & { messages: any[] }} ClientConnection
- *   `messages` collects every parsed JSON message, in arrival order.
+ * @typedef {WsConnection & { messages: any[], protocol: string|null }} ClientConnection
+ *   `messages` collects every parsed JSON message, in arrival order; `protocol` is the subprotocol
+ *   the server confirmed, if any.
  */
 
 /**
  * Opens a WebSocket. Rejects with an Error carrying `status` when the server refuses the upgrade.
- * @param {string} url ws:// URL
- * @param {{ headers?: Record<string, string>, timeoutMs?: number, maxMessageBytes?: number }} [options]
+ * @param {string} url ws:// or wss:// URL
+ * @param {{ headers?: Record<string, string>, timeoutMs?: number, maxMessageBytes?: number, ca?: Buffer|string }} [options]
+ *   `ca`: a certificate to trust for wss:// (a test's self-signed one)
  * @returns {Promise<ClientConnection>}
  */
-export function connectWebSocket(url, { headers = {}, timeoutMs = 5000, maxMessageBytes = 256 * 1024 * 1024 } = {}) {
+export function connectWebSocket(url, { headers = {}, timeoutMs = 5000, maxMessageBytes = 256 * 1024 * 1024, ca } = {}) {
   const target = new URL(url);
   const key = generateClientKey();
+  const request = target.protocol === 'wss:' ? httpsRequest : httpRequest;
   return new Promise((resolve, reject) => {
     const req = request({
+      ...(ca ? { ca } : {}),
       host: target.hostname.replace(/^\[|\]$/g, ''),
       port: target.port,
       path: `${target.pathname}${target.search}`,
@@ -41,6 +46,7 @@ export function connectWebSocket(url, { headers = {}, timeoutMs = 5000, maxMessa
       }
       const connection = /** @type {ClientConnection} */ (new WsConnection(socket, { role: 'client', maxMessageBytes }));
       connection.messages = [];
+      connection.protocol = typeof res.headers['sec-websocket-protocol'] === 'string' ? res.headers['sec-websocket-protocol'] : null;
       connection.on('message', (text) => {
         try {
           connection.messages.push(JSON.parse(text));

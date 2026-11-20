@@ -10,7 +10,7 @@ import { isLoopbackHost } from '../security.mjs';
 import { savedTopicUrl } from '../notify.mjs';
 import { ensureHome, findRunningServer, loginUrl, probeServer, readStateFile } from '../state-file.mjs';
 import { cliInvocation, sleep, tildify } from './io.mjs';
-import { UsageError, parseApprovalTimeout, parseNotifyUrl, parsePort, parseShareTo, parseTeamHosts } from './options.mjs';
+import { UsageError, parseApprovalTimeout, parseNotifyUrl, parsePort, parseShareTo, parseTeamHosts, parseTls } from './options.mjs';
 
 /** Options shared by start and demo (parseArgs format). */
 export const START_OPTIONS = Object.freeze({
@@ -25,6 +25,8 @@ export const START_OPTIONS = Object.freeze({
   'share-to': { type: 'string' },
   'team-key': { type: 'string' },
   'approval-timeout': { type: 'string' },
+  'tls-cert': { type: 'string' },
+  'tls-key': { type: 'string' },
   record: { type: 'boolean' },
   detach: { type: 'boolean' },
 });
@@ -41,6 +43,7 @@ export const START_OPTIONS = Object.freeze({
  * @property {string[]} teamHosts      --team-host: other names teammates reach it by
  * @property {{ url: string, key: string, member: string }|null} shareTo  --share-to and --team-key
  * @property {number|undefined} approvalTimeoutMs
+ * @property {ReturnType<typeof parseTls>} tls  --tls-cert and --tls-key: HTTPS for other computers
  * @property {boolean} record
  * @property {boolean} detach
  * @property {boolean} demo
@@ -69,6 +72,7 @@ function startSettings(values, io, demo) {
     notify: Boolean(values.notify),
     notifyUrl: parseNotifyUrl(values['notify-url'] ?? io.env.ANDARY_NOTIFY_URL),
     approvalTimeoutMs: parseApprovalTimeout(values['approval-timeout'], (warning) => io.err(`Warning: ${warning}`)),
+    tls: parseTls(values['tls-cert'] ?? io.env.ANDARY_TLS_CERT, values['tls-key'] ?? io.env.ANDARY_TLS_KEY),
     record: Boolean(values.record),
     detach: Boolean(values.detach),
     demo,
@@ -101,7 +105,7 @@ function linkFor(state, settings) {
 }
 
 /** Flags that only matter when a new server starts. */
-const SERVER_SHAPING = new Set(['port', 'host', 'remote-approvals', 'notify', 'notify-url', 'team', 'team-host', 'share-to', 'team-key', 'approval-timeout', 'record']);
+const SERVER_SHAPING = new Set(['port', 'host', 'remote-approvals', 'notify', 'notify-url', 'team', 'team-host', 'share-to', 'team-key', 'approval-timeout', 'tls-cert', 'tls-key', 'record']);
 
 /**
  * @param {import('../state-file.mjs').ServerState} state
@@ -126,7 +130,7 @@ function reportRunning(state, settings, io, ignoredFlags) {
  * @returns {Promise<number>}
  */
 async function runForeground(settings, home, io) {
-  warnIfExposed(settings.host, io, settings.team);
+  warnIfExposed(settings, io);
   refreshForwarder(home);
   let server;
   try {
@@ -140,6 +144,7 @@ async function runForeground(settings, home, io) {
       teamHosts: settings.teamHosts,
       shareTo: settings.shareTo,
       approvalTimeoutMs: settings.approvalTimeoutMs,
+      tls: settings.tls ? { cert: settings.tls.cert, key: settings.tls.key } : null,
       record: settings.record,
       log: (message) => io.out(`[${new Date().toLocaleTimeString()}] ${message}`),
     });
@@ -175,20 +180,25 @@ function describeListenError(error, settings) {
 }
 
 /**
- * @param {string} host
+ * @param {StartSettings} settings
  * @param {import('./io.mjs').CliIo} io
- * @param {boolean} [team]
  */
-function warnIfExposed(host, io, team = false) {
+function warnIfExposed({ host, team, tls }, io) {
   if (isLoopbackHost(host)) {
     if (team) io.err(`Warning: teammates cannot reach ${host}. Leave out --host (or use your network address) so they can.`);
+    if (tls) io.err('Note: --tls-cert only matters when other computers connect (--team or --host): this computer uses plain HTTP on 127.0.0.1.');
     return;
   }
   io.err('');
   io.err(`  WARNING: ${team ? 'the team town listens on your network' : `--host ${host} makes Andary reachable from other machines`}.`);
   io.err('  Hook events contain your prompts, commands and file paths, and with remote approvals');
   io.err('  anyone who gets the sign-in link can approve tool calls. Use this only on a network you trust.');
-  if (team) io.err('  Traffic is plain HTTP: across the internet, connect through a private network such as Tailscale.');
+  if (tls) {
+    io.err('  Other computers must use https:// (your certificate); plain HTTP is answered on this computer only.');
+  } else {
+    io.err('  Traffic is plain HTTP. Add --tls-cert and --tls-key to encrypt it (for example with');
+    io.err('  "tailscale cert"), or connect through a private network such as Tailscale.');
+  }
   io.err('');
 }
 
@@ -212,7 +222,8 @@ function printBanner(server, settings, io) {
   }
   if (settings.shareTo) {
     io.out(`  Sharing your sessions with the team town at ${settings.shareTo.url} as ${settings.shareTo.member}.`);
-    io.out('  Everyone with the team\'s view link sees their prompts, commands and file paths, over plain HTTP.');
+    const how = settings.shareTo.url.startsWith('https:') ? 'over HTTPS' : 'over plain HTTP';
+    io.out(`  Everyone with the team's view link sees their prompts, commands and file paths, sent ${how}.`);
   }
   if (server.recordingPath) {
     io.out(`  Recording to ${tildify(server.recordingPath)} (it will contain your prompts and commands)`);
@@ -324,6 +335,8 @@ function forwardedFlags(settings) {
   if (settings.team) flags.push('--team');
   for (const name of settings.teamHosts) flags.push('--team-host', name);
   if (settings.approvalTimeoutMs !== undefined) flags.push('--approval-timeout', String(settings.approvalTimeoutMs / 1000));
+  // Paths only: the background server reads the files itself.
+  if (settings.tls) flags.push('--tls-cert', settings.tls.certPath, '--tls-key', settings.tls.keyPath);
   if (settings.record) flags.push('--record');
   return flags;
 }

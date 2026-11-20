@@ -25,9 +25,16 @@ async function refusalStatus(attempt) {
 }
 
 describe('WebSocket access control', () => {
-  it('needs the andary_ui cookie', async () => {
-    assert.equal(await refusalStatus(connectBrowser(town, { cookie: null })), 401);
-    assert.equal(await refusalStatus(connectBrowser(town, { cookie: 'andary_ui=guess' })), 401);
+  it('needs the sign-in subprotocol; a cookie is not enough', async () => {
+    assert.equal(await refusalStatus(connectBrowser(town, { protocols: null })), 401);
+    assert.equal(await refusalStatus(connectBrowser(town, { protocols: 'andary, andary.token.guess' })), 401);
+    assert.equal(await refusalStatus(connectBrowser(town, { protocols: 'andary', cookie: `andary_ui=${town.uiToken}` })), 401);
+  });
+
+  it('confirms the andary subprotocol, and never echoes the token', async () => {
+    const connection = await connectBrowser(town);
+    assert.equal(connection.protocol, 'andary');
+    connection.close();
   });
 
   it('needs our own Origin (or none)', async () => {

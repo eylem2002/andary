@@ -173,6 +173,12 @@ same `subagent_type` (FIFO). Normalise ids by stripping a leading `agent-`.
 2. Reads `<ANDARY_HOME>/server.json`; if missing, unreadable, or its `pid` is not a live process of
    the same user (a stale file whose port someone else may now hold), exits 0 immediately.
 3. Reads stdin fully, parses JSON (on failure sends `{hook_event_name: 'Unknown', raw: <first 4000 chars>}`).
+3a. Challenges the server before sending anything: `GET /api/proof` with
+   `x-andary-nonce: <16 random bytes, base64url>` and nothing else (no secret). The server answers
+   `200 {"ok":true}` with `x-andary-proof: base64url(HMAC-SHA256(responseKey, "andary-proof\n" +
+   nonce))` (400 for a nonce that is not 16–128 base64url characters). Without a valid proof
+   within 1.5 s the forwarder exits 0 having sent nothing: a recycled pid of a dead server whose
+   port someone else now holds learns neither the event nor the secret.
 4. `POST http://127.0.0.1:<port>/api/hook` with headers `x-andary-secret: <secret>` and
    `x-andary-nonce: <16 random bytes, base64url>` and body `{"v":1,"ts":<ts>,"event":<payload>}`;
    run with the argument `codex`, the body also has `"source":"codex"` (§4.12). Codex reads the
@@ -203,18 +209,23 @@ same `subagent_type` (FIFO). Normalise ids by stripping a leading `agent-`.
   same-origin`, `Cross-Origin-Resource-Policy: same-origin`, `Permissions-Policy` (camera, mic,
   geolocation off). The import-map hash is computed from `public/index.html` at startup.
 - Routes:
-  - `GET /?token=<uiToken>[&…]` → sets cookie `andary_ui=<uiToken>; HttpOnly; SameSite=Strict; Path=/`
-    and `302` to the same URL without `token` (other query params kept). Wrong token → `403` page.
+  - `GET /?token=<uiToken>[&…]` → `302` to the same URL without `token` (other query params
+    kept) and with `#signin=<uiToken>`; `Cache-Control: no-store`, no cookie. Wrong token → `403`
+    page. The page keeps the token in `localStorage["andary:signin"]` (`{token, view}`), removes
+    the fragment, and sends it as `x-andary-token` on `fetch` and as the WebSocket subprotocol
+    `andary.token.<uiToken>` (ADR 0015). No cookie is set or read.
   - `GET /` and static files from `public/` (no auth: they contain no data). gzip when accepted.
     Path traversal is impossible (resolve + prefix check), dotfiles are not served.
   - `GET /api/health` → `{"ok":true}` (no auth).
   - `GET /api/hello` → `{"app":"andary","version","authenticated":bool,"settings":{...}}`
-    (no auth; tells the UI whether it is in live mode and logged in).
+    (no auth; tells the UI whether it is in live mode and whether its `x-andary-token` /
+    `x-andary-view` header signs it in).
   - `POST /api/hook` → requires `x-andary-secret` (constant-time compare), JSON ≤ 1 MiB,
     rate-limited (token bucket ~300 req/s, burst 600 → `429`). Responds `{"output": object|null}`,
     signed in `x-andary-signature` when the request has an `x-andary-nonce` (see §4.3).
-  - `GET /ws` → WebSocket upgrade; requires the `andary_ui` cookie and an `Origin` matching the
-    server's own origin (or absent). Max 16 clients; client messages ≤ 64 KiB.
+  - `GET /ws` → WebSocket upgrade; requires the subprotocol `andary.token.<uiToken>` (or
+    `andary.view.<token>` on a team host) and an `Origin` matching the server's own origin (or
+    absent); when the client offers `andary`, the answer confirms it (never a credential). Max 16 clients; client messages ≤ 64 KiB.
 - Sanitising before anything leaves the server or is recorded: strings longer than 2,000 chars are
   cut (`…[+N chars]`), arrays to 50 items, objects to 100 keys (plus `"…": "[+N keys]"`), keys to
   200 chars, depth to 8; secrets are redacted to `[redacted]`, in keys too
@@ -276,6 +287,11 @@ Settled during implementation; they refine §4.3–§4.5.
   server in the background). `--approval-timeout` is capped at 140 s because Claude Code kills the
   hook at 150 s. An explicit `--host` address is added to the Host allowlist. Sign-in links also
   work on `/<page>.html`.
+- HTTPS (ADR 0016, `server/listener.mjs`): with `--tls-cert`/`--tls-key` one port takes both;
+  a connection whose first byte is `0x16` (a TLS handshake) gets HTTPS (TLS 1.2 or newer), any
+  other gets plain HTTP only from a loopback peer and `400` otherwise. `server.json` then has
+  `"tls": true` and, on a team host, `"teamHosts"`; `serverOrigin` stays `http://127.0.0.1:<port>`
+  for local clients. WebSocket `Origin` may be `http://` or `https://` with an allowed host.
 - The forwarder shrinks payloads over 1 MiB instead of dropping them, and also looks for
   `server.json` next to itself (plugin installs).
 - Approvals: `SubagentStop` also resolves that subagent's terminal-answered approvals; approval
@@ -351,8 +367,8 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
 - **Member key**: `encodeURIComponent(name) + "." + HMAC-SHA256(secret, "member:" + name)`
   (base64url, first 32 characters). Names keep letters, digits, spaces and `._-`, at most 24.
 - **View token**: `HMAC-SHA256(secret, "view")`, same length. `GET /?view=<token>` (pages only)
-  sets the `andary_view` cookie (`HttpOnly; SameSite=Strict; Path=/`) and redirects without it;
-  a wrong token answers 403.
+  redirects to the same page with `#view=<token>`, which the page keeps like the sign-in (§4.4;
+  `x-andary-view`, subprotocol `andary.view.<token>`); a wrong token answers 403.
 - **Host names**: a team host answers to loopback names, to `--team-host <name>` (repeatable;
   for a VPN or local DNS name) and, listening on every interface, to its IPv4 network addresses
   (read again every 30 s). `team invite` prints the private-range address first.
@@ -375,8 +391,7 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
   `ts` kept within the last hour and not in the future; it counts towards the town's growth
   (§4.9) but not usage, notifications or approvals: a teammate answers their own prompts.
   A local `/api/hook` event never keeps an `andary_member` field.
-- **Browsers** are `owner` (the `andary_ui` cookie) or `viewer` (the `andary_view` cookie, team
-  hosts only); `/api/hello` reports `authenticated: true` for both. A viewer's `hello` has no
+- **Browsers** are `owner` (the UI token) or `viewer` (the view token, team hosts only); `/api/hello` reports `authenticated: true` for both. A viewer's `hello` has no
   approvals, empty usage, `notifyUrl: null` and `remoteApprovals: false`; `approval`, `usage` and
   `settings` broadcasts go to owners only; a viewer's messages other than `ping` get
   `{t:'error', message:'Viewers can only watch…'}`. Viewers never use the last 4 connections, and

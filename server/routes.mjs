@@ -1,6 +1,6 @@
 // HTTP routes (CONTRACTS §4.4). Every response carries the security headers; every request must
 // name one of our own hosts.
-import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, browserRole, hasHookSecret, loginCookie, safeEqual, signHookReply, viewCookie } from './auth.mjs';
+import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, PROOF_HEADER, browserRole, hasHookSecret, proveServer, safeEqual, signHookReply } from './auth.mjs';
 import { TEAM_HEADER, verifyMemberKey } from './team.mjs';
 import { sourceOf } from './adapters/index.mjs';
 import { ingestHook, ingestTeam } from './ingest.mjs';
@@ -83,8 +83,10 @@ function isPagePath(pathname) {
 }
 
 /**
- * GET /?token=… stores the UI token in an HttpOnly cookie and redirects to the same page without
- * the token, so it does not linger in the address bar or history.
+ * GET /?token=… (the sign-in link): checks the token, then redirects to the same page with the
+ * token moved into the fragment (`#signin=…`). The page keeps it in its own storage, which no
+ * other origin can read, and removes it from the address bar (ADR 0015). A fragment is never sent
+ * to a server again, so the token appears in no later request line or Referer.
  * @param {TownContext} ctx
  * @param {Response} res
  * @param {URL} url
@@ -94,20 +96,11 @@ function handleLogin(ctx, res, url) {
     sendHtml(res, 403, BAD_TOKEN_PAGE);
     return;
   }
-  url.searchParams.delete('token');
-  const query = url.searchParams.toString();
-  res.writeHead(302, {
-    'Set-Cookie': loginCookie(ctx.uiToken),
-    Location: `${url.pathname}${query ? `?${query}` : ''}`,
-    'Cache-Control': 'no-store',
-    'Content-Length': '0',
-  });
-  res.end();
+  redirectWithFragment(res, url, 'token', `signin=${ctx.uiToken}`);
 }
 
 /**
- * GET /?view=… (a team host's view-only link): stores the view token in its own HttpOnly cookie
- * and redirects without it, like the sign-in link.
+ * GET /?view=… (a team host's view-only link): the same, with `#view=…`.
  * @param {TownContext} ctx
  * @param {Response} res
  * @param {URL} url
@@ -117,11 +110,20 @@ function handleViewLogin(ctx, res, url) {
     sendHtml(res, 403, BAD_TOKEN_PAGE);
     return;
   }
-  url.searchParams.delete('view');
+  redirectWithFragment(res, url, 'view', `view=${ctx.team.view}`);
+}
+
+/**
+ * @param {Response} res
+ * @param {URL} url
+ * @param {string} param   the query parameter to take out
+ * @param {string} fragment
+ */
+function redirectWithFragment(res, url, param, fragment) {
+  url.searchParams.delete(param);
   const query = url.searchParams.toString();
   res.writeHead(302, {
-    'Set-Cookie': viewCookie(ctx.team.view),
-    Location: `${url.pathname}${query ? `?${query}` : ''}`,
+    Location: `${url.pathname}${query ? `?${query}` : ''}#${fragment}`,
     'Cache-Control': 'no-store',
     'Content-Length': '0',
   });
@@ -141,6 +143,7 @@ const API_ROUTES = {
         settings: publicSettings(ctx),
       }),
   },
+  '/api/proof': { methods: ['GET'], handle: handleProof },
   '/api/hook': { methods: ['POST'], handle: handleHook },
   '/api/team': { methods: ['POST'], handle: handleTeam },
 };
@@ -232,6 +235,23 @@ async function handleApi(ctx, req, res, pathname) {
     return;
   }
   await route.handle(ctx, req, res);
+}
+
+/**
+ * GET /api/proof: the forwarder's challenge before it sends an event (or the hook secret). Only
+ * the server that wrote server.json holds the response key, so a program that took over the port
+ * of a dead server cannot answer it and receives nothing else (CONTRACTS §4.3).
+ * @param {TownContext} ctx
+ * @param {Request} req
+ * @param {Response} res
+ */
+function handleProof(ctx, req, res) {
+  const proof = proveServer(ctx.responseKey, req.headers[HOOK_NONCE_HEADER]);
+  if (!proof) {
+    sendJson(res, 400, { error: 'Missing or malformed nonce' });
+    return;
+  }
+  sendJson(res, 200, { ok: true }, { [PROOF_HEADER]: proof });
 }
 
 /**
