@@ -20,6 +20,7 @@ const START_TIMEOUT_MS = 15_000;
  * @property {string} home        the temporary ANDARY_HOME
  * @property {string} secret      hook secret
  * @property {string} uiToken     browser token
+ * @property {string} responseKey signs the server's answers to the forwarder
  * @property {number} pid
  * @property {() => string} output  everything the server printed so far
  * @property {(pattern: RegExp, timeoutMs?: number) => Promise<string>} waitForOutput
@@ -81,6 +82,7 @@ export async function startTown({ remoteApprovals = false, args = [], env = {} }
     home,
     secret: state.secret,
     uiToken: state.uiToken,
+    responseKey: String(state.responseKey ?? ''),
     pid: state.pid,
     output: () => output,
     waitForOutput,

@@ -17,7 +17,9 @@ the security review:
 ## Decision
 
 - **Live server only.** The forwarder sends nothing unless the `pid` in `server.json` is a live
-  process of the same user.
+  process of the same user, and (added later) the server on the port answers a challenge with
+  `HMAC-SHA256(responseKey, "andary-proof\n" + nonce)` first: no event, and not the hook secret,
+  goes anywhere before that proof.
 - **Signed replies.** Each start creates a `responseKey` that stays in the 0600 state file and is
   never sent. The forwarder sends a random nonce with each request; the server signs its reply
   with `HMAC-SHA256(responseKey, nonce + "\n" + body)`. The forwarder prints a decision only for
@@ -34,4 +36,5 @@ the security review:
 - A forwarder from this version ignores answers from an older server (no signature); prompts then
   fall back to the terminal, which is safe. `andary start` refreshes the installed forwarder.
 - Long Write/Edit inputs and anything with a masked secret are always answered in the terminal.
-- A recycled pid of the same user could still receive payloads (it cannot steer Claude Code).
+- A recycled pid of the same user no longer receives payloads either: whatever holds the port
+  must prove it holds the response key before anything is sent.

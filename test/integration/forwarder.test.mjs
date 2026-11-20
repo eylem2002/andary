@@ -144,7 +144,7 @@ describe('forwarder failure modes (always exit 0, print nothing)', () => {
       const home = join(scratch, 'silent');
       mkdirSync(home, { recursive: true });
       const { port } = /** @type {import('node:net').AddressInfo} */ (silent.address());
-      writeFileSync(join(home, 'server.json'), JSON.stringify({ pid: process.pid, port, host: '127.0.0.1', secret: 's', uiToken: 'u' }));
+      writeFileSync(join(home, 'server.json'), JSON.stringify({ pid: process.pid, port, host: '127.0.0.1', secret: 's', uiToken: 'u', responseKey: 'k' }));
       const started = Date.now();
       const result = await runHookScript({ payload: hookPayload('PreToolUse'), env: isolatedEnv({ ANDARY_HOME: home }) });
       assert.deepEqual(result, { code: 0, stdout: '', stderr: '' });
@@ -159,7 +159,8 @@ describe('forwarder failure modes (always exit 0, print nothing)', () => {
 /**
  * An HTTP server that is not Andary but answers on a port named in server.json, the way another
  * local user could after the real server died. It records what it receives and replies with
- * `reply(event)`, optionally signed with `signKey`.
+ * `reply(event)`; with `signKey` (which a real impostor would not have) it also answers the
+ * forwarder's proof challenge and signs its replies.
  * @param {(event: any) => object} reply
  * @param {string} [signKey]
  */
@@ -167,6 +168,14 @@ async function impostor(reply, signKey) {
   /** @type {any[]} */
   const received = [];
   const server = createHttpServer((req, res) => {
+    if (req.url === '/api/proof') {
+      const nonce = String(req.headers['x-andary-nonce'] ?? '');
+      received.push({ proof: true, secret: req.headers['x-andary-secret'] });
+      const proof = signKey ? createHmac('sha256', signKey).update(`andary-proof\n${nonce}`).digest('base64url') : 'made-up';
+      res.writeHead(200, { 'content-type': 'application/json', 'x-andary-proof': proof });
+      res.end('{"ok":true}');
+      return;
+    }
     let body = '';
     req.on('data', (chunk) => (body += chunk));
     req.on('end', () => {
@@ -222,14 +231,16 @@ describe('forwarder trust (another program on the recorded port)', () => {
     }
   });
 
-  it('ignores answers that are not signed with the response key', async () => {
+  it('sends nothing, not even the secret, to a server that cannot prove it holds the key', async () => {
     const fake = await impostor(() => HOSTILE_DECISION);
     try {
-      const home = homeWith('unsigned', { pid: process.pid, port: fake.port, responseKey: 'the-real-key' });
-      const result = await runHookScript({ payload: hookPayload('PermissionRequest', { tool_name: 'Bash' }), env: isolatedEnv({ ANDARY_HOME: home }) });
-      assert.deepEqual(result, { code: 0, stdout: '', stderr: '' });
-      assert.equal(fake.received.length, 1);
-      assert.equal(fake.received[0].secret, 'stale-secret', 'the hook secret is sent, which is why it cannot vouch for answers');
+      // The recorded pid is alive (it was reused), but the port belongs to someone else now.
+      const home = homeWith('unproven', { pid: process.pid, port: fake.port, responseKey: 'the-real-key' });
+      for (const name of ['UserPromptSubmit', 'PermissionRequest']) {
+        const result = await runHookScript({ payload: hookPayload(name, { prompt: 'private', tool_name: 'Bash' }), env: isolatedEnv({ ANDARY_HOME: home }) });
+        assert.deepEqual(result, { code: 0, stdout: '', stderr: '' }, name);
+      }
+      assert.deepEqual(fake.received, [{ proof: true, secret: undefined }, { proof: true, secret: undefined }], 'only the challenge, which carries nothing');
     } finally {
       await fake.close();
     }

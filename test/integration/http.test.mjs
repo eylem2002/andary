@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { Agent } from 'node:http';
 import { gunzipSync } from 'node:zlib';
 import { after, before, describe, it } from 'node:test';
@@ -51,6 +52,17 @@ describe('public endpoints', () => {
       assert.match(csp, /frame-ancestors 'none'/);
       assert.match(String(res.headers['permissions-policy']), /camera=\(\)/);
     }
+  });
+});
+
+describe('the forwarder\'s challenge', () => {
+  it('proves the server holds the response key, and needs a well-formed nonce', async () => {
+    const nonce = 'challenge-0123456789';
+    const res = await rawRequest(town.port, { path: '/api/proof', headers: { 'x-andary-nonce': nonce } });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers['x-andary-proof'], createHmac('sha256', town.responseKey).update(`andary-proof\n${nonce}`).digest('base64url'));
+    assert.equal((await rawRequest(town.port, { path: '/api/proof' })).status, 400);
+    assert.equal((await rawRequest(town.port, { path: '/api/proof', method: 'POST' })).status, 405);
   });
 });
 

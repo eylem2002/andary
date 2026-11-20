@@ -52,8 +52,8 @@ it came from, in one table (`POLICIES`): a local event counts toward growth, not
 approvals and is relayed to a team host; a teammate's event grows the town and nothing else.
 Token usage is read before the adapter, and only for Claude Code (its transcripts).
 
-**Security at every boundary.** The forwarder only talks to a live server of yours and only obeys
-replies signed with a key that never leaves `~/.andary` (ADR 0012). The server checks the `Host`
+**Security at every boundary.** The forwarder only talks to a live server of yours that proves it
+holds a key that never leaves `~/.andary`, and only obeys replies signed with it (ADR 0012). The server checks the `Host`
 header (DNS rebinding) and the WebSocket `Origin`, signs browsers in with a per-start token the
 page keeps for its own origin (ADR 0015; no cookie, which every port would see), sanitizes every
 payload (secrets redacted, sizes capped) before anything is kept or sent, and never holds a

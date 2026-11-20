@@ -241,9 +241,9 @@ Andary sees what your agents see, so it is locked down:
   and sends with each request; there is no cookie, which would also reach every other local
   server on `127.0.0.1` (ADR 0015); hooks use a separate secret; both live in
   `~/.andary/server.json`, readable only by you;
-- the hook forwarder only talks to a live server of yours and only obeys replies signed with a
-  key that never leaves `~/.andary`, so a stale state file cannot hand your prompts, or control
-  of your agent, to whoever takes the old port;
+- the hook forwarder only talks to a live server of yours that first proves it holds a key that
+  never leaves `~/.andary`, and only obeys replies signed with it, so a stale state file cannot
+  hand your prompts, the hook secret or control of your agent to whoever takes the old port;
 - secrets that look like API keys, tokens or passwords are redacted before anything is kept or
   sent; prompts and commands are never written to disk unless you pass `--record` (small state
   files in `~/.andary` keep usage totals with the transcript paths they came from, and the

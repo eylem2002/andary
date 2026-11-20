@@ -173,6 +173,12 @@ same `subagent_type` (FIFO). Normalise ids by stripping a leading `agent-`.
 2. Reads `<ANDARY_HOME>/server.json`; if missing, unreadable, or its `pid` is not a live process of
    the same user (a stale file whose port someone else may now hold), exits 0 immediately.
 3. Reads stdin fully, parses JSON (on failure sends `{hook_event_name: 'Unknown', raw: <first 4000 chars>}`).
+3a. Challenges the server before sending anything: `GET /api/proof` with
+   `x-andary-nonce: <16 random bytes, base64url>` and nothing else (no secret). The server answers
+   `200 {"ok":true}` with `x-andary-proof: base64url(HMAC-SHA256(responseKey, "andary-proof\n" +
+   nonce))` (400 for a nonce that is not 16–128 base64url characters). Without a valid proof
+   within 1.5 s the forwarder exits 0 having sent nothing: a recycled pid of a dead server whose
+   port someone else now holds learns neither the event nor the secret.
 4. `POST http://127.0.0.1:<port>/api/hook` with headers `x-andary-secret: <secret>` and
    `x-andary-nonce: <16 random bytes, base64url>` and body `{"v":1,"ts":<ts>,"event":<payload>}`;
    run with the argument `codex`, the body also has `"source":"codex"` (§4.12). Codex reads the

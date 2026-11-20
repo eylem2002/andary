@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { browserCredentials, browserRole, generateToken, hasHookSecret, offersAndaryProtocol, safeEqual, signHookReply } from '../../../server/auth.mjs';
+import { browserCredentials, browserRole, generateToken, hasHookSecret, offersAndaryProtocol, proveServer, safeEqual, signHookReply } from '../../../server/auth.mjs';
 
 describe('generateToken', () => {
   it('returns 32 random bytes as base64url', () => {
@@ -66,5 +66,14 @@ describe('signHookReply', () => {
     assert.notEqual(signHookReply('key', 'nonce-2', '{"output":null}'), signature, 'bound to the nonce');
     assert.notEqual(signHookReply('key', 'nonce-1', '{"output":{}}'), signature, 'bound to the body');
     for (const nonce of [undefined, '', 'x'.repeat(129), ['a']]) assert.equal(signHookReply('key', nonce, '{}'), null);
+  });
+});
+
+describe('proveServer', () => {
+  it('answers the forwarder\'s challenge with a proof no signed reply can stand in for', () => {
+    const nonce = 'n0nce-abcdefghijklm';
+    assert.equal(proveServer('key', nonce), createHmac('sha256', 'key').update(`andary-proof\n${nonce}`).digest('base64url'));
+    assert.notEqual(proveServer('key', nonce), signHookReply('key', nonce, 'andary-proof'));
+    for (const bad of [undefined, '', 'short', 'has space in it here', 'x'.repeat(129), 'line\nbreak-abcdefghijk']) assert.equal(proveServer('key', bad), null, String(bad));
   });
 });

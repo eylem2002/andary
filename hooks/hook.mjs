@@ -5,7 +5,9 @@
 // same decision format.
 //
 // It must never get in Claude's way: it prints nothing but that decision object, it always exits
-// 0, and when no server is running it exits at once. Self-contained (Node built-ins only),
+// 0, and when no server is running it exits at once. Before sending anything (the event, or the
+// hook secret) it asks the server to prove it holds the key from server.json, so a program that
+// took over the port of a server that is gone receives nothing. Self-contained (Node built-ins only),
 // because `andary install` copies it to <ANDARY_HOME>/hook.mjs and the plugin runs it in
 // place from its own folder.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -166,6 +168,40 @@ function connectHost(host) {
 }
 
 /**
+ * Asks the server on the recorded port to prove it is the one that wrote server.json: it must
+ * answer GET /api/proof with HMAC(responseKey, "andary-proof\n" + nonce). Nothing else is sent
+ * first, not even the hook secret.
+ * @param {State} state
+ * @param {number} timeoutMs
+ * @returns {Promise<boolean>}
+ */
+function serverProves(state, timeoutMs) {
+  if (typeof state.responseKey !== 'string' || state.responseKey === '') return Promise.resolve(false);
+  const key = state.responseKey;
+  const nonce = randomBytes(16).toString('base64url');
+  const host = connectHost(state.host);
+  return new Promise((resolveProof) => {
+    const req = request(
+      { host, port: state.port, path: '/api/proof', method: 'GET', agent: false, headers: { host: `${host.includes(':') ? `[${host}]` : host}:${state.port}`, 'x-andary-nonce': nonce } },
+      (res) => {
+        res.resume();
+        const given = Buffer.from(String(res.headers['x-andary-proof'] ?? ''), 'base64url');
+        const expected = createHmac('sha256', key).update(`andary-proof\n${nonce}`).digest();
+        resolveProof(res.statusCode === 200 && given.length === expected.length && timingSafeEqual(given, expected));
+      },
+    );
+    const timer = setTimeout(() => req.destroy(), timeoutMs);
+    // The first answer counts: after a proof, the closing connection changes nothing.
+    req.on('close', () => {
+      clearTimeout(timer);
+      resolveProof(false);
+    });
+    req.on('error', () => resolveProof(false));
+    req.end();
+  });
+}
+
+/**
  * POSTs the body; resolves with the response text and its signature on HTTP 200, otherwise null.
  * @param {State} state
  * @param {string} body
@@ -258,6 +294,7 @@ async function main() {
   const timeoutMs = isPermission ? approvalMs + APPROVAL_GRACE_MS : EVENT_TIMEOUT_MS;
   // Last line of defence: whatever happens, never outlive the request budget.
   setTimeout(() => finish(), timeoutMs + 1000).unref();
+  if (!(await serverProves(state, EVENT_TIMEOUT_MS))) return '';
   const nonce = randomBytes(16).toString('base64url');
   const reply = await post(state, buildBody(event), nonce, timeoutMs);
   // Only a permission prompt takes an answer from the town; other events print nothing.

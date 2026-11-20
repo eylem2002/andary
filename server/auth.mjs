@@ -14,6 +14,8 @@ const HOOK_SECRET_HEADER = 'x-andary-secret';
 /** The forwarder's per-request nonce, and the server's signature over nonce + reply body. */
 export const HOOK_NONCE_HEADER = 'x-andary-nonce';
 export const HOOK_SIGNATURE_HEADER = 'x-andary-signature';
+/** The server's answer to the forwarder's challenge (GET /api/proof). */
+export const PROOF_HEADER = 'x-andary-proof';
 const MAX_NONCE_CHARS = 128;
 
 /**
@@ -108,4 +110,17 @@ export function browserRole(req, uiToken, view) {
   if (safeEqual(credentials.token, uiToken)) return 'owner';
   if (view && safeEqual(credentials.view, view)) return 'viewer';
   return null;
+}
+
+/**
+ * Proves to the forwarder, before it sends anything, that this is the server that wrote
+ * server.json: HMAC-SHA256(responseKey, "andary-proof\n" + nonce), base64url. The prefix keeps a
+ * proof from ever doubling as a signed reply (those sign nonce + "\n" + a JSON body).
+ * @param {string} responseKey
+ * @param {unknown} nonce the forwarder's x-andary-nonce header: base64url, 16 to 128 characters
+ * @returns {string|null} null for a missing or malformed nonce
+ */
+export function proveServer(responseKey, nonce) {
+  if (typeof nonce !== 'string' || !/^[\w-]{16,128}$/.test(nonce)) return null;
+  return createHmac('sha256', responseKey).update(`andary-proof\n${nonce}`).digest('base64url');
 }

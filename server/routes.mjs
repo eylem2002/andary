@@ -1,6 +1,6 @@
 // HTTP routes (CONTRACTS §4.4). Every response carries the security headers; every request must
 // name one of our own hosts.
-import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, browserRole, hasHookSecret, safeEqual, signHookReply } from './auth.mjs';
+import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, PROOF_HEADER, browserRole, hasHookSecret, proveServer, safeEqual, signHookReply } from './auth.mjs';
 import { TEAM_HEADER, verifyMemberKey } from './team.mjs';
 import { sourceOf } from './adapters/index.mjs';
 import { ingestHook, ingestTeam } from './ingest.mjs';
@@ -143,6 +143,7 @@ const API_ROUTES = {
         settings: publicSettings(ctx),
       }),
   },
+  '/api/proof': { methods: ['GET'], handle: handleProof },
   '/api/hook': { methods: ['POST'], handle: handleHook },
   '/api/team': { methods: ['POST'], handle: handleTeam },
 };
@@ -234,6 +235,23 @@ async function handleApi(ctx, req, res, pathname) {
     return;
   }
   await route.handle(ctx, req, res);
+}
+
+/**
+ * GET /api/proof: the forwarder's challenge before it sends an event (or the hook secret). Only
+ * the server that wrote server.json holds the response key, so a program that took over the port
+ * of a dead server cannot answer it and receives nothing else (CONTRACTS §4.3).
+ * @param {TownContext} ctx
+ * @param {Request} req
+ * @param {Response} res
+ */
+function handleProof(ctx, req, res) {
+  const proof = proveServer(ctx.responseKey, req.headers[HOOK_NONCE_HEADER]);
+  if (!proof) {
+    sendJson(res, 400, { error: 'Missing or malformed nonce' });
+    return;
+  }
+  sendJson(res, 200, { ok: true }, { [PROOF_HEADER]: proof });
 }
 
 /**
