@@ -113,6 +113,7 @@ export function baseAgent(s, key, agentId, ts) {
     errors: 0,
     lastMessage: undefined,
     model: undefined,
+    wait: null,
   };
 }
 

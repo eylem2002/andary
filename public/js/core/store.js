@@ -13,6 +13,7 @@ import { NO_SESSION, normalize } from './events.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
+import { waitAfter, waitAfterApproval } from './waits.js';
 
 export { ACHIEVEMENTS };
 
@@ -89,6 +90,7 @@ export { ACHIEVEMENTS };
  * @property {number} errors
  * @property {string} [lastMessage]
  * @property {string} [model]
+ * @property {import('./waits.js').Wait|null} wait  what it waits for you on, if anything (waits.js)
  */
 
 /**
@@ -578,12 +580,22 @@ function apply(m, input) {
   m.state.stats.events += 1;
   const handler = own(APPLY, e.kind);
   const draft = handler && a ? handler(m, e, s, a, relabels) : null;
+  if (a) setWait(a, waitAfter(a, e));
   if (relabels.length) e.data.relabels = relabels;
   s.lastActivity = Math.max(s.lastActivity, e.ts);
   if (a) a.lastActivity = Math.max(a.lastActivity, e.ts);
   if (s.status !== 'ended') s.status = sessionStatus(m, s);
   if (draft) pushLog(m, e, s, a, draft);
   return e;
+}
+
+/**
+ * Applies a wait change from waits.js: undefined leaves the wait as it is.
+ * @param {AgentState} a
+ * @param {import('./waits.js').Wait|null|undefined} next
+ */
+function setWait(a, next) {
+  if (next !== undefined) a.wait = next;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -651,11 +663,14 @@ function approvalChanged(m, approval, ts) {
   const key = agentKeyOf(approval.sessionId, normalizeAgentId(approval.agentId));
   const a = m.state.agents[key];
   const tool = str(approval.toolName) || 'Tool';
-  if (a) waitForAnswer(m, a, key, approval.status, tool);
+  const summary = summarizeTool(tool, approval.toolInput, approval.cwd ?? s?.cwd ?? '');
+  if (a) {
+    waitForAnswer(m, a, key, approval.status, tool);
+    setWait(a, waitAfterApproval(a, approval, summary));
+  }
   if (s && s.status !== 'ended') s.status = sessionStatus(m, s);
   const log = own(APPROVAL_LOG, approval.status);
   if (log) {
-    const summary = summarizeTool(tool, approval.toolInput, approval.cwd ?? s?.cwd ?? '');
     const at = { ts, sessionId: approval.sessionId, agentKey: key, kind: 'approval' };
     pushLog(m, at, s, a, { icon: log.icon, text: `${log.prefix}: ${summary}`, level: /** @type {LogDraft['level']} */ (log.level) });
   }

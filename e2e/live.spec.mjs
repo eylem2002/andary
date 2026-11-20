@@ -178,6 +178,54 @@ test('a click meant for one request cannot answer another that just slid under t
   for (const pending of [first, second]) expect(JSON.parse((await pending).stdout).hookSpecificOutput.decision.behavior).toBe('deny');
 });
 
+test('what needs you: rows say what for, the button and I go through it, a stop can be set aside', async ({ page }) => {
+  await signIn(page);
+  const crew = (/** @type {string} */ session) => (/** @type {string} */ name, /** @type {Record<string, unknown>} */ extra = {}) => hook(name, { session_id: session, ...extra });
+  const asks = crew('e2e-session');
+  const stops = crew('e2e-other');
+  const finishes = crew('e2e-third');
+  for (const payload of [
+    asks('SessionStart', { source: 'startup' }),
+    asks('PreToolUse', { tool_name: 'AskUserQuestion', tool_use_id: 'q1', tool_input: { questions: [{ question: 'Which port should the dev server use?' }] } }),
+    stops('SessionStart', { source: 'startup' }),
+    stops('StopFailure', { error: 'server_error' }),
+    finishes('SessionStart', { source: 'startup' }),
+    finishes('Stop', { last_assistant_message: 'All tests pass.' }),
+    finishes('Notification', { notification_type: 'idle_prompt', message: 'Claude is waiting for your input' }),
+  ]) {
+    expect(await town.sendHook(payload)).toMatchObject({ code: 0 });
+  }
+  const button = page.getByTestId('waiting-for-you');
+  // The label carries the words (the count and its words are separate spans on screen).
+  await expect(button).toHaveAttribute('aria-label', '3 things need you. Next: Asks: Which port should the dev server use?');
+  await expect(button).toHaveAttribute('data-level', 'blocked');
+  await expect(page).toHaveTitle('(3) Andary');
+  const row = (/** @type {string} */ session) => page.locator(`[data-testid="agent-row"][data-agent-key="${session}:main"]`);
+  await expect(row('e2e-session')).toContainText('Asks: Which port should the dev server use?');
+  await expect(row('e2e-session')).toHaveAttribute('data-need', 'blocked');
+  // A question blocks the agent: it cannot be set aside. A stop can.
+  const dismiss = (/** @type {string} */ session) => page.locator(`.hud-stations__item:has([data-agent-key="${session}:main"]) [data-testid="dismiss-need"]`);
+  await expect(dismiss('e2e-session')).toBeHidden();
+  await dismiss('e2e-other').click();
+  await expect(button).toHaveAttribute('aria-label', /^2 things need you/);
+  await expect(page).toHaveTitle('(2) Andary');
+
+  // Most urgent first: the question, then the finished turn, then around again.
+  await page.keyboard.press('i');
+  await expect(row('e2e-session')).toHaveAttribute('aria-current', 'true');
+  await button.click();
+  await expect(row('e2e-third')).toHaveAttribute('aria-current', 'true');
+  await expect(page.getByTestId('agent-inspector')).toContainText('Finished: All tests pass.');
+  await page.getByTestId('inspector-dismiss').click();
+  await expect(button).toHaveAttribute('aria-label', /^1 thing needs you/);
+  await expect(button).toHaveAttribute('data-level', 'blocked');
+
+  // Answered in the terminal: nothing needs you, and the button goes.
+  await town.sendHook(asks('PostToolUse', { tool_name: 'AskUserQuestion', tool_use_id: 'q1', tool_input: {}, tool_response: {} }));
+  await expect(button).toBeHidden();
+  await expect(page).toHaveTitle('Andary');
+});
+
 test('with --notify-url, Settings shows the phone topic and sends a test', async ({ page }) => {
   await town.stop();
   town = await startTown({ args: ['--notify-url', 'http://127.0.0.1:9/e2e-topic'] });

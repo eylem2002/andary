@@ -9,7 +9,6 @@ import { toTownPayloads } from '../../../server/adapters/index.mjs';
 import { withCallKey } from '../../../server/hook-steps.mjs';
 import { ORDER_SLACK_MS } from '../../../public/js/core/dialogs.js';
 import { parseNotifyUrl } from '../../../server/cli/options.mjs';
-import { notificationFor } from '../../../public/js/ui/notifications.js';
 import { createFakeClock } from '../core/helpers.mjs';
 
 test('noteFor picks the notes sent at once, and never says more than what happened', () => {
@@ -778,18 +777,4 @@ test('--notify-url takes only an http(s) topic URL without credentials', () => {
   assert.equal(checkNotifyUrl('https://user:pw@ntfy.sh/t'), null);
   assert.equal(parseNotifyUrl(undefined), null);
   assert.throws(() => parseNotifyUrl('nope'), /--notify-url takes/);
-});
-
-test('this computer\'s notifications: fresh approvals, finished turns and failures only', () => {
-  const state = /** @type {any} */ ({ sessions: [{ id: 's1', project: 'api-server' }] });
-  const now = 100_000;
-  assert.deepEqual(notificationFor({ type: 'approval', approval: { id: 'a', status: 'pending', sessionId: 's1', toolName: 'Bash', createdAt: now } }, state, now), { title: 'Permission needed', body: 'api-server wants to use Bash.', tag: 'approval-a' });
-  assert.equal(notificationFor({ type: 'approval', approval: { id: 'a', status: 'allowed', createdAt: now } }, state, now), null);
-  assert.equal(notificationFor({ type: 'approval', approval: { id: 'a', status: 'pending', createdAt: 0 } }, state, now), null, 'replayed history is not news');
-  assert.equal(notificationFor({ type: 'event', event: { kind: 'turn.stop', ts: now, sessionId: 's1', agentKey: 's1:main' } }, state, now)?.title, 'Turn finished');
-  assert.equal(notificationFor({ type: 'event', event: { kind: 'turn.stop', ts: now, sessionId: 's1', agentKey: 's1:abc' } }, state, now), null);
-  assert.equal(notificationFor({ type: 'event', event: { kind: 'turn.fail', ts: now, sessionId: 's2', agentKey: 's2:main' } }, state, now)?.body, 'A crew stopped with an error.');
-  assert.equal(notificationFor({ type: 'usage' }, state, now), null);
-  const team = /** @type {any} */ ({ ...state, sessions: [...state.sessions, { id: 'Lina~s3', project: 'web-app', member: 'Lina' }] });
-  assert.equal(notificationFor({ type: 'event', event: { kind: 'turn.stop', ts: now, sessionId: 'Lina~s3', agentKey: 'Lina~s3:main' } }, team, now), null, 'a teammate\'s crew is theirs to watch');
 });

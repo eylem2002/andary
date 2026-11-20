@@ -145,6 +145,7 @@ building to see who is inside.
 | `P` | Place names: on the buildings where they fit (zoom in for more), always, or off |
 | `M` | Sound on or off |
 | `U` · `L` | Usage (tokens and estimated cost) · Leaderboard |
+| `I` | Go to what needs you, most urgent first (again for the next) |
 | `A` | Go to approvals |
 | `1`–`9` | Jump to crew 1 to 9 |
 | `?` | All shortcuts |
@@ -163,8 +164,17 @@ was masked, a long value was cut, or it has an option the card does not show, su
 command outside the sandbox) is never held there and goes straight to your terminal; so does one
 from an older copy of Andary's hook (the card says how to update it). Codex does not say whether
 a command asks to leave its sandbox, so a Codex command's card says that allowing it may.
-While a request waits, a yellow **approvals waiting for you** button sits at the top right and the
-browser tab reads **(1) Andary**, so you notice it from another tab or with the side boards away.
+
+### See what needs you
+
+When an agent stops for you (a permission request, a question, a plan to approve, a turn that
+stopped on an error, or a finished turn nobody answered for a minute), its row in **Crews** says
+what for and how long it has waited, the browser tab reads **(2) Andary**, and a **2 need you**
+button sits at the top right: yellow while an agent is blocked or stopped, quieter when crews only
+finished their turns. Click it (or press `I`) to go to the most urgent: a request the town can
+answer opens its card in Approvals, anything else selects the agent; click again for the next.
+A stop or a finished turn can be set aside from its row or the agent's details. With
+notifications on (Settings), each new one also pops up while the tab is in the background.
 
 ### Everything else
 

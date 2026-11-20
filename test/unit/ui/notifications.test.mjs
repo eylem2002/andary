@@ -1,0 +1,176 @@
+// This computer's notifications follow "needs you" (core/attention.js): what deserves one, in
+// words that never show a command, and each item pops up once, only while the town is behind.
+import assert from 'node:assert/strict';
+import { afterEach, beforeEach, describe, test } from 'node:test';
+import { createStore } from '../../../public/js/core/store.js';
+import { createNeedsYou } from '../../../public/js/ui/needs-you.js';
+import { NEWS_MS, installNotifications, notificationFor } from '../../../public/js/ui/notifications.js';
+import { SESSION, envelope, hook } from '../core/helpers.mjs';
+
+const T0 = 1_000_000;
+const OTHER = '7c1d0e3f-2e5b-4d44-8f20-1b8c7d6e5f40';
+const other = { session: OTHER };
+
+/**
+ * A store fed hook payloads, and its "needs you" list, on a clock the test moves.
+ * @param {{ viewOnly?: boolean }} [options]
+ */
+function town({ viewOnly = false } = {}) {
+  let at = T0;
+  const now = () => at;
+  const store = createStore({ now });
+  const needsYou = createNeedsYou({ storage: null, now, viewOnly: () => viewOnly });
+  return {
+    store,
+    needsYou,
+    now,
+    /** @param {number} ms */
+    advance(ms) {
+      at += ms;
+    },
+    /** @param {string} name @param {Record<string, any>} [extra] @param {Record<string, any>} [who] */
+    send(name, extra = {}, who = {}) {
+      store.ingest(envelope(hook(name, extra, who), at));
+    },
+    /** @param {string} id @param {Record<string, any>} [fields] */
+    ask(id, fields = {}) {
+      store.setApproval({ id, status: 'pending', held: true, sessionId: SESSION, agentId: null, toolName: 'Bash', toolInput: { command: 'rm -rf secret-dir' }, createdAt: at, expiresAt: at + 120_000, ...fields });
+    },
+    items: () => needsYou.items(store.getState(), at),
+    /** @param {number} [later] */
+    notes(later = 0) {
+      return needsYou.items(store.getState(), at).map((item) => notificationFor(item, store.getState(), at + later));
+    },
+  };
+}
+
+describe('what deserves a notification', () => {
+  test('a permission request names the crew, never the command', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' });
+    t.ask('a1');
+    const [note] = t.notes();
+    assert.deepEqual(note, { title: 'Permission needed', body: 'api-server needs your permission.', tag: t.items()[0].id });
+    assert.doesNotMatch(JSON.stringify(note), /rm -rf|secret/);
+    t.send('SessionStart', { source: 'startup' }, other);
+    t.ask('a2', { held: false, sessionId: OTHER });
+    assert.deepEqual(t.notes().map((n) => n?.body), ['api-server needs your permission.', 'api-server needs your permission in its terminal.']);
+  });
+
+  test('questions and plans are answered in the terminal', () => {
+    const t = town();
+    t.send('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Drop the users table?' }] }, tool_use_id: 'q1' });
+    t.send('PreToolUse', { tool_name: 'ExitPlanMode', tool_input: { plan: 'Rewrite auth' }, tool_use_id: 'p1' }, other);
+    assert.deepEqual(t.notes().map((n) => n?.title), ['Question for you', 'Plan to approve']);
+    assert.doesNotMatch(JSON.stringify(t.notes()), /users table|Rewrite auth/);
+  });
+
+  test('stops: one crew by name, crews stopped by one rate limit as one note', () => {
+    const t = town();
+    t.send('StopFailure', { error: 'overloaded' });
+    assert.deepEqual(t.notes()[0], { title: 'Turn stopped', body: 'api-server: Servers overloaded.', tag: t.items()[0].id });
+    const limited = town();
+    limited.send('StopFailure', { error: 'rate_limit' });
+    limited.send('StopFailure', { error: 'rate_limit' }, other);
+    assert.deepEqual(limited.notes().map((n) => [n?.title, n?.body]), [['Crews stopped', 'Rate limited: 2 crews stopped.']]);
+  });
+
+  test('a finished turn only once nobody answered, and only with more than one crew at work', () => {
+    const t = town();
+    t.send('Stop', { last_assistant_message: 'Done.' });
+    assert.deepEqual(t.notes(), [null], 'listed, but not counted yet');
+    t.send('Notification', { notification_type: 'idle_prompt', message: 'Claude is waiting for your input' });
+    assert.deepEqual(t.notes(), [null], 'one crew: you are at its terminal');
+    t.send('SessionStart', { source: 'startup' }, other);
+    assert.equal(t.notes()[0]?.title, 'Turn finished');
+  });
+
+  test('only news: an item that started to count a while ago does not pop up', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' });
+    t.ask('a1');
+    assert.ok(t.notes(NEWS_MS)[0]);
+    assert.equal(t.notes(NEWS_MS + 1)[0], null);
+  });
+});
+
+describe('installNotifications', () => {
+  /** @type {{ title: string, body: string }[]} */
+  let shown = [];
+  /** @type {(() => void)[]} watchers to stop, even after a failed assertion (they keep a timer) */
+  const watching = [];
+  const saved = { document: globalThis.document, Notification: globalThis.Notification };
+  const page = { hidden: false, title: '' };
+
+  beforeEach(() => {
+    shown = [];
+    page.hidden = false;
+    page.title = '';
+    Object.assign(globalThis, {
+      document: page,
+      Notification: class {
+        static permission = 'granted';
+        /** @param {string} title @param {{ body: string }} options */
+        constructor(title, options) {
+          shown.push({ title, body: options.body });
+        }
+      },
+    });
+  });
+  afterEach(() => {
+    for (const stop of watching.splice(0)) stop();
+    Object.assign(globalThis, saved);
+  });
+
+  /** @param {ReturnType<typeof town>} t @param {Record<string, any>} [prefs] */
+  function watch(t, prefs = { desktopNotify: true }) {
+    const ctx = /** @type {any} */ ({ store: t.store, needsYou: t.needsYou, prefs });
+    watching.push(installNotifications(ctx, { now: t.now }));
+  }
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  test('what you saw with the town in front never pops up later; something new behind it pops up once', async () => {
+    const t = town();
+    watch(t);
+    t.send('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which port?' }] }, tool_use_id: 'q1' });
+    await settle();
+    assert.deepEqual([shown.length, page.title], [0, '(1) Andary']);
+    page.hidden = true;
+    t.send('PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/x' }, tool_use_id: 'r1' }, other);
+    await settle();
+    assert.equal(shown.length, 0, 'the question was on screen before');
+    t.ask('a1', { sessionId: OTHER });
+    await settle();
+    t.ask('a1', { sessionId: OTHER });
+    await settle();
+    assert.deepEqual(shown, [{ title: 'Permission needed', body: 'api-server needs your permission.' }]);
+    assert.equal(page.title, '(2) Andary', 'the title counts without a render');
+  });
+
+  test('a reconnect replays history in one go: asked and answered within it is no news', async () => {
+    const t = town();
+    page.hidden = true;
+    watch(t);
+    t.store.reset();
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm test' } });
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_response: {} });
+    await settle();
+    assert.deepEqual([shown.length, page.title], [0, 'Andary']);
+  });
+
+  test('nothing pops up with notifications off, or for someone only watching a team town', async () => {
+    const off = town();
+    page.hidden = true;
+    watch(off, { desktopNotify: false });
+    off.send('SessionStart', { source: 'startup' });
+    off.ask('a1');
+    await settle();
+    assert.deepEqual([shown.length, page.title], [0, '(1) Andary']);
+    const watcher = town({ viewOnly: true });
+    watch(watcher);
+    watcher.send('SessionStart', { source: 'startup' });
+    watcher.ask('a1');
+    await settle();
+    assert.deepEqual([shown.length, page.title], [0, 'Andary'], 'nothing needs a viewer: no count either');
+  });
+});

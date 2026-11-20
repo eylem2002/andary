@@ -92,7 +92,7 @@ AttentionItem {
 | blocked | approval (the town can answer), terminal (the terminal asks: not held, expired or released), question (`AskUserQuestion`, `agent_needs_input`, elicitation), plan (`ExitPlanMode`) | always |
 | stopped | the turn ended in an error; several crews stopped by one rate limit are **one** item ("paused until 15:40, 6 crews") | always |
 | alert | stuck; same file when a Write lands on another active agent's change | until dismissed |
-| ready | a lead finished its turn and has had no prompt since | after Claude Code's `idle_prompt` (Codex: two minutes with no prompt), for 30 minutes; never for agent-team teammates |
+| ready | a lead finished its turn and has had no prompt since | after Claude Code's `idle_prompt` (Codex: a minute with no prompt), for 30 minutes; never for agent-team teammates |
 
 The store gains `AgentState.wait = { kind, since, text } | null`, set and cleared by the handlers
 that already change an agent's status; `attentionItems` only reads. Teammates' crews are left

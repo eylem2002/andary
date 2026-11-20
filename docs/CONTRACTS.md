@@ -525,8 +525,14 @@ the WebSocket `hello`. Only this computer's events count (§4.11).
 - A finished turn posts nothing by itself. Stopping the server drops every note still waiting.
 
 This computer (`public/js/ui/notifications.js`), opt-in in Settings (`prefs.desktopNotify`, after
-the browser's permission): while the page is hidden, a fresh pending approval, the main agent's
-finished turn or a failed turn becomes a system notification naming the crew.
+the browser's permission), follows "needs you" (§5.1): while the page is hidden, each new counted
+item becomes one system notification naming the crew, never a command or file ("Permission
+needed", "Question for you", "Plan to approve", "Turn stopped", "Turn finished"). An item the
+viewer could already see (the page in front, or notifications off) never pops up later, nor one
+that started to count more than two minutes ago (a reconnect or a page opened in the
+background); changes that arrive together (a reconnect's history) are checked once. No "Turn
+finished" while only one of your crews is in town, and nothing for someone watching a team town
+with its view link. The same watcher keeps the page title's count current in a background tab.
 
 ### 4.11 Team town
 
@@ -681,13 +687,41 @@ AgentState { key, sessionId, agentId: string|null, name, role: 'lead'|'subagent'
              currentTool?, summary?, description?, startedAt, lastActivity,
              toolCounts: Record<string, number>, files: string[] /* recent unique, ≤ 30 */,
              changes: FileChange[] /* finished Edit/MultiEdit/Write/NotebookEdit, ≤ 20, newest last */,
-             recent: LogEntry[] /* ≤ 30 */, errors: number, lastMessage? }
+             recent: LogEntry[] /* ≤ 30 */, errors: number, lastMessage?,
+             wait: Wait|null /* what it waits for you on, below */ }
+Wait { kind: 'approval'|'question'|'plan'|'finished'|'stopped', since /* hook time */,
+       text /* one line */, idleAt: number|null /* finished: when idle_prompt said nobody answered */ }
 LogEntry { id, ts, sessionId, agentKey, agentName, color, kind, icon, text,
            level: 'info'|'success'|'warn'|'error' }
 Achievement { id, title, description, icon, unlockedAt }
 FileChange { id, path /* relative to the crew's folder */, tool, ts, whole: boolean /* Write */,
              hunks: { before: string, after: string }[] /* from tool_input, ≤ 4,000 characters each */ }
 ```
+
+**Needs you** (`core/waits.js`, `core/attention.js`, both pure; docs/design/agent-health.md §3).
+The store sets `AgentState.wait` after each event (`waitAfter`) and approval change
+(`waitAfterApproval`): a permission request, an `AskUserQuestion` or `ExitPlanMode` call, an
+`agent_needs_input`/elicitation notice, a lead's finished turn or a failed turn starts a wait; a
+prompt, a new session, a tool call (other than those two), an answer or a manual `/compact` ends
+it; an approval answered in the town ends it, one handed back to the terminal keeps it.
+`attentionItems(state, now, { dismissed? }) → AttentionItem[]`, most urgent first:
+
+```js
+AttentionItem { id /* kind:agentKey:since — a new episode is a new item */,
+                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'finished',
+                level: 'blocked'|'stopped'|'alert'|'ready', sessionId, agentKey,
+                approvalId: string|null /* a request the town can answer */, since, countedSince,
+                text, counted: boolean, dismissable: boolean, crews: number }
+```
+
+Pending approvals are `approval` (held) or `terminal` items; a wait is the rest. A finished turn
+is listed at once and counted from `idle_prompt` (Codex: `CODEX_IDLE_MS`, a minute) for
+`READY_MS` (30 minutes). Stops by one rate limit within ten minutes merge into one item. Ended
+sessions and teammates' crews are left out. `ui/needs-you.js` adds the viewer's dismissals
+(stops and finished turns, kept in `localStorage["andary:dismissed"]` for a day; someone watching
+a team town with its view link gets no items, as they can answer nothing) and drives the
+masthead button, the `I` key, the page title, the crew rows, the inspector and the desktop
+notifications.
 
 `director.js`: `createDirector({ world, store, backlog?, humor?, random? }) → { dispose() }`
 subscribes to the store and drives the world. `recordChanges(store) → { stop() }` keeps the
@@ -896,7 +930,9 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="demo-button"]` | starts the simulation (shown when there is nothing live to watch) |
 | `[data-testid="crew-list"]` | crews panel; children `[data-testid="crew"][data-session-id]` |
 | `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects |
-| `[data-testid="agent-inspector"]` | details drawer for the selected agent |
+| `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn or stop aside |
+| `[data-testid="waiting-for-you"]` | the masthead's "N need you" button (`data-level` is the most urgent level); click goes to the next item |
+| `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn or a stop aside |
 | `[data-testid="activity-log"]` | log; children `[data-testid="log-entry"]` |
 | `[data-testid="tasks-panel"]` | goals/tasks; children `[data-testid="task-item"]` |
 | `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]` |
