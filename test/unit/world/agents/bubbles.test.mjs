@@ -1,13 +1,15 @@
-import { test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BUBBLE_MAX_CHARS,
   BUBBLE_MIN_VISIBLE_MS,
   bubbleDurationMs,
+  bubblePriority,
   createBubbleSlot,
   deOverlap,
   normalizeTone,
   offerBubble,
+  pickBubbles,
   tickBubble,
   truncateText,
 } from '../../../../public/js/world/agents/bubbles.js';
@@ -103,4 +105,38 @@ test('name pills are fixed obstacles: bubbles move above them, pills never move'
   deOverlap(boxes, 2, new Int32Array(2), 4);
   assert.equal(boxes[0].dy, 0, 'the pill stays');
   assert.equal(boxes[1].bottom + boxes[1].dy, 160 - 22 - 4, 'the bubble clears the pill');
+});
+
+describe('the bubble budget', () => {
+  /** @param {number} x @param {number} priority @param {Partial<import('../../../../public/js/world/agents/bubbles.js').BubbleCandidate>} [over] */
+  const talker = (x, priority, over = {}) => ({ x, y: 300, w: 120, h: 30, priority, muted: false, ...over });
+
+  test('at most two bubbles stack over one spot; the highest priorities keep theirs', () => {
+    const crowd = [talker(100, 1), talker(110, 3), talker(105, 2)];
+    pickBubbles(crowd, 3, new Int32Array(3));
+    assert.deepEqual(crowd.map((t) => t.muted), [true, false, false]);
+  });
+
+  test('bubbles far apart all show, up to four on screen', () => {
+    const town = [0, 200, 400, 600, 800, 1000].map((x, i) => talker(x, i));
+    pickBubbles(town, 6, new Int32Array(6));
+    assert.deepEqual(town.map((t) => t.muted), [true, true, false, false, false, false]);
+  });
+
+  test('bubbles at the same x but on different streets do not stack', () => {
+    const pair = [talker(100, 1, { y: 100 }), talker(100, 2, { y: 400 }), talker(100, 3, { y: 700 })];
+    pickBubbles(pair, 3, new Int32Array(3));
+    assert.deepEqual(pair.map((t) => t.muted), [false, false, false]);
+  });
+
+  test('priority: the selected agent, then urgent lines, then the newest; a shown bubble keeps a head start', () => {
+    const base = { selected: false, hovered: false, tone: 'speech', shownAt: 10_000, muted: false };
+    assert.ok(bubblePriority({ ...base, selected: true, shownAt: 0 }) > bubblePriority({ ...base, tone: 'shout' }));
+    assert.ok(bubblePriority({ ...base, tone: 'shout', shownAt: 0 }) > bubblePriority({ ...base, shownAt: 60_000 }));
+    assert.ok(bubblePriority({ ...base, shownAt: 12_000 }) > bubblePriority(base));
+    // A new line two seconds younger does not push a showing one out…
+    assert.ok(bubblePriority(base) > bubblePriority({ ...base, shownAt: 12_000, muted: true }));
+    // …but one much newer does.
+    assert.ok(bubblePriority({ ...base, shownAt: 30_000, muted: true }) > bubblePriority(base));
+  });
 });

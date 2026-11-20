@@ -1,10 +1,11 @@
 // Per-frame placement of the DOM name tags: project each agent's head to the screen, hide tags
 // that are off-screen, scale them gently with zoom, shrink pills lost in a crowd to their status
-// dot, and nudge overlapping bubbles apart.
+// dot, keep the number of bubbles down (a few at once, two over one spot), and nudge overlapping
+// bubbles apart.
 // Transforms only (no layout reads), and no allocations once the box pool has grown.
 
 import * as THREE from 'three';
-import { deOverlap } from './bubbles.js';
+import { bubblePriority, deOverlap, pickBubbles } from './bubbles.js';
 import { BUBBLE_GAP } from './overlay.js';
 import { clamp, damp } from './easing.js';
 
@@ -28,6 +29,9 @@ let order = new Int32Array(64);
 /** Visible pills this frame, for the crowd pass; reused across frames. @type {CrowdPill[]} */
 const pills = [];
 let pillOrder = new Int32Array(64);
+/** Bubbles that want to show this frame, for the budget pass; reused across frames. @type {Array<import('./bubbles.js').BubbleCandidate & {tag: import('./overlay.js').AgentTag|null}>} */
+const talkers = [];
+let talkOrder = new Int32Array(64);
 
 /**
  * @typedef {object} CrowdPill
@@ -155,7 +159,7 @@ function obstaclesAndBubbles(count, scale) {
     pill.h = p.h;
     pill.fixed = true;
     pill.tag = null;
-    if (tag.bubbleShown) {
+    if (tag.bubbleShown && !tag.bubbleMuted) {
       const bubble = box(n++);
       bubble.x = p.x;
       bubble.bottom = p.y - (PILL_HEIGHT + BUBBLE_GAP) * scale;
@@ -167,6 +171,34 @@ function obstaclesAndBubbles(count, scale) {
     p.agent = null;
   }
   return n;
+}
+
+/**
+ * Mutes the bubbles over the budget (pickBubbles): the selected agent, urgent lines and the newest
+ * keep theirs.
+ * @param {number} count visible pills @param {number} scale
+ */
+function settleBubbles(count, scale) {
+  let n = 0;
+  for (let i = 0; i < count; i++) {
+    const agent = pills[i].agent;
+    const tag = agent.tag;
+    if (!tag.bubbleShown) continue;
+    const t = (talkers[n++] ??= { x: 0, y: 0, w: 0, h: 0, priority: 0, muted: false, tag: null });
+    t.x = pills[i].x;
+    t.y = pills[i].y - (PILL_HEIGHT + BUBBLE_GAP) * scale;
+    t.w = tag.bubbleW * scale;
+    t.h = tag.bubbleH * scale;
+    t.muted = tag.bubbleMuted;
+    t.priority = bubblePriority({ selected: tag.selected, hovered: tag.hovered, tone: tag.bubbleTone, shownAt: agent.bubble.current?.shownAt ?? 0, muted: tag.bubbleMuted });
+    t.tag = tag;
+  }
+  if (talkOrder.length < n) talkOrder = new Int32Array(n * 2);
+  pickBubbles(talkers, n, talkOrder);
+  for (let i = 0; i < n; i++) {
+    talkers[i].tag.setBubbleMuted(talkers[i].muted);
+    talkers[i].tag = null;
+  }
 }
 
 /**
@@ -206,6 +238,7 @@ export function layoutTags(agents, view, dt) {
     p.agent = a;
   }
   settleCrowd(visibleCount, scale);
+  settleBubbles(visibleCount, scale);
   const n = obstaclesAndBubbles(visibleCount, scale);
   if (order.length < n) order = new Int32Array(n * 2);
   deOverlap(boxes, n, order, 4);

@@ -58,6 +58,9 @@ export class AgentTag {
     this.bubbleShown = false;
     this.bubbleW = 0;
     this.bubbleH = 0;
+    this.bubbleTone = 'speech';
+    /** Shown but waiting for room: too many bubbles on screen (decided by tags.js each frame). */
+    this.bubbleMuted = false;
     this.shift = 0;
     this.statusName = 'idle';
     this.depth = NaN;
@@ -144,8 +147,9 @@ export class AgentTag {
    */
   showBubble(text, tone, reducedMotion) {
     this.bubble.textContent = text;
-    this.bubble.className = `tt-bubble tt-bubble--${tone} is-visible`;
+    this.bubble.className = `tt-bubble tt-bubble--${tone} is-visible${this.bubbleMuted ? ' is-muted' : ''}`;
     this.bubbleShown = true;
+    this.bubbleTone = tone;
     this.bubbleW = this.bubble.offsetWidth;
     this.bubbleH = this.bubble.offsetHeight;
     if (!reducedMotion) {
@@ -160,6 +164,13 @@ export class AgentTag {
     this.bubble.classList.remove('is-visible');
     this.bubbleShown = false;
     this.setBubbleShift(0);
+  }
+
+  /** @param {boolean} on */
+  setBubbleMuted(on) {
+    if (on === this.bubbleMuted) return;
+    this.bubbleMuted = on;
+    this.bubble.classList.toggle('is-muted', on);
   }
 
   /**

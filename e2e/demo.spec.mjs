@@ -131,7 +131,9 @@ test('a demo permission request can be allowed from the town', async ({ page }) 
   await expect(pending).toBeAttached({ timeout: 60_000 });
   const id = await pending.getAttribute('data-approval-id');
   const card = page.locator(`[data-testid="approval-card"][data-approval-id="${id}"]`);
-  await openTab(page, 'Approvals');
+  // Waiting for you: the page title (for a background tab) and a button that leads to it.
+  await expect(page).toHaveTitle(/^\(\d+\) Andary$/);
+  await page.getByTestId('waiting-for-you').click();
   await expect(card).toBeVisible();
   await expect(card.locator('.hud-approval__code')).toContainText('$ ');
   await expect(card).toContainText('left');

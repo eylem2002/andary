@@ -307,3 +307,14 @@ section.
     arrows, `+`/`-`, `Q`/`E`. Screen readers may (JAWS: next paragraph in its virtual cursor),
     but in browse mode they keep the key for themselves, as they already do for `N`, `M`, `H`
     and `L`; the setting is also in Settings.
+84. **Four speech bubbles on screen at once, two over one spot.** More buried the agents saying
+    them (six stacked over the plaza in the demo). The selected or pointed-at agent keeps its
+    bubble first, then shouts (failures, waiting for you), then the newest; a bubble already
+    showing keeps a few seconds' head start so two lines never take turns. The others are muted,
+    not lost: they show when room frees up, or run out unseen. The events behind them are in the
+    log.
+85. **Two toasts at most, one per kind.** A newer crew arrival replaces the older one's toast, and
+    a newer achievement the older's; the Crews panel and the leaderboard keep them all. Approval
+    toasts are never merged.
+86. **The page title counts approvals only.** "(2) Andary" is for things that block an agent
+    until you answer; failures and finished work do not change the title.

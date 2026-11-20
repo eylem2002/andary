@@ -602,6 +602,42 @@ body {
   gap: 8px;
 }
 
+/* Approvals waiting: a yellow plate that stays until you answer (like a wanted level). */
+.hud-waiting {
+  border-color: #B98419;
+  background: var(--waiting-fill);
+  color: #1E1A2E;
+  font-weight: 800;
+  animation: hud-waiting-in 0.5s ease-out;
+}
+
+.hud-waiting__count {
+  margin-right: -3px; /* the count and its words read as one phrase */
+}
+
+.hud-waiting:hover {
+  background: #F6C665;
+}
+
+@keyframes hud-waiting-in {
+  0% {
+    transform: scale(0.85);
+  }
+  60% {
+    transform: scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-waiting {
+    animation: none;
+  }
+}
+
+[data-motion="reduce"] .hud-waiting {
+  animation: none;
+}
+
 .hud-status {
   display: inline-flex;
   align-items: center;
@@ -2881,6 +2917,14 @@ body {
   }
 
   .hud-setup-button {
+    display: none;
+  }
+
+  .hud-waiting {
+    padding-inline: 10px;
+  }
+
+  .hud-waiting__words {
     display: none;
   }
 

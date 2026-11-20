@@ -158,6 +158,8 @@ terminal. The card shows the exact request, and for a file change the change its
 file's content, or an edit as a diff. To tell the agent why you said no, type a reason before
 **Deny** (or press Enter in the reason field). A request the town cannot show in full (a secret
 was masked, a long value was cut) is never held there and goes straight to your terminal.
+While a request waits, a yellow **approvals waiting for you** button sits at the top right and the
+browser tab reads **(1) Andary**, so you notice it from another tab or with the side boards away.
 
 ### Everything else
 

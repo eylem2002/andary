@@ -89,7 +89,7 @@ function showToast(ctx, effect, state) {
   if (effect.type === 'session') return crewArrived(ctx, effect.sessionId, state);
   if (effect.type === 'approval') return approvalArrived(ctx, effect.approval, state);
   const { achievement } = effect;
-  ctx.toasts.show({ tone: 'achievement', icon: 'medal', title: achievement.title, body: achievement.description });
+  ctx.toasts.show({ tone: 'achievement', icon: 'medal', title: achievement.title, body: achievement.description, group: 'achievement' });
   ctx.sound.play('chime');
   ctx.announcer.polite(`Achievement unlocked: ${achievement.title}.`);
   return undefined;
@@ -112,6 +112,7 @@ function crewArrived(ctx, sessionId, state) {
   const number = crewNumber(state, session.id);
   ctx.toasts.show({
     tone: 'crew',
+    group: 'crew',
     number,
     color: session.color,
     title: `New crew in ${session.project}`,

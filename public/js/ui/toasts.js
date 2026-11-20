@@ -15,9 +15,12 @@ import { roundel } from './parts.js';
  * @property {number} [number]         crew number, shown as a roundel
  * @property {string} [color]          crew colour for the roundel
  * @property {{ label: string, run: () => void }} [action]
+ * @property {string} [group]          a newer toast of the same group replaces this one (one crew
+ *                                     arrival, one achievement on screen at a time: the panels keep the rest)
  */
 
-const MAX_VISIBLE = 3;
+/** Two at most: toasts sit over the town, and three cards hid a third of its top. */
+const MAX_VISIBLE = 2;
 const DURATION_MS = 6500;
 /** A toast with a button waits longer, so there is time to reach it. */
 const ACTION_DURATION_MS = 15_000;
@@ -59,6 +62,10 @@ export function createToasts() {
     toast.addEventListener('focusin', () => clearTimeout(Number(toast.dataset.timer)));
     toast.addEventListener('focusout', () => arm(toast));
     if (options.action) toast.dataset.action = 'true';
+    if (options.group) {
+      for (const old of /** @type {HTMLElement[]} */ ([...list.children])) if (old.dataset.group === options.group) dismiss(old);
+      toast.dataset.group = options.group;
+    }
     list.prepend(toast);
     overflow();
     arm(toast);

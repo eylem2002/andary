@@ -152,6 +152,66 @@ function overlaps(a, b, gap) {
   return aBottom - a.h < bBottom + gap && bBottom - b.h < aBottom + gap;
 }
 
+/** Most bubbles on screen at once: more is noise, and it buries the agents saying them. */
+export const MAX_BUBBLES = 4;
+/** Most bubbles stacked over one spot (a crowd at a door): the rest wait their turn. */
+export const MAX_STACK = 2;
+
+/**
+ * @typedef {object} BubbleCandidate
+ * @property {number} x         horizontal centre (px)
+ * @property {number} y         bottom edge before de-overlap (px)
+ * @property {number} w         width (px)
+ * @property {number} h         height (px)
+ * @property {number} priority  higher keeps its bubble
+ * @property {boolean} muted    in: last frame's; out: this frame's
+ */
+
+/**
+ * Picks which bubbles show this frame: at most `max` on screen and at most `stack` over one spot,
+ * highest priority first. The others are muted, not dropped: they show when room frees up, or
+ * run out unseen. Allocation-free; `scratch` must hold `count` entries.
+ * @param {BubbleCandidate[]} list @param {number} count @param {Int32Array} scratch
+ * @param {number} [max] @param {number} [stack]
+ */
+export function pickBubbles(list, count, scratch, max = MAX_BUBBLES, stack = MAX_STACK) {
+  for (let i = 0; i < count; i++) scratch[i] = i;
+  for (let i = 1; i < count; i++) {
+    const k = scratch[i];
+    let j = i - 1;
+    while (j >= 0 && list[scratch[j]].priority < list[k].priority) {
+      scratch[j + 1] = scratch[j];
+      j--;
+    }
+    scratch[j + 1] = k;
+  }
+  let shown = 0;
+  for (let i = 0; i < count; i++) {
+    const p = list[scratch[i]];
+    let column = 0;
+    for (let j = 0; j < i && column < stack; j++) {
+      const q = list[scratch[j]];
+      // Bubbles that would collide (or nearly) end up stacked by deOverlap.
+      if (!q.muted && Math.abs(p.x - q.x) * 2 < p.w + q.w && Math.abs(p.y - q.y) < p.h + q.h) column++;
+    }
+    p.muted = shown >= max || column >= stack;
+    if (!p.muted) shown++;
+  }
+}
+
+/**
+ * Who keeps a bubble when there are too many: the agent you selected or point at, then urgent
+ * lines (shouts: failures, waiting for you), then the newest. A bubble already showing keeps a
+ * head start of a few seconds, so two lines never take turns every frame.
+ * @param {{selected: boolean, hovered: boolean, tone: string, shownAt: number, muted: boolean}} b
+ */
+export function bubblePriority(b) {
+  const focus = b.selected || b.hovered ? 4e6 : 0;
+  const urgent = b.tone === 'shout' ? 1e6 : 0;
+  const steady = b.muted ? 0 : 8;
+  return focus + urgent + steady + b.shownAt / 1000;
+}
+
 /** Sort key: obstacles first, then bubbles from the bottom of the screen up. @param {BubbleBox} a @param {BubbleBox} b */
 function before(a, b) {
   if (Boolean(a.fixed) !== Boolean(b.fixed)) return Boolean(a.fixed);

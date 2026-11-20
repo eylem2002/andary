@@ -9,7 +9,7 @@ import { busiestAgent, sameSelection } from '../../../public/js/ui/hud-actions.j
 import { effectFor, FRESH_MS } from '../../../public/js/ui/hud-effects.js';
 import { noticeKind } from '../../../public/js/ui/hud.js';
 import { topTools } from '../../../public/js/ui/inspector.js';
-import { subtitleFor } from '../../../public/js/ui/masthead.js';
+import { pageTitle, subtitleFor, waitingLabel } from '../../../public/js/ui/masthead.js';
 
 /**
  * Test data only needs the fields a helper reads.
@@ -179,6 +179,13 @@ describe('inspector and masthead', () => {
     assert.equal(subtitleFor(fixture({ sessions: [], agents: {}, stats: { toolCalls: 0 } }), fixture(view)), 'Waiting for Claude Code');
     assert.equal(subtitleFor(fixture({ sessions: [], agents: {}, stats: { toolCalls: 0 } }), fixture({ mode: 'live', connection: 'signin' })), 'Sign in to see your crews');
     assert.equal(subtitleFor(fixture({ sessions: [], agents: {}, stats: { toolCalls: 0 } }), fixture({ mode: 'demo', connection: 'demo' })), 'The demo crews are on their way');
+  });
+
+  test('approvals waiting: the button and the page title say how many', () => {
+    assert.equal(waitingLabel(1), '1 approval waiting for you');
+    assert.equal(waitingLabel(3), '3 approvals waiting for you');
+    assert.equal(pageTitle(0), 'Andary');
+    assert.equal(pageTitle(2), '(2) Andary');
   });
 
   test('notices: sign in, waiting for Claude Code, or nothing', () => {
