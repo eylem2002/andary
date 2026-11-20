@@ -6,6 +6,7 @@ import { generateToken } from './auth.mjs';
 import { createApprovalBroker } from './approvals.mjs';
 import { claudeConfigDir, createUsageTracker } from './usage.mjs';
 import { createProgress } from './progress.mjs';
+import { createNotifier } from './notify.mjs';
 import { createHub, handleUpgrade } from './browsers.mjs';
 import { DEFAULT_APPROVAL_TIMEOUT_MS, DEFAULT_HOST, DEFAULT_PORT, LIMITS, PUBLIC_DIR, readVersion, resolveHome } from './config.mjs';
 import { createHistory, createRecorder, recordingPath } from './history.mjs';
@@ -25,6 +26,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {string} [home]               ANDARY_HOME; server.json and recordings live here
  * @property {string} [publicDir]
  * @property {boolean} [remoteApprovals]
+ * @property {string|null} [notifyUrl]    ntfy topic URL for phone notifications (null: off)
  * @property {string} [claudeDir]          Claude Code's config folder, for reading token usage from transcripts
  * @property {number} [approvalTimeoutMs]
  * @property {boolean} [record]            append every envelope to <home>/recordings/*.jsonl
@@ -45,6 +47,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {import('./approvals.mjs').ApprovalBroker} broker
  * @property {ReturnType<typeof createUsageTracker>} usage
  * @property {ReturnType<typeof createProgress>} progress
+ * @property {ReturnType<typeof createNotifier>} notifier
  * @property {import('./browsers.mjs').Hub} hub
  * @property {import('./rate-limit.mjs').TokenBucket} hookLimiter
  * @property {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, pathname: string) => Promise<void>} serveStatic
@@ -65,6 +68,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {string} uiToken
  * @property {string|null} recordingPath
  * @property {import('./state-file.mjs').ServerState} state
+ * @property {string|null} notifyUrl  where phone notifications go (null: off)
  * @property {() => number} browserCount
  * @property {() => Promise<void>} stop
  */
@@ -105,6 +109,7 @@ export async function startTownServer(options = {}) {
     uiToken: ctx.uiToken,
     recordingPath: ctx.recorder?.path ?? null,
     state,
+    notifyUrl: ctx.notifier.url,
     browserCount: () => ctx.hub.size,
     stop: once(() => stopServer(ctx, server, config)),
   };
@@ -172,6 +177,7 @@ function createContext(config, options) {
       stateFile: config.writeState ? join(config.home, 'usage.json') : null,
       onChange: (record, days) => hub.broadcast({ t: 'usage', u: record, days }),
     }),
+    notifier: createNotifier({ url: options.notifyUrl ?? null, log: config.log }),
     progress: createProgress({
       stateFile: config.writeState ? join(config.home, 'progress.json') : null,
       onChange: (progress) => hub.broadcast({ t: 'progress', p: progress }),

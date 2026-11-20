@@ -122,3 +122,15 @@ test('a click meant for one request cannot answer another that just slid under t
   await page.locator(`[data-testid="approval-card"][data-approval-id="${firstId}"]`).getByTestId('deny').click();
   for (const pending of [first, second]) expect(JSON.parse((await pending).stdout).hookSpecificOutput.decision.behavior).toBe('deny');
 });
+
+test('with --notify-url, Settings shows the phone topic and sends a test', async ({ page }) => {
+  await town.stop();
+  town = await startTown({ args: ['--notify-url', 'http://127.0.0.1:9/e2e-topic'] });
+  await signIn(page);
+  await page.getByTestId('settings-button').click();
+  await expect(page.getByTestId('phone-notify-text')).toContainText('On. Install the free ntfy app');
+  await expect(page.getByText('http://127.0.0.1:9/e2e-topic')).toBeVisible();
+  await page.getByTestId('phone-notify-test').click();
+  // Nothing listens on port 9, so the server says it could not send it.
+  await expect(page.getByText('The test notification was not sent')).toBeVisible({ timeout: 10_000 });
+});

@@ -15,6 +15,7 @@ tell you what each one is doing (with jokes, but mostly with real file names and
 <img src="docs/media/andary-mobile.webp" width="260" alt="Andary on a phone: the town on top, crews in a bottom sheet">
 
 It runs entirely on your machine: no account, no cloud, no telemetry, no runtime dependencies.
+(Phone notifications are opt-in and go through the free ntfy service; see below.)
 
 ## Quick start
 
@@ -71,6 +72,16 @@ Ferris wheel on the beach at 100, a hot-air balloon at 200 and a golden dome on 
 500. The count is kept across restarts. `L` (or the trophy) opens the **Leaderboard**: how far
 the town has grown, your busy-day streak, the fastest fix and who turned the most test runs
 green, and the busiest agents in town.
+
+### Notifications
+
+Settings → **Notifications on this computer** pings you while the town is in a background tab:
+a crew needs your permission, finished its turn or stopped with an error. For your **phone**,
+start with `andary start --notify`: Andary makes a private, random topic on the free
+[ntfy](https://ntfy.sh) service (no account), prints its address, and you subscribe to it in the
+ntfy app. Phone messages only say what happened ("A crew needs your permission"), never your
+project, files or commands, and at most one of a kind every 30 seconds. `--notify-url` points
+at your own ntfy server instead; Settings has a test button.
 
 ### Weather
 
@@ -164,7 +175,8 @@ Details: [docs/INTEGRATION.md](docs/INTEGRATION.md) and the
 andary [command] [options]
 
   start                 start the town and open it (default). --port, --host, --no-open,
-                        --remote-approvals, --approval-timeout <s>, --record, --detach
+                        --remote-approvals, --approval-timeout <s>, --notify, --notify-url <url>,
+                        --record, --detach
   demo                  start the town in demo mode
   stop                  stop the running town
   install / uninstall   add or remove the hooks. --scope user|project|local, --dir, --dry-run, --print

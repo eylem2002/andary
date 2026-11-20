@@ -14,6 +14,9 @@ const START_HELP = `Options:
   -p, --port <n>            Port to listen on (default 4747, or ANDARY_PORT; 0 = any free port)
       --host <address>      Interface to bind (default 127.0.0.1; anything else exposes the town)
       --no-open             Do not open a browser
+      --notify              Phone notifications through the free ntfy app (a private topic
+                            on ntfy.sh, kept in ~/.andary/notify.json)
+      --notify-url <url>    Your own ntfy topic URL instead (or ANDARY_NOTIFY_URL)
       --remote-approvals    Let the town answer Claude Code's permission prompts
       --approval-timeout <s>
                             Seconds a prompt waits for the town before the terminal asks

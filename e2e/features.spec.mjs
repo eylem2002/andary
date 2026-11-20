@@ -108,3 +108,16 @@ test('L opens the leaderboard: the town, records and the busiest agents', async 
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
   expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([]);
 });
+
+test('notifications on this computer can be turned on in Settings', async ({ page, context }) => {
+  await context.grantPermissions(['notifications']);
+  await openDemo(page);
+  await page.getByTestId('settings-button').click();
+  const toggle = page.getByTestId('desktop-notify-toggle');
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+  await expect(page.getByText('Notifications are on while the town is in the background.')).toBeVisible();
+  await expect(toggle).toBeChecked();
+  // The demo has no server, so the phone setting is not offered.
+  await expect(page.getByTestId('phone-notify-text')).toBeHidden();
+});

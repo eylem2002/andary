@@ -59,10 +59,11 @@ export function createHub(maxClients) {
 
 /**
  * @param {import('./app.mjs').TownContext} ctx
- * @returns {{ remoteApprovals: boolean, approvalTimeoutMs: number }}
+ * @returns {{ remoteApprovals: boolean, approvalTimeoutMs: number, notify: boolean }}
  */
 export function publicSettings(ctx) {
-  return { remoteApprovals: ctx.settings.remoteApprovals, approvalTimeoutMs: ctx.settings.approvalTimeoutMs };
+  // Whether phone notifications are on, never the topic: /api/hello answers without signing in.
+  return { remoteApprovals: ctx.settings.remoteApprovals, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: ctx.notifier.on };
 }
 
 /**
@@ -148,6 +149,7 @@ function attachBrowser(ctx, connection) {
     approvals: ctx.broker.list(),
     usage: ctx.usage.snapshot(),
     progress: ctx.progress.snapshot(),
+    notifyUrl: ctx.notifier.url,
   });
   const limiter = createTokenBucket({ ratePerSecond: LIMITS.wsMessagesPerSecond, burst: LIMITS.wsMessageBurst });
   connection.on('message', (text) => {
@@ -184,6 +186,9 @@ function handleBrowserMessage(ctx, connection, text) {
     }
     case 'settings':
       applySettings(ctx, connection, message.settings);
+      return;
+    case 'notify-test':
+      void ctx.notifier.test().then((ok) => ctx.hub.send(connection, { t: 'notify-test', ok }));
       return;
     case 'ping':
       return;

@@ -2,6 +2,7 @@
 // that says what was expected.
 import { DEFAULT_PORT, MAX_APPROVAL_TIMEOUT_MS } from '../config.mjs';
 import { SCOPES } from '../installer.mjs';
+import { checkNotifyUrl } from '../notify.mjs';
 
 export class UsageError extends Error {
   /** @param {string} message */
@@ -80,3 +81,16 @@ export function parseScope(value) {
   if (!SCOPES.includes(scope)) throw new UsageError(`--scope must be user, project or local (got "${scope}").`);
   return /** @type {'user'|'project'|'local'} */ (scope);
 }
+
+/**
+ * --notify-url (or ANDARY_NOTIFY_URL): an http(s) ntfy topic URL, or null when not given.
+ * @param {string|undefined} value
+ * @returns {string|null}
+ */
+export function parseNotifyUrl(value) {
+  if (value === undefined || value === '') return null;
+  const url = checkNotifyUrl(value);
+  if (!url) throw new UsageError(`--notify-url takes an ntfy topic URL such as https://ntfy.sh/my-private-topic (got "${value}").`);
+  return url;
+}
+

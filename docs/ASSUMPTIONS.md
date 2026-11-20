@@ -189,4 +189,12 @@ section.
     started (in memory); the streak counts busy days ending today or yesterday. Agents are
     ranked by tool calls, then files changed, among those in town now. In a team town
     (feature 9) the same board covers everyone's crews.
+53. **Phone notifications through ntfy.** "Phone notifications" with zero cost and no account
+    means ntfy: a free, open-source push service with Android and iOS apps, where subscribing to
+    a topic needs no sign-up. It is the only feature that sends anything off the computer, so it
+    is off unless started with `--notify` or `--notify-url`, the topic is random (24 characters),
+    and the messages carry no project, file or command. Owners who want nothing to leave the
+    machine can run their own ntfy server and pass its URL.
+54. **Notifications on this computer** use the browser's own permission and only fire while the
+    town's tab is in the background; they may name the crew, since they stay on the computer.
 

@@ -6,6 +6,7 @@ import { h, setAttr, setHidden } from './dom.js';
 import { BUILDING_ICONS, icon } from './icons.js';
 import { kbd } from './parts.js';
 import { SHORTCUT_HELP } from './shortcuts.js';
+import { setDesktopNotify } from './notifications.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 
@@ -122,6 +123,8 @@ export function createSettingsDialog(ctx) {
     settingRow('hud-set-weather', 'Town weather', weather),
     h('p', { class: 'hud-setting__help', text: 'Rain when commands fail, a storm when they keep failing, a rainbow when tests pass again, fog while a crew thinks for a long time.' }));
 
+  const notify = notifyBlocks(ctx);
+
   const helpButton = h('button', { type: 'button', class: 'hud-btn' }, icon('help', { size: 18 }), 'Shortcuts and help');
   const setupButton = h('button', { type: 'button', class: 'hud-btn' }, icon('terminal', { size: 18 }), 'Use your own Claude Code');
   const leaveButton = h('button', { type: 'button', class: 'hud-btn' }, icon('external', { size: 18 }), 'Leave the demo');
@@ -129,7 +132,7 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [remoteBlock, theme.el, motion.el, quality.el, weatherBlock, volumeBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    body: [remoteBlock, theme.el, motion.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -159,12 +162,54 @@ export function createSettingsDialog(ctx) {
       motion.set(ctx.prefs.motion);
       quality.set(ctx.prefs.quality);
       weather.checked = ctx.prefs.weather;
+      notify.sync();
       dialog.open();
     },
     /** Keeps the switch in step when the server reports a settings change. */
     sync() {
       remote.checked = Boolean(ctx.view.serverSettings.remoteApprovals);
       remote.disabled = ctx.view.connection !== 'live';
+    },
+  };
+}
+
+/**
+ * The two notification settings: on this computer (a browser permission) and on a phone (the
+ * server's ntfy topic, shown with a test button when it is on).
+ * @param {HudContext} ctx
+ */
+function notifyBlocks(ctx) {
+  const desktopSwitch = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-notify', role: 'switch', 'data-testid': 'desktop-notify-toggle' }));
+  const desktopHelp = h('p', { class: 'hud-setting__help', id: 'hud-set-notify-help', role: 'status', text: 'When the town is in a background tab: a crew needs your permission, finished its turn or stopped with an error.' });
+  setAttr(desktopSwitch, 'aria-describedby', 'hud-set-notify-help');
+  desktopSwitch.addEventListener('change', async () => {
+    desktopHelp.textContent = await setDesktopNotify(ctx, desktopSwitch.checked);
+    desktopSwitch.checked = ctx.prefs.desktopNotify;
+  });
+  const desktop = h('div', { class: 'hud-setting' }, settingRow('hud-set-notify', 'Notifications on this computer', desktopSwitch), desktopHelp);
+
+  const phoneText = h('p', { class: 'hud-setting__help', 'data-testid': 'phone-notify-text' });
+  const topic = h('code', { class: 'hud-mono hud-steps__code' });
+  const copy = h('button', { type: 'button', class: 'hud-btn hud-btn--small' }, icon('copy', { size: 16 }), h('span', { text: 'Copy' }));
+  copy.addEventListener('click', () => copyCommand(topic.textContent ?? '', topic, copy, ctx));
+  const test = h('button', { type: 'button', class: 'hud-btn hud-btn--small', 'data-testid': 'phone-notify-test' }, icon('bell', { size: 16 }), h('span', { text: 'Send a test' }));
+  test.addEventListener('click', () => ctx.controls.notifyTest());
+  const topicRow = h('div', { class: 'hud-steps__command' }, topic, copy, test);
+  const phone = h('div', { class: 'hud-setting' }, h('p', { class: 'hud-setting__name', text: 'Notifications on your phone' }), phoneText, topicRow);
+
+  return {
+    desktop,
+    phone,
+    sync() {
+      desktopSwitch.checked = ctx.prefs.desktopNotify;
+      const live = ctx.view.mode === 'live';
+      setHidden(phone, !live);
+      const url = ctx.view.serverSettings.notifyUrl;
+      setHidden(topicRow, !url);
+      topic.textContent = url ?? '';
+      phoneText.textContent = url
+        ? 'On. Install the free ntfy app and subscribe to this address. Messages only say what happened, never your project or commands.'
+        : 'Off. Start Andary with --notify to get them on your phone through the free ntfy app (no account).';
     },
   };
 }

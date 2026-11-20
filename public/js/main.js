@@ -48,6 +48,7 @@ async function boot() {
         app.world?.setPaused(paused);
       },
       setSpeed: (speed) => demo?.setSpeed(speed),
+      notifyTest: () => link?.notifyTest() ?? false,
     },
   });
 
@@ -89,6 +90,7 @@ async function boot() {
       onSettings: (settings) => hud.setServerSettings(settings),
       onError: (message) => hud.notify({ tone: 'error', icon: 'warning', title: message }),
       onProgress: (progress) => hud.setProgress(progress),
+      onNotifyTest: (ok) => hud.notify(ok ? { icon: 'bell', title: 'Test notification sent', body: 'Check the ntfy app on your phone.' } : { tone: 'error', icon: 'warning', title: 'The test notification was not sent', body: 'The server could not reach ntfy, or sent one a moment ago.' }),
     });
   }
 

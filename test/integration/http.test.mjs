@@ -31,7 +31,7 @@ describe('public endpoints', () => {
     const hello = JSON.parse((await rawRequest(town.port, { path: '/api/hello' })).text);
     assert.equal(hello.app, 'andary');
     assert.equal(hello.authenticated, false);
-    assert.deepEqual(hello.settings, { remoteApprovals: false, approvalTimeoutMs: 120000 });
+    assert.deepEqual(hello.settings, { remoteApprovals: false, approvalTimeoutMs: 120000, notify: false });
     assert.match(hello.version, /^\d+\.\d+\.\d+/);
   });
 

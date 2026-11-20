@@ -11,6 +11,7 @@ describe('handleUpgrade', () => {
       version: '0.0.0',
       uiToken: 'token',
       settings: { remoteApprovals: false, approvalTimeoutMs: 1000 },
+      notifier: { on: false, url: null },
       allowedHosts: allowedHostHeaders(4747),
       hub: createHub(4),
       // A history that cannot be serialised stands in for one too large for a single string.
