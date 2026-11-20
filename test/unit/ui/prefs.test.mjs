@@ -23,14 +23,14 @@ describe('parsePrefs', () => {
     assert.deepEqual(bad, DEFAULT_PREFS);
   });
 
-  test('the director camera starts on and the side panels follow the page by default', () => {
-    assert.equal(DEFAULT_PREFS.directorCam, true);
+  test('the director camera and the side panels follow the situation by default', () => {
+    assert.equal(DEFAULT_PREFS.directorCam, 'auto');
     assert.equal(DEFAULT_PREFS.panels, 'auto');
-    const prefs = parsePrefs(JSON.stringify({ directorCam: false, panels: 'hidden' }));
-    assert.equal(prefs.directorCam, false);
+    const prefs = parsePrefs(JSON.stringify({ directorCam: 'off', panels: 'hidden' }));
+    assert.equal(prefs.directorCam, 'off');
     assert.equal(prefs.panels, 'hidden');
-    const bad = parsePrefs(JSON.stringify({ directorCam: 'off', panels: 'gone' }));
-    assert.equal(bad.directorCam, true);
+    const bad = parsePrefs(JSON.stringify({ directorCam: true, panels: 'gone' }));
+    assert.equal(bad.directorCam, 'auto');
     assert.equal(bad.panels, 'auto');
   });
 

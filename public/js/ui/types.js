@@ -152,6 +152,7 @@
  * @property {boolean} serverAvailable     an Andary server answered (live mode is possible)
  * @property {boolean} demoForced          the URL asked for the demo (?demo=1), e.g. `andary demo`
  * @property {boolean} hosted              a demo on a static host, with no server to connect to
+ * @property {boolean} worldFailed         the 3D town could not start (no WebGL); the panels stay
  * @property {{ remoteApprovals?: boolean, approvalTimeoutMs?: number }} serverSettings
  * @property {Selection|null} selection
  * @property {boolean} follow

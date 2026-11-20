@@ -57,10 +57,11 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     setPrefs: (patch) => updatePrefs(ctx, patch),
     select: (sel, options) => select(hud, sel, options),
     setFollow: (on) => setFollow(hud, on),
-    showTab: (tab, options) => ui.board.select(tab, { focus: options?.focus, open: true }),
+    showTab: (tab, options) => showTab(hud, shell, tab, options),
     openDialog: (name) => openDialog(hud, name),
     run: (action) => runAction(hud, action),
-    cinema: null,
+    // The director camera needs the finished context, so it is attached right below.
+    cinema: /** @type {any} */ (null),
   };
   ctx.cinema = createCinema(ctx);
   const ui = createParts(ctx);
@@ -96,8 +97,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       applyTheme(prefs, world);
       applyMotion(prefs, world);
       if (failed) {
-        // Without a 3D view the boards are the show, wherever the page is hosted.
-        view.hosted = false;
+        view.worldFailed = true;
         ui.notices.showWorldFallback();
       } else {
         ctx.cinema.start(/** @type {HTMLElement} */ (document.getElementById('world')));
@@ -148,6 +148,8 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
         body: 'See your own agents here.',
         action: { label: 'How to connect', run: () => openDialog(hud, 'setup') },
       });
+      // Toasts are not announced; this one matters, so it is said too, with where the steps live.
+      ctx.announcer.polite('This is a demo town. To watch your own agents, open Settings and choose Use your own Claude Code.');
     },
     /** @param {import('./toasts.js').ToastOptions} options */
     notify: (options) => ctx.toasts.show(options),
@@ -167,6 +169,7 @@ function initialView(prefs) {
     serverAvailable: false,
     demoForced: false,
     hosted: false,
+    worldFailed: false,
     serverSettings: {},
     selection: null,
     follow: false,
@@ -219,7 +222,8 @@ function mount(ctx, ui) {
  * @param {{ frame: number, measureSheets: () => void }} shell
  * @param {ReturnType<typeof createEffectQueue>} effects
  */
-function flush({ ctx, ui }, shell, effects) {
+function flush(hud, shell, effects) {
+  const { ctx, ui } = hud;
   shell.frame = 0;
   const state = ctx.store.getState();
   ui.masthead.render(state);
@@ -232,7 +236,7 @@ function flush({ ctx, ui }, shell, effects) {
   ui.inspector.render(state);
   ui.place.render(state);
   ui.toolbar.render();
-  applyPanels(ctx, ui, shell.measureSheets);
+  applyPanels(hud, shell.measureSheets);
   ui.notices.show(noticeKind(ctx.view, state));
   ui.dialogs.settings.sync();
   playEffects(ctx, effects.take(), state);
@@ -241,18 +245,36 @@ function flush({ ctx, ui }, shell, effects) {
 
 /**
  * Hidden panels slide away and become inert, so they cannot be reached by keyboard or read out.
- * A slide does not resize the sheets, so the phone layout is measured again by hand.
- * @param {HudContext} ctx
- * @param {{ board: { el: HTMLElement, leftDock: HTMLElement } }} ui
+ * Focus inside them moves to the button that brings them back, so the keyboard does not fall
+ * to the top of the page. A slide does not resize the sheets, so phones are measured again.
+ * @param {{ ctx: HudContext, ui: Parts }} hud
  * @param {() => void} measureSheets
  */
-function applyPanels(ctx, ui, measureSheets) {
+function applyPanels({ ctx, ui }, measureSheets) {
   const hidden = panelsHidden(ctx);
   if (ui.board.el.inert === hidden) return;
+  const docks = [ui.board.el, ui.board.leftDock];
+  if (hidden && docks.some((dock) => dock.contains(document.activeElement))) ui.toolbar.focusTool('toggle-panels');
   document.documentElement.classList.toggle('hud-panels-hidden', hidden);
-  ui.board.el.inert = hidden;
-  ui.board.leftDock.inert = hidden;
+  for (const dock of docks) dock.inert = hidden;
   measureSheets();
+}
+
+/**
+ * Opens a board tab. A tab the viewer asked for (an approval to review) must be reachable, so the
+ * side boards come back first if they were put away.
+ * @param {{ ctx: HudContext, ui: Parts }} hud
+ * @param {{ measureSheets: () => void }} shell
+ * @param {string} tab
+ * @param {{ focus?: boolean }} [options]
+ */
+function showTab(hud, shell, tab, options) {
+  const { ctx, ui } = hud;
+  if (panelsHidden(ctx)) {
+    ctx.setPrefs({ panels: 'shown' });
+    applyPanels(hud, shell.measureSheets);
+  }
+  ui.board.select(tab, { focus: options?.focus, open: true });
 }
 
 /**

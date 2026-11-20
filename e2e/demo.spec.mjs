@@ -184,7 +184,9 @@ test('without a server the town fills the screen, then offers the setup steps', 
   await expect(dialog.getByText('andary install', { exact: true })).toBeVisible();
   const copy = dialog.locator('.hud-steps__step').first().getByRole('button');
   await copy.click();
-  await expect(copy).toHaveText(/Copied|Press Ctrl\+C/);
+  // The button says "Copied" for a moment only, which a busy software-rendered page can outlast, so
+  // the clipboard itself is checked.
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('npm install -g github:eylem2002/andary');
   await dialog.getByRole('button', { name: 'Keep watching the demo' }).click();
   await expect(dialog).toBeHidden();
   // Seen once, it is not offered again.

@@ -1,5 +1,7 @@
-// The director camera's taste: which moments deserve a close-up, and when to cut to them.
-// Pure functions of the event stream and the clock, so the choices are unit-tested.
+// The director camera's taste and memory: which moments deserve a close-up, when to cut to them,
+// and when to stand back for the viewer. No DOM and no 3D here (cinema.js connects it to the HUD
+// and draws the caption), so every choice is unit-tested.
+import { HISTORIC_MS } from '../core/director.js';
 
 /**
  * How worth watching each kind of town event is, 0–10. Kinds not listed never draw the camera.
@@ -123,4 +125,119 @@ export function nextShot({ moments, current, now, exists }) {
   if (!moment) return null;
   const count = (current?.count ?? 0) + 1;
   return { agentKey: moment.agentKey, zoom: count % WIDE_EVERY === 0 ? ZOOM.wide : ZOOM.close, startedAt: now, count };
+}
+
+/**
+ * Drops moments that have faded completely, so memory stays the size of what is recent.
+ * @param {Map<string, Moment>} moments @param {number} now
+ */
+export function forget(moments, now) {
+  for (const [key, moment] of moments) if (now - moment.at >= TIMING.memoryMs) moments.delete(key);
+}
+
+/**
+ * Whether the director camera runs. "auto" (the default) runs it unless motion is reduced, since
+ * it moves the view on its own; an explicit choice wins either way.
+ * @param {'auto'|'on'|'off'} choice @param {boolean} motionReduced
+ */
+export function directorOn(choice, motionReduced) {
+  if (choice === 'on') return true;
+  if (choice === 'off') return false;
+  return !motionReduced;
+}
+
+/**
+ * Events that were already old when they arrived (history replayed to a new tab) are not news.
+ * @param {{ ts?: number, rx?: number }} event @param {number} now
+ */
+export function isNews(event, now) {
+  const at = Number(event.rx ?? event.ts);
+  return !Number.isFinite(at) || now - at <= HISTORIC_MS;
+}
+
+/**
+ * @typedef {object} DirectorCamHost  what the director camera needs from the HUD and the 3D view
+ * @property {() => number} now
+ * @property {() => boolean} enabled        the viewer wants it (preference and reduced motion)
+ * @property {() => boolean} viewerBusy     an agent or building is selected, or the viewer follows one
+ * @property {() => boolean} viewerFollows  the viewer's own follow is on: never stop it
+ * @property {(agentKey: string) => boolean} onStage  the agent is in the 3D town right now
+ * @property {(agentKey: string, zoom: number) => void} film   follow the agent at this zoom
+ * @property {() => void} stopFilming       stop following (the camera stays where it is)
+ */
+
+/**
+ * The director camera's state: what it remembers, which shot is on, and when it stands back. It
+ * only ever stops a follow it started itself, and after the viewer has used the camera it waits
+ * for a quiet spell before taking over again.
+ * @param {DirectorCamHost} host
+ */
+export function createDirectorCam(host) {
+  /** @type {Map<string, Moment>} */
+  const moments = new Map();
+  /** @type {Shot|null} */
+  let shot = null;
+  let pausedUntil = 0;
+  let running = false;
+
+  /** Leaves the camera to the viewer, letting go of the director's own follow. */
+  function standDown() {
+    if (shot && !host.viewerFollows()) host.stopFilming();
+    shot = null;
+  }
+
+  return {
+    /** The agent on screen, while the director has the camera. */
+    get subject() {
+      return shot && host.onStage(shot.agentKey) ? shot.agentKey : null;
+    },
+    /** Called once the 3D view exists; without it there is no camera to direct. */
+    start() {
+      running = true;
+    },
+    stop() {
+      standDown();
+      running = false;
+    },
+    /** @param {{ kind: string, agentKey?: string, ts?: number, rx?: number }} event */
+    hear(event) {
+      const now = host.now();
+      if (isNews(event, now)) remember(moments, event, now);
+    },
+    /** The town started over (demo restart, new connection). */
+    reset() {
+      moments.clear();
+      standDown();
+    },
+    /** The viewer moved the camera: stand back until things have been quiet for a while. */
+    holdOff() {
+      pausedUntil = host.now() + TIMING.idleResumeMs;
+      standDown();
+    },
+    /** Turned on by hand: no waiting. */
+    resume() {
+      pausedUntil = 0;
+    },
+    /** Decides, every half second or so, whether to keep the shot, cut, or stand back. */
+    tick() {
+      const now = host.now();
+      forget(moments, now);
+      if (!running || !host.enabled()) {
+        standDown();
+        return;
+      }
+      if (host.viewerBusy()) {
+        pausedUntil = now + TIMING.idleResumeMs;
+        standDown();
+        return;
+      }
+      if (now < pausedUntil) return;
+      const next = nextShot({ moments, current: shot, now, exists: host.onStage });
+      if (next) {
+        shot = next;
+        moments.delete(next.agentKey);
+        host.film(next.agentKey, next.zoom);
+      }
+    },
+  };
 }

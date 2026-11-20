@@ -16,7 +16,7 @@
  * @property {boolean} errorsOnly     activity log filter
  * @property {boolean} announce       read out activity summaries to screen readers
  * @property {boolean} setupSeen      the "run it yourself" dialog was shown once
- * @property {boolean} directorCam    the camera follows the action by itself
+ * @property {'auto'|'on'|'off'} directorCam  the camera follows the action by itself; auto is on unless motion is reduced
  * @property {'auto'|'shown'|'hidden'} panels  side panels; auto hides them in a hosted demo
  */
 
@@ -34,7 +34,7 @@ export const DEFAULT_PREFS = Object.freeze({
   errorsOnly: false,
   announce: true,
   setupSeen: false,
-  directorCam: true,
+  directorCam: 'auto',
   panels: 'auto',
 });
 
@@ -49,6 +49,7 @@ const CHOICES = {
   tab: ['crews', 'tasks', 'activity', 'approvals'],
   speed: [1, 2, 4],
   panels: ['auto', 'shown', 'hidden'],
+  directorCam: ['auto', 'on', 'off'],
 };
 
 /**

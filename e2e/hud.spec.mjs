@@ -129,6 +129,40 @@ test.describe('keyboard', () => {
     await expect(crews).toBeVisible();
   });
 
+  test('putting the boards away while focus is in them hands focus to the button that brings them back', async ({ page }) => {
+    await openDemo(page);
+    const activity = page.getByRole('tab', { name: /^Activity/ });
+    await activity.focus();
+    await page.keyboard.press('h');
+    await expect(page.getByRole('complementary', { name: 'Town board' })).toBeHidden();
+    await expect(page.locator('[data-tool="toggle-panels"]')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('complementary', { name: 'Town board' })).toBeVisible();
+  });
+
+  test('A reaches the approvals even with the boards put away', async ({ page }) => {
+    await openDemo(page);
+    const board = page.getByRole('complementary', { name: 'Town board' });
+    await page.keyboard.press('h');
+    await expect(board).toBeHidden();
+    await page.keyboard.press('a');
+    await expect(board).toBeVisible();
+    await expect(page.getByRole('tab', { name: /^Approvals/ })).toBeFocused();
+    await expect(page.locator('[data-tool="toggle-panels"]')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('with reduced motion the director camera starts off, and C still turns it on', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openDemo(page);
+    const director = page.locator('[data-tool="director"]');
+    await expect(director).toHaveAttribute('aria-pressed', 'false');
+    await page.waitForTimeout(2000);
+    await expect(page.getByTestId('director-caption')).toBeHidden();
+    await page.keyboard.press('c');
+    await expect(director).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('director-caption')).toBeVisible({ timeout: 30_000 });
+  });
+
   test('? opens help and Escape closes it, returning focus', async ({ page }) => {
     await openDemo(page);
     await page.getByTestId('settings-button').focus();

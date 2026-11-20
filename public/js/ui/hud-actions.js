@@ -1,6 +1,7 @@
 // What the viewer can do: select an agent or building, follow, switch tabs, open dialogs, and the
 // toolbar / keyboard actions. Each function takes the HUD (its context and components).
 import { timeOfDayFor } from './appearance.js';
+import { directorActive } from './cinema.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').Selection} Selection */
@@ -106,10 +107,11 @@ export function openDialog({ ui }, name) {
 
 /**
  * The side panels are hidden when the viewer asked for it, and by default in a hosted demo,
- * where the town itself is the point.
+ * where the town itself is the point. Without a 3D view the panels are all there is to see.
  * @param {HudContext} ctx
  */
 export function panelsHidden(ctx) {
+  if (ctx.view.worldFailed) return false;
   return ctx.prefs.panels === 'hidden' || (ctx.prefs.panels === 'auto' && ctx.view.hosted);
 }
 
@@ -155,8 +157,8 @@ export function runAction(hud, action) {
  */
 function toggleDirector(hud) {
   const { ctx } = hud;
-  const on = !ctx.prefs.directorCam;
-  ctx.setPrefs({ directorCam: on });
+  const on = !directorActive(ctx);
+  ctx.setPrefs({ directorCam: on ? 'on' : 'off' });
   if (on) {
     if (ctx.view.selection) select(hud, null, { camera: false });
     if (ctx.view.follow) setFollow(hud, false);
@@ -168,6 +170,10 @@ function toggleDirector(hud) {
 
 /** @param {HudContext} ctx */
 function togglePanels(ctx) {
+  if (ctx.view.worldFailed) {
+    ctx.announcer.polite('The 3D town could not start, so the side boards stay on screen.');
+    return;
+  }
   const hide = !panelsHidden(ctx);
   ctx.setPrefs({ panels: hide ? 'hidden' : 'shown' });
   ctx.announcer.polite(hide ? 'Full-screen town on: the side boards are put away.' : 'Full-screen town off: the side boards are back.');
