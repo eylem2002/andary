@@ -28,3 +28,4 @@ bottom; after a merge GitHub retargets the next pull request to `main`.
 - `fix/feature-review` — fixes from the independent review of the nine features
 - `feat/codex` — connect OpenAI Codex: `andary install codex`, a server-side adapter, a Codex badge
 - `refactor/architecture` — one ingest pipeline, shared core rules, smaller modules, enforced layer boundaries
+- `docs/usage-guide` — README as a guide: install, connect Claude Code or Codex, use the town, share it

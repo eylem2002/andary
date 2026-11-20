@@ -1,6 +1,6 @@
 # Leaderboard
 
-Part 18 of 23 · base: `feat/town-growth`
+Part 18 of 26 · base: `feat/town-growth`
 
 ## What changed
 

@@ -1,6 +1,6 @@
 # Characters, animation and the world facade
 
-Part 5 of 23 · base: `feat/town-environment`
+Part 5 of 26 · base: `feat/town-environment`
 
 ## What changed
 

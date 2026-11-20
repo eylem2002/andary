@@ -290,9 +290,9 @@ function settingRow(id, name, control) {
 
 const SETUP_STEPS = [
   { title: 'Install the andary command', command: 'npm install -g github:eylem2002/andary', note: 'Installs straight from GitHub. Andary has no runtime dependencies.' },
-  { title: 'Add the Andary hooks to Claude Code', command: 'andary install', note: 'Registers the hooks in ~/.claude/settings.json, for every project. Undo any time with andary uninstall.' },
+  { title: 'Add the Andary hooks to Claude Code', command: 'andary install', note: 'Registers the hooks in ~/.claude/settings.json, for every project. Using Codex? Run andary install codex too, and trust the hooks when Codex asks. Undo any time with andary uninstall.' },
   { title: 'Start the town', command: 'andary start', note: 'Runs a small server on 127.0.0.1 only, and prints a link that signs your browser in.' },
-  { title: 'Open the link, then use Claude Code as usual', command: 'claude', note: 'Every session, subagent and teammate shows up as a crew in the town.' },
+  { title: 'Open the link, then use Claude Code as usual', command: 'claude', note: 'Every session, subagent and teammate shows up as a crew in the town (Codex sessions too, with codex).' },
 ];
 
 /** @param {HudContext} ctx */
@@ -310,7 +310,7 @@ export function createSetupDialog(ctx) {
     id: 'hud-setup',
     title: 'Run it with your own Claude Code',
     body: [
-      h('p', { class: 'hud-dialog__lead', text: 'This is a demo town with simulated crews. On your own machine, Andary shows your real Claude Code sessions as they work. You need Node.js 20 or newer.' }),
+      h('p', { class: 'hud-dialog__lead', text: 'This is a demo town with simulated crews. On your own machine, Andary shows your real Claude Code (or Codex) sessions as they work. You need Node.js 20 or newer.' }),
       steps,
       h('p', { class: 'hud-dialog__note', text: 'Everything stays on your computer: the server only listens on 127.0.0.1, and your prompts and commands are never written to disk unless you ask it to record.' }),
     ],

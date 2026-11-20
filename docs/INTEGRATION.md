@@ -1,12 +1,14 @@
-# Connecting Andary to Claude Code
+# Connecting Andary to Claude Code and Codex
 
-Andary learns what Claude Code is doing through **hooks**. Claude Code runs a small forwarder
-script for every hook event; the forwarder posts the event to the local Andary server; the
-server sanitizes it and streams it to the town in your browser over a WebSocket.
+Andary learns what Claude Code (or OpenAI's Codex CLI) is doing through **hooks**. The agent runs
+a small forwarder script for every hook event; the forwarder posts the event to the local Andary
+server; the server translates it into the town's event format, sanitizes it and streams it to the
+town in your browser over a WebSocket.
 
 ```
-Claude Code ──hook (stdin JSON)──▶ hook.mjs ──POST /api/hook──▶ server ──WebSocket──▶ browser
-                ◀── decision (stdout, PermissionRequest only) ──┘
+Claude Code ─┐
+             ├─hook (stdin JSON)──▶ hook.mjs ──POST /api/hook──▶ server ──WebSocket──▶ browser
+Codex ───────┘   ◀── decision (stdout, PermissionRequest only) ──┘
 ```
 
 The interfaces are specified in [CONTRACTS.md §4](CONTRACTS.md#4-claude-code--server-the-hook-pipeline).
@@ -14,16 +16,17 @@ The interfaces are specified in [CONTRACTS.md §4](CONTRACTS.md#4-claude-code--s
 ## Quick start
 
 ```sh
-npx andary                 # or: node bin/andary.mjs start   (from a checkout)
-npx andary install         # register the hooks in ~/.claude/settings.json
+npm install -g github:eylem2002/andary   # or use node bin/andary.mjs from a checkout
+andary install             # register the hooks in ~/.claude/settings.json (Codex: andary install codex)
+andary start
 ```
 
 `start` prints a sign-in link such as `http://127.0.0.1:4747/?token=…` and opens it in your
 browser. Start a **new** Claude Code session in any project and its crew walks into town. Running
 sessions keep the hooks they started with.
 
-Without Claude Code you can still watch the town: `npx andary demo` opens the built-in
-simulation, and `npx andary simulate` sends simulated sessions through the real pipeline.
+Without Claude Code you can still watch the town: `andary demo` opens the built-in
+simulation, and `andary simulate` sends simulated sessions through the real pipeline.
 
 ## Ways to connect
 
@@ -37,6 +40,29 @@ simulation, and `npx andary simulate` sends simulated sessions through the real 
 
 `--dry-run` shows what `install` or `uninstall` would change without writing anything.
 `CLAUDE_CONFIG_DIR` is honoured for the user scope.
+
+## Codex
+
+`andary install codex` registers the same forwarder in Codex's hooks file, with the argument
+`codex` so the server knows who is calling (CONTRACTS §4.1, §4.12; ADR 0013):
+
+| Route | Command | Hooks file |
+| --- | --- | --- |
+| User scope (default) | `andary install codex` | `~/.codex/hooks.json` (`$CODEX_HOME` honoured) |
+| Project scope | `andary install codex --scope project [--dir <project>]` | `<project>/.codex/hooks.json` |
+| By hand | `andary install codex --print` | wherever you paste it (`hooks.json`, or `[hooks]` in `config.toml`) |
+
+- **Trust the hooks.** Codex asks you to review new or changed hooks when it starts; hooks you
+  do not trust do not run. Choose to trust Andary's, or open `/hooks` in Codex. Project hooks
+  load only in projects you trust.
+- **Events:** SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, SubagentStart,
+  SubagentStop, Stop, PreCompact and PostCompact (asynchronous), PermissionRequest (waits up to
+  150 s, for remote approvals), SessionEnd and Interrupt (3 s, Codex's maximum).
+- **Translation, on the server:** a multi-file `apply_patch` becomes one edit per file (so the
+  inspector shows each diff), `spawn_agent` an Agent call, a command with a non-zero exit code a
+  failure, `Interrupt` the end of the turn. Permission requests are passed on exactly as Codex
+  sent them, and Codex reads the town's allow/deny answer in the same format as Claude Code.
+- **Not covered yet:** token costs (read from Claude Code transcripts only).
 
 ### What the installer does
 
@@ -196,6 +222,8 @@ At most 50 prompts wait at once; beyond that the oldest is handed back to the te
 
 Run `andary doctor` first: it checks every link of the chain and prints the fix.
 
+- **Codex sessions do not appear.** Trust Andary's hooks in Codex (`/hooks`), then start a new
+  session; `andary status` should list "Codex, user scope: installed".
 - **Nothing appears in the town.** Start a new Claude Code session after installing; running
   sessions keep the hooks they started with. `/hooks` inside Claude Code lists the hooks it sees.
   The hook command calls `node`, which must be on the PATH of the shell Claude Code uses.
@@ -225,6 +253,7 @@ Run `andary doctor` first: it checks every link of the chain and prints the fix.
 
 ```sh
 andary uninstall                 # user scope; add --scope project|local [--dir …] for the others
+andary uninstall codex           # Codex's hooks (--scope project for a project's)
 /plugin uninstall andary@andary   # if you used the plugin
 rm -rf ~/.andary                 # forwarder, records and recordings
 ```

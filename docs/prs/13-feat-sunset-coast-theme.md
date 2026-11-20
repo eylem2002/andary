@@ -1,6 +1,6 @@
 # The sunset-coast look
 
-Part 13 of 23 · base: `feat/game-view-director-camera`
+Part 13 of 26 · base: `feat/game-view-director-camera`
 
 ## What changed
 
