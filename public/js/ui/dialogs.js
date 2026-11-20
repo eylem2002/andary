@@ -107,6 +107,14 @@ export function createSettingsDialog(ctx) {
   const volumeBlock = h('div', { class: 'hud-setting' },
     settingRow('hud-set-volume', 'Sound volume', volume),
     h('p', { class: 'hud-setting__help', text: 'Sound is off until you turn it on with the speaker button or M.' }));
+  const ambient = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-ambient', role: 'switch', checked: ctx.prefs.ambient, 'data-testid': 'ambient-toggle' }));
+  ambient.addEventListener('change', () => {
+    ctx.setPrefs({ ambient: ambient.checked });
+    ctx.sound.setAmbient({ wanted: ambient.checked });
+  });
+  const ambientBlock = h('div', { class: 'hud-setting' },
+    settingRow('hud-set-ambient', 'Ambient sound', ambient),
+    h('p', { class: 'hud-setting__help', text: 'While sound is on: waves, gulls by day and crickets by night, a city hum and soft chords that grow busier with the crews, and rain with the town\'s weather.' }));
 
   const announce = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-announce', role: 'switch', checked: ctx.prefs.announce }));
   announce.addEventListener('change', () => {
@@ -132,7 +140,7 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [remoteBlock, theme.el, motion.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    body: [remoteBlock, theme.el, motion.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -162,6 +170,7 @@ export function createSettingsDialog(ctx) {
       motion.set(ctx.prefs.motion);
       quality.set(ctx.prefs.quality);
       weather.checked = ctx.prefs.weather;
+      ambient.checked = ctx.prefs.ambient;
       notify.sync();
       dialog.open();
     },

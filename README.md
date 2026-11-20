@@ -83,6 +83,13 @@ ntfy app. Phone messages only say what happened ("A crew needs your permission")
 project, files or commands, and at most one of a kind every 30 seconds. `--notify-url` points
 at your own ntfy server instead; Settings has a test button.
 
+### Ambient sound
+
+With sound on (`M`), the town has its own soundscape, all synthesised in the browser: waves on
+the shore, gulls by day and crickets by night, a city hum and soft chords that get fuller as the
+crews get busier, and rain when the town's weather rains. It fades out when the tab is in the
+background; Settings → Ambient sound turns it off and keeps the effects.
+
 ### Weather
 
 The town's weather follows the work: rain when commands fail, a storm with lightning when they

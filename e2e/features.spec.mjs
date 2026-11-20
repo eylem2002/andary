@@ -121,3 +121,15 @@ test('notifications on this computer can be turned on in Settings', async ({ pag
   // The demo has no server, so the phone setting is not offered.
   await expect(page.getByTestId('phone-notify-text')).toBeHidden();
 });
+
+test('ambient sound has its own switch in Settings, kept for next time', async ({ page }) => {
+  await openDemo(page);
+  await page.getByTestId('settings-button').click();
+  const toggle = page.getByTestId('ambient-toggle');
+  await expect(toggle).toBeChecked();
+  await toggle.uncheck();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('andary:prefs') ?? '{}').ambient)).toBe(false);
+  await page.keyboard.press('Escape');
+  // Turning sound on (a gesture) must not throw, with or without the ambient bed.
+  await page.keyboard.press('m');
+});

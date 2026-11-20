@@ -197,4 +197,9 @@ section.
     machine can run their own ntfy server and pass its URL.
 54. **Notifications on this computer** use the browser's own permission and only fire while the
     town's tab is in the background; they may name the crew, since they stay on the computer.
+55. **Ambient sound is synthesised and follows sound.** No audio files (nothing to license):
+    noise loops for waves, hum and rain, short calls for gulls and crickets, and a pad of four
+    slow chords. It plays only while sound is on (still off by default) and "Ambient sound" is on
+    (on by default), and fades out while the tab is hidden. "Night" for the crickets is the
+    town's clock (before 6:00 or from 19:30).
 
