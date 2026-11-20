@@ -336,7 +336,7 @@ export function parseHookBody(raw) {
 const NOT_SHOWN_IN_FULL = 'The town cannot show this request in full (it is very long or holds credentials)';
 /**
  * Requests that a plain allow or deny cannot answer: a plan to approve, a question to answer. They
- * wait in the terminal, never in the town.
+ * wait in the terminal, never in the town, and their card always says so.
  */
 const TERMINAL_ONLY = new Map([
   ['ExitPlanMode', 'Plans are approved in the terminal'],
@@ -369,7 +369,7 @@ async function answerPermissionRequest(ctx, req, res, event, exact) {
   const wanted = ctx.settings.remoteApprovals && ctx.hub.owners > 0;
   const terminalOnly = TERMINAL_ONLY.get(String(event.tool_name));
   const hold = wanted && exact && !terminalOnly;
-  const why = wanted ? (terminalOnly ?? (exact ? undefined : NOT_SHOWN_IN_FULL)) : undefined;
+  const why = terminalOnly ?? (wanted && !exact ? NOT_SHOWN_IN_FULL : undefined);
   const { approval, response } = ctx.broker.create(event, { hold, message: why });
   if (hold) {
     // The forwarder went away (Claude Code cancelled the hook): Claude asks in the terminal now.

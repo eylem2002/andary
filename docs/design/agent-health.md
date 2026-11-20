@@ -49,11 +49,16 @@ Principles:
   it drops out of every count. The count must follow the agent's wait, not the approval's status.
 - **Plan approvals** (`ExitPlanMode`) raise a PermissionRequest that a plain allow cannot answer,
   yet the town holds it and shows Allow. Never hold them; the card says "answer in your terminal".
-- **Phone notes follow the attention rules**:
-  - no note for every finished turn (Claude Code's `idle_prompt`, 60 s later, already covers an
-    unanswered one);
-  - a permission note waits about 10 seconds and is dropped if the request was answered meanwhile;
-  - several in that window become one ("2 crews need you").
+- **Phone notes follow the attention rules** (CONTRACTS §4.10):
+  - no note for every finished turn: Claude Code's `idle_prompt`, 60 s later, covers an unanswered
+    one. Codex has no `idle_prompt`, so the server waits the same 60 s after a Codex lead's turn;
+  - a permission note waits 10 seconds per request and is dropped only on proof of an answer: the
+    same call reporting back, a prompt, the turn ending, a decision in the town. A request that
+    timed out or went back to the terminal still gets its note: the agent waits there. A yes in
+    the terminal is seen only when the tool finishes and a "No" only at the next prompt, so those
+    can still send one;
+  - notes due together become one ("2 crews need your permission"), and one held back by the 30 s
+    limit goes out when the limit allows.
 
 ## 3. Needs you
 

@@ -102,6 +102,17 @@ describe('remote approvals', () => {
     await closeBrowser(browser);
   });
 
+  it('says why on a plan even when nobody could answer it in the town anyway', async () => {
+    const payload = permissionRequest({ tool_name: 'ExitPlanMode', tool_input: { plan: 'Refactor the auth module' } });
+    assert.deepEqual(await town.sendHook(payload), { code: 0, stdout: '', stderr: '' });
+    const browser = await connectBrowser(town);
+    const hello = await waitForMessage(browser, (m) => m?.t === 'hello');
+    const approval = hello.approvals.find((/** @type {any} */ a) => a.sessionId === payload.session_id);
+    assert.deepEqual([approval.status, approval.held], ['pending', false]);
+    assert.match(approval.message, /Plans are approved in the terminal/);
+    await closeBrowser(browser);
+  });
+
   it('does not hold when no browser is watching', async () => {
     const payload = permissionRequest();
     const result = await town.sendHook(payload);

@@ -291,11 +291,12 @@ reports PostToolUse, PostToolUseFailure, PermissionDenied, Stop or SessionEnd (t
 by `tool_name` or, for a call an adapter renamed, `andary_tool`, §4.12). At most 50 pending.
 `ExitPlanMode` and `AskUserQuestion` requests are never held: a plain allow or deny cannot approve
 a plan or answer a question, so they are answered with `null` at once (`held: false`) and their
-`message` says they are answered in the terminal. A request whose `tool_input` was changed by
-sanitising (a value redacted or cut) is never held,
-because the town could not show what would run: it is answered at once with `null` and its
-approval has `held: false` and `message: "The town cannot show this request in full (…)"`. In the
-browser, Allow/Deny ignore pointer clicks for 1 s after a card appears or changes place.
+`message` always says they are answered in the terminal. A request whose `tool_input` was changed
+by sanitising (a value redacted or cut) is never held, because the town could not show what would
+run: it is answered at once with `null`. When the town would otherwise have held it (remote
+approvals on, a browser signed in), its approval has `held: false` and
+`message: "The town cannot show this request in full (…)"`. In the browser, Allow/Deny ignore
+pointer clicks for 1 s after a card appears or changes place.
 
 ### 4.6 Implementation notes (server)
 
@@ -369,15 +370,44 @@ demo keeps its points in `localStorage['andary:demo-progress']`, starting at 92.
 
 Phone (`server/notify.mjs`), opt-in: `--notify` uses a random ntfy.sh topic kept in
 `<ANDARY_HOME>/notify.json` (0600); `--notify-url <url>` or `ANDARY_NOTIFY_URL` names any http(s)
-ntfy topic (no credentials in the URL). A `PermissionRequest` or `Notification`
-(`permission_prompt`) hook holds back "A crew needs your permission." (priority high) for 10 s
-and drops it if the approval broker no longer has a request pending for that agent (answered
-meanwhile); requests from several crews in that window become one note ("2 crews need your
-permission."). `idle_prompt` posts "Claude is waiting for your next prompt.", `StopFailure` a limit
-or error note. A finished turn posts nothing by itself (`idle_prompt` follows a minute later if
-nobody answered). The body never names a project, file or command. At most one of a kind per 30 s
-and 30 an hour; a failed post is logged once. `settings.notify` (also in the
-unauthenticated `/api/hello`) is a boolean; the topic URL is only in the WebSocket `hello`.
+ntfy topic (no credentials in the URL). The body never names a project, file, command or tool. At
+most one note of a kind per 30 s and 30 an hour (test notes aside); a failed post is logged once.
+`settings.notify` (also in the unauthenticated `/api/hello`) is a boolean; the topic URL is only in
+the WebSocket `hello`. Only this computer's events count (§4.11).
+
+- **Permission**: "A crew needs your permission." (priority high). The notifier keeps one dialog
+  per agent (session + agent). A dialog starts with a `PermissionRequest`, or with a `Notification`
+  (`permission_prompt`) when the session has no dialog yet (its request never reached the town: a
+  429, a failed proof, a restart). A new request from the same agent replaces its dialog: the old
+  one was answered. The note is due 10 s after the dialog starts. It is dropped only on proof of
+  an answer:
+  - the same agent's `PostToolUse`, `PostToolUseFailure` or `PermissionDenied` for the same call: a
+    tool name in common (`tool_name` or `andary_tool`) and the same `tool_input`, compared as a
+    SHA-256 of its JSON before sanitising (a list command joined as the Codex adapter joins it). A
+    call an adapter renamed is matched by name only. A dialog known only from `permission_prompt`
+    is answered by any tool result of that agent. A parallel call with another input proves nothing;
+  - `UserPromptSubmit`, `SessionEnd` or a Codex interrupt (the `Stop` with
+    `stop_reason: "interrupted"`): every dialog of the session. `Stop`: the lead's. `SubagentStop`:
+    that agent's;
+  - the town deciding (`allowed` or `denied`) the held approval made for that request.
+
+  An approval that expired or was released is no proof: the agent waits in its terminal. Nor is
+  the broker's `resolved`, which matches by tool name only. Dialogs due at the same time become one
+  note for their crews ("3 crews need your permission."). While the 30 s limit holds a permission
+  note back, the due dialogs wait and go out when it allows; past the hour's limit they count as
+  noted, unsent. A noted dialog is kept until its proof, at most 30 minutes after it started (a
+  crashed session sends no `SessionEnd`), so its `permission_prompt` sends nothing more. At most 100
+  dialogs are kept; the oldest go first.
+
+  What cannot be seen: a yes in the terminal shows only when the tool finishes (approve a 30 s
+  `npm test` in 1 s and the note still goes out), and a "No" sends no event before your next
+  prompt. Either can still send a note.
+- **Waiting**: "A crew is waiting for your next prompt.", for Claude Code's `idle_prompt`. Codex
+  sends no `Notification` events: after a Codex lead's `Stop` (an interrupt too), the notifier
+  waits 60 s (`CODEX_IDLE_MS`) and sends the same note unless another event of that session comes
+  first.
+- **Stopped**: `StopFailure` posts a limit or an error note.
+- A finished turn posts nothing by itself. Stopping the server drops every note still waiting.
 
 This computer (`public/js/ui/notifications.js`), opt-in in Settings (`prefs.desktopNotify`, after
 the browser's permission): while the page is hidden, a fresh pending approval, the main agent's

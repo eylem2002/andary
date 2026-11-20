@@ -265,16 +265,6 @@ export function createApprovalBroker({
       for (const entry of pending()) release(entry);
     },
 
-    /**
-     * Whether an agent still has a request waiting (in the town or in the terminal).
-     * @param {unknown} sessionId
-     * @param {unknown} agentId  as in the hook (with or without "agent-"), or absent for the main agent
-     */
-    isWaiting(sessionId, agentId) {
-      const agent = normalizeAgentId(agentId);
-      return pending().some(({ approval }) => approval.sessionId === sessionId && approval.agentId === agent);
-    },
-
     /** @returns {number} */
     heldCount() {
       return pending().filter(({ approval }) => approval.held).length;
