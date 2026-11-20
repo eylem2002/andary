@@ -11,7 +11,7 @@ export const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const PUBLIC_DIR = join(ROOT_DIR, 'public');
 /** The forwarder that `install` copies to <ANDARY_HOME>/hook.mjs. */
 export const HOOK_SOURCE = join(ROOT_DIR, 'hooks', 'hook.mjs');
-export const CLI_PATH = join(ROOT_DIR, 'bin', 'andary.mjs');
+export const CLI_PATH = join(ROOT_DIR, 'cli', 'andary.mjs');
 export const SIMULATION_MODULE = join(PUBLIC_DIR, 'js', 'sim', 'simulation.js');
 
 export const APP_ID = 'andary';

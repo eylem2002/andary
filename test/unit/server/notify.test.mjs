@@ -73,7 +73,8 @@ test('the saved topic is random, private to the user and kept', () => {
   const url = savedTopicUrl(home);
   assert.match(url, /^https:\/\/ntfy\.sh\/andary-[\w-]{24}$/);
   assert.equal(savedTopicUrl(home), url);
-  assert.equal(statSync(join(home, 'notify.json')).mode & 0o777, 0o600);
+  // Windows has no POSIX modes; the user profile's permissions protect the file there.
+  if (process.platform !== 'win32') assert.equal(statSync(join(home, 'notify.json')).mode & 0o777, 0o600);
   assert.equal(JSON.parse(readFileSync(join(home, 'notify.json'), 'utf8')).url, url);
 });
 

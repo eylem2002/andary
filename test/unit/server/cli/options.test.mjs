@@ -55,7 +55,7 @@ describe('display helpers', () => {
     assert.equal(cliInvocation('/usr/local/bin/andary'), 'andary');
     assert.equal(cliInvocation('C:\\npm\\andary.cmd'), 'andary');
     assert.equal(cliInvocation('/home/me/.npm/_npx/abc/node_modules/.bin/andary'), 'npx andary');
-    assert.match(cliInvocation('/repo/bin/andary.mjs'), /^node ".*andary\.mjs"$/);
+    assert.match(cliInvocation('/repo/cli/andary.mjs'), /^node ".*andary\.mjs"$/);
   });
 
   it('formats uptimes', () => {

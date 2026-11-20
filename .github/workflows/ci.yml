@@ -1,8 +1,9 @@
 name: CI
 
-# Free-tier friendly: Linux runners only, one Node matrix for the fast checks, a single end-to-end
-# job, cancelled when a newer commit lands, with hard timeouts. Public repositories pay nothing;
-# private ones use roughly 10 of the 2,000 free minutes per push.
+# Free-tier friendly: the full checks on Linux with one Node matrix, the unit and integration
+# tests once on macOS and Windows (after the Linux checks pass), a single end-to-end job,
+# cancelled when a newer commit lands, with hard timeouts. Public repositories pay nothing;
+# private ones pay more for macOS (10x) and Windows (2x) minutes, so those run one Node only.
 on:
   push:
     branches: [main]
@@ -61,6 +62,29 @@ jobs:
       - run: npm test
       - run: npm run licenses
       - run: npm run secrets
+
+  other-os:
+    name: Unit and integration tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    needs: checks
+    # Windows has not passed a run yet (no Windows machine was available while porting): its
+    # result is reported without failing the workflow until it has been green for a while.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-fund
+      - run: npm test
 
   e2e:
     name: End-to-end and accessibility

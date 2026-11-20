@@ -55,6 +55,9 @@ import { agentState, contextFor, enqueue, makeVisit, pump, release, say, scoped,
  * @property {() => number} [now]
  * @property {(fn: () => void, ms: number) => unknown} [setTimer]
  * @property {(handle: unknown) => void} [clearTimer]
+ * @property {StoreChange[]|null} [backlog]  the store's changes from before the director started
+ *   (recordChanges), played in order so the town misses none of them; without one, agents already
+ *   in the store are placed without ceremony
  */
 
 /**
@@ -108,6 +111,8 @@ import { agentState, contextFor, enqueue, makeVisit, pump, release, say, scoped,
  */
 
 const SLEEP_AFTER_MS = 120_000;
+/** Store changes kept for a director that has not started yet; past this, it catches up from the state. */
+const MAX_BACKLOG = 5000;
 const NAG_AFTER_MS = Object.freeze([15_000, 40_000, 80_000, 150_000]);
 const HISTORIC_MS = 30_000;
 
@@ -1100,18 +1105,47 @@ function syncFromStore(d) {
 }
 
 /**
+ * Keeps the store's changes until the director starts. The app starts the store and the HUD
+ * first and builds the 3D world after (it blocks the page for a moment); the director then plays
+ * this backlog, so crews that arrived meanwhile still come in by bus. Returns null instead when
+ * the store already had sessions or the backlog grew past `limit`: the director then places the
+ * store's agents without ceremony.
+ * @param {{subscribe: (listener: (change: StoreChange) => void) => () => void, getState: () => StoreState}} store
+ * @param {number} [limit]
+ * @returns {{ stop: () => StoreChange[]|null }}
+ */
+export function recordChanges(store, limit = MAX_BACKLOG) {
+  /** @type {StoreChange[]|null} */
+  let backlog = store.getState().sessions.length ? null : [];
+  const unsubscribe = store.subscribe((change) => {
+    if (!backlog) return;
+    if (backlog.length >= limit) backlog = null;
+    else backlog.push(change);
+  });
+  return {
+    stop() {
+      unsubscribe();
+      return backlog;
+    },
+  };
+}
+
+/**
  * Subscribes to the store and drives the world until disposed.
  * @param {DirectorOptions} options
  * @returns {{dispose: () => void}}
  */
 export function createDirector(options) {
   const d = createContext(options);
-  syncFromStore(d);
-  const unsubscribe = d.store.subscribe((change) => {
+  /** @param {StoreChange} change */
+  const play = (change) => {
     if (d.disposed || !change) return;
     const show = own(CHANGE_SHOWS, change.type);
     if (show) scoped(d, d.historic, () => show(d, change))();
-  });
+  };
+  if (Array.isArray(options.backlog)) for (const change of options.backlog) play(change);
+  else syncFromStore(d);
+  const unsubscribe = d.store.subscribe(play);
   return {
     dispose() {
       if (d.disposed) return;

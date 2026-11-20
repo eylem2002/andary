@@ -41,7 +41,8 @@ test('the team secret is made once, kept private, and replaced by a reset', () =
   assert.equal(teamSecret(home, { create: false }), null);
   const first = teamSecret(home);
   assert.equal(teamSecret(home), first);
-  assert.equal(statSync(join(home, 'team.json')).mode & 0o777, 0o600);
+  // Windows has no POSIX modes; the user profile's permissions protect the file there.
+  if (process.platform !== 'win32') assert.equal(statSync(join(home, 'team.json')).mode & 0o777, 0o600);
   const fresh = teamSecret(home, { fresh: true });
   assert.notEqual(fresh, first);
   assert.equal(teamSecret(home, { create: false }), fresh);

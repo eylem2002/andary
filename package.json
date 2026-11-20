@@ -18,10 +18,10 @@
     "developer-tools"
   ],
   "bin": {
-    "andary": "bin/andary.mjs"
+    "andary": "cli/andary.mjs"
   },
   "files": [
-    "bin",
+    "cli",
     "server",
     "hooks",
     "public",
@@ -35,8 +35,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node bin/andary.mjs start",
-    "demo": "node bin/andary.mjs demo",
+    "start": "node cli/andary.mjs start",
+    "demo": "node cli/andary.mjs demo",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json",
     "deadcode": "node scripts/find-unused-exports.mjs",

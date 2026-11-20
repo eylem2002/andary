@@ -7,9 +7,9 @@
 import { ACHIEVEMENTS, achievementFor } from './achievements.js';
 import { BUILDINGS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
 import { LEAD_NAME, MAX_APPROVALS, MAX_RECENT, MAX_RETIRED, MAX_SPAWNS_PER_SESSION, boundedPush, createModel } from './store-model.js';
-import { agentFor, assignSpawn, attribute, dropAgent, place, pruneDoneHelpers, pruneEndedSessions, reconcileTeammate, sessionFor, sessionStatus } from './crews.js';
+import { agentFor, assignSpawn, attribute, dropAgent, place, pruneDoneHelpers, pruneEndedSessions, reconcileTeammate, repairGuesses, sessionFor, sessionStatus } from './crews.js';
 import { recordChange, rememberFile } from './changes.js';
-import { normalize } from './events.js';
+import { NO_SESSION, normalize } from './events.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
@@ -29,6 +29,8 @@ export { ACHIEVEMENTS };
 /**
  * @typedef {object} Session  one Claude Code session, shown as a crew
  * @property {string} id
+ * @property {number} number         the crew's number in the HUD (keys 1–9): the lowest one free
+ *   when it arrived, kept for as long as the crew is listed, even when older crews are pruned
  * @property {string} project        cwd basename
  * @property {string} cwd
  * @property {string} [title]
@@ -159,7 +161,9 @@ export { ACHIEVEMENTS };
  * @property {string|null} teamName
  * @property {string} description
  * @property {string|null} model
+ * @property {number} ts               when the call's hook started: guesses pair helpers in this order
  * @property {string|null} claimedBy  agentKey that holds this identity
+ * @property {boolean} proven          the Agent result or a teammate's name showed who holds it
  */
 
 /** @typedef {{icon: string, text: string, level: LogEntry['level']}} LogDraft */
@@ -209,6 +213,11 @@ const SHIPPING_LOG = Object.freeze({
 });
 /** Tools whose derived event writes a better log line than the tool call itself. */
 const QUIET_TOOLS = new Set(['SendMessage']);
+/**
+ * Events without a session id share one crew, and no SessionEnd will ever end it: it ends once
+ * another crew's event comes this long after its last one, and is pruned like any ended crew.
+ */
+const NO_SESSION_IDLE_MS = 10 * 60_000;
 
 /** @typedef {(m: Model, e: TownEvent, s: Session, a: AgentState, relabels: Relabel[]) => LogDraft|null} Apply */
 
@@ -329,7 +338,12 @@ function applyNotify(m, e, s, a) {
 }
 
 /** @type {Apply} */
-function applySubagentStart(m, e, s, a) {
+function applySubagentStart(m, e, s, a, relabels) {
+  // Its own tool calls may have arrived first; it started when this hook did.
+  if (e.ts < a.startedAt) {
+    a.startedAt = e.ts;
+    repairGuesses(m, s, a.type, relabels);
+  }
   a.status = 'working';
   place(a, 'hall', 'wave');
   m.state.stats.subagents += 1;
@@ -442,7 +456,7 @@ function applyTaskUpsert(m, e, s) {
 }
 
 /** @type {Apply} */
-function applySpawnRequest(m, e, s) {
+function applySpawnRequest(m, e, s, a, relabels) {
   const d = e.data;
   const list = m.spawns.get(s.id) ?? [];
   m.spawns.set(s.id, list);
@@ -455,10 +469,14 @@ function applySpawnRequest(m, e, s) {
       teamName: d.teamName,
       description: d.description,
       model: d.model,
+      ts: e.ts,
       claimedBy: null,
+      proven: false,
     }),
     MAX_SPAWNS_PER_SESSION,
   );
+  // A helper of this type may have started before this call arrived (async hooks race).
+  repairGuesses(m, s, d.subagentType, relabels);
   return null;
 }
 
@@ -466,15 +484,10 @@ function applySpawnRequest(m, e, s) {
 function applySpawnResult(m, e, s, a, relabels) {
   const { agentId, toolUseId } = e.data;
   const spawn = toolUseId ? (m.spawns.get(s.id) ?? []).find((sp) => sp.toolUseId === toolUseId) : undefined;
-  if (!agentId || !spawn) return null;
-  const key = agentKeyOf(s.id, agentId);
-  if (m.state.agents[key]) {
-    assignSpawn(m, s, key, spawn, relabels);
-  } else if (!spawn.claimedBy) {
-    // Launched in the background before its SubagentStart arrived: remember who it will be.
-    spawn.claimedBy = key;
-    m.spawnOf.set(key, spawn);
-  }
+  if (!agentId || !spawn || (spawn.proven && spawn.claimedBy !== agentKeyOf(s.id, agentId))) return null;
+  // Also before the subagent's SubagentStart arrived (launched in the background): it starts
+  // with the right label, even if another helper had guessed this call meanwhile.
+  assignSpawn(m, s, agentKeyOf(s.id, agentId), spawn, relabels);
   return null;
 }
 
@@ -558,10 +571,10 @@ function apply(m, input) {
   const e = attribute(m, { ...input, data: { ...input.data } });
   // Async hooks of a finished subagent can still trickle in; they must not resurrect it.
   if (m.retired.has(e.agentKey)) return null;
-  const a = e.kind === 'session.end' ? m.state.agents[agentKeyOf(s.id, null)] : agentFor(m, s, e);
-  m.state.stats.events += 1;
   /** @type {Relabel[]} */
   const relabels = [];
+  const a = e.kind === 'session.end' ? m.state.agents[agentKeyOf(s.id, null)] : agentFor(m, s, e, relabels);
+  m.state.stats.events += 1;
   const handler = own(APPLY, e.kind);
   const draft = handler && a ? handler(m, e, s, a, relabels) : null;
   if (relabels.length) e.data.relabels = relabels;
@@ -698,6 +711,7 @@ export function createStore(options = {}) {
 
   /** @param {unknown} event */
   function commit(event) {
+    if (isTownEvent(event) && event.sessionId !== NO_SESSION) endIdleNoSession(event.ts);
     const applied = apply(m, event);
     if (!applied) return null;
     const unlocked = unlock(m.tracker.observe(applied, m.view), applied);
@@ -711,6 +725,30 @@ export function createStore(options = {}) {
       for (const achievement of unlock(approved, applied)) emit({ type: 'achievement', achievement });
     }
     return applied;
+  }
+
+  /**
+   * Ends the crew of events without a session id once it has been quiet for NO_SESSION_IDLE_MS,
+   * through an ordinary session end, so the HUD and the town see it leave.
+   * @param {number} ts
+   */
+  function endIdleNoSession(ts) {
+    const s = m.sessions.get(NO_SESSION);
+    if (!s || s.status === 'ended' || ts - s.lastActivity < NO_SESSION_IDLE_MS) return;
+    commit({
+      id: `${NO_SESSION}-idle-${ts}`,
+      ts,
+      rx: ts,
+      kind: 'session.end',
+      sessionId: NO_SESSION,
+      agentKey: agentKeyOf(NO_SESSION, null),
+      agentId: null,
+      agentType: null,
+      cwd: s.cwd,
+      member: s.member ?? null,
+      source: s.source ?? 'claude',
+      data: { reason: 'idle' },
+    });
   }
 
   return {

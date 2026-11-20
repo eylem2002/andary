@@ -198,9 +198,24 @@ export function slotPosition(key, slot) {
   const places = queuePlaces(key);
   const row = Math.floor(slot.index / places.length);
   const base = places[slot.index % places.length];
-  if (row === 0) return base;
-  // Overflow rows stand behind the first one, on whichever side is walkable.
-  const south = { x: base.x, z: base.z + QUEUE_ROW_GAP * row, facing: base.facing };
-  if (walkableAt(south.x, south.z)) return south;
-  return { x: base.x, z: base.z - QUEUE_ROW_GAP * row, facing: base.facing };
+  return row === 0 ? base : overflowPlace(base, row);
+}
+
+/**
+ * Overflow rows stand beside the first one, south then north, one gap further out each time,
+ * skipping places that are not walkable (a queue on a road's centre line has room for one row
+ * on each side). With no room left, the last row shares the first one's places.
+ * @param {Standing} base
+ * @param {number} row  1 or more
+ * @returns {Standing}
+ */
+function overflowPlace(base, row) {
+  let found = 0;
+  for (let k = 1; k <= MAX_QUEUE_PLACES; k++) {
+    for (const side of [1, -1]) {
+      const z = base.z + side * QUEUE_ROW_GAP * k;
+      if (walkableAt(base.x, z) && ++found === row) return { x: base.x, z, facing: base.facing };
+    }
+  }
+  return base;
 }

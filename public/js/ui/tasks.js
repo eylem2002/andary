@@ -60,13 +60,12 @@ export function createTasksPanel(ctx) {
 
   /** @param {StoreState} state */
   function render(state) {
-    const numbers = new Map(state.sessions.map((session, index) => [session.id, index + 1]));
     const shown = state.sessions.filter((session) => session.goal || session.todos.length || session.tasks.length);
     // Crews still at work first; ended crews keep their record below.
     shown.sort((a, b) => Number(a.status === 'ended') - Number(b.status === 'ended'));
     setText(empty, ctx.view.mode === 'demo' ? 'Goals and todo lists appear here as the demo crews plan their work.' : 'Each crew’s goal, todo list and team tasks appear here once it starts planning.');
     setHidden(empty, shown.length > 0);
-    renderList(list, shown, (session) => session.id, createGoal, (item, session) => updateGoal(item, session, numbers.get(session.id)));
+    renderList(list, shown, (session) => session.id, createGoal, (item, session) => updateGoal(item, session, session.number));
   }
 
   return { el, render };

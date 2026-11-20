@@ -20,11 +20,24 @@ import { LEAD_NAME, MAX_DONE_PER_SESSION, MAX_ENDED_SESSIONS, ROLE_NAMES, TEAMMA
 // ---------------------------------------------------------------------------------------------
 // Sessions and agents.
 
+/**
+ * The lowest crew number no listed crew holds. Numbers are never changed, so pruning an ended
+ * crew does not renumber the others, and they stay small enough for the 1–9 keys.
+ * @param {Model} m
+ */
+function freeCrewNumber(m) {
+  const taken = new Set(m.state.sessions.map((s) => s.number));
+  let n = 1;
+  while (taken.has(n)) n += 1;
+  return n;
+}
+
 /** @param {Model} m @param {TownEvent} e */
 export function newSession(m, e) {
   /** @type {Session} */
   const s = {
     id: e.sessionId,
+    number: freeCrewNumber(m),
     project: projectName(e.cwd, e.sessionId),
     cwd: e.cwd,
     title: undefined,
@@ -146,7 +159,8 @@ export function roleOf(spawn) {
 }
 
 /**
- * FIFO match of a newly seen subagent with the oldest unclaimed Agent/Task call of its type.
+ * Guesses which Agent/Task call a newly seen subagent came from: the oldest unclaimed one of its
+ * type (by when the call's hook started; async hooks can arrive out of order).
  * @param {Model} m
  * @param {string} sessionId
  * @param {string|null} agentType
@@ -154,7 +168,7 @@ export function roleOf(spawn) {
  */
 export function claimSpawn(m, sessionId, agentType, agentKey) {
   const wanted = (agentType ?? '').toLowerCase();
-  const spawn = (m.spawns.get(sessionId) ?? []).find(
+  const spawn = byStart(m.spawns.get(sessionId) ?? []).find(
     (sp) => !sp.claimedBy && (!wanted || sp.subagentType.toLowerCase() === wanted),
   );
   if (!spawn) return null;
@@ -163,8 +177,54 @@ export function claimSpawn(m, sessionId, agentType, agentKey) {
   return spawn;
 }
 
-/** @param {Model} m @param {Session} s @param {TownEvent} e */
-export function createHelper(m, s, e) {
+/** Oldest first; ties keep their arrival order. @param {Spawn[]} spawns */
+function byStart(spawns) {
+  return [...spawns].sort((a, b) => a.ts - b.ts);
+}
+
+/** Whether an agent's label rests on proof rather than a guess. @param {Model} m @param {string} key */
+function proven(m, key) {
+  const spawn = m.spawnOf.get(key);
+  return Boolean(spawn?.proven && spawn.claimedBy === key);
+}
+
+/**
+ * Re-pairs the helpers of one type whose label is a guess with the calls of that type no proof has
+ * claimed: the earliest-started helper gets the oldest call. Run whenever a helper or a call of
+ * the type arrives, or a proof takes a call from a guesser, so the labels follow the order the
+ * hooks started in, not the order they arrived in. Finished helpers keep theirs.
+ * @param {Model} m
+ * @param {Session} s
+ * @param {string} type
+ * @param {Relabel[]} relabels
+ */
+export function repairGuesses(m, s, type, relabels) {
+  const wanted = type.toLowerCase();
+  const guessing = helpersOf(m, s.id)
+    .filter((a) => a.status !== 'done' && a.type.toLowerCase() === wanted && !proven(m, a.key))
+    .sort((a, b) => a.startedAt - b.startedAt);
+  if (!guessing.length) return;
+  const keys = new Set(guessing.map((a) => a.key));
+  const free = byStart(m.spawns.get(s.id) ?? []).filter(
+    (sp) => sp.subagentType.toLowerCase() === wanted && !sp.proven && (!sp.claimedBy || keys.has(sp.claimedBy)),
+  );
+  const before = guessing.map((a) => m.spawnOf.get(a.key) ?? null);
+  for (const [i, a] of guessing.entries()) {
+    if (before[i]?.claimedBy === a.key) before[i].claimedBy = null;
+    m.spawnOf.delete(a.key);
+  }
+  for (const [i, a] of guessing.entries()) {
+    const spawn = free[i] ?? null;
+    if (spawn) {
+      spawn.claimedBy = a.key;
+      m.spawnOf.set(a.key, spawn);
+    }
+    if (spawn !== before[i]) relabel(m, s, a.key, spawn, relabels);
+  }
+}
+
+/** @param {Model} m @param {Session} s @param {TownEvent} e @param {Relabel[]} relabels */
+export function createHelper(m, s, e, relabels) {
   const spawn = m.spawnOf.get(e.agentKey) ?? claimSpawn(m, s.id, e.agentType, e.agentKey);
   const agent = baseAgent(s, e.agentKey, e.agentId, e.ts);
   agent.type = e.agentType || spawn?.subagentType || 'agent';
@@ -174,14 +234,16 @@ export function createHelper(m, s, e) {
   agent.description = spawn?.description || undefined;
   agent.model = spawn?.model || undefined;
   agent.status = 'working';
-  return register(m, s, agent);
+  register(m, s, agent);
+  if (!proven(m, agent.key)) repairGuesses(m, s, agent.type, relabels);
+  return agent;
 }
 
-/** @param {Model} m @param {Session} s @param {TownEvent} e */
-export function agentFor(m, s, e) {
+/** @param {Model} m @param {Session} s @param {TownEvent} e @param {Relabel[]} relabels */
+export function agentFor(m, s, e, relabels) {
   const existing = m.state.agents[e.agentKey];
   if (existing) return existing;
-  return e.agentId ? createHelper(m, s, e) : createLead(m, s, e);
+  return e.agentId ? createHelper(m, s, e, relabels) : createLead(m, s, e);
 }
 
 /**
@@ -205,8 +267,9 @@ export function relabel(m, s, key, spawn, relabels) {
 }
 
 /**
- * Gives an agent the identity of `spawn` once a later event proves which spawn it came from;
- * whoever had claimed that spawn by FIFO gets the agent's previous identity instead.
+ * Gives an agent the identity of `spawn` once an event proves which call it came from (the Agent
+ * result, a teammate's name). The agent need not be in the town yet: its SubagentStart may still
+ * be on its way. Whoever had only guessed that call is paired again with the calls left.
  * @param {Model} m
  * @param {Session} s
  * @param {string} agentKey
@@ -215,21 +278,15 @@ export function relabel(m, s, key, spawn, relabels) {
  */
 export function assignSpawn(m, s, agentKey, spawn, relabels) {
   const previous = m.spawnOf.get(agentKey) ?? null;
-  if (previous === spawn) return;
   const holder = spawn.claimedBy;
+  spawn.proven = true;
+  if (previous === spawn && holder === agentKey) return;
+  if (previous?.claimedBy === agentKey) previous.claimedBy = null;
   spawn.claimedBy = agentKey;
   m.spawnOf.set(agentKey, spawn);
-  if (previous) previous.claimedBy = null;
-  if (holder && holder !== agentKey) {
-    if (previous) {
-      previous.claimedBy = holder;
-      m.spawnOf.set(holder, previous);
-    } else {
-      m.spawnOf.delete(holder);
-    }
-    relabel(m, s, holder, previous, relabels);
-  }
   relabel(m, s, agentKey, spawn, relabels);
+  const types = new Set([spawn.subagentType, previous?.subagentType, holder ? m.state.agents[holder]?.type : null]);
+  for (const type of types) if (type) repairGuesses(m, s, type, relabels);
 }
 
 /**

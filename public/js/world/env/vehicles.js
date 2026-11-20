@@ -1,10 +1,13 @@
 // Traffic: cars looping the ring road (driving on the right and queueing behind each other and
 // the bus), the bus arriving at and leaving the stop through the edge tunnels, the mail truck's
 // delivery loop out of the post office garage, and the MCP cargo boat sailing in to the pier.
+// Cars and the mail truck wait for people in their lane (agents crossing to a door); the
+// environment cannot see the agents, so the facade hands in a query (setPedestrians). The bus
+// keeps its timetable: the crowd times arrivals to it, and agents at doors stand clear of it.
 import * as THREE from 'three';
 import { ringRoadCorners, tileToWorld } from '../layout.js';
 import { PIER } from './buildings/industry.js';
-import { createPath, offsetPolyline, roundCorners } from './lane-path.js';
+import { createPath, laneBlocked, offsetPolyline, roundCorners } from './lane-path.js';
 import { SEA } from './terrain.js';
 import { createBus, createCar, createCargoBoat, createMailTruck, createMooredBoats } from './vehicle-models.js';
 import { C } from './palette.js';
@@ -13,6 +16,10 @@ const LANE = 0.5;
 const CAR_SPEED = 2.6;
 const TUNNEL_X = 25.3;
 const BUS_STOP_X = 3.6;
+/** A vehicle waits for anyone this close to its lane's centre line (half a car, plus a little). */
+const YIELD_REACH = 0.42;
+
+/** @typedef {(x: number, z: number, reach: number) => boolean} Pedestrians  is anyone within reach of this ground point? */
 
 /** @typedef {'arrive'|'depart'|'trip'} VehicleAction */
 /** @typedef {{x: number, z: number, angle: number}} Sample */
@@ -25,9 +32,11 @@ export function createVehicles({ scene, material, records, reducedMotion }) {
   const group = new THREE.Group();
   group.name = 'vehicles';
   scene.add(group);
+  /** @type {{ occupied: Pedestrians }} */
+  const people = { occupied: () => false };
   const bus = createBusRun(group, material);
-  const truck = createTruckRun(group, material, records.post);
-  const cars = createCars(group, material, [bus, truck]);
+  const truck = createTruckRun(group, material, records.post, people);
+  const cars = createCars(group, material, [bus, truck], people);
   const boats = createBoats(group, material);
 
   return {
@@ -50,6 +59,10 @@ export function createVehicles({ scene, material, records, reducedMotion }) {
     setReducedMotion(on) {
       reduced = on;
     },
+    /** @param {Pedestrians} occupied  asked every frame, for points on the lanes ahead */
+    setPedestrians(occupied) {
+      people.occupied = occupied;
+    },
     dispose() {
       scene.remove(group);
       group.traverse((obj) => /** @type {any} */ (obj).geometry?.dispose());
@@ -68,12 +81,13 @@ function put(mesh, at, y = 0) {
 
 /**
  * Cars on both lanes of the ring road. Each keeps its distance to the car ahead in its own lane
- * and stops behind the bus or the mail truck when they are in the way.
+ * and stops behind the bus or the mail truck when they are in the way, and for people in its lane.
  * @param {THREE.Group} group
  * @param {THREE.Material} material
  * @param {Array<{position: () => THREE.Vector3 | null}>} others  other vehicles that may block a lane
+ * @param {{ occupied: Pedestrians }} people
  */
-function createCars(group, material, others) {
+function createCars(group, material, others, people) {
   const corners = ringRoadCorners();
   const clockwise = createPath(roundCorners(offsetPolyline(corners, LANE, true), 1.4, true, 8), true);
   const anticlockwise = createPath(roundCorners(offsetPolyline([...corners].reverse(), LANE, true), 1.4, true, 8), true);
@@ -84,6 +98,7 @@ function createCars(group, material, others) {
   ];
   const cars = specs.map((spec) => {
     const mesh = createCar(spec.color, material);
+    mesh.name = 'car';
     group.add(mesh);
     return { mesh, path: spec.path, dist: spec.start * spec.path.length, speed: CAR_SPEED, at: { x: 0, z: 0, angle: 0 }, ahead: { x: 0, z: 0, angle: 0 } };
   });
@@ -101,6 +116,7 @@ function createCars(group, material, others) {
         for (const other of cars) {
           if (other !== car && other.path === car.path && Math.hypot(car.ahead.x - other.at.x, car.ahead.z - other.at.z) < 1.1) clear = false;
         }
+        if (clear && laneBlocked(car.path, car.dist, people.occupied, YIELD_REACH)) clear = false;
         car.speed += ((clear ? CAR_SPEED : 0) - car.speed) * Math.min(1, dt * (clear ? 1.5 : 6));
         car.dist += car.speed * dt;
         car.path.sample(car.dist, car.at);
@@ -188,12 +204,13 @@ function createBusRun(group, material) {
 
 /**
  * The mail truck's delivery loop: out of the post office garage (its roll-up door opens), round
- * the town in left turns, and back into the garage.
+ * the town in left turns, and back into the garage. It waits for people in its lane.
  * @param {THREE.Group} group
  * @param {THREE.Material} material
  * @param {import('./buildings/index.js').BuildingRecord} post
+ * @param {{ occupied: Pedestrians }} people
  */
-function createTruckRun(group, material, post) {
+function createTruckRun(group, material, post, people) {
   const gx = post.anchors.garage.x;
   const gz = post.anchors.garage.z - 2.4;
   const ave = tileToWorld(0, 9).z;
@@ -230,6 +247,7 @@ function createTruckRun(group, material, post) {
       if (door) door.scale.y = 1 - 0.92 * s.doorOpen;
       if (!s.running) return;
       if (s.doorOpen < 0.9 && s.dist < 0.1) return;
+      if (mesh.visible && laneBlocked(path, s.dist, people.occupied, YIELD_REACH)) return;
       s.dist = Math.min(path.length, s.dist + dt * 3.6);
       path.sample(s.dist, at);
       put(mesh, at);

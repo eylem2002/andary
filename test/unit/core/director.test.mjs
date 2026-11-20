@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDirector } from '../../../public/js/core/director.js';
+import { createDirector, recordChanges } from '../../../public/js/core/director.js';
 import { modelLabel } from '../../../public/js/core/catalog.js';
 import { createStore } from '../../../public/js/core/store.js';
 import { CREW_COLORS } from '../../../public/js/core/catalog.js';
@@ -558,6 +558,59 @@ describe('director: lifecycle and robustness', () => {
     assert.equal(spec.spawnAt, 'library');
     assert.equal(spec.entrance, 'none');
     assert.deepEqual(world.named('setBoard')[0], ['setBoard', [{ text: 'A', status: 'pending' }], 'api-server · todos']);
+  });
+
+  it('a director that starts after the store plays its backlog, exactly as if it had listened all along', async () => {
+    const story = [FIXTURES.SessionStart, FIXTURES.UserPromptSubmit, FIXTURES.PreToolUse, FIXTURES.SubagentStart];
+    /** @param {boolean} late  start the director after the events (the world was still loading) */
+    const run = async (late) => {
+      const clock = createFakeClock();
+      const store = createStore({ now: clock.now, localHour: () => 12 });
+      const world = createRecordingWorld();
+      const options = {
+        world,
+        store,
+        humor: { quip: (/** @type {string} */ situation) => `[${situation}]` },
+        random: () => 0.1,
+        now: clock.now,
+        setTimer: (/** @type {() => void} */ fn, /** @type {number} */ ms) => clock.setTimeout(fn, ms),
+        clearTimer: (/** @type {unknown} */ h) => clock.clearTimeout(h),
+      };
+      const backlog = late ? recordChanges(store) : null;
+      if (!late) createDirector(options);
+      story.forEach((event, i) => store.ingest({ id: i + 1, ts: clock.now(), rx: clock.now(), event }));
+      if (late) createDirector({ ...options, backlog: backlog?.stop() });
+      await flush();
+      await clock.advance(10_000);
+      return world.calls;
+    };
+    const late = await run(true);
+    const early = await run(false);
+    // Listening from the start, it first clears the board of the empty store (a no-op on a new world).
+    assert.deepEqual(early[0], ['setBoard', [], undefined]);
+    assert.deepEqual(late, early.slice(1));
+    const arrival = late.find((c) => c[0] === 'addAgent');
+    assert.equal(arrival?.[1].entrance, 'bus', 'the first crew still arrives by bus');
+  });
+
+  it('records no backlog for a store that already had sessions, or past its limit', () => {
+    const store = createStore();
+    const small = recordChanges(store, 2);
+    for (const [i, event] of [FIXTURES.SessionStart, FIXTURES.UserPromptSubmit].entries()) store.ingest({ id: i + 1, ts: 1, event });
+    const kept = recordChanges(store);
+    store.ingest({ id: 3, ts: 1, event: FIXTURES.PreToolUse });
+    assert.equal(small.stop(), null, 'too many changes: the director catches up from the state instead');
+    assert.equal(kept.stop(), null, 'sessions from before the record began would be missing from it');
+    const fresh = createStore();
+    const recorder = recordChanges(fresh);
+    fresh.ingest({ id: 1, ts: 1, event: FIXTURES.SessionStart });
+    const backlog = recorder.stop();
+    fresh.ingest({ id: 2, ts: 1, event: FIXTURES.UserPromptSubmit });
+    assert.deepEqual(
+      backlog?.map((c) => c.type),
+      ['event', 'achievement'],
+      'stop() ends the record',
+    );
   });
 
   it('reset clears the town', async () => {

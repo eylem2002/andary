@@ -30,6 +30,8 @@ async function openDemo(page) {
   await page.addInitScript(() => localStorage.setItem('andary:prefs', JSON.stringify({ setupSeen: true })));
   await page.goto(`${site.baseUrl}/?demo=1&speed=4&seed=7&world=fake`);
   await expect(page.getByTestId('agent-row').first()).toBeAttached({ timeout: 45_000 });
+  // The crews show before the world is built; these tests drive the world, so they wait for it.
+  await page.waitForFunction(() => /** @type {any} */ (window).__andary?.world);
 }
 
 /** World methods called so far (the stand-in world records them). @param {import('@playwright/test').Page} page */

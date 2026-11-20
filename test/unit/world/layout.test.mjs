@@ -95,3 +95,19 @@ test('lot bounds and decor areas are inside the map', () => {
   for (const rect of Object.values(DECOR)) assert.ok(rect.every(Number.isFinite));
   assert.equal(ringRoadCorners().length, 4);
 });
+
+test('agents waiting at a door on a road stand clear of both vehicle lanes', () => {
+  // Vehicles drive 0.5 either side of a road's centre line; half a car plus a little is 0.42.
+  const clear = 0.42;
+  const onRoad = BUILDING_KEYS.filter((key) => MAP[LOTS[key].door[1]][LOTS[key].door[0]] === '#');
+  assert.ok(onRoad.includes('cafe') && onRoad.includes('station'), 'the south row opens onto the ring road');
+  for (const key of onRoad) {
+    const centre = tileToWorld(...LOTS[key].door).z;
+    const places = [...workSpots(key), queueSpot(key, 0), queueSpot(key, 3)];
+    for (const p of places) {
+      for (const lane of [centre - 0.5, centre + 0.5]) {
+        assert.ok(Math.abs(p.z - lane) >= clear, `${key} place at z=${p.z.toFixed(2)} is in the lane at ${lane.toFixed(2)}`);
+      }
+    }
+  }
+});
