@@ -17,6 +17,7 @@ import { createWeatherDriver } from '../core/town-weather.js';
 import { MILESTONES, unlockedAt } from '../core/growth.js';
 import { createDiffDialog } from './changes.js';
 import { createUsageDialog } from './usage.js';
+import { createLeaderboard } from './leaderboard.js';
 import { createMasthead } from './masthead.js';
 import { createNotices } from './notices.js';
 import { savePrefs } from './prefs.js';
@@ -154,7 +155,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       view.hosted = hosted;
       ctx.refresh();
     },
-    /** @param {'help'|'settings'|'setup'|'diff'|'usage'} name */
+    /** @param {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'} name */
     openDialog: (name) => openDialog(hud, name),
     /** Points a first-time visitor to the setup steps, unless they have seen them already. */
     offerSetup() {
@@ -253,7 +254,7 @@ function createParts(ctx) {
     place: createBuildingCard(ctx),
     toolbar: createToolbar(ctx),
     notices: createNotices(ctx),
-    dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx), usage: createUsageDialog(ctx) },
+    dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx), usage: createUsageDialog(ctx), leaderboard: createLeaderboard(ctx) },
   };
 }
 
@@ -296,6 +297,7 @@ function flush(hud, shell, effects) {
   ui.notices.show(noticeKind(ctx.view, state));
   ui.dialogs.settings.sync();
   ui.dialogs.usage.render();
+  ui.dialogs.leaderboard.render();
   playEffects(ctx, effects.take(), state);
   ui.activity.settle();
 }

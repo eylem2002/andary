@@ -184,4 +184,9 @@ section.
     umbrellas for the wheel, the sky, and over the Town Hall's own dome.
 51. **The demo starts at 92 points**, so a visitor sees the Ferris wheel rise within a few
     minutes; its count stays in that browser.
+52. **Leaderboard records.** A "fix" runs from a crew's first failing test run to its next
+    passing one (within two hours; interrupts don't count). Records are kept since Andary
+    started (in memory); the streak counts busy days ending today or yesterday. Agents are
+    ranked by tool calls, then files changed, among those in town now. In a team town
+    (feature 9) the same board covers everyone's crews.
 

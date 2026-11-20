@@ -68,7 +68,9 @@ it changed, or any building for who is inside.
 Every finished turn, finished helper and completed task is a point, and points unlock
 landmarks: bunting over the avenue at 10, an ice-cream cart at 25, a curly-brace statue at 50, a
 Ferris wheel on the beach at 100, a hot-air balloon at 200 and a golden dome on the Town Hall at
-500. The count is kept across restarts.
+500. The count is kept across restarts. `L` (or the trophy) opens the **Leaderboard**: how far
+the town has grown, your busy-day streak, the fastest fix and who turned the most test runs
+green, and the busiest agents in town.
 
 ### Weather
 
