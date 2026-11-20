@@ -159,6 +159,7 @@ async function handleHook(ctx, req, res) {
     return;
   }
   ctx.usage.observe(body.event);
+  ctx.progress.observe(body.event);
   const envelope = ctx.ingest(body);
   if (envelope.event.hook_event_name === 'PermissionRequest') {
     await answerPermissionRequest(ctx, req, res, envelope.event, shownInFull(body.event.tool_input, envelope.event.tool_input));

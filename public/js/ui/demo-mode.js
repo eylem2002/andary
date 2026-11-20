@@ -6,6 +6,7 @@
 
 import { normalizeAgentId } from '../core/events.js';
 import { createDemoUsage } from './demo-usage.js';
+import { createDemoProgress } from './demo-progress.js';
 
 /** @typedef {import('./types.js').Approval} Approval */
 
@@ -19,10 +20,11 @@ export const DEMO_APPROVAL_MS = 25_000;
  * @property {number} [speed]
  * @property {number} [approvalMs]
  * @property {() => number} [now]
+ * @property {(progress: { points: number, days: string[] }) => void} [onProgress]  the town's growth
  */
 
 /** @param {DemoOptions} options */
-export function createDemo({ store, createSimulation, seed, speed = 1, approvalMs = DEMO_APPROVAL_MS, now = Date.now }) {
+export function createDemo({ store, createSimulation, seed, speed = 1, approvalMs = DEMO_APPROVAL_MS, now = Date.now, onProgress }) {
   let sequence = 0;
   let currentSpeed = speed;
   let paused = false;
@@ -33,6 +35,7 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
    */
   const waiting = new Map();
   const usage = createDemoUsage(store, now);
+  const progress = onProgress ? createDemoProgress(onProgress, now) : () => {};
 
   /** @param {any} payload */
   function emit(payload) {
@@ -40,6 +43,7 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
     const id = ++sequence;
     store.ingest({ id, ts, rx: ts, event: payload });
     usage(payload);
+    progress(payload);
     if (payload?.hook_event_name === 'PermissionRequest') return hold(payload, id, ts);
     return undefined;
   }

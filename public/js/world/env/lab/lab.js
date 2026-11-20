@@ -123,6 +123,7 @@ function applyFeatureParams() {
   const name = params.get('weather') ?? '';
   const weather = Object.hasOwn(WEATHERS, name) ? WEATHERS[name] : null;
   if (weather) env.setWeather(weather);
+  if (params.get('grow') === 'all') env.setLandmarks(['bunting', 'icecream', 'statue', 'wheel', 'balloon', 'golden']);
 }
 
 

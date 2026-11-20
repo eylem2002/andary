@@ -88,13 +88,14 @@ async function boot() {
       onStatus: (status) => hud.setConnection(status),
       onSettings: (settings) => hud.setServerSettings(settings),
       onError: (message) => hud.notify({ tone: 'error', icon: 'warning', title: message }),
+      onProgress: (progress) => hud.setProgress(progress),
     });
   }
 
   /** @param {{ hosted: boolean }} options  hosted: no server at all, so offer the setup steps */
   async function startDemo({ hosted }) {
     const { createSimulation } = await import('./sim/simulation.js');
-    demo = createDemo({ store, createSimulation, speed: prefs.speed, seed: seedParam() });
+    demo = createDemo({ store, createSimulation, speed: prefs.speed, seed: seedParam(), onProgress: (progress) => hud.setProgress(progress) });
     app.mode = 'demo';
     hud.setMode('demo');
     hud.setConnection('demo');

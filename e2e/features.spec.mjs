@@ -84,3 +84,13 @@ test('failures bring weather to the town, and Settings can turn it off', async (
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('andary:prefs') ?? '{}').weather);
   expect(saved).toBe(false);
 });
+
+test('finished work grows the town: a new landmark rises with a toast', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('andary:demo-progress', '99'));
+  await openDemo(page);
+  const landmarks = () => page.evaluate(() => /** @type {any} */ (window).__andary.world.calls.filter((c) => c.method === 'setLandmarks').at(-1)?.args[0] ?? []);
+  await expect.poll(landmarks).toContain('statue');
+  // The next finished turn or helper is point 100: the Ferris wheel.
+  await expect(page.locator('.hud-toast', { hasText: 'The town grew' })).toContainText('Ferris wheel', { timeout: 60_000 });
+  await expect.poll(landmarks).toContain('wheel');
+});

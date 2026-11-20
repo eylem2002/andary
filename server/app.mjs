@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { generateToken } from './auth.mjs';
 import { createApprovalBroker } from './approvals.mjs';
 import { claudeConfigDir, createUsageTracker } from './usage.mjs';
+import { createProgress } from './progress.mjs';
 import { createHub, handleUpgrade } from './browsers.mjs';
 import { DEFAULT_APPROVAL_TIMEOUT_MS, DEFAULT_HOST, DEFAULT_PORT, LIMITS, PUBLIC_DIR, readVersion, resolveHome } from './config.mjs';
 import { createHistory, createRecorder, recordingPath } from './history.mjs';
@@ -43,6 +44,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {ReturnType<typeof createHistory>} history
  * @property {import('./approvals.mjs').ApprovalBroker} broker
  * @property {ReturnType<typeof createUsageTracker>} usage
+ * @property {ReturnType<typeof createProgress>} progress
  * @property {import('./browsers.mjs').Hub} hub
  * @property {import('./rate-limit.mjs').TokenBucket} hookLimiter
  * @property {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, pathname: string) => Promise<void>} serveStatic
@@ -170,6 +172,10 @@ function createContext(config, options) {
       stateFile: config.writeState ? join(config.home, 'usage.json') : null,
       onChange: (record, days) => hub.broadcast({ t: 'usage', u: record, days }),
     }),
+    progress: createProgress({
+      stateFile: config.writeState ? join(config.home, 'progress.json') : null,
+      onChange: (progress) => hub.broadcast({ t: 'progress', p: progress }),
+    }),
     hookLimiter: createTokenBucket({ ratePerSecond: LIMITS.hookRatePerSecond, burst: LIMITS.hookBurst }),
     serveStatic: createStaticHandler({ root: config.publicDir, notFound: (_req, res) => sendHtml(res, 404, NOT_FOUND_PAGE) }),
     recorder: options.record ? createRecorder(recordingPath(config.home)) : null,
@@ -226,6 +232,7 @@ async function stopServer(ctx, server, config) {
   if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
   ctx.broker.releaseAll();
   ctx.usage.dispose();
+  ctx.progress.dispose();
   ctx.hub.closeAll(CLOSE_CODE.GOING_AWAY, 'Andary is shutting down');
   const closed = new Promise((resolve) => server.close(() => resolve(undefined)));
   server.closeIdleConnections();

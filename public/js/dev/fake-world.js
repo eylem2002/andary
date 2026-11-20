@@ -58,6 +58,7 @@ export function createFakeWorld(container, { timeOfDay = 'auto', log = false } =
     zoomBy: noop('zoomBy'),
     setBuildingStat: noop('setBuildingStat'),
     setTownWeather: noop('setTownWeather'),
+    setLandmarks: noop('setLandmarks'),
     pulseBuilding: noop('pulseBuilding'),
     setBoard: noop('setBoard'),
     setNodeModules: noop('setNodeModules'),

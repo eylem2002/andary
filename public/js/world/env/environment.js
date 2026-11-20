@@ -6,6 +6,7 @@ import { BUILDING_KEYS } from '../../core/catalog.js';
 import { createAmbient } from './ambient.js';
 import { createAtmosphere } from './atmosphere.js';
 import { createTownWeatherFx } from './town-weather-fx.js';
+import { createLandmarks } from './landmarks.js';
 import { GeometryBatch } from './batch.js';
 import { createBoard } from './board.js';
 import { createBuildingFx } from './building-fx.js';
@@ -130,6 +131,7 @@ function createFeatures(core, options) {
   return {
     weather,
     flash,
+    landmarks: createLandmarks({ scene, material: materials.dynamic, records: world.records, reducedMotion: reduced }),
     signs,
     board,
     fx: createBuildingFx({ scene, town, records: world.records, reducedMotion: reduced }),
@@ -149,7 +151,7 @@ function createApi(core, f) {
   const { renderer, scene, town, world, rig, post, atmosphere, view } = core;
   /** @param {unknown} key */
   const record = (key) => (BUILDING_KEYS.includes(/** @type {BuildingKey} */ (key)) ? world.records[/** @type {BuildingKey} */ (key)] : null);
-  const movers = [f.fx, f.pile, f.grove, f.vehicles, f.ambient, f.signs, f.weather];
+  const movers = [f.fx, f.pile, f.grove, f.vehicles, f.ambient, f.signs, f.weather, f.landmarks];
   return {
     scene,
     camera: rig.camera,
@@ -171,6 +173,7 @@ function createApi(core, f) {
       f.board.update();
       f.signs.update(rig.camera, view.width, view.height, rig.zoom);
       f.weather.update(step);
+      f.landmarks.update(step);
       // A lightning flash brightens the whole picture for a moment.
       f.flash.level = Math.max(0, f.flash.level - step * 7);
       renderer.toneMappingExposure = 1.1 + f.flash.level * 1.4;
@@ -193,6 +196,11 @@ function createApi(core, f) {
       core.applyQuality(resolveQuality(q));
       f.weather.setQuality(view.quality);
     },
+    /**
+     * Builds the landmarks the town has earned (core/growth.js); grow: new ones rise into place.
+     * @param {string[]} ids @param {{ grow?: boolean }} [options]
+     */
+    setLandmarks: (ids, options) => f.landmarks.set(ids, options),
     /** @param {import('../../core/town-weather.js').TownWeather} w */
     setWeather(w) {
       atmosphere.setWeather(w);

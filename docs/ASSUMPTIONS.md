@@ -177,4 +177,11 @@ section.
 49. **No flashes with reduced motion.** Lightning is a single short flash at most every five
     seconds (well under the three-flashes-a-second limit), and none at all with reduced motion,
     where the rain also stands still. Screen readers hear only storms and rainbows.
+50. **What counts as work done.** A finished turn (`Stop`), a finished helper (`SubagentStop`)
+    and a completed task (`TaskCompleted`) are one point each. Points never go down; the
+    landmarks are original models (no real brands), placed where the town had room: the
+    north avenue, the promenade, the lawn by the Workshop, a stretch of beach kept free of
+    umbrellas for the wheel, the sky, and over the Town Hall's own dome.
+51. **The demo starts at 92 points**, so a visitor sees the Ferris wheel rise within a few
+    minutes; its count stays in that browser.
 
