@@ -1,6 +1,6 @@
 # Connect OpenAI Codex
 
-Part 24 of 27 · base: `fix/feature-review`
+Part 24 of 30 · base: `fix/feature-review`
 
 ## What changed
 

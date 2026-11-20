@@ -30,3 +30,6 @@ bottom; after a merge GitHub retargets the next pull request to `main`.
 - `refactor/architecture` — one ingest pipeline, shared core rules, smaller modules, enforced layer boundaries
 - `docs/usage-guide` — README as a guide: install, connect Claude Code or Codex, use the town, share it
 - `fix/codex-review` — fixes from the independent review of Codex, the refactor and the README
+- `fix/security-hardening` — sign-in per origin, full changes on approval cards, a forwarder challenge, HTTPS
+- `fix/product-polish` — the CLI out of bin/, first paint before the 3D world, crew edge cases, macOS and Windows CI
+- `fix/hardening-review` — fixes from the independent review of parts 28 and 29

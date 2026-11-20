@@ -1967,6 +1967,13 @@ body {
   color: var(--error);
 }
 
+/* A run of blank lines on an approval card, shown as one row so nothing hides below it. */
+.hud-diff__line--gap .hud-diff__text {
+  color: var(--ink-2);
+  font-style: italic;
+  font-weight: 700;
+}
+
 .hud-recent__item {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);

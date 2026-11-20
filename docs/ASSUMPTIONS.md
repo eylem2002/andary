@@ -213,7 +213,8 @@ section.
 57. **The team town is a LAN feature over plain HTTP.** Zero cost rules out a relay service, so
     one teammate's Andary is the host and the others post to it directly. `--team` listens on
     every interface (with the usual warning) and the CLI suggests a private network such as
-    Tailscale when people are not on the same network; there is no TLS of our own.
+    Tailscale when people are not on the same network; there is no TLS of our own (until part 28:
+    `--tls-cert`/`--tls-key`, see 74).
 58. **Teammates share events, not money or control.** A member's server relays its already
     sanitized hook events. Token usage and costs stay on each person's own town, phone
     notifications fire only for your own crews, and a teammate's permission prompt is shown in
@@ -281,3 +282,12 @@ section.
 76. **Two remaining risks are accepted, not fixed.** A local denial of service (flooding the
     port) needs an account on the computer and cannot read or change anything; phone
     notifications through ntfy.sh are opt-in and never name a project, file or command.
+77. **A sign-in from a link is a candidate until the server accepts it.** Anyone can link to
+    `…/#signin=junk`; that must not replace a working sign-in. The page tries the new token on
+    its own first and keeps it only if `/api/hello` accepts it.
+78. **"This computer" for plain HTTP includes a peer that connects from the address it connected
+    to.** That is how a local client of `--host <address>` arrives; TCP addresses cannot be forged
+    that way from another computer. A local reverse proxy counts as this computer, as before.
+79. **Blank-line runs on an approval card collapse into a marker.** Three or more blank lines in a
+    row show as "⟨N blank lines⟩", and the note gives the line counts, so padding cannot push the
+    rest of a change out of sight.

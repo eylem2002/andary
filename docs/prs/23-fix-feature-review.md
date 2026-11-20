@@ -1,6 +1,6 @@
 # Fixes from the independent review of the nine features
 
-Part 23 of 27 · base: `feat/team-town`
+Part 23 of 30 · base: `feat/team-town`
 
 Two reviewers who had not seen the work read features 1–4 (file diffs, cost meter, weather,
 growth) and 5–9 (leaderboard, notifications, ambient sound, town looks, team town). Neither found

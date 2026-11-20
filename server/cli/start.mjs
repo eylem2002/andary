@@ -6,7 +6,8 @@ import { startTownServer } from '../app.mjs';
 import { CLI_PATH, DEFAULT_HOST, readVersion, resolveHome } from '../config.mjs';
 import { applyHooksChange, inspectInstallations, planHooksChange, refreshForwarder, settingsPathFor } from '../installer.mjs';
 import { openBrowser } from '../open-browser.mjs';
-import { isLoopbackHost } from '../security.mjs';
+import { hostWithPort, isLoopbackHost, isWildcardHost } from '../security.mjs';
+import { lanAddresses } from '../team.mjs';
 import { savedTopicUrl } from '../notify.mjs';
 import { ensureHome, findRunningServer, loginUrl, probeServer, readStateFile, removeStateFileIfOwned } from '../state-file.mjs';
 import { cliInvocation, sleep, tildify } from './io.mjs';
@@ -203,6 +204,21 @@ function warnIfExposed({ host, team, tls }, io) {
 }
 
 /**
+ * With a certificate and a network address, the sign-in link for another computer: https at the
+ * name on the certificate (the first --team-host), else the bound or network address.
+ * @param {import('../state-file.mjs').ServerState} state
+ * @param {StartSettings} settings
+ * @returns {string|null}
+ */
+function remoteLink(state, settings) {
+  if (!settings.tls || isLoopbackHost(settings.host)) return null;
+  const name = settings.teamHosts[0] ?? (isWildcardHost(settings.host) ? lanAddresses()[0] : settings.host);
+  if (!name) return null;
+  const query = new URLSearchParams({ token: state.uiToken, ...(settings.demo ? { demo: '1' } : {}) });
+  return `https://${hostWithPort(name, state.port)}/?${query}`;
+}
+
+/**
  * @param {import('../app.mjs').TownServer} server
  * @param {StartSettings} settings
  * @param {import('./io.mjs').CliIo} io
@@ -212,6 +228,8 @@ function printBanner(server, settings, io) {
   io.out('');
   io.out('  Open this link to sign in (it contains your private token, so do not share it):');
   io.out(`  ${linkFor(server.state, settings)}`);
+  const remote = remoteLink(server.state, settings);
+  if (remote) io.out(`  From another computer: ${remote}`);
   io.out('');
   io.out(`  Remote approvals: ${settings.remoteApprovals ? 'on' : 'off (switch them on in the town, or start with --remote-approvals)'}`);
   const { notifyUrl } = server;

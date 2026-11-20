@@ -12,6 +12,7 @@
 import { createStore } from './core/store.js';
 import { createDirector, recordChanges } from './core/director.js';
 import { connectLive, fetchHello } from './sources/live.js';
+import { readCredentials } from './sources/credentials.js';
 import { createHud } from './ui/hud.js';
 import { loadPrefs } from './ui/prefs.js';
 import { createDemo } from './sources/demo.js';
@@ -26,6 +27,8 @@ const FIRST_CONTENT_MS = 800;
 /** @typedef {import('./ui/types.js').World} World */
 
 async function boot() {
+  // A sign-in link leaves the address bar first, in the demo too: the page keeps it for later.
+  readCredentials();
   // ?speed= sets this visit's demo speed without changing the saved preference.
   const saved = loadPrefs();
   const prefs = { ...saved, speed: speedParam(saved.speed) };

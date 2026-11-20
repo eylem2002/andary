@@ -1,9 +1,14 @@
 // The server's socket (ADR 0016). Without a certificate it is a plain HTTP server, as always. With
 // one (--tls-cert/--tls-key), one port speaks both: the first byte of a connection tells a TLS
 // handshake (0x16) from plain HTTP. HTTPS is for the network (a team town, --host); plain HTTP is
-// kept for this computer's own clients (the hook forwarder, the CLI, a browser on 127.0.0.1),
-// which never leave the machine, and refused from anywhere else so nothing crosses the network in
-// clear.
+// kept for this computer's own clients (the hook forwarder, the CLI, a local browser), which never
+// leave the machine, and refused from anywhere else so nothing crosses the network in clear.
+// "This computer" means a loopback peer, or a peer whose address is the one it connected to (a
+// local client of a server bound to a network address with --host).
+//
+// The inner HTTP and HTTPS servers never listen themselves: they are told they are listening so
+// that Node starts their request time limits and connection tracking, and every raw socket is
+// tracked here too, so stopping the server ends all of them.
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { createServer as createNetServer } from 'node:net';
@@ -14,6 +19,10 @@ import { createSecureContext } from 'node:tls';
 const TLS_HANDSHAKE = 0x16;
 /** How long a new connection may stay silent before its first byte decides where it goes. */
 const FIRST_BYTE_MS = 10_000;
+/** How long a TLS handshake may take. */
+const HANDSHAKE_MS = 10_000;
+/** How long a refused peer has to read the refusal before the socket is closed. */
+const REFUSAL_MS = 2_000;
 const REFUSAL = 'This town only answers over https:// from other computers.\n';
 const PLAIN_REFUSED = `HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(REFUSAL)}\r\n\r\n${REFUSAL}`;
 
@@ -45,8 +54,12 @@ export function createListener(onRequest, onUpgrade, tls) {
   if (!tls) {
     return { front: plain, tls: false, closeIdle: () => plain.closeIdleConnections(), closeAll: () => plain.closeAllConnections() };
   }
-  const secure = prepare(createHttpsServer({ cert: tls.cert, key: tls.key, minVersion: 'TLSv1.2' }, onRequest), onUpgrade);
+  const secure = prepare(createHttpsServer({ cert: tls.cert, key: tls.key, minVersion: 'TLSv1.2', handshakeTimeout: HANDSHAKE_MS }, onRequest), onUpgrade);
+  /** Every raw connection, whichever server it went to. @type {Set<import('node:net').Socket>} */
+  const sockets = new Set();
   const front = createNetServer({ pauseOnConnect: true }, (socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
     socket.on('error', () => socket.destroy());
     socket.setTimeout(FIRST_BYTE_MS, () => socket.destroy());
     socket.once('data', (chunk) => {
@@ -59,11 +72,24 @@ export function createListener(onRequest, onUpgrade, tls) {
         return;
       }
       socket.unshift(chunk);
-      if (isLoopbackAddress(socket.remoteAddress)) plain.emit('connection', socket);
-      else socket.end(PLAIN_REFUSED);
+      if (isSameMachine(socket)) {
+        plain.emit('connection', socket);
+      } else {
+        socket.end(PLAIN_REFUSED);
+        setTimeout(() => socket.destroy(), REFUSAL_MS).unref();
+      }
       socket.resume();
     });
     socket.resume();
+  });
+  // Time limits and connection tracking start when a Node HTTP server hears it is listening.
+  front.once('listening', () => {
+    plain.emit('listening');
+    secure.emit('listening');
+  });
+  front.once('close', () => {
+    plain.close();
+    secure.close();
   });
   return {
     front,
@@ -75,6 +101,7 @@ export function createListener(onRequest, onUpgrade, tls) {
     closeAll: () => {
       plain.closeAllConnections();
       secure.closeAllConnections();
+      for (const socket of sockets) socket.destroy();
     },
   };
 }
@@ -127,6 +154,22 @@ function prepare(server, onUpgrade) {
  */
 export function isLoopbackAddress(address) {
   if (!address) return false;
-  const bare = address.startsWith('::ffff:') ? address.slice(7) : address;
+  const bare = unmapped(address);
   return bare === '::1' || /^127(?:\.\d{1,3}){3}$/.test(bare);
+}
+
+/**
+ * True for a connection from this computer: a loopback peer, or one that connected from the very
+ * address it connected to (a local client of a server bound to a network address).
+ * @param {{ remoteAddress?: string, localAddress?: string }} socket
+ * @returns {boolean}
+ */
+export function isSameMachine({ remoteAddress, localAddress }) {
+  if (isLoopbackAddress(remoteAddress)) return true;
+  return Boolean(remoteAddress && localAddress && unmapped(remoteAddress) === unmapped(localAddress));
+}
+
+/** @param {string} address */
+function unmapped(address) {
+  return address.startsWith('::ffff:') ? address.slice(7) : address;
 }

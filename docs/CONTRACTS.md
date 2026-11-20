@@ -300,13 +300,18 @@ Settled during implementation; they refine §4.3–§4.5.
 
 - CLI extras: `andary stop`, and `start`/`demo --detach` (the `/town` plugin command starts the
   server in the background). `--approval-timeout` is capped at 140 s because Claude Code kills the
-  hook at 150 s. An explicit `--host` address is added to the Host allowlist. Sign-in links also
-  work on `/<page>.html`.
+  hook at 150 s. An explicit `--host` address is added to the Host allowlist. A sign-in link
+  opened on another `/<page>.html` (the lab pages, which do not read the fragment) only loses its
+  token: the redirect has no `#signin=`.
 - HTTPS (ADR 0016, `server/listener.mjs`): with `--tls-cert`/`--tls-key` one port takes both;
-  a connection whose first byte is `0x16` (a TLS handshake) gets HTTPS (TLS 1.2 or newer), any
-  other gets plain HTTP only from a loopback peer and `400` otherwise. `server.json` then has
-  `"tls": true` and, on a team host, `"teamHosts"`; `serverOrigin` stays `http://127.0.0.1:<port>`
-  for local clients. WebSocket `Origin` may be `http://` or `https://` with an allowed host.
+  a connection whose first byte is `0x16` (a TLS handshake) gets HTTPS (TLS 1.2 or newer,
+  10 s handshake limit), any other gets plain HTTP only from this computer (a loopback peer, or a
+  peer connecting from the very address it connected to: a local client of `--host <address>`)
+  and a `400` otherwise, after which the server closes the connection within 2 s. `server.json`
+  then has `"tls": true` and, on a team host, `"teamHosts"`; local clients keep plain HTTP at
+  `serverOrigin` (the bound address, or `127.0.0.1` for a wildcard). With `--host`, `start` also
+  prints an `https://` sign-in link for other computers. WebSocket `Origin` may be `http://` or
+  `https://` with an allowed host. Stopping ends every connection, stalled ones included.
 - The forwarder shrinks payloads over 1 MiB instead of dropping them, and also looks for
   `server.json` next to itself (plugin installs).
 - Approvals: `SubagentStop` also resolves that subagent's terminal-answered approvals; approval

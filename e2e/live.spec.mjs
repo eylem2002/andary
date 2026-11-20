@@ -81,6 +81,22 @@ test('another tab on the same town is signed in too; a page on another port is n
   }
 });
 
+test('a demo opened from the sign-in link keeps the sign-in, out of the address bar', async ({ page }) => {
+  await page.goto(`${town.loginUrl}&demo=1&${PAGE_OPTIONS}`);
+  await expect.poll(() => page.url()).not.toContain('#signin');
+  expect(page.url()).not.toContain(town.uiToken);
+  // "Leave the demo" opens the same page without demo=1: it must land signed in.
+  await page.goto(`${town.baseUrl}/?${PAGE_OPTIONS}`);
+  await expect(page.getByTestId('connection-status')).toContainText('Live');
+});
+
+test('a link with a wrong token cannot sign this browser out', async ({ page }) => {
+  await signIn(page);
+  await page.goto(`${town.baseUrl}/?${PAGE_OPTIONS}#signin=AAAAAAAAAAAAAAAAAAAAAA`);
+  await expect(page.getByTestId('connection-status')).toContainText('Live');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('andary:signin') ?? 'null')?.token)).toBe(town.uiToken);
+});
+
 test('hook events show up as a crew, agent rows and log entries', async ({ page }) => {
   await signIn(page);
   for (const payload of [
@@ -124,7 +140,7 @@ test('a file change is shown in full before it is approved, and a denial can say
   await expect(card).toBeAttached();
   if (!(await card.isVisible())) await page.getByRole('tab', { name: /Approvals/ }).click();
   const change = card.getByTestId('approval-change');
-  await expect(change).toContainText('Replaces one occurrence');
+  await expect(change).toContainText('Replaces one occurrence: 1 line added, 1 removed');
   await expect(change).toContainText('const url = PROD_URL;');
   // Hidden characters cannot hide anything in what is approved.
   await expect(change).toContainText('STAGING_URL;⟨U+202E⟩console.log(secrets)');
