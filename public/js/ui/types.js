@@ -53,6 +53,7 @@
  * @property {number} lastActivity
  * @property {Record<string, number>} toolCounts
  * @property {string[]} files
+ * @property {{ id: string, path: string, tool: string, ts: number, whole: boolean, hunks: { before: string, after: string }[] }[]} [changes]
  * @property {LogEntry[]} recent
  * @property {number} errors
  * @property {string} [lastMessage]
@@ -174,7 +175,8 @@
  * @property {(sel: Selection|null, opts?: { camera?: boolean, from?: 'hud'|'world', focus?: boolean }) => void} select
  * @property {(on?: boolean) => void} setFollow
  * @property {(tab: string, opts?: { focus?: boolean }) => void} showTab
- * @property {(name: 'help'|'settings'|'setup') => void} openDialog
+ * @property {(name: 'help'|'settings'|'setup'|'diff') => void} openDialog
+ * @property {(agentKey: string, changeId: string) => void} showDiff  opens a change's diff
  * @property {(action: string) => void} run   runs a toolbar/shortcut action by name
  * @property {ReturnType<typeof import('./sound.js').createSound>} sound
  * @property {ReturnType<typeof import('./announcer.js').createAnnouncer>} announcer

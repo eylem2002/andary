@@ -45,6 +45,8 @@
   --shadow: 0 1px 2px rgb(36 26 61 / 0.1), 0 12px 30px -16px rgb(36 26 61 / 0.45);
   --shadow-lift: 0 2px 4px rgb(36 26 61 / 0.12), 0 22px 48px -20px rgb(36 26 61 / 0.55);
   --stage: #EBD6DA;
+  --diff-add: #E3F4E8;
+  --diff-del: #FBE6E4;
 
   --gap: 16px;
   --sign-h: 84px;
@@ -84,6 +86,8 @@
     --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.5), 0 24px 52px -20px rgb(0 0 0 / 0.85);
     --stage: #120D1E;
     --switch-on: #E0438F;
+    --diff-add: #173A27;
+    --diff-del: #43202A;
   }
 }
 
@@ -112,6 +116,8 @@
   --shadow: 0 1px 2px rgb(0 0 0 / 0.45), 0 14px 34px -16px rgb(0 0 0 / 0.8);
   --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.5), 0 24px 52px -20px rgb(0 0 0 / 0.85);
   --stage: #120D1E;
+  --diff-add: #173A27;
+  --diff-del: #43202A;
   --switch-on: #E0438F;
   color-scheme: dark;
 }
@@ -1754,6 +1760,108 @@ body {
   font-size: 12.5px;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.hud-changes {
+  display: grid;
+  gap: 4px;
+}
+
+.hud-change {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--paper-2);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hud-change:hover {
+  border-color: var(--edge);
+}
+
+.hud-change:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.hud-change__path {
+  overflow: hidden;
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hud-change__stat {
+  flex: none;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+/* A diff: + and − marks carry the meaning; the tints only help the eye. */
+.hud-diff__body {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.hud-diff__hunk-title {
+  margin-bottom: 6px;
+  font: 700 14px/1.3 var(--font-ui);
+}
+
+.hud-diff__code {
+  overflow: auto;
+  max-height: 52vh;
+  padding: 6px 0;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--code-bg);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.hud-diff__code:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.hud-diff__line {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  padding: 0 10px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hud-diff__mark {
+  text-align: center;
+  font-weight: 700;
+}
+
+.hud-diff__line--add {
+  background: var(--diff-add);
+}
+
+.hud-diff__line--add .hud-diff__mark {
+  color: var(--done);
+}
+
+.hud-diff__line--del {
+  background: var(--diff-del);
+}
+
+.hud-diff__line--del .hud-diff__mark {
+  color: var(--error);
 }
 
 .hud-recent__item {

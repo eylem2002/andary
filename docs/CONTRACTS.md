@@ -309,10 +309,13 @@ AgentState { key, sessionId, agentId: string|null, name, role: 'lead'|'subagent'
              color, hat, status: 'working'|'waiting'|'idle'|'error'|'done', building, activity,
              currentTool?, summary?, description?, startedAt, lastActivity,
              toolCounts: Record<string, number>, files: string[] /* recent unique, ≤ 30 */,
+             changes: FileChange[] /* finished Edit/MultiEdit/Write/NotebookEdit, ≤ 20, newest last */,
              recent: LogEntry[] /* ≤ 30 */, errors: number, lastMessage? }
 LogEntry { id, ts, sessionId, agentKey, agentName, color, kind, icon, text,
            level: 'info'|'success'|'warn'|'error' }
 Achievement { id, title, description, unlockedAt }
+FileChange { id, path /* relative to the crew's folder */, tool, ts, whole: boolean /* Write */,
+             hunks: { before: string, after: string }[] /* from tool_input, ≤ 4,000 characters each */ }
 ```
 
 `director.js`: `createDirector({ world, store, humor?, random? }) → { dispose() }` subscribes to the

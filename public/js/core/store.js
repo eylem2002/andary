@@ -83,6 +83,7 @@ export { ACHIEVEMENTS };
  * @property {number} lastActivity
  * @property {Record<string, number>} toolCounts
  * @property {string[]} files       recent unique paths, newest last, ≤ 30
+ * @property {FileChange[]} changes  edits and writes this agent made, newest last, ≤ 20
  * @property {LogEntry[]} recent    ≤ 30
  * @property {number} errors
  * @property {string} [lastMessage]
@@ -309,6 +310,7 @@ function baseAgent(s, key, agentId, ts) {
     lastActivity: ts,
     toolCounts: {},
     files: [],
+    changes: [],
     recent: [],
     errors: 0,
     lastMessage: undefined,
@@ -539,6 +541,51 @@ function rememberFile(a, path) {
 }
 
 /**
+ * @typedef {object} FileChange  one finished Edit, MultiEdit, Write or NotebookEdit
+ * @property {string} id        the event's id
+ * @property {string} path      relative to the crew's folder where possible
+ * @property {string} tool
+ * @property {number} ts
+ * @property {boolean} whole    the whole file was written (no "before" to compare with)
+ * @property {{ before: string, after: string }[]} hunks
+ */
+
+const MAX_CHANGES = 20;
+/** Longest text kept per side of a hunk (the server already cuts strings at 2,000 characters). */
+const MAX_HUNK_CHARS = 4000;
+
+/**
+ * Keeps what a finished edit changed, so the inspector can show it as a diff.
+ * @param {AgentState} a
+ * @param {TownEvent} e
+ * @param {Session} s
+ */
+function recordChange(a, e, s) {
+  const hunks = changeHunks(e.data.tool, e.data.input);
+  if (!hunks) return;
+  const path = relativePath(e.data.file ?? '', e.cwd || s.cwd);
+  if (!path) return;
+  boundedPush(a.changes, { id: e.id, path, tool: e.data.tool, ts: e.ts, whole: hunks.whole, hunks: hunks.list }, MAX_CHANGES);
+}
+
+/**
+ * The before and after text of an editing tool's input, or null for other tools.
+ * @param {string} tool
+ * @param {Record<string, any>} input
+ * @returns {{ whole: boolean, list: { before: string, after: string }[] }|null}
+ */
+export function changeHunks(tool, input) {
+  const text = (/** @type {unknown} */ v) => (typeof v === 'string' ? v.slice(0, MAX_HUNK_CHARS) : '');
+  if (tool === 'Edit') return { whole: false, list: [{ before: text(input.old_string), after: text(input.new_string) }] };
+  if (tool === 'MultiEdit' && Array.isArray(input.edits)) {
+    return { whole: false, list: input.edits.slice(0, 20).filter((edit) => edit && typeof edit === 'object').map((edit) => ({ before: text(edit.old_string), after: text(edit.new_string) })) };
+  }
+  if (tool === 'Write') return { whole: true, list: [{ before: '', after: text(input.content) }] };
+  if (tool === 'NotebookEdit') return { whole: false, list: [{ before: '', after: text(input.new_source) }] };
+  return null;
+}
+
+/**
  * @param {Session} s
  * @param {{id: string|null, subject?: string|null, status?: string|null, owner?: string|null}} patch
  */
@@ -639,6 +686,7 @@ function applyToolStart(m, e, s, a) {
 
 /** @type {Apply} */
 function applyToolEnd(m, e, s, a) {
+  recordChange(a, e, s);
   if (a.currentTool === e.data.tool) a.currentTool = undefined;
   if (a.status === 'waiting') a.status = 'working';
   const shipped = own(SHIPPING_LOG, e.data.commandKind);

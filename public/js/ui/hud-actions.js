@@ -13,7 +13,7 @@ import { directorActive } from './cinema.js';
  * @property {ReturnType<typeof import('./board.js').createBoard>} board
  * @property {ReturnType<typeof import('./inspector.js').createInspector>} inspector
  * @property {ReturnType<typeof import('./building-card.js').createBuildingCard>} place
- * @property {Record<'help'|'settings'|'setup', { open(): void, close(): void, isOpen: boolean }>} dialogs
+ * @property {Record<'help'|'settings'|'setup'|'diff', { open(): void, close(): void, isOpen: boolean }>} dialogs
  */
 
 /** @typedef {{ ctx: HudContext, ui: HudParts }} Hud */
@@ -99,7 +99,7 @@ export function setFollow(hud, on = !hud.ctx.view.follow) {
 
 /**
  * @param {Hud} hud
- * @param {'help'|'settings'|'setup'} name
+ * @param {'help'|'settings'|'setup'|'diff'} name
  */
 export function openDialog({ ui }, name) {
   for (const [key, dialog] of Object.entries(ui.dialogs)) if (key !== name && dialog.isOpen) dialog.close();

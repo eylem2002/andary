@@ -60,7 +60,8 @@ Also: hats show the model (crown for Opus, beret for Sonnet, sun hat for Haiku),
 bring a personal rain cloud, rate limits a thunderstorm, passing tests fireworks, and there are
 achievements to unlock ("Red to Green", "node_modules Black Hole", "Night Shift"…). The town
 is a sunset coast (pastel stucco, palms, a beach, neon at dusk) that follows your clock, or press
-`N` for day, sunset or night. Click any agent for its details, or any building for who is inside.
+`N` for day, sunset or night. Click any agent for its details, including a diff of every file
+it changed, or any building for who is inside.
 
 ### Director camera and full-screen town
 

@@ -14,7 +14,7 @@ import { SHORTCUT_HELP } from './shortcuts.js';
  * tab stop, for text-only dialogs that may need scrolling from the keyboard.
  * @param {{ id: string, title: string, body: HTMLElement[], wide?: boolean, scrollable?: boolean }} options
  */
-function createDialog({ id, title, body, wide = false, scrollable = false }) {
+export function createDialog({ id, title, body, wide = false, scrollable = false }) {
   const close = h('button', { type: 'button', class: 'hud-iconbtn', 'aria-label': 'Close' }, icon('close'));
   const content = h('div', { class: 'hud-dialog__body', tabindex: scrollable ? '0' : null, role: scrollable ? 'region' : null, 'aria-labelledby': scrollable ? `${id}-title` : null }, ...body);
   const dialog = /** @type {HTMLDialogElement} */ (h('dialog', { class: `hud hud-dialog${wide ? ' hud-dialog--wide' : ''}`, id, 'aria-labelledby': `${id}-title` },
