@@ -1,10 +1,10 @@
-// Formatting rules for the building signs (DOM pills above each building). Pure, unit-tested.
+// Formatting rules for the place labels on the buildings (env/signs.js). Pure, unit-tested.
 
 const MAX_STAT = 22;
 
 /**
  * Normalises a stat chip text: trims, collapses whitespace, strips control characters and caps
- * the length so a chip never outgrows its pill. Empty → null (no chip).
+ * the length so a chip never outgrows its label. Empty → null (no chip).
  * @param {unknown} text
  * @returns {string|null}
  */
@@ -30,16 +30,6 @@ export function formatStat(text) {
 export function signScale(zoom) {
   const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
   return Math.min(1.25, Math.max(0.88, 0.94 + 0.14 * Math.log2(z)));
-}
-
-/**
- * Whether signs should collapse to their icon: narrow screens at the default zoom have no room for
- * fifteen names.
- * @param {number} viewportWidth  px
- * @param {number} zoom
- */
-export function compactSigns(viewportWidth, zoom) {
-  return viewportWidth < 640 && zoom < 1.8;
 }
 
 /**

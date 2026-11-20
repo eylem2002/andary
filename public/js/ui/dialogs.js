@@ -117,6 +117,8 @@ export function createSettingsDialog(ctx) {
   });
   const lookHelp = h('p', { class: 'hud-setting__help', role: 'status', text: 'The whole town, its sky and its sea. Rebuilding reloads the page.' });
   look.el.append(applyLook, lookHelp);
+  const placeNames = choice('hud-set-place-names', 'Place names', [['auto', 'On the buildings, where they fit'], ['always', 'Always'], ['off', 'Off (point at a building)']], ctx.prefs.placeNames, (value) => ctx.setPrefs({ placeNames: /** @type {any} */ (value) }));
+  placeNames.el.append(h('p', { class: 'hud-setting__help', text: 'Zoom in and more names fit. Agents always come first: a label fades while someone stands in front of it. Shortcut: P.' }));
   const quality = choice('hud-set-quality', 'Graphics', [['auto', 'Automatic'], ['high', 'High quality'], ['low', 'Low power']], ctx.prefs.quality, (value) => ctx.setPrefs({ quality: /** @type {any} */ (value) }));
 
   const volume = /** @type {HTMLInputElement} */ (h('input', { type: 'range', class: 'hud-range', id: 'hud-set-volume', min: '0', max: '100', step: '5', value: String(Math.round(ctx.prefs.volume * 100)) }));
@@ -162,7 +164,7 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [teamBlock, remoteBlock, look.el, theme.el, motion.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    body: [teamBlock, remoteBlock, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -195,6 +197,7 @@ export function createSettingsDialog(ctx) {
       theme.set(ctx.prefs.theme);
       motion.set(ctx.prefs.motion);
       quality.set(ctx.prefs.quality);
+      placeNames.set(ctx.prefs.placeNames);
       look.set(LOOK);
       applyLook.disabled = true;
       weather.checked = ctx.prefs.weather;

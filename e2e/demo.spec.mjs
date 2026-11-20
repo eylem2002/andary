@@ -51,6 +51,25 @@ test('crews fill with agents, the log grows and tasks appear', async ({ page }) 
   await expect(page.getByTestId('task-item').first()).toBeVisible({ timeout: 45_000 });
 });
 
+test('place labels sit on the buildings: names where they fit, more as you zoom in', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'zoom and P are keyboard shortcuts');
+  await page.addInitScript(() => localStorage.setItem('andary:prefs', JSON.stringify({ setupSeen: true, directorCam: 'off', panels: 'hidden' })));
+  await page.goto(demoUrl());
+  const signs = page.locator('.tt-sign[data-building]');
+  await expect.poll(() => signs.count(), { timeout: 45_000 }).toBe(15);
+  const count = (/** @type {string} */ state) => page.locator(`.tt-sign[data-building].is-${state}`).count();
+  // The whole town: the small places show just their icon.
+  await expect.poll(() => count('icon'), { timeout: 30_000 }).toBeGreaterThan(0);
+  const namesBefore = await count('name');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('+');
+  await expect.poll(() => count('name'), { timeout: 10_000 }).toBeGreaterThan(namesBefore);
+  await page.keyboard.press('0');
+  await page.keyboard.press('p'); // always
+  await expect.poll(() => count('icon'), { timeout: 10_000 }).toBe(0);
+  await page.keyboard.press('p'); // off
+  await expect.poll(async () => (await count('name')) + (await count('icon')), { timeout: 10_000 }).toBe(0);
+});
+
 test('the toolbar is placed above the board from the first frame (no layout shift)', async ({ page }) => {
   await page.addInitScript(() => {
     /** @type {any} */ (window).__shifts = [];

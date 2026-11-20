@@ -3,6 +3,7 @@
 // field and falls back to the default, and writing never throws.
 
 import { PREFS_STORAGE_KEY } from '../core/looks.js';
+import { PLACE_NAMES } from '../core/place-names.js';
 
 /**
  * @typedef {object} Prefs
@@ -24,6 +25,7 @@ import { PREFS_STORAGE_KEY } from '../core/looks.js';
  * @property {boolean} desktopNotify notifications on this computer while the town is in the background
  * @property {boolean} ambient       waves, gulls, city hum and soft music while sound is on
  * @property {'coast'|'snow'|'neon'|'desert'|'amman'} townLook  the town's look (core/looks.js, read by page.js); changing it reloads
+ * @property {'auto'|'always'|'off'} placeNames  labels on the buildings: names where they fit, always, or none (core/place-names.js)
  */
 
 /** @type {Readonly<Prefs>} */
@@ -46,6 +48,7 @@ export const DEFAULT_PREFS = Object.freeze({
   desktopNotify: false,
   ambient: true,
   townLook: 'coast',
+  placeNames: 'auto',
 });
 
 export const STORAGE_KEY = PREFS_STORAGE_KEY;
@@ -61,6 +64,7 @@ const CHOICES = {
   panels: ['auto', 'shown', 'hidden'],
   directorCam: ['auto', 'on', 'off'],
   townLook: ['coast', 'snow', 'neon', 'desert', 'amman'],
+  placeNames: PLACE_NAMES,
 };
 
 /**

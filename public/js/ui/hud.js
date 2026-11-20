@@ -3,7 +3,7 @@
 // plays the side effects of fresh changes (toasts, sounds, announcements).
 import { createActivityPanel } from './activity.js';
 import { createAnnouncer } from './announcer.js';
-import { applyMotion, applyTheme } from './appearance.js';
+import { applyMotion, applyTheme, applyWorldPrefs } from './appearance.js';
 import { createApprovalsPanel, pendingCount } from './approvals.js';
 import { createBoard } from './board.js';
 import { createBuildingCard } from './building-card.js';
@@ -107,8 +107,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       shell.world = world;
       if (view.progress) world.setLandmarks?.(unlockedAt(view.progress.points));
       world.on?.('select', (sel) => select(hud, sel, { from: 'world', camera: false }));
-      applyTheme(prefs, world);
-      applyMotion(prefs, world);
+      applyWorldPrefs(prefs, world);
       if (failed) {
         view.worldFailed = true;
         ui.notices.showWorldFallback();
@@ -379,6 +378,7 @@ function updatePrefs(ctx, patch) {
   if ('theme' in patch || 'timeMode' in patch) applyTheme(ctx.prefs, world);
   if ('motion' in patch) applyMotion(ctx.prefs, world);
   if (patch.quality === 'high' || patch.quality === 'low') world?.setQuality(patch.quality);
+  if ('placeNames' in patch) world?.setPlaceNames?.(ctx.prefs.placeNames);
   ctx.refresh();
 }
 

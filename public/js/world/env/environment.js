@@ -234,8 +234,16 @@ function createApi(core, f) {
     },
     /** @param {THREE.Raycaster} raycaster */
     pickBuilding: (raycaster) => pickBuilding(world.records, raycaster),
-    /** @param {BuildingKey|null} key */
-    highlightBuilding: (key) => f.fx.highlight(record(key) ? key : null),
+    /** The selected building: lit up, and its label shows its name. @param {BuildingKey|null} key */
+    highlightBuilding(key) {
+      const k = record(key) ? key : null;
+      f.fx.highlight(k);
+      f.signs.setSelected(k);
+    },
+    /** The building under the pointer in the 3D view: its label shows its name. @param {BuildingKey|null} key */
+    hoverBuilding: (key) => f.signs.setHovered(record(key) ? key : null),
+    /** How place labels show: 'auto' (names that fit), 'always' or 'off'. @param {'auto'|'always'|'off'} mode */
+    setPlaceNames: (mode) => f.signs.setMode(mode),
     /** @param {BuildingKey} key @param {string|null} text */
     setBuildingStat(key, text) {
       if (record(key)) f.signs.setStat(key, text);
@@ -259,6 +267,12 @@ function createApi(core, f) {
      * @param {(x: number, z: number, reach: number) => boolean} occupied
      */
     setPedestrians: (occupied) => f.vehicles.setPedestrians(occupied),
+    /**
+     * Where the agents are on screen, so place labels make way for them; from the facade, like
+     * setPedestrians.
+     * @param {() => ReadonlyArray<{x: number, y: number, feet: number, half: number}>} figures
+     */
+    setFigures: (figures) => f.signs.setFigures(figures),
     dispose() {
       rig.dispose();
       for (const part of [f.signs, f.fx, f.board, f.pile, f.grove, f.vehicles, f.ambient, atmosphere, core.lighting]) part.dispose();

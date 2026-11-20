@@ -68,6 +68,23 @@ test.describe('keyboard', () => {
     await expect(page.getByTestId('connection-status')).not.toContainText('paused');
   });
 
+  test('P cycles the place names and Settings keeps the choice', async ({ page }) => {
+    await openDemo(page);
+    const modes = async () => (await worldCalls(page)).filter(([method]) => method === 'setPlaceNames').map(([, mode]) => mode);
+    const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem('andary:prefs') ?? '{}').placeNames);
+    await page.keyboard.press('p');
+    await expect.poll(modes).toContain('always');
+    await page.keyboard.press('p');
+    await expect.poll(modes).toContain('off');
+    expect(await saved()).toBe('off');
+    await page.getByTestId('settings-button').click();
+    const select = page.locator('#hud-set-place-names');
+    await expect(select).toHaveValue('off');
+    await select.selectOption('auto');
+    await expect.poll(async () => (await modes()).at(-1)).toBe('auto');
+    expect(await saved()).toBe('auto');
+  });
+
   test('1–9 jump to a crew, F follows, Escape lets go', async ({ page }) => {
     await openDemo(page);
     await page.keyboard.press('1');

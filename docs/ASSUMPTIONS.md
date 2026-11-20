@@ -291,3 +291,15 @@ section.
 79. **Blank-line runs on an approval card collapse into a marker.** Three or more blank lines in a
     row show as "⟨N blank lines⟩", and the note gives the line counts, so padding cannot push the
     rest of a change out of sight.
+80. **A name "fits" when it takes at most 55% of its lot's width on screen (ADR 0017).** Lots
+    have yards and pavements around the building, so the whole lot would be too generous; 55%
+    puts names on the large buildings and icons on the small ones at the whole-town view on a
+    laptop, and every name within about two zoom steps.
+81. **Only figures in front of a building fade its label.** "In front" is judged on screen: the
+    figure's feet are below the building's ground point under the label. A figure behind the
+    building is hidden by the building itself, so fading the label for it would look like a
+    glitch.
+82. **`always` lets names overlap.** It is the viewer's explicit choice, so every name is written,
+    the nearer on top, rather than shrinking some to icons and calling that "always".
+83. **`P` was free.** No browser or screen reader shortcut uses a bare `P` in a web page, and the
+    3D view's own keys are arrows, `+`/`-`, `Q`/`E`.

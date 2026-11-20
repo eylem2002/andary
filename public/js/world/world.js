@@ -10,6 +10,7 @@ import { detectQuality } from './agents/quality.js';
 import { attachKeyboard, attachPointer } from './agents/input.js';
 import { truncateText } from './agents/bubbles.js';
 import { safeColor } from './agents/color.js';
+import { isPlaceNames } from '../core/place-names.js';
 
 const LABEL =
   'Andary: a 3D view of your agents at work. Arrow keys pan, plus and minus zoom, Q and E rotate, Escape deselects.';
@@ -59,7 +60,7 @@ async function loadEnvironment(args) {
 class World {
   /**
    * @param {HTMLElement} container
-   * @param {{quality?: 'auto'|'high'|'low', reducedMotion?: boolean, timeOfDay?: number|'auto'}} options
+   * @param {{quality?: 'auto'|'high'|'low', reducedMotion?: boolean, timeOfDay?: number|'auto', placeNames?: 'auto'|'always'|'off'}} options
    */
   constructor(container, options) {
     // Methods stay usable when destructured off the world object.
@@ -70,6 +71,8 @@ class World {
     this.quality = detectQuality(options.quality);
     this.reducedMotion =
       options.reducedMotion ?? (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
+    /** @type {import('../core/place-names.js').PlaceNames} how place labels show (Settings → Place names) */
+    this.placeNames = isPlaceNames(options.placeNames) ? options.placeNames : 'auto';
     this.paused = false;
     this.disposed = false;
     /** Whether prepareContainer had to make the container a positioned box (undone on teardown). */
@@ -117,6 +120,9 @@ class World {
     });
     // Cars and the mail truck wait for people in their lane; the town asks the crowd through here.
     this.env.setPedestrians?.((/** @type {number} */ x, /** @type {number} */ z, /** @type {number} */ reach) => this.crowd.occupied(x, z, reach));
+    // Place labels make way for the agents standing in front of them.
+    this.env.setFigures?.(() => this.crowd.figureBoxes());
+    this.env.setPlaceNames?.(this.placeNames);
     this.view.camera = this.env.camera;
     this.renderer.info.autoReset = false; // count every pass of a frame, not just the last one
     this.attachInput();
@@ -263,6 +269,7 @@ class World {
     if (key === this.hoverKey) return;
     this.hoverKey = key;
     this.crowd.hover(sel?.type === 'agent' ? sel.id : null);
+    this.envCall('hoverBuilding', sel?.type === 'building' ? sel.key : null);
     this.renderer.domElement.classList.toggle('is-pointing', Boolean(sel));
     this.emit('hover', sel);
   }
@@ -368,6 +375,13 @@ class World {
   getTimeOfDay() {
     const h = this.envCall('getTimeOfDay');
     return Number.isFinite(h) ? h : 12;
+  }
+
+  /** How place labels show: 'auto' (names that fit), 'always' or 'off'. @param {unknown} mode */
+  setPlaceNames(mode) {
+    if (!isPlaceNames(mode)) return;
+    this.placeNames = mode;
+    this.envCall('setPlaceNames', mode);
   }
 
   /** @param {boolean} on */
@@ -618,7 +632,7 @@ class World {
  * Creates the 3D town inside `container`. Rejects with a clear Error when WebGL is unavailable.
  * @param {HTMLElement} container
  * @param {{quality?: 'auto'|'high'|'low', reducedMotion?: boolean, timeOfDay?: number|'auto',
- *   envFactory?: (args: any) => any}} [options]
+ *   placeNames?: 'auto'|'always'|'off', envFactory?: (args: any) => any}} [options]
  * @returns {Promise<World>}
  */
 export async function createWorld(container, options = {}) {

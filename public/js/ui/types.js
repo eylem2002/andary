@@ -24,6 +24,7 @@
  * @property {(ids: string[], options?: { grow?: boolean }) => void} [setLandmarks]
  * @property {() => number} getTimeOfDay
  * @property {(on: boolean) => void} setReducedMotion
+ * @property {(mode: 'auto'|'always'|'off') => void} [setPlaceNames]
  * @property {(id: string, opts?: { follow?: boolean, zoom?: number }) => void} focusAgent
  * @property {(key: string) => void} focusBuilding
  * @property {() => void} stopFollow

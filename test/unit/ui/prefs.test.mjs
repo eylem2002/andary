@@ -34,6 +34,12 @@ describe('parsePrefs', () => {
     assert.equal(bad.panels, 'auto');
   });
 
+  test('place names fit on the buildings by default', () => {
+    assert.equal(DEFAULT_PREFS.placeNames, 'auto');
+    assert.equal(parsePrefs(JSON.stringify({ placeNames: 'off' })).placeNames, 'off');
+    assert.equal(parsePrefs(JSON.stringify({ placeNames: true })).placeNames, 'auto');
+  });
+
   test('ignores keys inherited from the prototype', () => {
     const prefs = parsePrefs('{"__proto__": {"sound": true}}');
     assert.equal(prefs.sound, false);
