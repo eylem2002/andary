@@ -202,4 +202,11 @@ section.
     slow chords. It plays only while sound is on (still off by default) and "Ambient sound" is on
     (on by default), and fades out while the tab is hidden. "Night" for the crickets is the
     town's clock (before 6:00 or from 19:30).
+56. **Five looks, chosen at load.** The town's colours are baked into its geometry (vertex
+    colours, one draw call per kind), so a look is chosen when the page loads (`?look=` or the
+    saved preference) and changing it reloads the page; the HUD keeps its own colours. The
+    looks are original: Sunset coast (default), Snowy village (painted wooden houses, pines,
+    snowmen, snow instead of rain), Neon city (dark towers, neon on all day), Desert oasis
+    (adobe and tiles, red rock) and Amman old town (the first limestone look, kept from
+    before the sunset coast).
 

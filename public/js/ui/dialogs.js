@@ -7,6 +7,7 @@ import { BUILDING_ICONS, icon } from './icons.js';
 import { kbd } from './parts.js';
 import { SHORTCUT_HELP } from './shortcuts.js';
 import { setDesktopNotify } from './notifications.js';
+import { LOOKS } from '../world/env/look.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 
@@ -97,6 +98,16 @@ export function createSettingsDialog(ctx) {
 
   const theme = choice('hud-set-theme', 'Theme', [['auto', 'Match the town and system'], ['light', 'Light'], ['dark', 'Dark']], ctx.prefs.theme, (value) => ctx.setPrefs({ theme: /** @type {any} */ (value) }));
   const motion = choice('hud-set-motion', 'Motion', [['system', 'Match system setting'], ['reduce', 'Reduce motion'], ['full', 'Full motion']], ctx.prefs.motion, (value) => ctx.setPrefs({ motion: /** @type {any} */ (value) }));
+  const look = choice('hud-set-look', 'Town look', LOOKS.map((l) => [l.id, l.name]), ctx.prefs.townLook, (value) => {
+    ctx.setPrefs({ townLook: /** @type {any} */ (value) });
+    lookHelp.textContent = 'Rebuilding the town with its new look…';
+    // The town's colours are part of its geometry, so a new look means building it again.
+    const url = new URL(location.href);
+    url.searchParams.delete('look');
+    setTimeout(() => location.replace(url.href), 250);
+  });
+  const lookHelp = h('p', { class: 'hud-setting__help', role: 'status', text: 'The whole town, its sky and its sea. Changing it reloads the page.' });
+  look.el.append(lookHelp);
   const quality = choice('hud-set-quality', 'Graphics', [['auto', 'Automatic'], ['high', 'High quality'], ['low', 'Low power']], ctx.prefs.quality, (value) => ctx.setPrefs({ quality: /** @type {any} */ (value) }));
 
   const volume = /** @type {HTMLInputElement} */ (h('input', { type: 'range', class: 'hud-range', id: 'hud-set-volume', min: '0', max: '100', step: '5', value: String(Math.round(ctx.prefs.volume * 100)) }));
@@ -140,7 +151,7 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [remoteBlock, theme.el, motion.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    body: [remoteBlock, look.el, theme.el, motion.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -169,6 +180,7 @@ export function createSettingsDialog(ctx) {
       theme.set(ctx.prefs.theme);
       motion.set(ctx.prefs.motion);
       quality.set(ctx.prefs.quality);
+      look.set(ctx.prefs.townLook);
       weather.checked = ctx.prefs.weather;
       ambient.checked = ctx.prefs.ambient;
       notify.sync();

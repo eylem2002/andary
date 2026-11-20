@@ -19,7 +19,10 @@ test.afterAll(async () => {
 
 test.beforeEach(async ({ page }) => {
   problems = watchConsole(page);
-  await page.addInitScript(() => localStorage.setItem('andary:prefs', JSON.stringify({ setupSeen: true, theme: 'light' })));
+  // Only on a fresh page: a reload (a new town look) keeps what the test changed.
+  await page.addInitScript(() => {
+    if (!localStorage.getItem('andary:prefs')) localStorage.setItem('andary:prefs', JSON.stringify({ setupSeen: true, theme: 'light' }));
+  });
 });
 
 test.afterEach(() => {
@@ -132,4 +135,17 @@ test('ambient sound has its own switch in Settings, kept for next time', async (
   await page.keyboard.press('Escape');
   // Turning sound on (a gesture) must not throw, with or without the ambient bed.
   await page.keyboard.press('m');
+});
+
+test('Settings switches the town\'s look, which rebuilds the town', async ({ page }) => {
+  await openDemo(page);
+  await page.getByTestId('settings-button').click();
+  const look = page.getByLabel('Town look');
+  await expect(look).toHaveValue('coast');
+  await expect(look.locator('option')).toHaveText(['Sunset coast', 'Snowy village', 'Neon city', 'Desert oasis', 'Amman old town']);
+  await Promise.all([page.waitForEvent('load'), look.selectOption('snow')]);
+  await expect(page.getByTestId('agent-row').first()).toBeAttached({ timeout: 45_000 });
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('andary:prefs') ?? '{}').townLook)).toBe('snow');
+  await page.getByTestId('settings-button').click();
+  await expect(page.getByLabel('Town look')).toHaveValue('snow');
 });

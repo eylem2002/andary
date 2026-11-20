@@ -22,7 +22,7 @@ test('every building has its own paint with all five colours', () => {
       const v = paint[part];
       assert.ok(Number.isInteger(v) && v >= 0 && v <= 0xffffff, `${key}.${part}`);
     }
-    assert.ok(Object.values(NEON).includes(paint.neon), `${key} uses a neon tube colour`);
+    assert.ok(/** @type {number[]} */ (Object.values(NEON)).includes(paint.neon), `${key} uses a neon tube colour`);
   }
 });
 

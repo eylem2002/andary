@@ -3,7 +3,7 @@
 // crossings, the seawall and promenade, the sea floor and the resin-look sea sides, and the
 // tunnel portals where buses leave the island.
 import { COLS, ROWS, TILE, tileAt, tileToWorld } from '../layout.js';
-import { C, S } from './palette.js';
+import { C, S, STYLE } from './palette.js';
 import { createRng, range } from './rand.js';
 
 /** Plinth extents (world units). The sea continues north of the map to the plinth's far edge. */
@@ -217,9 +217,9 @@ function buildSeaBed(kit, rng) {
   const top = SEA.level - 0.02;
   const h = top - SEA.floor;
   const water = { surface: S.water, shade: /** @type {[number, number]} */ ([0.45, 1]) };
-  kit.box([minX + 0.03, SEA.floor, (minZ + SEA.shoreZ) / 2], [0.06, h, d], 0x2fd0d6, water);
-  kit.box([maxX - 0.03, SEA.floor, (minZ + SEA.shoreZ) / 2], [0.06, h, d], 0x2fd0d6, water);
-  kit.box([0, SEA.floor, minZ + 0.03], [w, h, 0.06], 0x2fd0d6, water);
+  kit.box([minX + 0.03, SEA.floor, (minZ + SEA.shoreZ) / 2], [0.06, h, d], STYLE.seaSide, water);
+  kit.box([maxX - 0.03, SEA.floor, (minZ + SEA.shoreZ) / 2], [0.06, h, d], STYLE.seaSide, water);
+  kit.box([0, SEA.floor, minZ + 0.03], [w, h, 0.06], STYLE.seaSide, water);
 }
 
 /**

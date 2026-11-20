@@ -1,9 +1,15 @@
-// The town's colours (sRGB hex) and surface kinds. One place to tune the look: a sunset coast of
-// pastel stucco and white trims, turquoise water, palms, lush lawns and neon that comes on at dusk.
+// The town's colours (sRGB hex) and surface kinds. The default look is a sunset coast of pastel
+// stucco and white trims, turquoise water, palms, lush lawns and neon that comes on at dusk; the
+// other looks (look.js, look-palettes.js) override these tones, the paint, the neon and the style.
 // Each building is repainted from the shared stucco tones (PAINT, applied by the kit), so the
 // building code keeps naming materials ("stone", "gold") while every block gets its own colour.
+import { LOOK } from './look.js';
+import { COAST_STYLE, LOOK_PALETTES } from './look-palettes.js';
 
-export const C = Object.freeze({
+/** The overrides of the look this page was built with (none for the sunset coast). */
+const LOOK_PALETTE = LOOK === 'coast' ? null : LOOK_PALETTES[LOOK];
+
+const COAST_C = Object.freeze({
   // Stucco and plaster (shared tones; buildings swap them for their own paint)
   stone: 0xf6efe6,
   stoneWarm: 0xf3dccd,
@@ -73,14 +79,21 @@ export const C = Object.freeze({
   flowerWhite: 0xfff8f0,
 });
 
-/** Neon tube colours: they outline the buildings and light the plaza once the sun is down. */
-export const NEON = Object.freeze({
+export const C = Object.freeze({ ...COAST_C, ...(LOOK_PALETTE?.colors ?? {}) });
+
+const COAST_NEON = Object.freeze({
   pink: 0xff3fa4,
   cyan: 0x2fe8ff,
   violet: 0xb066ff,
   orange: 0xff9a3c,
   mint: 0x4dffc3,
 });
+
+/** Neon tube colours: they outline the buildings and light the plaza once the sun is down. */
+export const NEON = Object.freeze({ ...COAST_NEON, ...(LOOK_PALETTE?.neon ?? {}) });
+
+/** Sea, island sides, trees and beach of this look (look-palettes.js). */
+export const STYLE = LOOK_PALETTE?.style ?? COAST_STYLE;
 
 /**
  * @typedef {object} Paint
@@ -91,24 +104,35 @@ export const NEON = Object.freeze({
  * @property {number} neon    the tube that outlines the roofline at night
  */
 
-/** Every building's paint: pastel walls with white trims, one accent, one neon. */
-export const PAINT = Object.freeze({
-  hall: { wall: 0xfffaf5, deep: 0xffd6cf, trim: 0xffffff, accent: 0x29c7bd, neon: NEON.pink },
-  library: { wall: 0xb5ecd4, deep: 0x8fdcbf, trim: 0xfcfffd, accent: 0xff8fa6, neon: NEON.cyan },
-  academy: { wall: 0xffe39a, deep: 0xffcf73, trim: 0xfffdf6, accent: 0xff7b6b, neon: NEON.violet },
-  permits: { wall: 0xd4c2f5, deep: 0xbba5ee, trim: 0xfdfbff, accent: 0x7a5cff, neon: NEON.pink },
-  workshop: { wall: 0xffcfab, deep: 0xffb98a, trim: 0xfff8f1, accent: 0x18b6a8, neon: NEON.orange },
-  terminal: { wall: 0xff9f97, deep: 0xf47c74, trim: 0xfff6f4, accent: 0x2fd3e0, neon: NEON.cyan },
-  harbor: { wall: 0xa9ece6, deep: 0x7fdcd3, trim: 0xf7fffe, accent: 0xff7a59, neon: NEON.mint },
-  detective: { wall: 0xa8d8fb, deep: 0x86c4f2, trim: 0xf8fcff, accent: 0xffb703, neon: NEON.pink },
-  post: { wall: 0xffbfd3, deep: 0xffa1bd, trim: 0xfffafc, accent: 0x15aaa0, neon: NEON.cyan },
-  web: { wall: 0xf3f5ff, deep: 0xcfd6ff, trim: 0xffffff, accent: 0xb066ff, neon: NEON.violet },
-  spa: { wall: 0xf9c9e6, deep: 0xf1a8d6, trim: 0xfff9fd, accent: 0x2fc6d6, neon: NEON.mint },
-  cafe: { wall: 0x9fe6ee, deep: 0x7dd5e1, trim: 0xf8feff, accent: 0xff5c8a, neon: NEON.pink },
-  station: { wall: 0xfff1d8, deep: 0xffe0b5, trim: 0xffffff, accent: 0x16b3a7, neon: NEON.orange },
-  board: { wall: 0xfff1d8, deep: 0xffe0b5, trim: 0xffffff, accent: 0xff5c8a, neon: NEON.cyan },
-  grove: { wall: 0xf6efe6, deep: 0xf3dccd, trim: 0xfbf7f1, accent: 0x29c7bd, neon: NEON.mint },
+/** Every building's paint on the coast: pastel walls with white trims, one accent, one neon. */
+const COAST_PAINT = Object.freeze({
+  hall: { wall: 0xfffaf5, deep: 0xffd6cf, trim: 0xffffff, accent: 0x29c7bd, neon: COAST_NEON.pink },
+  library: { wall: 0xb5ecd4, deep: 0x8fdcbf, trim: 0xfcfffd, accent: 0xff8fa6, neon: COAST_NEON.cyan },
+  academy: { wall: 0xffe39a, deep: 0xffcf73, trim: 0xfffdf6, accent: 0xff7b6b, neon: COAST_NEON.violet },
+  permits: { wall: 0xd4c2f5, deep: 0xbba5ee, trim: 0xfdfbff, accent: 0x7a5cff, neon: COAST_NEON.pink },
+  workshop: { wall: 0xffcfab, deep: 0xffb98a, trim: 0xfff8f1, accent: 0x18b6a8, neon: COAST_NEON.orange },
+  terminal: { wall: 0xff9f97, deep: 0xf47c74, trim: 0xfff6f4, accent: 0x2fd3e0, neon: COAST_NEON.cyan },
+  harbor: { wall: 0xa9ece6, deep: 0x7fdcd3, trim: 0xf7fffe, accent: 0xff7a59, neon: COAST_NEON.mint },
+  detective: { wall: 0xa8d8fb, deep: 0x86c4f2, trim: 0xf8fcff, accent: 0xffb703, neon: COAST_NEON.pink },
+  post: { wall: 0xffbfd3, deep: 0xffa1bd, trim: 0xfffafc, accent: 0x15aaa0, neon: COAST_NEON.cyan },
+  web: { wall: 0xf3f5ff, deep: 0xcfd6ff, trim: 0xffffff, accent: 0xb066ff, neon: COAST_NEON.violet },
+  spa: { wall: 0xf9c9e6, deep: 0xf1a8d6, trim: 0xfff9fd, accent: 0x2fc6d6, neon: COAST_NEON.mint },
+  cafe: { wall: 0x9fe6ee, deep: 0x7dd5e1, trim: 0xf8feff, accent: 0xff5c8a, neon: COAST_NEON.pink },
+  station: { wall: 0xfff1d8, deep: 0xffe0b5, trim: 0xffffff, accent: 0x16b3a7, neon: COAST_NEON.orange },
+  board: { wall: 0xfff1d8, deep: 0xffe0b5, trim: 0xffffff, accent: 0xff5c8a, neon: COAST_NEON.cyan },
+  grove: { wall: 0xf6efe6, deep: 0xf3dccd, trim: 0xfbf7f1, accent: 0x29c7bd, neon: COAST_NEON.mint },
 });
+
+/**
+ * Every building's paint in this look, or null where the look keeps the shared tones unpainted.
+ * @type {Readonly<Record<string, Paint>>|null}
+ */
+export const PAINT = (() => {
+  if (!LOOK_PALETTE) return COAST_PAINT;
+  const paint = LOOK_PALETTE.paint;
+  if (!paint) return null;
+  return Object.freeze(Object.fromEntries(Object.entries(paint).map(([key, p]) => [key, { ...p, neon: NEON[/** @type {keyof typeof NEON} */ (p.neon)] ?? NEON.pink }])));
+})();
 
 /**
  * @param {number} hex @param {number} amount  -1 (black) … 0 … 1 (white)

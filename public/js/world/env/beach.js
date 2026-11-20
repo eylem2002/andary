@@ -1,7 +1,7 @@
 // The beach: a strip of sand sloping from the seawall into the sea west of the harbour, with
 // striped umbrellas, loungers, towels, a lifeguard tower and palms, ended at the harbour side by a
 // rock groyne. The sea's foam line follows its waterline (water.js reads WATERLINE_Z).
-import { C, NEON, S } from './palette.js';
+import { C, NEON, S, STYLE } from './palette.js';
 import { range } from './rand.js';
 import { PLINTH, SEA } from './terrain.js';
 
@@ -40,13 +40,36 @@ export function buildBeach(kit, trees, rng) {
   sand(kit);
   groyne(kit, rng);
   const spots = beachSpots(rng);
+  const snowy = STYLE.beach === 'snowmen';
   for (const { x, z } of spots.umbrellas) {
+    if (snowy) {
+      snowman(kit, x, z, rng);
+      continue;
+    }
     umbrella(kit, x, z, UMBRELLAS[Math.floor(rng() * UMBRELLAS.length)]);
     lounger(kit, x + 0.75, z - 0.15, rng() < 0.5 ? 0xffffff : C.tealLight);
     if (rng() < 0.7) towel(kit, x - 0.85, z - 0.55, TOWELS[Math.floor(rng() * TOWELS.length)], range(rng, -0.4, 0.4));
   }
-  lifeguardTower(kit, LIFEGUARD_X, -23.1);
-  for (const { x, z } of spots.palms) trees.push({ kind: 'palm', x, z, y: sandHeight(z), scale: range(rng, 0.8, 0.95) });
+  if (!snowy) lifeguardTower(kit, LIFEGUARD_X, -23.1);
+  const tree = snowy ? 'cypress' : 'palm';
+  for (const { x, z } of spots.palms) trees.push({ kind: tree, x, z, y: sandHeight(z), scale: range(rng, 0.8, 0.95) });
+}
+
+/**
+ * A snowman with a carrot nose and a red scarf, for the snowy look's shore.
+ * @param {import('./kit.js').Kit} kit
+ * @param {number} x @param {number} z @param {() => number} rng
+ */
+function snowman(kit, x, z, rng) {
+  const y = sandHeight(z);
+  const turn = range(rng, -0.6, 0.6);
+  kit.sphere([x, y + 0.32, z], 0.36, 0xffffff, { surface: S.matte });
+  kit.sphere([x, y + 0.82, z], 0.26, 0xffffff, { surface: S.matte });
+  kit.sphere([x, y + 1.18, z], 0.18, 0xffffff, { surface: S.matte });
+  kit.box([x, y + 0.98, z], [0.5, 0.08, 0.5], 0xc9302c, { surface: S.fabric, rotY: turn });
+  kit.cone([x + Math.sin(turn) * 0.17, y + 1.19, z + Math.cos(turn) * 0.17], 0.035, 0.16, 0xff8a1f, { surface: S.matte, rotX: Math.PI / 2, rotY: turn, center: true });
+  kit.cyl([x, y + 1.32, z], 0.13, 0.05, 0x2b2b33, { seg: 12, surface: S.matte });
+  kit.cyl([x, y + 1.37, z], 0.09, 0.16, 0x2b2b33, { seg: 12, surface: S.matte });
 }
 
 /** Spacing of the umbrellas along the beach. */

@@ -23,3 +23,4 @@ bottom; after a merge GitHub retargets the next pull request to `main`.
 - `feat/leaderboard` — the town's growth, records and the busiest agents
 - `feat/notifications` — notifications on your phone (ntfy, opt-in) and on this computer
 - `feat/ambient-sound` — waves, gulls, crickets, city hum and soft chords that follow the work
+- `feat/town-looks` — five town looks: coast, snowy village, neon city, desert oasis, Amman

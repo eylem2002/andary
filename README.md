@@ -64,6 +64,14 @@ is a sunset coast (pastel stucco, palms, a beach, neon at dusk) that follows you
 `N` for day, sunset or night. Click any agent for its details, including a diff of every file
 it changed, or any building for who is inside.
 
+### Town looks
+
+Settings → **Town look** rebuilds the whole town, its sky and its sea in another style: the
+sunset coast, a snowy village (where the rain falls as snow and snowmen stand on the shore), a
+neon city whose lights never quite go out, a desert oasis, or the limestone of Amman's old town.
+
+![The snowy village, the neon city, the desert oasis and Amman's old town](docs/media/andary-looks.webp)
+
 ### The town grows with you
 
 Every finished turn, finished helper and completed task is a point, and points unlock
