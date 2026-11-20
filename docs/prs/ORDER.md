@@ -24,3 +24,4 @@ bottom; after a merge GitHub retargets the next pull request to `main`.
 - `feat/notifications` — notifications on your phone (ntfy, opt-in) and on this computer
 - `feat/ambient-sound` — waves, gulls, crickets, city hum and soft chords that follow the work
 - `feat/town-looks` — five town looks: coast, snowy village, neon city, desert oasis, Amman
+- `feat/team-town` — teammates' sessions in one shared town over your network, with a view-only link

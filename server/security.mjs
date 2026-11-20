@@ -90,7 +90,7 @@ const WILDCARD_HOSTS = new Set(['', '0.0.0.0', '::', '[::]']);
  * @param {string|undefined} host
  * @returns {boolean}
  */
-function isWildcardHost(host) {
+export function isWildcardHost(host) {
   return WILDCARD_HOSTS.has(host ?? '');
 }
 
@@ -134,13 +134,15 @@ export function connectHost(boundHost) {
 
 /**
  * Host header values the server answers to. Loopback names always; the bound host too when the
- * user chose a specific non-loopback address with --host.
+ * user chose a specific non-loopback address with --host; and any extra names (a team host's LAN
+ * addresses when it listens on every interface).
  * @param {number} port
  * @param {string} [boundHost]
+ * @param {string[]} [extra]
  * @returns {Set<string>} lower-case host:port strings
  */
-export function allowedHostHeaders(port, boundHost) {
-  const names = ['127.0.0.1', 'localhost', '::1'];
+export function allowedHostHeaders(port, boundHost, extra = []) {
+  const names = ['127.0.0.1', 'localhost', '::1', ...extra];
   if (boundHost && !isWildcardHost(boundHost)) names.push(boundHost);
   const allowed = new Set();
   for (const name of names) {

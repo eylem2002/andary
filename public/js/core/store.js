@@ -47,6 +47,7 @@ export { ACHIEVEMENTS };
  * @property {{id: string, subject: string, status: ItemStatus, owner?: string}[]} tasks
  * @property {number} [endedAt]
  * @property {string} [endReason]
+ * @property {string|null} [member]  the teammate whose session this is, in a team town
  */
 
 /**
@@ -270,6 +271,7 @@ function newSession(m, e) {
     tasks: [],
     endedAt: undefined,
     endReason: undefined,
+    member: e.member ?? null,
   };
   m.sessions.set(s.id, s);
   m.state.sessions.push(s);
@@ -341,6 +343,8 @@ function register(m, s, agent) {
 /** @param {Model} m @param {Session} s @param {TownEvent} e */
 function createLead(m, s, e) {
   const agent = baseAgent(s, agentKeyOf(s.id, null), null, e.ts);
+  // In a team town a teammate's lead carries their name, so the town shows whose crew it is.
+  if (s.member) agent.name = s.member;
   agent.type = (e.kind === 'session.start' && e.data.agentType) || 'main';
   agent.model = s.model;
   agent.hat = hatForModel(s.model) ?? 'hardhat';

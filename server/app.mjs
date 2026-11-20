@@ -7,14 +7,15 @@ import { createApprovalBroker } from './approvals.mjs';
 import { claudeConfigDir, createUsageTracker } from './usage.mjs';
 import { createProgress } from './progress.mjs';
 import { createNotifier } from './notify.mjs';
-import { createHub, handleUpgrade } from './browsers.mjs';
+import { announceTeam, createHub, handleUpgrade } from './browsers.mjs';
+import { createTeamHost, createTeamRelay, lanAddresses, teamSecret } from './team.mjs';
 import { DEFAULT_APPROVAL_TIMEOUT_MS, DEFAULT_HOST, DEFAULT_PORT, LIMITS, PUBLIC_DIR, readVersion, resolveHome } from './config.mjs';
 import { createHistory, createRecorder, recordingPath } from './history.mjs';
 import { NOT_FOUND_PAGE, sendHtml, sendText } from './http-util.mjs';
 import { createTokenBucket } from './rate-limit.mjs';
 import { handleRequest } from './routes.mjs';
 import { sanitize } from './sanitize.mjs';
-import { allowedHostHeaders, buildCsp, computeImportMapHashes, securityHeaders } from './security.mjs';
+import { allowedHostHeaders, buildCsp, computeImportMapHashes, connectHost, hostWithPort, isWildcardHost, securityHeaders } from './security.mjs';
 import { loginUrl, removeStateFileIfOwned, serverOrigin, writeStateFile } from './state-file.mjs';
 import { createStaticHandler } from './static.mjs';
 import { CLOSE_CODE } from './ws-frame.mjs';
@@ -28,6 +29,8 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {boolean} [remoteApprovals]
  * @property {string|null} [notifyUrl]    ntfy topic URL for phone notifications (null: off)
  * @property {string} [claudeDir]          Claude Code's config folder, for reading token usage from transcripts
+ * @property {boolean} [team]              host a team town: teammates' Andarys may send their events here
+ * @property {{ url: string, key: string }|null} [shareTo]  send this town's events to a team host
  * @property {number} [approvalTimeoutMs]
  * @property {boolean} [record]            append every envelope to <home>/recordings/*.jsonl
  * @property {boolean} [writeState]        write server.json (default true)
@@ -49,6 +52,8 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {ReturnType<typeof createProgress>} progress
  * @property {ReturnType<typeof createNotifier>} notifier
  * @property {import('./browsers.mjs').Hub} hub
+ * @property {ReturnType<typeof createTeamHost>|null} team    set on a team host
+ * @property {ReturnType<typeof createTeamRelay>|null} relay  set when sharing to a team host
  * @property {import('./rate-limit.mjs').TokenBucket} hookLimiter
  * @property {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, pathname: string) => Promise<void>} serveStatic
  * @property {ReturnType<typeof createRecorder>|null} recorder
@@ -69,6 +74,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {string|null} recordingPath
  * @property {import('./state-file.mjs').ServerState} state
  * @property {string|null} notifyUrl  where phone notifications go (null: off)
+ * @property {string|null} viewUrl    a team host's view-only link for teammates (null: not a host)
  * @property {() => number} browserCount
  * @property {() => Promise<void>} stop
  */
@@ -85,7 +91,9 @@ export async function startTownServer(options = {}) {
   await listen(server, config.port, config.host);
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : config.port;
-  ctx.allowedHosts = allowedHostHeaders(port, config.host);
+  // A team host listening on every interface also answers to its LAN addresses (the view link).
+  const extraHosts = ctx.team && isWildcardHost(config.host) ? lanAddresses() : [];
+  ctx.allowedHosts = allowedHostHeaders(port, config.host, extraHosts);
 
   const state = {
     pid: process.pid,
@@ -110,6 +118,7 @@ export async function startTownServer(options = {}) {
     recordingPath: ctx.recorder?.path ?? null,
     state,
     notifyUrl: ctx.notifier.url,
+    viewUrl: ctx.team ? `http://${hostWithPort(extraHosts[0] ?? connectHost(config.host), port)}/?view=${ctx.team.view}` : null,
     browserCount: () => ctx.hub.size,
     stop: once(() => stopServer(ctx, server, config)),
   };
@@ -169,13 +178,23 @@ function createContext(config, options) {
       timeoutMs: config.approvalTimeoutMs,
       maxPending: LIMITS.pendingApprovals,
       maxSettled: LIMITS.settledApprovals,
-      onChange: (approval) => hub.broadcast({ t: 'approval', a: approval }),
+      onChange: (approval) => hub.broadcastOwners({ t: 'approval', a: approval }),
     }),
     hub,
+    team: options.team
+      ? createTeamHost({
+          secret: /** @type {string} */ (teamSecret(config.home)),
+          onMember: (members) => {
+            config.log(`Team town: ${members.at(-1)} is sharing now (${members.length} teammate${members.length === 1 ? '' : 's'})`);
+            announceTeam(ctx);
+          },
+        })
+      : null,
+    relay: options.shareTo ? createTeamRelay({ url: options.shareTo.url, key: options.shareTo.key, log: config.log }) : null,
     usage: createUsageTracker({
       claudeDir: options.claudeDir ?? claudeConfigDir(),
       stateFile: config.writeState ? join(config.home, 'usage.json') : null,
-      onChange: (record, days) => hub.broadcast({ t: 'usage', u: record, days }),
+      onChange: (record, days) => hub.broadcastOwners({ t: 'usage', u: record, days }),
     }),
     notifier: createNotifier({ url: options.notifyUrl ?? null, log: config.log }),
     progress: createProgress({
@@ -237,6 +256,9 @@ function listen(server, port, host) {
 async function stopServer(ctx, server, config) {
   if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
   ctx.broker.releaseAll();
+  // Last events to the team host, but never hold up shutdown for long.
+  if (ctx.relay) await Promise.race([ctx.relay.flush(), new Promise((resolve) => setTimeout(resolve, 1500).unref())]);
+  ctx.relay?.dispose();
   ctx.usage.dispose();
   ctx.progress.dispose();
   ctx.hub.closeAll(CLOSE_CODE.GOING_AWAY, 'Andary is shutting down');

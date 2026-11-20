@@ -149,3 +149,14 @@ test('Settings switches the town\'s look, which rebuilds the town', async ({ pag
   await page.getByTestId('settings-button').click();
   await expect(page.getByLabel('Town look')).toHaveValue('snow');
 });
+
+test('a teammate\'s crew carries their name, in the crews board and on its foreman', async ({ page }) => {
+  await openDemo(page);
+  const member = page.getByTestId('crew-member').filter({ hasText: 'Lina' });
+  await expect(member).toBeVisible({ timeout: 60_000 });
+  await expect(member).toContainText('Shared by Lina');
+  const crew = page.locator('[data-testid="crew"]').filter({ has: member });
+  await expect(crew.getByTestId('agent-row').first()).toContainText('Lina');
+  // Your own crews have no badge.
+  await expect(page.locator('[data-testid="crew"]').first().getByTestId('crew-member')).toBeHidden();
+});

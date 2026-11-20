@@ -9,6 +9,7 @@ import { REPLAY_OPTIONS, runReplay } from './replay.mjs';
 import { SIMULATE_OPTIONS, runSimulate } from './simulate.mjs';
 import { START_OPTIONS, runStart, runStop } from './start.mjs';
 import { runStatus } from './status.mjs';
+import { TEAM_OPTIONS, runTeam } from './team.mjs';
 
 const START_HELP = `Options:
   -p, --port <n>            Port to listen on (default 4747, or ANDARY_PORT; 0 = any free port)
@@ -17,6 +18,10 @@ const START_HELP = `Options:
       --notify              Phone notifications through the free ntfy app (a private topic
                             on ntfy.sh, kept in ~/.andary/notify.json)
       --notify-url <url>    Your own ntfy topic URL instead (or ANDARY_NOTIFY_URL)
+      --team                Host a team town: teammates' Andarys can share their sessions here
+                            (listens on your network unless --host says otherwise)
+      --share-to <address>  Share your sessions with a team town (or ANDARY_SHARE_TO)
+      --team-key <key>      Your key from "andary team invite" on the host (or ANDARY_TEAM_KEY)
       --remote-approvals    Let the town answer Claude Code's permission prompts
       --approval-timeout <s>
                             Seconds a prompt waits for the town before the terminal asks
@@ -72,6 +77,14 @@ const COMMANDS = {
     help: HOOKS_HELP,
     options: HOOKS_OPTIONS,
     run: runUninstall,
+  },
+  team: {
+    usage: 'team invite <name> | team reset',
+    summary: 'On a team host: print a teammate\'s key and the view link, or revoke them all',
+    help: 'Options:\n      --url <address>       The address teammates reach this computer at (default: its\n                            network address and the running port), e.g. a Tailscale name',
+    options: TEAM_OPTIONS,
+    positionals: true,
+    run: runTeam,
   },
   status: { usage: 'status', summary: 'Show whether the server runs and where hooks are installed', options: {}, run: runStatus },
   doctor: { usage: 'doctor', summary: 'Check the whole pipeline end to end and suggest fixes', options: {}, run: runDoctor },

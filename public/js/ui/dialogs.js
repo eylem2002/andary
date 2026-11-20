@@ -143,6 +143,8 @@ export function createSettingsDialog(ctx) {
     h('p', { class: 'hud-setting__help', text: 'Rain when commands fail, a storm when they keep failing, a rainbow when tests pass again, fog while a crew thinks for a long time.' }));
 
   const notify = notifyBlocks(ctx);
+  const teamText = h('p', { class: 'hud-setting__help', 'data-testid': 'team-text' });
+  const teamBlock = h('div', { class: 'hud-setting' }, h('p', { class: 'hud-setting__name', text: 'Team town' }), teamText);
 
   const helpButton = h('button', { type: 'button', class: 'hud-btn' }, icon('help', { size: 18 }), 'Shortcuts and help');
   const setupButton = h('button', { type: 'button', class: 'hud-btn' }, icon('terminal', { size: 18 }), 'Use your own Claude Code');
@@ -151,7 +153,7 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [remoteBlock, look.el, theme.el, motion.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    body: [teamBlock, remoteBlock, look.el, theme.el, motion.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -172,7 +174,11 @@ export function createSettingsDialog(ctx) {
     },
     open() {
       const live = ctx.view.mode === 'live';
-      setHidden(remoteBlock, !live);
+      const team = live ? ctx.view.serverSettings.team : null;
+      const viewer = team?.role === 'viewer';
+      setHidden(teamBlock, !team);
+      teamText.textContent = team ? teamSentence(team) : '';
+      setHidden(remoteBlock, !live || viewer);
       remote.checked = Boolean(ctx.view.serverSettings.remoteApprovals);
       remote.disabled = ctx.view.connection !== 'live';
       setHidden(setupButton, live || ctx.view.serverAvailable);
@@ -184,6 +190,7 @@ export function createSettingsDialog(ctx) {
       weather.checked = ctx.prefs.weather;
       ambient.checked = ctx.prefs.ambient;
       notify.sync();
+      setHidden(notify.phone, !live || viewer);
       dialog.open();
     },
     /** Keeps the switch in step when the server reports a settings change. */
@@ -192,6 +199,16 @@ export function createSettingsDialog(ctx) {
       remote.disabled = ctx.view.connection !== 'live';
     },
   };
+}
+
+/**
+ * @param {{ role: 'owner'|'viewer', members: string[] }} team
+ * @returns {string}
+ */
+export function teamSentence({ role, members }) {
+  const who = members.length ? `Sharing so far: ${members.join(', ')}.` : 'No teammate has shared a session yet.';
+  if (role === 'viewer') return `You are watching a team town. Only the person who hosts it can answer permission prompts or change its settings. ${who}`;
+  return `This town hosts your team. ${who} Invite someone with: andary team invite <name>`;
 }
 
 /**

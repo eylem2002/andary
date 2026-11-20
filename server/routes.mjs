@@ -1,6 +1,7 @@
 // HTTP routes (CONTRACTS §4.4). Every response carries the security headers; every request must
 // name one of our own hosts.
-import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, hasHookSecret, hasUiCookie, loginCookie, safeEqual, signHookReply } from './auth.mjs';
+import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, browserRole, hasHookSecret, loginCookie, safeEqual, signHookReply, viewCookie } from './auth.mjs';
+import { TEAM_HEADER, verifyMemberKey } from './team.mjs';
 import { APP_ID, LIMITS } from './config.mjs';
 import { publicSettings } from './browsers.mjs';
 import { BAD_TOKEN_PAGE, HttpError, readBody, sendHtml, sendJson, sendText } from './http-util.mjs';
@@ -20,7 +21,10 @@ import { isAllowedHost } from './security.mjs';
  */
 export async function handleRequest(ctx, req, res) {
   for (const [name, value] of Object.entries(ctx.headers)) res.setHeader(name, value);
-  if (!isAllowedHost(req.headers.host, ctx.allowedHosts)) {
+  // A teammate's relay may reach the host by any name (a LAN address, a VPN name); its key, not
+  // the Host header, is what authenticates it, and no browser can send that header cross-site.
+  const teamPost = Boolean(ctx.team) && req.method === 'POST' && req.url === '/api/team';
+  if (!teamPost && !isAllowedHost(req.headers.host, ctx.allowedHosts)) {
     req.resume();
     sendText(res, 403, 'Forbidden: Andary only answers to 127.0.0.1, localhost and [::1].\n');
     return;
@@ -45,6 +49,10 @@ export async function handleRequest(ctx, req, res) {
   }
   if (req.method === 'GET' && url.searchParams.has('token') && isPagePath(url.pathname)) {
     handleLogin(ctx, res, url);
+    return;
+  }
+  if (req.method === 'GET' && url.searchParams.has('view') && isPagePath(url.pathname)) {
+    handleViewLogin(ctx, res, url);
     return;
   }
   await ctx.serveStatic(req, res, url.pathname);
@@ -94,6 +102,29 @@ function handleLogin(ctx, res, url) {
   res.end();
 }
 
+/**
+ * GET /?view=… (a team host's view-only link): stores the view token in its own HttpOnly cookie
+ * and redirects without it, like the sign-in link.
+ * @param {TownContext} ctx
+ * @param {Response} res
+ * @param {URL} url
+ */
+function handleViewLogin(ctx, res, url) {
+  if (!ctx.team || !safeEqual(url.searchParams.get('view'), ctx.team.view)) {
+    sendHtml(res, 403, BAD_TOKEN_PAGE);
+    return;
+  }
+  url.searchParams.delete('view');
+  const query = url.searchParams.toString();
+  res.writeHead(302, {
+    'Set-Cookie': viewCookie(ctx.team.view),
+    Location: `${url.pathname}${query ? `?${query}` : ''}`,
+    'Cache-Control': 'no-store',
+    'Content-Length': '0',
+  });
+  res.end();
+}
+
 /** @type {Record<string, { methods: string[], handle: (ctx: TownContext, req: Request, res: Response) => void|Promise<void> }>} */
 const API_ROUTES = {
   '/api/health': { methods: ['GET', 'HEAD'], handle: (_ctx, _req, res) => sendJson(res, 200, { ok: true }) },
@@ -103,12 +134,83 @@ const API_ROUTES = {
       sendJson(res, 200, {
         app: APP_ID,
         version: ctx.version,
-        authenticated: hasUiCookie(req, ctx.uiToken),
+        authenticated: browserRole(req, ctx.uiToken, ctx.team?.view ?? null) !== null,
         settings: publicSettings(ctx),
       }),
   },
   '/api/hook': { methods: ['POST'], handle: handleHook },
+  '/api/team': { methods: ['POST'], handle: handleTeam },
 };
+
+/** Most events one teammate may send in one request. */
+const TEAM_BATCH = 200;
+
+/**
+ * POST /api/team from a teammate's Andary: authenticate the member, rate-limit, read, then ingest
+ * each event as theirs (sanitized again: nothing from the network is trusted). Their permission
+ * requests are shown, never held: only they can answer their own prompts.
+ * @param {TownContext} ctx
+ * @param {Request} req
+ * @param {Response} res
+ */
+async function handleTeam(ctx, req, res) {
+  const member = ctx.team ? verifyMemberKey(ctx.team.secret, req.headers[TEAM_HEADER]) : null;
+  if (!member) {
+    req.resume();
+    sendJson(res, ctx.team ? 401 : 404, { error: ctx.team ? 'Missing or wrong team key' : 'Not found' });
+    return;
+  }
+  const bucket = /** @type {NonNullable<TownContext['team']>} */ (ctx.team).limiter(member);
+  if (bucket.available() < 1) {
+    req.resume();
+    sendJson(res, 429, { error: 'Too many team events' }, { 'Retry-After': '1' });
+    return;
+  }
+  let events;
+  try {
+    events = await readTeamEvents(req);
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error;
+    sendJson(res, error.status, { error: error.message }, error.status === 413 ? { Connection: 'close' } : {});
+    return;
+  }
+  if (!bucket.take(events.length)) {
+    sendJson(res, 429, { error: 'Too many team events' }, { 'Retry-After': '1' });
+    return;
+  }
+  const now = Date.now();
+  for (const item of events) {
+    // The session id is prefixed so two people's sessions can never collide.
+    const event = { ...item.event, andary_member: member, session_id: `${member}~${String(item.event.session_id ?? 'unknown')}` };
+    // Another computer's clock: keep its order, but not times in the future or long past.
+    ctx.ingest({ ts: Number.isFinite(item.ts) ? Math.min(now, Math.max(now - TEAM_MAX_AGE_MS, item.ts)) : now, event });
+    ctx.progress.observe(event);
+  }
+  ctx.team?.seen(member);
+  sendJson(res, 200, { ok: true });
+}
+
+/** A teammate's queued events older than this arrive dated an hour ago. */
+const TEAM_MAX_AGE_MS = 60 * 60 * 1000;
+
+/**
+ * Reads a teammate's batch: `{ v: 1, events: [{ ts, event }] }`, at most 200 well-formed items.
+ * @param {Request} req
+ * @returns {Promise<{ ts: number, event: Record<string, any> }[]>}
+ */
+async function readTeamEvents(req) {
+  const raw = await readBody(req, LIMITS.teamBodyBytes);
+  let body;
+  try {
+    body = JSON.parse(raw.toString('utf8'));
+  } catch {
+    throw new HttpError(400, 'Body must be JSON');
+  }
+  if (!isObject(body) || body.v !== 1 || !Array.isArray(body.events)) {
+    throw new HttpError(400, 'Body must look like {"v":1,"events":[{"ts":<ms>,"event":{...}}]}');
+  }
+  return body.events.slice(0, TEAM_BATCH).filter((item) => isObject(item) && isObject(item.event));
+}
 
 /**
  * @param {TownContext} ctx
@@ -158,10 +260,13 @@ async function handleHook(ctx, req, res) {
     sendJson(res, error.status, { error: error.message }, error.status === 413 ? { Connection: 'close' } : {});
     return;
   }
+  // Only the team endpoint may say whose session an event is.
+  delete body.event.andary_member;
   ctx.usage.observe(body.event);
   ctx.progress.observe(body.event);
   ctx.notifier.observe(body.event);
   const envelope = ctx.ingest(body);
+  ctx.relay?.send(envelope);
   if (envelope.event.hook_event_name === 'PermissionRequest') {
     await answerPermissionRequest(ctx, req, res, envelope.event, shownInFull(body.event.tool_input, envelope.event.tool_input));
     return;
@@ -243,7 +348,7 @@ function shownInFull(raw, sanitized) {
  * @param {boolean} exact the tool input reached the town unchanged (see shownInFull)
  */
 async function answerPermissionRequest(ctx, req, res, event, exact) {
-  const wanted = ctx.settings.remoteApprovals && ctx.hub.size > 0;
+  const wanted = ctx.settings.remoteApprovals && ctx.hub.owners > 0;
   const hold = wanted && exact;
   const { approval, response } = ctx.broker.create(event, { hold, message: wanted && !exact ? NOT_SHOWN_IN_FULL : undefined });
   if (hold) {

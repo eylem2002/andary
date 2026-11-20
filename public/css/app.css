@@ -785,6 +785,15 @@ body {
   gap: 1px;
 }
 
+.hud-line__member {
+  padding: 1px 7px 0;
+  border-radius: 999px;
+  background: var(--band);
+  color: var(--band-ink);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .hud-line__model {
   padding-top: 2px;
   color: var(--ink-3);

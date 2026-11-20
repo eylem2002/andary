@@ -10,7 +10,7 @@ import { isLoopbackHost } from '../security.mjs';
 import { savedTopicUrl } from '../notify.mjs';
 import { ensureHome, findRunningServer, loginUrl, probeServer, readStateFile } from '../state-file.mjs';
 import { cliInvocation, sleep, tildify } from './io.mjs';
-import { parseApprovalTimeout, parseNotifyUrl, parsePort } from './options.mjs';
+import { UsageError, parseApprovalTimeout, parseNotifyUrl, parsePort, parseShareTo } from './options.mjs';
 
 /** Options shared by start and demo (parseArgs format). */
 export const START_OPTIONS = Object.freeze({
@@ -20,6 +20,9 @@ export const START_OPTIONS = Object.freeze({
   'remote-approvals': { type: 'boolean' },
   notify: { type: 'boolean' },
   'notify-url': { type: 'string' },
+  team: { type: 'boolean' },
+  'share-to': { type: 'string' },
+  'team-key': { type: 'string' },
   'approval-timeout': { type: 'string' },
   record: { type: 'boolean' },
   detach: { type: 'boolean' },
@@ -33,6 +36,8 @@ export const START_OPTIONS = Object.freeze({
  * @property {boolean} remoteApprovals
  * @property {boolean} notify          --notify: a private ntfy.sh topic kept in ANDARY_HOME
  * @property {string|null} notifyUrl   --notify-url or ANDARY_NOTIFY_URL
+ * @property {boolean} team            --team: host a team town
+ * @property {{ url: string, key: string, member: string }|null} shareTo  --share-to and --team-key
  * @property {number|undefined} approvalTimeoutMs
  * @property {boolean} record
  * @property {boolean} detach
@@ -46,9 +51,15 @@ export const START_OPTIONS = Object.freeze({
  * @returns {StartSettings}
  */
 function startSettings(values, io, demo) {
+  const team = Boolean(values.team);
+  const shareTo = parseShareTo(values['share-to'] ?? io.env.ANDARY_SHARE_TO, values['team-key'] ?? io.env.ANDARY_TEAM_KEY);
+  if (team && shareTo) throw new UsageError('A town either hosts the team (--team) or shares with one (--share-to), not both.');
   return {
     port: parsePort(values.port, io.env),
-    host: values.host ?? DEFAULT_HOST,
+    // Teammates must be able to reach a team host, so --team listens on the network unless --host says where.
+    host: values.host ?? (team ? '0.0.0.0' : DEFAULT_HOST),
+    team,
+    shareTo,
     open: !values['no-open'],
     remoteApprovals: Boolean(values['remote-approvals']),
     notify: Boolean(values.notify),
@@ -86,7 +97,7 @@ function linkFor(state, settings) {
 }
 
 /** Flags that only matter when a new server starts. */
-const SERVER_SHAPING = new Set(['port', 'host', 'remote-approvals', 'notify', 'notify-url', 'approval-timeout', 'record']);
+const SERVER_SHAPING = new Set(['port', 'host', 'remote-approvals', 'notify', 'notify-url', 'team', 'share-to', 'team-key', 'approval-timeout', 'record']);
 
 /**
  * @param {import('../state-file.mjs').ServerState} state
@@ -111,7 +122,7 @@ function reportRunning(state, settings, io, ignoredFlags) {
  * @returns {Promise<number>}
  */
 async function runForeground(settings, home, io) {
-  warnIfExposed(settings.host, io);
+  warnIfExposed(settings.host, io, settings.team);
   refreshForwarder(home);
   let server;
   try {
@@ -121,6 +132,8 @@ async function runForeground(settings, home, io) {
       home,
       remoteApprovals: settings.remoteApprovals,
       notifyUrl: settings.notifyUrl ?? (settings.notify ? savedTopicUrl(home) : null),
+      team: settings.team,
+      shareTo: settings.shareTo,
       approvalTimeoutMs: settings.approvalTimeoutMs,
       record: settings.record,
       log: (message) => io.out(`[${new Date().toLocaleTimeString()}] ${message}`),
@@ -159,13 +172,18 @@ function describeListenError(error, settings) {
 /**
  * @param {string} host
  * @param {import('./io.mjs').CliIo} io
+ * @param {boolean} [team]
  */
-function warnIfExposed(host, io) {
-  if (isLoopbackHost(host)) return;
+function warnIfExposed(host, io, team = false) {
+  if (isLoopbackHost(host)) {
+    if (team) io.err(`Warning: teammates cannot reach ${host}. Leave out --host (or use your network address) so they can.`);
+    return;
+  }
   io.err('');
-  io.err(`  WARNING: --host ${host} makes Andary reachable from other machines.`);
+  io.err(`  WARNING: ${team ? 'the team town listens on your network' : `--host ${host} makes Andary reachable from other machines`}.`);
   io.err('  Hook events contain your prompts, commands and file paths, and with remote approvals');
   io.err('  anyone who gets the sign-in link can approve tool calls. Use this only on a network you trust.');
+  if (team) io.err('  Traffic is plain HTTP: across the internet, connect through a private network such as Tailscale.');
   io.err('');
 }
 
@@ -183,6 +201,11 @@ function printBanner(server, settings, io) {
   io.out(`  Remote approvals: ${settings.remoteApprovals ? 'on' : 'off (switch them on in the town, or start with --remote-approvals)'}`);
   const { notifyUrl } = server;
   io.out(notifyUrl ? `  Phone notifications: on. In the free ntfy app, subscribe to ${notifyUrl}` : '  Phone notifications: off (start with --notify to get them in the free ntfy app)');
+  if (server.viewUrl) {
+    io.out(`  Team town: on. Invite a teammate with: ${cliInvocation()} team invite <name>`);
+    io.out(`  Teammates watch (view only) at ${server.viewUrl}`);
+  }
+  if (settings.shareTo) io.out(`  Sharing your sessions with the team town at ${settings.shareTo.url} as ${settings.shareTo.member}`);
   if (server.recordingPath) {
     io.out(`  Recording to ${tildify(server.recordingPath)} (it will contain your prompts and commands)`);
   }
@@ -246,7 +269,8 @@ async function startDetached(settings, home, io) {
     child = spawn(process.execPath, [CLI_PATH, 'start', '--no-open', ...forwardedFlags(settings)], {
       detached: true,
       stdio: ['ignore', logFd, logFd],
-      env: io.env,
+      // The team key goes by environment, not argv, where other users could read it in ps.
+      env: settings.shareTo ? { ...io.env, ANDARY_SHARE_TO: settings.shareTo.url, ANDARY_TEAM_KEY: settings.shareTo.key } : io.env,
       cwd: io.cwd,
       windowsHide: true,
     });
@@ -276,6 +300,7 @@ function forwardedFlags(settings) {
   if (settings.remoteApprovals) flags.push('--remote-approvals');
   if (settings.notify) flags.push('--notify');
   if (settings.notifyUrl) flags.push('--notify-url', settings.notifyUrl);
+  if (settings.team) flags.push('--team');
   if (settings.approvalTimeoutMs !== undefined) flags.push('--approval-timeout', String(settings.approvalTimeoutMs / 1000));
   if (settings.record) flags.push('--record');
   return flags;

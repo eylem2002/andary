@@ -91,6 +91,17 @@ ntfy app. Phone messages only say what happened ("A crew needs your permission")
 project, files or commands, and at most one of a kind every 30 seconds. `--notify-url` points
 at your own ntfy server instead; Settings has a test button.
 
+### Team town
+
+Several people's sessions in one town. One of you hosts with `andary start --team`; for each
+teammate, run `andary team invite <name>` on that computer and send them the two lines it
+prints: an `andary start --share-to … --team-key …` command that shares their sessions, and a
+view-only link to watch the shared town. Teammates' crews arrive with their name on the foreman
+and a badge on the crews board. Only events travel: costs stay on each computer, and each person
+answers their own permission prompts. It is plain HTTP for a network you trust (across the
+internet, use a private network such as Tailscale); `andary team reset` revokes every key and
+the link.
+
 ### Ambient sound
 
 With sound on (`M`), the town has its own soundscape, all synthesised in the browser: waves on
@@ -164,7 +175,7 @@ Design notes and interfaces: [docs/CONTRACTS.md](docs/CONTRACTS.md) and
 
 Andary sees what your agents see (prompts, commands, file paths), so it is locked down:
 
-- listens on `127.0.0.1` only, and checks the `Host` header (DNS rebinding) and the WebSocket
+- listens on `127.0.0.1` only (unless you choose `--host` or host a team town), and checks the `Host` header (DNS rebinding) and the WebSocket
   `Origin` (cross-site hijacking);
 - the browser signs in with a random per-start token, exchanged for an `HttpOnly`,
   `SameSite=Strict` cookie; hooks authenticate with a separate secret; both live in
@@ -191,10 +202,12 @@ andary [command] [options]
 
   start                 start the town and open it (default). --port, --host, --no-open,
                         --remote-approvals, --approval-timeout <s>, --notify, --notify-url <url>,
-                        --record, --detach
+                        --team, --share-to <address> --team-key <key>, --record, --detach
   demo                  start the town in demo mode
   stop                  stop the running town
   install / uninstall   add or remove the hooks. --scope user|project|local, --dir, --dry-run, --print
+  team invite <name>    on a team host: a teammate's key and the view link (--url <address>)
+  team reset            on a team host: revoke every key and the view link
   status                server, sign-in link, hooks per scope
   doctor                check the whole pipeline end to end
   simulate              send simulated sessions to the running town (--speed, --seed)

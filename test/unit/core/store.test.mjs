@@ -586,3 +586,24 @@ describe('store: achievements', () => {
     assert.deepEqual(types, ['session.start', 'first-contact', 'compact.start', 'memory-lane', 'compact.end']);
   });
 });
+
+describe('store: team town members (§4.11)', () => {
+  it('marks a teammate\'s session and names its foreman after them', () => {
+    const ctx = setup();
+    ctx.send(hook('SessionStart', { source: 'startup', model: 'claude-opus-4-7', andary_member: 'Lina' }, { session: 'Lina~s1' }));
+    ctx.send(hook('SessionStart', { source: 'startup', model: 'claude-opus-4-7' }));
+    const [theirs, mine] = ctx.state().sessions;
+    assert.equal(theirs.member, 'Lina');
+    assert.equal(ctx.state().agents['Lina~s1:main'].name, 'Lina');
+    assert.equal(mine.member, null);
+    assert.equal(ctx.state().agents[MAIN].name, 'Foreman');
+  });
+
+  it('keeps a member name to one short line', () => {
+    const ctx = setup();
+    ctx.send(hook('UserPromptSubmit', { prompt: 'hi', andary_member: `Lina\n${'x'.repeat(40)}` }, { session: 'Lina~s2' }));
+    const member = ctx.state().sessions[0].member ?? '';
+    assert.ok(!member.includes('\n'));
+    assert.ok(member.length <= 24);
+  });
+});
