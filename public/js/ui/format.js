@@ -225,6 +225,43 @@ export function describeApproval({ toolName = '', toolInput, cwd }, { exact = fa
 }
 
 /**
+ * @typedef {object} ApprovalChange
+ * @property {{ before: string, after: string }[]} hunks  what the file tool would write
+ * @property {string} note  what kind of change it is, in a few words
+ */
+
+/**
+ * What a file tool's permission request would write, for the approval card: a Write's whole new
+ * content, an Edit's replacement, each of a MultiEdit's edits, a notebook cell's new source. Null
+ * for other tools (their card shows every input field instead).
+ * @param {string} toolName
+ * @param {unknown} toolInput
+ * @returns {ApprovalChange|null}
+ */
+export function approvalChange(toolName, toolInput) {
+  const input = toolInput && typeof toolInput === 'object' ? /** @type {Record<string, any>} */ (toolInput) : {};
+  const isText = (/** @type {unknown} */ value) => typeof value === 'string';
+  switch (toolName) {
+    case 'Write':
+      return isText(input.content) ? { hunks: [{ before: '', after: input.content }], note: input.content ? 'The whole new file' : 'An empty file' } : null;
+    case 'Edit':
+      if (!isText(input.old_string) || !isText(input.new_string)) return null;
+      return { hunks: [{ before: input.old_string, after: input.new_string }], note: input.replace_all === true ? 'Replaces every occurrence' : 'Replaces one occurrence' };
+    case 'MultiEdit': {
+      const edits = Array.isArray(input.edits) ? input.edits.filter((edit) => isText(edit?.old_string) && isText(edit?.new_string)) : [];
+      if (edits.length === 0) return null;
+      const everywhere = edits.some((edit) => edit.replace_all === true);
+      return { hunks: edits.map((edit) => ({ before: edit.old_string, after: edit.new_string })), note: `${edits.length} edits, in order${everywhere ? '; some replace every occurrence' : ''}` };
+    }
+    case 'NotebookEdit':
+      if (!isText(input.new_source)) return null;
+      return { hunks: [{ before: '', after: input.new_source }], note: `${input.edit_mode === 'insert' ? 'A new cell' : input.edit_mode === 'delete' ? 'Deletes a cell' : 'The cell\'s new source'}${isText(input.cell_id) ? ` (cell ${input.cell_id})` : ''}` };
+    default:
+      return null;
+  }
+}
+
+/**
  * Every field of a tool input as "name: value" lines (values that are not text as JSON), with
  * hidden characters revealed: nothing the tool will receive is left out.
  * @param {Record<string, unknown>} input

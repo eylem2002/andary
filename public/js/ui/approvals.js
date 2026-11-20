@@ -1,10 +1,13 @@
 // The Approvals panel: permission requests from every crew. A held request (remote approvals on,
 // or the demo) can be answered here with Allow / Deny — or A / D while the card has focus — before
-// its countdown runs out. Requests that are not held show "Answer in your terminal".
-// Commands and paths are shown verbatim in the mono face, as text only.
+// its countdown runs out, with an optional reason for a denial that goes back to the agent.
+// Requests that are not held show "Answer in your terminal". Commands and paths are shown
+// verbatim in the mono face, as text only, and a file change in full: a Write's content, an
+// Edit's diff, with hidden characters revealed, so nothing is approved unseen.
 import { h, renderList, setAttr, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
-import { describeApproval, formatCountdown } from './format.js';
+import { approvalChange, describeApproval, formatCountdown } from './format.js';
+import { diffView } from './diff-view.js';
 import { approvalAgentKey, crewNumber, findSession, kbd, roundel, updateRoundel } from './parts.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
@@ -12,6 +15,8 @@ import { approvalAgentKey, crewNumber, findSession, kbd, roundel, updateRoundel 
 /** @typedef {import('./types.js').Approval} Approval */
 
 const MAX_CARDS = 30;
+/** The longest deny reason sent (the server keeps 500 characters). */
+export const MAX_REASON_CHARS = 500;
 
 /**
  * New requests are listed first, so a card can slide under the pointer just as the viewer clicks
@@ -68,9 +73,9 @@ export function resultText(approval, mode) {
     case 'allowed':
       return `Allowed ${where}`;
     case 'denied':
-      return `Denied ${where}`;
+      return approval.message ? `Denied ${where}: “${approval.message}”` : `Denied ${where}`;
     case 'expired':
-      return mode === 'demo' ? 'No answer in time, so the demo carried on' : 'No answer in time, so Claude Code asked in the terminal';
+      return mode === 'demo' ? 'No answer in time, so the demo carried on' : 'No answer in time, so the terminal asked instead';
     case 'resolved':
       return 'Answered in the terminal';
     default:
@@ -95,6 +100,11 @@ function buildCard(id, approvalId) {
   const crew = h('span', { class: 'hud-approval__crew' });
   const tool = h('code', { class: 'hud-approval__tool hud-mono' });
   const detail = h('code', { class: 'hud-approval__detail hud-mono', id: `${id}-detail` });
+  const changeNote = h('p', { class: 'hud-approval__change-note' });
+  const changeBody = h('div', { class: 'hud-approval__change-body' });
+  const change = h('div', { class: 'hud-approval__change', 'data-testid': 'approval-change' }, changeNote, changeBody);
+  const reason = /** @type {HTMLInputElement} */ (h('input', { type: 'text', class: 'hud-input hud-approval__reason-input', id: `${id}-reason`, maxlength: String(MAX_REASON_CHARS), autocomplete: 'off', spellcheck: 'true', 'data-testid': 'deny-reason' }));
+  const reasonRow = h('div', { class: 'hud-approval__reason' }, h('label', { for: `${id}-reason`, text: 'Reason, if you deny (optional; the agent reads it)' }), reason);
   const bar = h('span', { class: 'hud-approval__bar' });
   const countdown = h('span', { class: 'hud-approval__left' });
   const timer = h('div', { class: 'hud-approval__timer' }, h('span', { class: 'hud-approval__track', 'aria-hidden': 'true' }, bar), countdown);
@@ -105,9 +115,9 @@ function buildCard(id, approvalId) {
   const result = h('p', { class: 'hud-approval__result' });
   const card = h('article', { class: 'hud-approval', 'data-testid': 'approval-card', 'data-approval-id': approvalId, 'aria-labelledby': `${id}-who`, 'aria-describedby': `${id}-detail` },
     h('header', { class: 'hud-approval__head' }, mark, h('div', {}, who, h('p', { class: 'hud-approval__meta' }, crew, tool))),
-    h('pre', { class: 'hud-approval__code' }, detail), timer, actions, terminal, result);
+    h('pre', { class: 'hud-approval__code' }, detail), change, timer, reasonRow, actions, terminal, result);
   const item = h('li', { class: 'hud-approvals__item' }, card);
-  return { item, parts: { mark, who, crew, tool, detail, timer, bar, countdown, actions, allow, deny, terminal, result, card, index: -1, armedAt: 0, armTimer: 0 } };
+  return { item, parts: { mark, who, crew, tool, detail, change, changeNote, changeBody, changeKey: '', reason, reasonRow, timer, bar, countdown, actions, allow, deny, terminal, result, card, index: -1, armedAt: 0, armTimer: 0 } };
 }
 
 /**
@@ -125,6 +135,25 @@ function describeRequest(p, approval, state) {
   setText(p.crew, session ? `in ${session.project}` : '');
   setText(p.tool, approval.toolName || 'Tool');
   setText(p.detail, detail || approval.toolName);
+  showChange(p, approval);
+}
+
+/**
+ * The full change a file tool would make, rebuilt only when the request is a different one.
+ * @param {any} p the card's parts
+ * @param {Approval} approval
+ */
+function showChange(p, approval) {
+  if (p.changeKey === approval.id) return;
+  p.changeKey = approval.id;
+  const change = approvalChange(approval.toolName, approval.toolInput);
+  setHidden(p.change, !change);
+  if (!change) {
+    p.changeBody.replaceChildren();
+    return;
+  }
+  setText(p.changeNote, change.note);
+  p.changeBody.replaceChildren(...change.hunks.map((hunk, index) => diffView(hunk, { index, count: change.hunks.length, exact: true, compact: true })));
 }
 
 /** @param {HudContext} ctx */
@@ -144,10 +173,12 @@ export function createApprovalsPanel(ctx) {
   /**
    * @param {Approval} approval
    * @param {'allow'|'deny'} decision
+   * @param {string} [reason] sent with a denial only
    */
-  function decide(approval, decision) {
+  function decide(approval, decision, reason = '') {
     if (sending.has(approval.id) || approval.status !== 'pending' || !approval.held) return;
-    if (!ctx.controls.decide(approval.id, decision)) {
+    const message = decision === 'deny' ? reason.trim().slice(0, MAX_REASON_CHARS) : '';
+    if (!ctx.controls.decide(approval.id, decision, message || undefined)) {
       ctx.toasts.show({ tone: 'error', icon: 'warning', title: 'Not connected to Andary', body: 'Answer this request in your terminal.' });
       return;
     }
@@ -163,13 +194,23 @@ export function createApprovalsPanel(ctx) {
     const { item, parts: p } = buildCard(`hud-approval-${++cards}`, first.id);
     parts.set(item, p);
     p.allow.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'allow'));
-    p.deny.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'deny'));
+    p.deny.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'deny', p.reason.value));
+    // Enter in the reason field denies with that reason; typing there never answers by itself.
+    p.reason.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.key === 'Enter' && !event.isComposing) {
+        event.preventDefault();
+        decide(p.approval, 'deny', p.reason.value);
+      }
+    });
     p.card.addEventListener('keydown', (event) => {
       const key = event.key.toLowerCase();
       if ((key !== 'a' && key !== 'd') || event.ctrlKey || event.metaKey || event.altKey) return;
+      // A / D answer from the card and its buttons, not while reading the change.
+      if (p.change.contains(/** @type {Node} */ (event.target))) return;
       event.preventDefault();
       event.stopPropagation();
-      decide(p.approval, key === 'a' ? 'allow' : 'deny');
+      decide(p.approval, key === 'a' ? 'allow' : 'deny', p.reason.value);
     });
     return item;
   }
@@ -197,9 +238,11 @@ export function createApprovalsPanel(ctx) {
     setAttr(p.card, 'data-status', approval.status);
     setAttr(p.card, 'tabindex', answerable ? '0' : '-1');
     // The buttons are about to disappear: keep keyboard focus on the card instead of losing it.
-    if (!answerable && p.actions.contains(document.activeElement)) p.card.focus();
+    if (!answerable && (p.actions.contains(document.activeElement) || p.reasonRow.contains(document.activeElement))) p.card.focus();
     setAttr(p.card, 'aria-keyshortcuts', answerable ? 'A D' : null);
     setHidden(p.actions, !answerable);
+    setHidden(p.reasonRow, !answerable);
+    p.reason.disabled = busy;
     setHidden(p.timer, !answerable || !approval.expiresAt);
     setHidden(p.terminal, !pending || approval.held);
     // The server says why it left a request to the terminal (e.g. it could not be shown in full).
@@ -237,7 +280,7 @@ export function createApprovalsPanel(ctx) {
     let text = 'Demo requests wait for your answer for 25 seconds of story time, then the demo carries on.';
     if (mode === 'live') {
       text = remoteOn
-        ? 'Remote approvals are on: Claude Code waits for your answer here before asking in the terminal.'
+        ? 'Remote approvals are on: your agents wait for your answer here before asking in the terminal.'
         : 'Remote approvals are off, so answer requests in your terminal. Turn them on in Settings to answer here.';
     }
     setText(noteText, text);

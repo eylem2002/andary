@@ -230,7 +230,9 @@ export function createApprovalBroker({
       if (entry.approval.status !== 'pending') return { ok: false, error: `This request is already ${entry.approval.status}` };
       if (!entry.approval.held) return { ok: false, error: 'This request is waiting in the terminal; answer it there' };
       if (decision !== 'allow' && decision !== 'deny') return { ok: false, error: 'Decision must be "allow" or "deny"' };
-      const note = typeof message === 'string' ? message.trim().slice(0, 500) : '';
+      // Typed by the owner for the agent to read: one line, no control characters, 500 at most.
+      // eslint-disable-next-line no-control-regex -- removing control characters is the point
+      const note = typeof message === 'string' ? message.replace(/[\s\u0000-\u001F\u007F]+/g, ' ').trim().slice(0, 500) : '';
       const status = decision === 'allow' ? 'allowed' : 'denied';
       settle(entry, { status, decidedBy: 'town', ...(note ? { message: note } : {}) }, decisionOutput(decision, note));
       return { ok: true };

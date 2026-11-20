@@ -187,13 +187,14 @@ Off by default. Turn them on in the town (Settings → Remote approvals) or star
 `--remote-approvals`.
 
 - **On, with a browser connected:** a permission prompt waits for the town. Allow or Deny answers
-  Claude Code directly; Claude sees a denial as `Denied from Andary`, so it can try another
-  approach. (The protocol also accepts a reason, shown as `Denied from Andary: <reason>`; the
-  approval card does not offer a field for one yet.) Claude Code's own deny and ask rules still
-  apply.
+  the agent directly; it sees a denial as `Denied from Andary`, or `Denied from Andary: <reason>`
+  when you type a reason in the card (one line, at most 500 characters; Enter in that field
+  denies), so it can try another approach. The agent's own deny and ask rules still apply.
 - **Only what the town can show in full.** A request whose input had to be shortened or had
   credentials masked goes straight to the terminal (the card says why), and the card shows full
-  paths, every input field and any invisible or direction-changing characters. Allow and Deny
+  paths, every input field and any invisible or direction-changing characters. A file change is
+  shown in full: a Write's whole content, an Edit's or MultiEdit's diff, a notebook cell's new
+  source. Allow and Deny
   ignore clicks for a second after a card appears or moves, so a new request sliding under the
   pointer cannot be approved by accident.
 - **No answer in time:** after `--approval-timeout` seconds (default 120, at most 140 because

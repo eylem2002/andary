@@ -104,13 +104,15 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
    * @param {string} id
    * @param {'allowed'|'denied'|'expired'} status
    * @param {'town'|'timeout'} decidedBy
+   * @param {string} [message] why, for a denial
    */
-  function settle(id, status, decidedBy) {
+  function settle(id, status, decidedBy, message = '') {
     const entry = waiting.get(id);
     if (!entry) return false;
     waiting.delete(id);
     clearTimeout(entry.timer);
-    store.setApproval({ ...entry.approval, status, decidedBy });
+    const note = String(message).trim().slice(0, 500);
+    store.setApproval({ ...entry.approval, status, decidedBy, ...(note ? { message: note } : {}) });
     entry.resolve(status === 'allowed' ? { decision: 'allow' } : status === 'denied' ? { decision: 'deny' } : {});
     return true;
   }
@@ -141,7 +143,7 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
      * @param {string} id
      * @param {'allow'|'deny'} decision
      */
-    decide: (id, decision) => settle(id, decision === 'allow' ? 'allowed' : 'denied', 'town'),
+    decide: (id, decision, message) => settle(id, decision === 'allow' ? 'allowed' : 'denied', 'town', decision === 'deny' ? message : ''),
     /** Stops the simulation and lets anything still waiting carry on. */
     close() {
       simulation.stop();

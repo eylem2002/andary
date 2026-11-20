@@ -78,7 +78,8 @@ describe('approvals', () => {
     assert.equal(resultText(fixture({ status: 'allowed', decidedBy: 'town' }), 'live'), 'Allowed from the town');
     assert.equal(resultText(fixture({ status: 'denied', decidedBy: 'terminal' }), 'live'), 'Denied in the terminal');
     assert.equal(resultText(fixture({ status: 'expired' }), 'demo'), 'No answer in time, so the demo carried on');
-    assert.equal(resultText(fixture({ status: 'expired' }), 'live'), 'No answer in time, so Claude Code asked in the terminal');
+    assert.equal(resultText(fixture({ status: 'expired' }), 'live'), 'No answer in time, so the terminal asked instead');
+    assert.equal(resultText(fixture({ status: 'denied', decidedBy: 'town', message: 'use the staging db' }), 'live'), 'Denied from the town: “use the staging db”');
     assert.equal(resultText(fixture({ status: 'resolved' }), 'live'), 'Answered in the terminal');
     assert.equal(resultText(fixture({ status: 'pending' }), 'live'), '');
   });

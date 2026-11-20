@@ -1470,6 +1470,59 @@ body {
   font-size: 13px;
 }
 
+/* A file change in full: what would be written, as a diff, before anyone allows it. */
+.hud-approval__change {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.hud-approval__change-note {
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.hud-approval__change-body {
+  display: grid;
+  gap: 8px;
+}
+
+.hud-approval__change .hud-diff__hunk-title {
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.hud-diff__code--compact {
+  max-height: 16em;
+  font-size: 12.5px;
+}
+
+.hud-approval__reason {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.hud-input {
+  min-height: 32px;
+  max-width: 100%;
+  padding: 0 10px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 500 13px/1.3 var(--font-ui);
+}
+
+.hud-input:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 1px;
+}
+
 .hud-approval__timer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

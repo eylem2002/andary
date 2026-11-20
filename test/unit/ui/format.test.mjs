@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { revealHidden,
+  approvalChange,
   describeApproval,
   doingText,
   formatAgo,
@@ -141,6 +142,18 @@ describe('words', () => {
 describe('describeApproval', () => {
   test('shell commands are shown verbatim with a prompt', () => {
     assert.deepEqual(describeApproval({ toolName: 'Bash', toolInput: { command: 'rm -rf dist' } }), { action: 'run a command', detail: '$ rm -rf dist' });
+  });
+
+  test('file tools show the change they would make in full', () => {
+    assert.deepEqual(approvalChange('Write', { file_path: 'a.ts', content: 'one\ntwo' }), { hunks: [{ before: '', after: 'one\ntwo' }], note: 'The whole new file' });
+    assert.equal(approvalChange('Write', { file_path: 'a.ts', content: '' })?.note, 'An empty file');
+    assert.deepEqual(approvalChange('Edit', { file_path: 'a.ts', old_string: 'x', new_string: 'y', replace_all: true }), { hunks: [{ before: 'x', after: 'y' }], note: 'Replaces every occurrence' });
+    const multi = approvalChange('MultiEdit', { file_path: 'a.ts', edits: [{ old_string: 'a', new_string: 'b' }, { old_string: 'c', new_string: 'd', replace_all: true }, { bad: 1 }] });
+    assert.deepEqual(multi?.hunks, [{ before: 'a', after: 'b' }, { before: 'c', after: 'd' }]);
+    assert.equal(multi?.note, '2 edits, in order; some replace every occurrence');
+    assert.equal(approvalChange('NotebookEdit', { notebook_path: 'n.ipynb', new_source: 'print(1)', edit_mode: 'insert', cell_id: 'c1' })?.note, 'A new cell (cell c1)');
+    assert.equal(approvalChange('Edit', { file_path: 'a.ts' }), null);
+    assert.equal(approvalChange('Bash', { command: 'ls' }), null);
   });
 
   test('a command given as an argument list (Codex) quotes each argument, so none can hide another', () => {
