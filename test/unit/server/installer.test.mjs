@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { HOOK_SOURCE } from '../../../server/config.mjs';
 import { ensureHome } from '../../../server/state-file.mjs';
@@ -85,8 +85,9 @@ describe('registration table', () => {
 
   it('resolves the settings file of each scope', () => {
     assert.equal(settingsPathFor('user', { env }), userSettings);
-    assert.equal(settingsPathFor('project', { dir: '/repo', env }), join('/repo', '.claude', 'settings.json'));
-    assert.equal(settingsPathFor('local', { dir: '/repo', env }), join('/repo', '.claude', 'settings.local.json'));
+    // Paths are resolved: on Windows '/repo' is D:\\repo.
+    assert.equal(settingsPathFor('project', { dir: '/repo', env }), join(resolve('/repo'), '.claude', 'settings.json'));
+    assert.equal(settingsPathFor('local', { dir: '/repo', env }), join(resolve('/repo'), '.claude', 'settings.local.json'));
     assert.throws(() => settingsPathFor('global', { env }), SettingsError);
   });
 
@@ -162,7 +163,8 @@ describe('install', () => {
     const settings = readJson(userSettings);
     assert.equal(settings.hooks.PreToolUse.length, 1);
     assert.equal(settings.hooks.Stop.length, 1);
-    assert.match(settings.hooks.Stop[0].hooks[0].command, new RegExp(home.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')));
+    // The command names the forwarder with forward slashes on every system.
+    assert.match(settings.hooks.Stop[0].hooks[0].command, new RegExp(home.replaceAll('\\', '/').replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')));
   });
 
   it('writes a timestamped backup of the previous file before changing it', () => {
@@ -376,7 +378,7 @@ describe('Codex', () => {
 
   it('writes its hooks to CODEX_HOME/hooks.json (or the project .codex/hooks.json) with the codex argument', () => {
     assert.equal(settingsPathFor('user', { env, client: codex }), codexHooks());
-    assert.equal(settingsPathFor('project', { dir: '/repo', env, client: codex }), join('/repo', '.codex', 'hooks.json'));
+    assert.equal(settingsPathFor('project', { dir: '/repo', env, client: codex }), join(resolve('/repo'), '.codex', 'hooks.json'));
     assert.throws(() => settingsPathFor('local', { env, client: codex }), /Use user or project/);
     assert.equal(hookCommand('/h', codex), 'node "/h/hook.mjs" codex # andary');
     const plan = planHooksChange({ action: 'install', scope: 'user', home, env, client: codex });

@@ -215,8 +215,7 @@ test('without a server the town fills the screen, then offers the setup steps', 
   await dialog.getByRole('button', { name: 'Keep watching the demo' }).click();
   await expect(dialog).toBeHidden();
   // Seen once, it is not offered again.
-  const seen = await page.evaluate(() => JSON.parse(localStorage.getItem('andary:prefs') ?? '{}').setupSeen);
-  expect(seen).toBe(true);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('andary:prefs') ?? '{}').setupSeen)).toBe(true);
 
   // The boards come back with one press, and stay back on the next visit.
   await page.locator('[data-tool="toggle-panels"]').click();

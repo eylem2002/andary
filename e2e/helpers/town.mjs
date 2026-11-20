@@ -86,7 +86,9 @@ export async function startTown({ remoteApprovals = false, args = [], env = {} }
     pid: state.pid,
     output: () => output,
     waitForOutput,
-    sendHook: (payload, options = {}) => runHookScript({ payload, env: { ...childEnv }, ...options }),
+    // A permission request waits for the test to click: on a slow CI runner that can take longer
+    // than the runner's default 10 s, after which the hook would be killed with no answer.
+    sendHook: (payload, options = {}) => runHookScript({ payload, env: { ...childEnv }, timeoutMs: 60_000, ...options }),
     async stop() {
       if (stopped) return;
       stopped = true;

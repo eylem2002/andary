@@ -319,8 +319,18 @@ export function createSetupDialog(ctx) {
   const keepWatching = h('button', { type: 'button', class: 'hud-btn hud-btn--primary', autofocus: true }, 'Keep watching the demo');
   keepWatching.addEventListener('click', () => dialog.close());
   dialog.el.querySelector('.hud-dialog__body')?.append(h('div', { class: 'hud-dialog__actions' }, keepWatching));
-  dialog.el.addEventListener('close', () => ctx.setPrefs({ setupSeen: true }));
-  return dialog;
+  // Seen once, it is not offered again: kept as soon as it opens, not only when it closes (a
+  // dialog's close event comes a moment after it disappears, and the page may be gone by then).
+  return {
+    ...dialog,
+    open() {
+      dialog.open();
+      ctx.setPrefs({ setupSeen: true });
+    },
+    get isOpen() {
+      return dialog.isOpen;
+    },
+  };
 }
 
 /**

@@ -4,7 +4,7 @@ import { cliInvocation, printable, tildify } from '../../../../server/cli/io.mjs
 import { UsageError, parseApprovalTimeout, parseClient, parsePort, parseScope, parseSeed, parseSpeed, parseTls } from '../../../../server/cli/options.mjs';
 import { formatDuration } from '../../../../server/cli/status.mjs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 describe('option parsing', () => {
   it('reads the port from the flag, then ANDARY_PORT, then the default', () => {
@@ -76,9 +76,11 @@ describe('printable', () => {
 });
 
 describe('--tls-cert and --tls-key', () => {
-  const files = { '/c.pem': Buffer.from('CERT'), '/k.pem': Buffer.from('KEY') };
+  // parseTls resolves the paths it is given (on Windows '/c.pem' is D:\\c.pem).
+  /** @type {Record<string, Buffer>} */
+  const files = { [resolve('/c.pem')]: Buffer.from('CERT'), [resolve('/k.pem')]: Buffer.from('KEY') };
   const readFile = (/** @type {string} */ path) => {
-    const file = files[/** @type {keyof typeof files} */ (path)];
+    const file = files[path];
     if (!file) throw new Error('ENOENT');
     return file;
   };
@@ -86,10 +88,10 @@ describe('--tls-cert and --tls-key', () => {
   it('are both given or neither, and are read and checked at once', () => {
     assert.equal(parseTls(undefined, undefined), null);
     assert.throws(() => parseTls('/c.pem', undefined), /needs both --tls-cert <file> and --tls-key <file>/);
-    assert.throws(() => parseTls('/c.pem', '/missing.pem', { readFile, check: () => {} }), /Cannot read the key file \/missing.pem/);
+    assert.throws(() => parseTls('/c.pem', '/missing.pem', { readFile, check: () => {} }), /Cannot read the key file \/missing\.pem/);
     assert.throws(() => parseTls('/c.pem', '/k.pem', { readFile, check: () => { throw new Error('mismatch'); } }), /could not be used together/);
     const tls = parseTls('/c.pem', '/k.pem', { readFile, check: () => {} });
-    assert.deepEqual([String(tls?.cert), String(tls?.key), tls?.certPath, tls?.keyPath], ['CERT', 'KEY', '/c.pem', '/k.pem']);
+    assert.deepEqual([String(tls?.cert), String(tls?.key), tls?.certPath, tls?.keyPath], ['CERT', 'KEY', resolve('/c.pem'), resolve('/k.pem')]);
     assert.ok(new UsageError('x') instanceof Error);
   });
 });
