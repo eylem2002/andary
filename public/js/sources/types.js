@@ -4,7 +4,7 @@
 // the town's growth). Both feed the same store with the same envelopes; main.js holds exactly one.
 
 /**
- * @typedef {object} EventSource
+ * @typedef {object} TownSource
  * @property {'live'|'demo'} mode
  * @property {(id: string, decision: 'allow'|'deny') => boolean} decide  answer a held permission request
  * @property {(on: boolean) => unknown} [setRemoteApprovals]  live: the server's switch

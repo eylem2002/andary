@@ -40,7 +40,9 @@ export function describeScope(report) {
   if (report.error) return `${which}: cannot read ${where}`;
   if (report.events.length === 0) return `${which}: not installed (${where})`;
   if (report.complete) return `${which}: installed (${where})`;
-  const again = report.client.id === 'claude' ? 'install' : `install ${report.client.id}`;
+  const client = report.client.id === 'claude' ? '' : ` ${report.client.id}`;
+  const scope = report.scope === 'user' ? '' : ` --scope ${report.scope}`;
+  const again = `install${client}${scope}`;
   return `${which}: partly installed, ${report.events.length} of ${report.client.registrations.length} events (${where}); run ${again} again`;
 }
 

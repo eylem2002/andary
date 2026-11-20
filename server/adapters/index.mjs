@@ -21,13 +21,14 @@ export function sourceOf(value) {
 }
 
 /**
- * The town payloads for one hook payload from a source. Fields only the server may set are
- * dropped from what arrived first: a session cannot name its team member or claim another source.
+ * The town payloads for one hook payload from a source. Fields only the server may set (every
+ * `andary_` field) are dropped from what arrived first: a session cannot name its team member,
+ * claim another source or settle someone else's approval.
  * @param {Source} source
  * @param {Record<string, any>} payload
  * @returns {Record<string, any>[]}
  */
 export function toTownPayloads(source, payload) {
-  const { andary_member: _member, andary_source: _source, ...clean } = payload;
+  const clean = Object.fromEntries(Object.entries(payload).filter(([key]) => !key.startsWith('andary_')));
   return ADAPTERS[source](clean);
 }

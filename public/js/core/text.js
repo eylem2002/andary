@@ -148,6 +148,23 @@ export function hostOf(url) {
   }
 }
 
+/** Shell words that need no quotes. */
+const PLAIN_WORD = /^[\w@%+=:,./-]+$/;
+
+/**
+ * A shell command as one line. An argument list (Codex may send one) is joined with each argument
+ * quoted the way a shell would need it, so ['rm', 'a b'] and ['rm', 'a', 'b'] never read the same.
+ * @param {unknown} command
+ * @returns {string}
+ */
+export function shellWords(command) {
+  if (!Array.isArray(command)) return typeof command === 'string' ? command : String(command ?? '');
+  return command.map((word) => {
+    const text = String(word);
+    return PLAIN_WORD.test(text) ? text : `'${text.replaceAll("'", `'\\''`)}'`;
+  }).join(' ');
+}
+
 /** @param {unknown} text @param {number} [max] */
 export function quoted(text, max = 32) {
   return `"${clip(oneLine(text), max)}"`;

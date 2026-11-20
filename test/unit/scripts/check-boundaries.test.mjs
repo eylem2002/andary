@@ -40,3 +40,26 @@ test('the rules catch the crossings the architecture forbids', () => {
     'public/js/world/env/water.js ../agents/crowd.js',
   ]);
 });
+
+test('an import wrapped over several lines is still checked', () => {
+  const text = "import {\n  createWorld,\n  disposeWorld,\n} from '../world/world.js';\nexport {\n  LOOK,\n} from '../world/env/look.js';";
+  assert.deepEqual(importsOf(text), ['../world/world.js', '../world/env/look.js']);
+  assert.equal(violations([{ file: 'public/js/ui/hud.js', text }]).length, 2);
+});
+
+test('a module the server shares may only bring other shared modules with it', () => {
+  const found = violations([
+    { file: 'public/js/core/text.js', text: "import { BUILDINGS } from './catalog.js';" },
+    { file: 'public/js/core/growth.js', text: "import { localDate } from './dates.js';" },
+  ]);
+  assert.deepEqual(found.map((v) => `${v.file} ${v.spec}`), ['public/js/core/text.js ./catalog.js']);
+});
+
+test('the page load is read in page.js: the HUD and the town may read it, core may not', () => {
+  const found = violations([
+    { file: 'public/js/ui/hud.js', text: "import { LOOK } from '../page.js';" },
+    { file: 'public/js/world/env/palette.js', text: "import { LOOK } from '../../page.js';" },
+    { file: 'public/js/core/store.js', text: "import { LOOK } from '../page.js';" },
+  ]);
+  assert.deepEqual(found.map((v) => v.file), ['public/js/core/store.js']);
+});

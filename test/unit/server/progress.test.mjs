@@ -19,6 +19,7 @@ test('milestones are in order, and points unlock them', () => {
   assert.equal(earnsPoint({ hook_event_name: 'SubagentStop' }), true);
   assert.equal(earnsPoint({ hook_event_name: 'TaskCompleted' }), true);
   assert.equal(earnsPoint({ hook_event_name: 'PreToolUse' }), false);
+  assert.equal(earnsPoint({ hook_event_name: 'Stop', stop_reason: 'interrupted' }), false, 'an interrupted Codex turn is not finished work');
   assert.equal(earnsPoint(null), false);
 });
 

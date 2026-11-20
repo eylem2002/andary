@@ -11,8 +11,8 @@
 set -euo pipefail
 
 REPO="${1:-eylem2002/andary}"
-DESCRIPTION="A living 3D town where your Claude Code sessions, subagents and agent teams work as tiny characters, live through hooks."
-TOPICS="claude-code,claude,ai-agents,multi-agent,hooks,visualization,threejs,developer-tools,observability"
+DESCRIPTION="A living 3D town where your Claude Code and Codex sessions, subagents and agent teams work as tiny characters, live through hooks."
+TOPICS="claude-code,claude,codex,ai-agents,multi-agent,hooks,visualization,threejs,developer-tools,observability"
 
 cd "$(dirname "$0")/.."
 command -v gh >/dev/null || { echo "Install the GitHub CLI first: https://cli.github.com"; exit 1; }
@@ -27,7 +27,7 @@ fi
 # Branches in merge order; each PR targets the branch before it (see docs/adr/0010-git-workflow.md).
 # The backticks are literal Markdown code marks in ORDER.md, not command substitution.
 # shellcheck disable=SC2016
-mapfile -t BRANCHES < <(sed -n 's/^- `\(.*\)`.*/\1/p' docs/prs/ORDER.md)
+mapfile -t BRANCHES < <(sed -n 's/^- `\([^`]*\)`.*/\1/p' docs/prs/ORDER.md)
 [ "${#BRANCHES[@]}" -gt 0 ] || { echo "docs/prs/ORDER.md lists no branches"; exit 1; }
 
 # Each pull request needs its prepared description; check them all before anything is pushed, so a

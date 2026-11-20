@@ -143,6 +143,14 @@ describe('describeApproval', () => {
     assert.deepEqual(describeApproval({ toolName: 'Bash', toolInput: { command: 'rm -rf dist' } }), { action: 'run a command', detail: '$ rm -rf dist' });
   });
 
+  test('a command given as an argument list (Codex) quotes each argument, so none can hide another', () => {
+    const detail = (/** @type {unknown[]} */ command) => describeApproval({ toolName: 'Bash', toolInput: { command } }, { exact: true }).detail;
+    assert.equal(detail(['rm', 'a,b']), '$ rm a,b');
+    assert.equal(detail(['rm', 'a', 'b']), '$ rm a b');
+    assert.equal(detail(['rm', 'a b']), "$ rm 'a b'");
+    assert.equal(detail(['rm', '']), "$ rm ''");
+  });
+
   test('file tools show the path relative to the crew folder', () => {
     assert.deepEqual(describeApproval({ toolName: 'Edit', toolInput: { file_path: '/w/app/src/a.ts' }, cwd: '/w/app' }), { action: 'edit a file', detail: 'src/a.ts' });
     assert.equal(describeApproval({ toolName: 'Write', toolInput: { file_path: 'b.ts' } }).action, 'write a file');

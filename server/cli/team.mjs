@@ -47,7 +47,7 @@ function invite(rawName, values, home, io) {
   const command = `ANDARY_TEAM_KEY=${memberKey(secret, name)} andary start --share-to ${base}`;
   io.out(`Invite for ${name}. Send them these two lines privately: the key lets anyone add sessions to your town as ${name}.`);
   io.out('');
-  io.out('  To share their Claude Code sessions with the team town, they run:');
+  io.out('  To share their Claude Code and Codex sessions with the team town, they run:');
   io.out(`    ${command}`);
   io.out('  (In PowerShell: $env:ANDARY_TEAM_KEY="<key>"; andary start --share-to <address>)');
   io.out('  To watch the team town in a browser (view only):');

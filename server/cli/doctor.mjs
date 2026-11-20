@@ -84,7 +84,8 @@ function checkHooks(report, home, io) {
   }
   for (const scope of inSettings) report(scope.complete ? 'ok' : 'warn', `Hooks: ${describeScope(scope)}`);
   if (installs.plugin) report('ok', 'Hooks: the Andary plugin is enabled');
-  if (installs.plugin && inSettings.length > 0) {
+  // The plugin is Claude Code's: only Claude Code settings can register the same hooks again.
+  if (installs.plugin && inSettings.some((scope) => scope.client.id === 'claude')) {
     report('warn', 'Hooks are registered by both the plugin and settings', `Every event would arrive twice. Remove one: ${cliInvocation()} uninstall`);
   }
   // Claude Code and Codex side by side are fine; one agent registered twice is not.
@@ -101,12 +102,16 @@ function checkHooks(report, home, io) {
  * @param {ReturnType<typeof inspectInstallations>} installs
  */
 function checkForwarderCopy(report, home, installs) {
-  if (!installs.scopes.some((scope) => scope.events.length > 0)) return;
+  const installed = installs.scopes.filter((scope) => scope.events.length > 0);
+  if (installed.length === 0) return;
+  // Reinstalling for an agent that is already connected puts the forwarder back without adding
+  // hooks for one that is not.
+  const install = installed.some((scope) => scope.client.id === 'claude') ? 'install' : 'install codex';
   const target = forwarderPath(home);
   if (!existsSync(target)) {
-    report('fail', `The hook forwarder is missing (${tildify(target)})`, `Run: ${cliInvocation()} install`);
+    report('fail', `The hook forwarder is missing (${tildify(target)})`, `Run: ${cliInvocation()} ${install}`);
   } else if (readFileSync(target, 'utf8') !== readFileSync(HOOK_SOURCE, 'utf8')) {
-    report('warn', 'The installed hook forwarder is from another version', `Run: ${cliInvocation()} install (or start the server, which refreshes it)`);
+    report('warn', 'The installed hook forwarder is from another version', `Run: ${cliInvocation()} ${install} (or start the server, which refreshes it)`);
   } else {
     report('ok', `Hook forwarder: ${tildify(target)}`);
   }
@@ -141,7 +146,7 @@ async function checkServer(report, home) {
 async function checkRoundTrip(report, home, io) {
   const state = readStateFile(home);
   const script = existsSync(forwarderPath(home)) ? forwarderPath(home) : HOOK_SOURCE;
-  // The browser ignores this prefix (DOCTOR_SESSION_PREFIX in public/js/core/events.js), so the
+  // The browser ignores this prefix (DOCTOR_SESSION_PREFIX in public/js/core/ids.js), so the
   // probe proves delivery without leaving a crew in the town.
   const sessionId = `${DOCTOR_SESSION_PREFIX}${randomUUID()}`;
   const env = { ...io.env, ANDARY_HOME: home };

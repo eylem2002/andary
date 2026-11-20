@@ -48,6 +48,7 @@ import { clip, finite, isObject, listOf, oneLine, own, str, textOf } from './tex
  * @typedef {object} ToolData
  * @property {string|null} toolUseId  null for permission.request (the hook carries none)
  * @property {string} tool
+ * @property {string|null} sourceTool  the agent's own name for a tool its adapter renamed (§4.12)
  * @property {Record<string, any>} input
  * @property {BuildingKey} building
  * @property {Activity} activity
@@ -98,6 +99,7 @@ function toolData(p, cwd) {
   return {
     toolUseId: str(p.tool_use_id) || null,
     tool,
+    sourceTool: oneLine(p.andary_tool) || null,
     input,
     building,
     activity: activityForTool(tool, building),

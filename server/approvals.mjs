@@ -100,7 +100,9 @@ function answeredInTerminal(waiting, event) {
   const sameAgent = candidates.filter(({ approval }) => approval.agentId === agentId);
   if (AGENT_END_EVENTS.has(name)) return sameAgent;
   if (!TOOL_EVENTS.has(name)) return [];
-  return sameAgent.filter(({ approval }) => approval.toolName === text(event.tool_name)).slice(0, 1);
+  // A tool the adapter renamed (Codex's apply_patch → Edit) was asked for under its own name.
+  const names = new Set([text(event.tool_name), text(event.andary_tool)].filter(Boolean));
+  return sameAgent.filter(({ approval }) => names.has(approval.toolName)).slice(0, 1);
 }
 
 /**

@@ -37,11 +37,12 @@ hooks/hooks.json             Hook config used when Andary is installed as a Clau
 commands/town.md             /town slash command for the plugin
 public/index.html            The app shell (import map, fonts, HUD markup roots)
 public/css/*.css             HUD styles (app.css) and in-world overlay styles (world.css)
+public/js/page.js            What the page was opened with (the town look), read once at load
 public/js/core/              Pure logic, no DOM, no I/O: events (normalize), store (+ crews, changes,
                              store-model), director (+ director-queue), catalog, text, summaries,
                              ids, dates, looks, prices, growth, records, town-weather, humor
 public/js/sources/           Where events come from: live.js (WebSocket) and demo.js (simulation),
-                             one EventSource shape (types.js)
+                             one TownSource shape (types.js)
 public/js/world/layout.js    Town plan (shared, pure data)
 public/js/world/env/         Environment: terrain, water, buildings, props, vehicles, sky, post-processing, camera rig
 public/js/world/agents/      Characters, animation, walking, bubbles, effects
@@ -260,7 +261,8 @@ or `{"behavior":"deny","message":"Denied from Andary"}`, or `{"output":null}` on
 normal terminal prompt then appears). If remote approvals are off, the server answers at once with
 `null` and broadcasts the approval with `held: false` ("answer in your terminal"). A non-held
 approval becomes `resolved` (`decidedBy: 'terminal'`) when the same session + agent + tool next
-reports PostToolUse, PostToolUseFailure, PermissionDenied, Stop or SessionEnd. At most 50 pending.
+reports PostToolUse, PostToolUseFailure, PermissionDenied, Stop or SessionEnd (the tool matches
+by `tool_name` or, for a call an adapter renamed, `andary_tool`, §4.12). At most 50 pending.
 A request whose `tool_input` was changed by sanitising (a value redacted or cut) is never held,
 because the town could not show what would run: it is answered at once with `null` and its
 approval has `held: false` and `message: "The town cannot show this request in full (…)"`. In the
@@ -393,8 +395,8 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
 
 Every agent's payloads are translated on the server, before ingest, into the one event contract
 the rest of the town reads: the Claude Code hook payload (§4.2). `server/adapters/index.mjs`
-picks the adapter by the body's `source` (`claude` when absent) and drops `andary_member` and
-`andary_source` from what arrived (only the server sets them).
+picks the adapter by the body's `source` (`claude` when absent) and drops every `andary_` field
+from what arrived (`andary_member`, `andary_source`, `andary_tool`: only the server sets them).
 
 - **Claude Code**: unchanged.
 - **Codex** (`server/adapters/codex.mjs`): Codex's hooks use Claude Code's event and field names,
@@ -406,10 +408,16 @@ picks the adapter by the body's `source` (`claude` when absent) and drops `andar
     the new path), a deleted file stays `apply_patch {command, file_path}`. Paths are joined to
     `cwd`. The first keeps the `tool_use_id`, the others get `<id>#2`, `<id>#3`…
   - `spawn_agent` becomes `Agent {description, prompt, subagent_type}`.
-  - `Bash` with `tool_input.command` as a list: joined with spaces. A `PostToolUse` whose
+  - Both keep Codex's own tool name in `andary_tool` (`apply_patch`, `spawn_agent`): a permission
+    request asked under that name settles when the renamed call runs (§4.5), and the browser's
+    `ToolData.sourceTool` carries it.
+  - `Bash` with `tool_input.command` as a list: joined with spaces, each argument quoted the way a
+    shell would need it (`['rm', 'a b']` → `rm 'a b'`). The approval card quotes a list the same way. A `PostToolUse` whose
     `tool_response` (or the payload) has a non-zero `exit_code`/`exitCode`/`metadata.exit_code`
     becomes `PostToolUseFailure` with `error` (stderr, output or "Exit code N", ≤ 500 characters).
-  - `Interrupt` becomes `Stop` with `stop_reason: "interrupted"`.
+  - `Interrupt` becomes `Stop` with `stop_reason: "interrupted"` (it earns no growth point).
+  - An event it already translated passes through unchanged, so `andary replay` sends a recorded
+    Codex event (one with `andary_source: "codex"`) as Codex's again and it keeps its mark.
   - `PermissionRequest` is never split or rewritten: the town shows exactly what it would approve.
 - Token usage is read from Claude Code transcripts only (Codex rollouts are not read yet).
 - The browser reads `andary_source` into `TownEvent.source` and `Session.source`
@@ -508,7 +516,7 @@ store and drives the world. `humor.js`: `quip(situation, context, random?) → s
 The app talks to the 3D world only through this API. Ids are agentKeys. Unknown ids are ignored
 (never throw). All methods are synchronous unless they return a Promise. The town's look
 (`core/looks.js`) is chosen when the page loads, from `?look=` or
-the saved preference, and the environment builds with it (`world/env/look.js` re-exports it);
+the saved preference (`page.js` reads it once), and the environment builds with it;
 changing it reloads the page, so the facade has no method for it.
 
 ```js

@@ -6,7 +6,7 @@
 // The day is stylised rather than astronomical: the sun rises at 06:00 and sets at 18:30 every day,
 // so the town looks the same in winter and summer and evenings always get a golden hour.
 
-import { LOOK } from './look.js';
+import { LOOK } from '../../page.js';
 
 const SUNRISE = 6;
 const SUNSET = 18.5;
@@ -92,8 +92,8 @@ function rgbToHex(rgb) {
 }
 
 /**
- * The sky keys of a town look (look.js): the coast's, Amman's, or one of them tinted.
- * @param {import('./look.js').LookId} look
+ * The sky keys of a town look (core/looks.js): the coast's, Amman's, or one of them tinted.
+ * @param {import('../../core/looks.js').LookId} look
  * @returns {readonly SkyKey[]}
  */
 export function skyKeysFor(look) {

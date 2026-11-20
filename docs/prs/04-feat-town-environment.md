@@ -1,6 +1,6 @@
 # The 3D town environment
 
-Part 4 of 26 · base: `feat/server-hooks-cli`
+Part 4 of 27 · base: `feat/server-hooks-cli`
 
 ## What changed
 

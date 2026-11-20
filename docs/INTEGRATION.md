@@ -11,7 +11,7 @@ Claude Code ─┐
 Codex ───────┘   ◀── decision (stdout, PermissionRequest only) ──┘
 ```
 
-The interfaces are specified in [CONTRACTS.md §4](CONTRACTS.md#4-claude-code--server-the-hook-pipeline).
+The interfaces are specified in [CONTRACTS.md §4](CONTRACTS.md#4-claude-code-or-codex--server-the-hook-pipeline).
 
 ## Quick start
 
@@ -50,7 +50,7 @@ simulation, and `andary simulate` sends simulated sessions through the real pipe
 | --- | --- | --- |
 | User scope (default) | `andary install codex` | `~/.codex/hooks.json` (`$CODEX_HOME` honoured) |
 | Project scope | `andary install codex --scope project [--dir <project>]` | `<project>/.codex/hooks.json` |
-| By hand | `andary install codex --print` | wherever you paste it (`hooks.json`, or `[hooks]` in `config.toml`) |
+| By hand | `andary install codex --print` | prints the `hooks.json` content to merge yourself (in `config.toml`, the same entries go under `[hooks]` as TOML) |
 
 - **Trust the hooks.** Codex asks you to review new or changed hooks when it starts; hooks you
   do not trust do not run. Choose to trust Andary's, or open `/hooks` in Codex. Project hooks

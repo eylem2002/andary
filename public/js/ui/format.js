@@ -1,5 +1,6 @@
 // Pure text helpers for the HUD: durations, relative times, countdowns, paths, labels.
 // No DOM here, so everything is unit-tested in Node.
+import { shellWords } from '../core/text.js';
 
 /**
  * Compact duration: "45s", "4m 05s" (under 10 minutes), "34m", "2h 05m", "3d 4h".
@@ -188,8 +189,9 @@ export function revealHidden(text) {
 
 /** @type {Record<string, (input: any, path: (p: unknown) => string, text: (t: unknown) => string) => { action: string, detail: string }>} */
 const APPROVAL_WORDING = {
-  Bash: (input, _path, text) => ({ action: 'run a command', detail: `$ ${text(input.command)}` }),
-  PowerShell: (input, _path, text) => ({ action: 'run a command', detail: `PS> ${text(input.command)}` }),
+  // A command may be an argument list (Codex): each argument is quoted, so none can hide another.
+  Bash: (input, _path, text) => ({ action: 'run a command', detail: `$ ${text(shellWords(input.command))}` }),
+  PowerShell: (input, _path, text) => ({ action: 'run a command', detail: `PS> ${text(shellWords(input.command))}` }),
   Write: (input, path) => ({ action: 'write a file', detail: path(input.file_path) }),
   Edit: (input, path) => ({ action: 'edit a file', detail: path(input.file_path) }),
   MultiEdit: (input, path) => ({ action: 'edit a file', detail: path(input.file_path) }),

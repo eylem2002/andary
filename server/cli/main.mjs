@@ -24,7 +24,7 @@ const START_HELP = `Options:
       --share-to <address>  Share your sessions with a team town (or ANDARY_SHARE_TO)
       --team-key <key>      Your key from "andary team invite" on the host (better: put it in
                             ANDARY_TEAM_KEY, so it stays out of ps and your shell history)
-      --remote-approvals    Let the town answer Claude Code's permission prompts
+      --remote-approvals    Let the town answer your agents' permission prompts
       --approval-timeout <s>
                             Seconds a prompt waits for the town before the terminal asks
                             (default 120, at most 140)
@@ -122,7 +122,7 @@ const HELP_ARGS = ['--help', '-h', 'help'];
 function generalHelp() {
   const width = Math.max(...Object.values(COMMANDS).map((c) => c.usage.length));
   const lines = Object.values(COMMANDS).map((c) => `  ${c.usage.padEnd(width)}  ${c.summary}`);
-  return `Andary ${readVersion()}: watch your Claude Code agents work in a living 3D town.
+  return `Andary ${readVersion()}: watch your Claude Code and Codex agents work in a living 3D town.
 
 Usage: andary [command] [options]
 
@@ -134,7 +134,8 @@ Run "andary <command> --help" for a command's options.
 Environment:
   ANDARY_HOME     Folder for server.json, the hook forwarder and recordings (default ~/.andary)
   ANDARY_PORT     Default port (default 4747)
-  CLAUDE_CONFIG_DIR   Claude Code's settings folder (default ~/.claude)`;
+  CLAUDE_CONFIG_DIR   Claude Code's settings folder (default ~/.claude)
+  CODEX_HOME      Codex's folder, where hooks.json lives (default ~/.codex)`;
 }
 
 /**

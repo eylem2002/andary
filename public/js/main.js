@@ -30,7 +30,7 @@ async function boot() {
   const app = { mode: 'demo', store, world: null };
   /** @type {any} */ (window).__andary = app;
 
-  /** The one place events come from: live or demo (sources/types.js). @type {import('./sources/types.js').EventSource|null} */
+  /** The one place events come from: live or demo (sources/types.js). @type {import('./sources/types.js').TownSource|null} */
   let source = null;
 
   const hud = createHud({

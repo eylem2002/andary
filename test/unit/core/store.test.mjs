@@ -540,6 +540,15 @@ describe('store: achievements', () => {
     assert.ok(ctx.unlocked().includes('rubber-stamp'));
   });
 
+  it('Rubber Stamp counts Codex patches approved in the terminal (asked as apply_patch, run as Edit)', () => {
+    const ctx = setup();
+    for (let i = 0; i < 5; i++) {
+      ctx.send({ ...FIXTURES.PermissionRequest, tool_name: 'apply_patch', tool_input: { command: '*** Begin Patch' } });
+      ctx.send(hook('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: `${CWD}/a.ts`, old_string: 'a', new_string: 'b' }, tool_response: {}, tool_use_id: `p${i}`, andary_tool: 'apply_patch' }));
+    }
+    assert.ok(ctx.unlocked().includes('rubber-stamp'));
+  });
+
   it('Memory Lane: the first compaction', () => {
     assert.ok(unlocks(({ send }) => send(FIXTURES.PreCompact)).includes('memory-lane'));
   });

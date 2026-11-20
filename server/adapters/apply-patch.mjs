@@ -49,11 +49,9 @@ export function parsePatch(text) {
       if (header[1] === 'Add') hunk = { before: [], after: [] };
       continue;
     }
+    if (line.startsWith('*** End Patch')) break;
     const file = files.at(-1);
-    if (!file || line.startsWith('*** End Patch')) {
-      closeHunk();
-      continue;
-    }
+    if (!file) continue;
     const move = MOVE_TO.exec(line);
     if (move) {
       file.moveTo = move[1].trim();
@@ -67,6 +65,7 @@ export function parsePatch(text) {
       continue;
     }
     if (line.startsWith('*** ')) continue; // "*** End of File" and the like
+    if (!hunk && line.trim() === '') continue; // a blank line between files is not context
     hunk ??= { before: [], after: [] };
     addLine(hunk, line);
   }

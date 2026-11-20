@@ -30,9 +30,6 @@ import { isObject } from '../public/js/core/text.js';
 const HOOK_MARKER = '# andary';
 const MARKER_AT_END = /(?:^|\s)#\s*andary\s*$/;
 
-/** Claude Code's registrations (the default client throughout this module). */
-export const HOOK_REGISTRATIONS = CLIENTS.claude.registrations;
-
 /** A problem with a settings file; the message is meant for the user. Nothing was written. */
 export class SettingsError extends Error {
   /** @param {string} message */

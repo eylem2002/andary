@@ -705,7 +705,7 @@ export function createStore(options = {}) {
     for (const achievement of unlocked) emit({ type: 'achievement', achievement });
     // A terminal-approved tool just ran: count it for Rubber Stamp.
     const waiting = m.awaiting.get(applied.agentKey);
-    if (applied.kind === 'tool.end' && waiting && waiting.tool === applied.data.tool) {
+    if (applied.kind === 'tool.end' && waiting && (waiting.tool === applied.data.tool || waiting.tool === applied.data.sourceTool)) {
       const approved = waiting.counted ? [] : m.tracker.approvalAllowed();
       m.awaiting.delete(applied.agentKey);
       for (const achievement of unlock(approved, applied)) emit({ type: 'achievement', achievement });

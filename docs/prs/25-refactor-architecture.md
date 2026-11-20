@@ -1,6 +1,6 @@
 # Architecture: one pipeline, clear layers, smaller modules
 
-Part 25 of 26 · base: `feat/codex`
+Part 25 of 27 · base: `feat/codex`
 
 ## What changed
 

@@ -245,7 +245,8 @@ Andary sees what your agents see, so it is locked down:
   town's points);
 - a strict Content-Security-Policy, no third-party requests (fonts and three.js are bundled), and
   no event text is ever rendered as HTML;
-- the installer refuses symlinked settings files and keeps a backup of every file it changes.
+- the installer keeps a backup of every file it changes and writes through temporary files it
+  creates itself, so a link planted in a project's `.claude/` folder is never followed.
 
 Known limits and what to do about them: [final report, section 5](docs/FINAL-REPORT.md#5-remaining-risks).
 The full model: [docs/INTEGRATION.md](docs/INTEGRATION.md).
@@ -302,8 +303,9 @@ flowchart LR
 ```
 
 - **Hooks:** both agents run the same small forwarder for each event; observation hooks are
-  asynchronous, so they never slow your agent down. Only a permission request waits, and only
-  when remote approvals are on.
+  asynchronous, so they never slow your agent down. A permission request waits for the town only
+  when remote approvals are on; a session's end (and Codex's Interrupt) waits at most a moment
+  while the forwarder hands it over.
 - **Server:** Node built-ins only. Every source is translated into one event format at the edge,
   then one pipeline sanitizes it, keeps the last 2,000 events in memory for newly opened tabs and
   sends it to the browsers.

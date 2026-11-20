@@ -23,7 +23,7 @@ import { PREFS_STORAGE_KEY } from '../core/looks.js';
  * @property {boolean} weather       rain, storms, fog and rainbows from what the crews go through
  * @property {boolean} desktopNotify notifications on this computer while the town is in the background
  * @property {boolean} ambient       waves, gulls, city hum and soft music while sound is on
- * @property {'coast'|'snow'|'neon'|'desert'|'amman'} townLook  the town's look (world/env/look.js); changing it reloads
+ * @property {'coast'|'snow'|'neon'|'desert'|'amman'} townLook  the town's look (core/looks.js, read by page.js); changing it reloads
  */
 
 /** @type {Readonly<Prefs>} */
