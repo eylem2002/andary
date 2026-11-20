@@ -1,6 +1,6 @@
 # The town grows with you
 
-Part 17 of 23 · base: `feat/town-weather`
+Part 17 of 26 · base: `feat/town-weather`
 
 ## What changed
 

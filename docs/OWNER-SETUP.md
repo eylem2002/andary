@@ -18,7 +18,7 @@ scripts/publish-github.sh              # secrets scan → push all branches → 
 ```
 
 The script stops before pushing anything if it finds a possible secret. It pushes `main` (an
-empty first commit) and the 23 branches, opens the 23 pull requests in merge order, scans
+empty first commit) and the 26 branches, opens the 26 pull requests in merge order, scans
 again, and only then makes the repository public. `KEEP_PRIVATE=1 scripts/publish-github.sh`
 keeps it private. It never merges anything.
 
@@ -31,8 +31,9 @@ push the branches and open the pull requests.
 ## 2. Review and merge the pull requests, in order
 
 They are stacked: each targets the one before it (order in `docs/prs/ORDER.md`). Merge from part
-1 to part 23. Parts 14–22 are the nine features you picked (one each) and part 23 holds the
-fixes from their independent review, so merge it too. After each merge GitHub retargets the
+1 to part 26. Parts 14–22 are the nine features you picked (one each), part 23 holds the fixes
+from their independent review, part 24 connects Codex, part 25 is the architecture clean-up and
+part 26 the new README. After each merge GitHub retargets the
 next pull request to `main`. Nothing is merged until you decide.
 
 ## 3. Optional repository settings (free)
@@ -40,9 +41,9 @@ next pull request to `main`. Nothing is merged until you decide.
 - **Settings → Branches → Add rule** for `main`: require a pull request and the `CI` checks.
 - **Settings → Code security**: turn on Dependabot alerts and security updates (the update
   schedule is already in `.github/dependabot.yml`).
-- **Settings → Pages**, only if you want the demo online: deploy from a branch, folder `public/`.
-  Without a server the page runs the built-in demo. Not done for you: the brief said no cloud
-  resources.
+- **GitHub Pages**, only if you want the demo online: add a Pages workflow that uploads the
+  `public/` folder (publishing from a branch only offers the root or `docs/`). Without a server
+  the page runs the built-in demo. Not done for you: the brief said no cloud resources.
 
 ## 4. Use it
 
@@ -50,7 +51,8 @@ Needs Node.js 20+ (22 LTS recommended) and Claude Code. From the clone:
 
 ```sh
 node bin/andary.mjs install     # adds hooks to ~/.claude/settings.json (a backup is made)
-node bin/andary.mjs start       # opens the town; then run `claude` in any project
+node bin/andary.mjs install codex   # and/or Codex's (~/.codex/hooks.json); trust them in Codex
+node bin/andary.mjs start       # opens the town; then run `claude` or `codex` in any project
 ```
 
 Once the pull requests are merged into `main`, anyone can install the command directly:

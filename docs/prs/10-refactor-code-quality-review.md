@@ -1,6 +1,6 @@
 # Fixes from the independent code-quality review
 
-Part 10 of 23 · base: `fix/qa-accessibility-performance`
+Part 10 of 26 · base: `fix/qa-accessibility-performance`
 
 ## What changed
 

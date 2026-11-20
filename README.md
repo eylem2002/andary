@@ -1,232 +1,323 @@
 # Andary
 
-**Watch your Claude Code agents work in a living 3D town.**
+**Watch your AI coding agents work in a living 3D town.**
 
-Every Claude Code session on your machine moves into Andary as a crew: a Foreman (the main
-agent), plus every subagent and agent-team teammate it spawns. When an agent reads a file it
-walks to the Library; when it runs `npm test` it heads to Terminal Works; when it needs your
-permission it queues at the Permit Office, and you can approve it right there. Speech bubbles
-tell you what each one is doing (with jokes, but mostly with real file names and commands).
+Every Claude Code or Codex session on your computer moves into Andary as a crew: a Foreman (the
+main agent) plus every helper it starts. When an agent reads a file it walks to the Library; when
+it runs `npm test` it heads to Terminal Works; when it needs your permission it queues at the
+Permit Office, and you can answer it right there. Speech bubbles say what each one is doing, with
+real file names and commands (and a few jokes).
 
 ![Andary by day: crews on the left, the town in the middle, live activity on the right](docs/media/andary-day.webp)
 
-![Andary at night: neon trim and lit windows along the coast](docs/media/andary-night.webp)
+It runs entirely on your computer: no account, no cloud, no telemetry, no runtime dependencies.
 
-<img src="docs/media/andary-mobile.webp" width="260" alt="Andary on a phone: the town on top, crews in a bottom sheet">
+**Contents:** [Install](#1-install) · [Connect Claude Code](#2-connect-claude-code) ·
+[Connect Codex](#3-connect-codex) · [Use the town](#4-use-the-town) ·
+[Share it](#5-share-it-with-others) · [Security](#6-security-and-privacy) ·
+[Troubleshooting](#7-troubleshooting) · [CLI](#8-command-reference) ·
+[How it works](#9-how-it-works) · [Development](#10-development)
 
-It runs entirely on your machine: no account, no cloud, no telemetry, no runtime dependencies.
-(Phone notifications are opt-in and go through the free ntfy service; see below.)
+---
 
-## Quick start
+## 1. Install
 
-You need **Node.js 20+** (22 LTS recommended), **Claude Code**, and a browser with WebGL 2.
+You need **Node.js 20 or newer** (22 LTS recommended), a browser with WebGL 2, and at least one of
+**Claude Code** or the **Codex CLI**.
 
 ```sh
-npm install -g github:eylem2002/andary   # installs the `andary` command straight from GitHub
-andary install                           # adds hooks to ~/.claude/settings.json (backup made)
-andary start                             # starts the town and opens it in your browser
+npm install -g github:eylem2002/andary    # installs the `andary` command from GitHub
 ```
 
-Now use `claude` as usual, in any project. The town fills up as your agents work.
+Prefer not to install globally? Clone it and use `node bin/andary.mjs` wherever this guide says
+`andary`:
 
-- No Claude session handy? `andary demo` plays a built-in simulation of three projects.
-- Changed your mind? `andary uninstall` removes exactly the hooks it added.
-- Prefer a clone? `git clone https://github.com/eylem2002/andary && cd andary`, then use
-  `node bin/andary.mjs <command>` instead of `andary <command>`.
-- As a Claude Code plugin: `/plugin marketplace add eylem2002/andary`, then
-  `/plugin install andary@andary`; the plugin brings its own hooks, and `/andary:town` starts
-  and opens the town (see [docs/INTEGRATION.md](docs/INTEGRATION.md)).
+```sh
+git clone https://github.com/eylem2002/andary && cd andary
+node bin/andary.mjs --help
+```
 
-## What you'll see
+Just curious? `andary demo` opens the town with a built-in simulation of three projects, no
+agent needed.
+
+## 2. Connect Claude Code
+
+```sh
+andary install     # adds Andary's hooks to ~/.claude/settings.json (a backup is made first)
+andary start       # starts the town and opens it in your browser
+```
+
+Now use `claude` as usual, in any project; each new session arrives by bus. Sessions that were
+already running pick the hooks up when they restart.
+
+- **Only one project?** `andary install --scope local` writes
+  `<project>/.claude/settings.local.json` (that project, just you). `--scope project` writes the
+  shared `.claude/settings.json`, but the hook command holds an absolute path to your
+  `~/.andary`, so that suits dev containers more than repositories other people clone.
+- **As a plugin instead:** in Claude Code, run `/plugin marketplace add eylem2002/andary` and
+  `/plugin install andary@andary`. The plugin brings its own hooks, and `/andary:town` starts and
+  opens the town. Use the plugin *or* `andary install`, not both.
+- **See it before it is written:** `andary install --dry-run` (or `--print` for the JSON, to
+  merge by hand).
+- **Agent teams** show up too; enable them in Claude Code with
+  `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
+
+## 3. Connect Codex
+
+Andary connects to OpenAI's **Codex CLI** through Codex's own hooks (recent versions have hooks
+on by default).
+
+```sh
+andary install codex   # adds Andary's hooks to ~/.codex/hooks.json (or $CODEX_HOME/hooks.json)
+andary start
+```
+
+Then start `codex`. **The first time, Codex asks you to review the new hooks: choose to trust
+them** (or open `/hooks` in Codex). Untrusted hooks do not run, and the town stays empty.
+
+- **Only one project?** `andary install codex --scope project` writes
+  `<project>/.codex/hooks.json`; Codex loads it once you trust that project. (Codex has no local
+  scope, and the command holds an absolute path: keep that file out of git if others clone the
+  project.)
+- **What you get:** Codex crews look and work like Claude Code's, with a **Codex** badge on the
+  crews board and the model in their caption (for example "GPT-5.3 Codex"). Patches
+  (`apply_patch`) appear as edits to each file they touch, with diffs in the inspector; commands
+  that fail bring rain; helpers that Codex starts join the crew; and remote approvals work the
+  same way.
+- **Not yet:** Codex's token costs. The cost meter reads Claude Code's transcripts only.
+
+Using both? Install both. Each agent's events arrive marked with where they came from, so one
+town shows them all side by side.
+
+### Check that it works
+
+```sh
+andary status    # is the server running, and where are the hooks installed (both agents)
+andary doctor    # sends a test event through the real forwarder and checks it reached the town
+```
+
+To undo: `andary uninstall` (Claude Code) or `andary uninstall codex` removes exactly the hooks
+Andary added and nothing else.
+
+## 4. Use the town
+
+`andary start` prints a sign-in link and opens it. The link holds a private token, so don't share
+it; the browser trades it for a cookie on the first visit.
+
+### What the buildings mean
 
 | Building | Agents go there to… | Tools |
 | --- | --- | --- |
-| Town Hall | start a crew, spawn subagents (through a glowing portal) | `Agent` (`Task`) |
+| Town Hall | start a crew, spawn helpers (through a glowing portal) | `Agent`, Codex `spawn_agent` |
 | Library | read files | `Read` |
-| Workshop | edit and write files | `Edit`, `Write`, `NotebookEdit` |
+| Workshop | edit and write files | `Edit`, `Write`, `NotebookEdit`, Codex `apply_patch` |
 | Terminal Works | run shell commands; `npm install` grows the node_modules pile | `Bash`, `PowerShell` |
 | Search Bureau | grep and glob through code | `Grep`, `Glob` |
 | Web Tower | search and fetch the web | `WebSearch`, `WebFetch`, `curl` |
 | Goal Board | update todo lists and team tasks (shown live on the billboard) | `TodoWrite`, `Task*` |
-| Post Office | send messages to teammates, commit and push (the mail truck leaves) | `SendMessage`, `git commit/push` |
+| Post Office | message teammates, commit and push (the mail truck leaves) | `SendMessage`, `git commit/push` |
 | MCP Harbor | use tools from MCP servers (boats come in) | `mcp__*` |
-| Permit Office | wait for your approval | permission prompts, `AskUserQuestion` |
+| Permit Office | wait for your approval | permission prompts |
 | Memory Spa | relax while their context is compacted | compaction |
 | Skill Academy | load skills | `Skill` |
 | Café | wait for your next prompt (and fall asleep if you take too long) | idle |
 | Worktree Grove | grow a tree per git worktree | worktrees |
 | Bus Stop | arrive and leave | session start and end |
 
-Also: hats show the model (crown for Opus, beret for Sonnet, sun hat for Haiku), failing tests
-bring a personal rain cloud, rate limits a thunderstorm, passing tests fireworks, and there are
-achievements to unlock ("Red to Green", "node_modules Black Hole", "Night Shift"…). The town
-is a sunset coast (pastel stucco, palms, a beach, neon at dusk) that follows your clock, or press
-`N` for day, sunset or night. Click any agent for its details, including a diff of every file
-it changed, or any building for who is inside.
+Hats show the model (a crown for Opus, a beret for Sonnet, a sun hat for Haiku, a cap for OpenAI
+models). Click any agent for its details, including a diff of every file it changed, or any
+building to see who is inside.
 
-### Town looks
+### Keyboard
 
-Settings → **Town look** rebuilds the whole town, its sky and its sea in another style: the
-sunset coast, a snowy village (where the rain falls as snow and snowmen stand on the shore), a
-neon city whose lights never quite go out, a desert oasis, or the limestone of Amman's old town.
+| Key | Does |
+| --- | --- |
+| `C` | Director camera on or off: it follows the most interesting thing by itself |
+| `H` | Full-screen town: put the side boards away or bring them back |
+| `F` / `Esc` | Follow the selected agent / stop following, close the open panel |
+| `[` `]` · `+` `−` · `0` | Rotate · zoom · reset the view |
+| `N` | Day, sunset, night or your clock |
+| `M` | Sound on or off |
+| `U` · `L` | Usage (tokens and estimated cost) · Leaderboard |
+| `A` | Go to approvals |
+| `1`–`9` | Jump to crew 1 to 9 |
+| `?` | All shortcuts |
 
-![The snowy village, the neon city, the desert oasis and Amman's old town](docs/media/andary-looks.webp)
-
-### The town grows with you
-
-Every finished turn, finished helper and completed task is a point, and points unlock
-landmarks: bunting along the north avenue at 10, an ice-cream cart at 25, a curly-brace statue at 50, a
-Ferris wheel on the beach at 100, a hot-air balloon at 200 and a golden dome on the Town Hall at
-500. The count is kept across restarts. `L` (or the trophy) opens the **Leaderboard**: how far
-the town has grown, your busy-day streak, the fastest fix and who turned the most test runs
-green, and the busiest agents in town.
-
-### Notifications
-
-Settings → **Notifications on this computer** pings you while the town is in a background tab:
-a crew needs your permission, finished its turn or stopped with an error. For your **phone**,
-start with `andary start --notify`: Andary makes a private, random topic on the free
-[ntfy](https://ntfy.sh) service (no account), prints its address, and you subscribe to it in the
-ntfy app. Phone messages only say what happened ("A crew needs your permission"), never your
-project, files or commands, and at most one of a kind every 30 seconds. `--notify-url` points
-at your own ntfy server instead; Settings has a test button.
-
-### Team town
-
-Several people's sessions in one town. One of you hosts with `andary start --team`; for each
-teammate, run `andary team invite <name>` on that computer and send them the two lines it
-prints: an `ANDARY_TEAM_KEY=… andary start --share-to …` command that shares their sessions,
-and a view-only link to watch the shared town. Whoever has the link sees every crew's prompts,
-commands and edits, so keep it within the team. Over a VPN, start the host with
-`--team-host <name>` so the link works at that name. Teammates' crews arrive with their name on the foreman
-and a badge on the crews board. Only events travel: costs stay on each computer, and each person
-answers their own permission prompts. It is plain HTTP for a network you trust (across the
-internet, use a private network such as Tailscale); `andary team reset` revokes every key and
-the link.
-
-### Ambient sound
-
-With sound on (`M`), the town has its own soundscape, all synthesised in the browser: waves on
-the shore, gulls by day and crickets by night, a city hum and soft chords that get fuller as the
-crews get busier, and rain when the town's weather rains. It fades out when the tab is in the
-background; Settings → Ambient sound turns it off and keeps the effects.
-
-### Weather
-
-The town's weather follows the work: rain when commands fail, a storm with lightning when they
-keep failing or a turn fails, a rainbow when tests pass again, fog while a crew has been
-thinking for a long time. Turn it off in Settings.
-
-### Cost and tokens
-
-Each crew shows what it has cost so far, and `U` (or a crew's cost) opens **Usage**: today's
-total and the last 14 days as a chart. Andary reads the token counts from Claude Code's own
-transcripts on your computer and prices them at the API list prices, so on a Pro or Max plan it
-is an estimate of value, not a bill. The agent inspector shows each agent's tokens too.
-
-### Director camera and full-screen town
-
-Leave the camera alone and a director takes it. It follows whoever is doing the most interesting
-thing right now (a new subagent arriving, a permission prompt, a failing command, a message to a
-teammate) in close-up, pulls back for a wider shot every few cuts, and a caption says who is on
-screen and what they are doing. Select an agent, drag, zoom or rotate and it stands back; after
-20 quiet seconds it carries on. `C` turns it off or on (it starts off if you have asked for
-reduced motion), and `H` puts the side boards away so the town fills the screen (both are also on
-the toolbar). A demo on a static host opens this way.
-
-![The full-screen town, with the director camera on three agents leaving the Town Hall](docs/media/andary-director.webp)
-
-## Approve permission prompts from the town
+### Answer permission prompts from the town
 
 Off by default. Turn on **Remote approvals** in Settings (or start with
-`andary start --remote-approvals`). When Claude Code asks for permission, the card in the
-Approvals tab gets **Allow** and **Deny** buttons and a countdown; if nobody answers within
-two minutes the normal terminal prompt appears. With it off, the town still shows each request
-so you know who is waiting.
+`andary start --remote-approvals`). A permission request then gets **Allow** and **Deny** buttons
+and a countdown; if nobody answers within two minutes, the normal prompt appears in your
+terminal. The card shows the exact request; a request the town cannot show in full (a secret
+was masked, a long value was cut) is never held there and goes straight to your terminal.
 
-Approval cards show the exact request (the full path, every MCP argument, and any invisible or
-text-reversing characters made visible). A request the town cannot show in full, because a
-secret was masked or a long value was cut, is never held: it goes straight to your terminal.
-Allow and Deny ignore clicks for a second after a card appears or moves, so a new request
-cannot catch a click meant for another; the keyboard is never delayed.
+### Everything else
 
-## How it works
+- **Cost and tokens:** each crew shows what it has cost so far, estimated at API list prices from
+  Claude Code's own transcripts (on a Pro or Max plan, a measure of value, not a bill). `U` opens
+  today's total and the last 14 days.
+- **Weather:** rain when commands fail, a storm when they keep failing, a rainbow when tests pass
+  again, fog while a crew thinks for a long time.
+- **The town grows:** finished turns and tasks earn points, and points build landmarks, from
+  bunting at 10 to a golden dome on the Town Hall at 500. `L` shows how far the town has come.
+- **Town looks:** Settings → Town look: the sunset coast, a snowy village, a neon city, a desert
+  oasis or Amman's old town.
+- **Sound:** `M` turns on sound effects and a soundscape (waves, gulls or crickets, a city hum,
+  soft chords that follow the work).
+- **Notifications:** on this computer (Settings, while the tab is in the background), or on your
+  phone with `andary start --notify` through the free [ntfy](https://ntfy.sh) app, no account.
+  Phone messages say only what happened ("A crew needs your permission"), never your project,
+  files or commands.
 
-```mermaid
-flowchart LR
-  CC["Claude Code<br/>(every session, subagent, teammate)"] -- "hook JSON on stdin" --> F["hook.mjs forwarder<br/>(async, always exits 0)"]
-  F -- "POST /api/hook + secret" --> S["andary server<br/>127.0.0.1 only"]
-  S -- "WebSocket (cookie + origin check)" --> B["Browser: 3D town + HUD"]
-  B -- "Allow / Deny" --> S
-  S -- "decision (PermissionRequest only)" --> F
+![The town's five looks](docs/media/andary-looks.webp)
+
+## 5. Share it with others
+
+### A shared team town
+
+Several people's agents in one town, live. One person hosts; everyone else shares into it.
+
+**On the host's computer:**
+
+```sh
+andary start --team                # listens on your network (it warns you)
+andary team invite Lina            # prints two lines to send Lina, privately
 ```
 
-- **Hooks**: `andary install` registers a tiny forwarder for 19 hook events. Observation hooks
-  run with `"async": true`, so they never slow Claude down; only `PermissionRequest` waits, and
-  only when remote approvals are on.
-- **Server**: Node built-ins only. Sanitises and redacts every payload, keeps the last 2,000
-  events in memory for newly opened tabs. On disk it keeps only numbers and dates in `~/.andary`
-  (tokens and cost per day, the town's growth); prompts and commands are written only if you
-  pass `--record`.
-- **Browser**: plain ES modules and three.js, no build step. The same pipeline runs the demo.
+**Lina gets two lines.** The first shares her sessions (she installs Andary and connects her
+agent as in sections 1–3, then runs):
 
-Design notes and interfaces: [docs/CONTRACTS.md](docs/CONTRACTS.md) and
-[architecture decision records](docs/adr/README.md).
+```sh
+ANDARY_TEAM_KEY=Lina.xxxxxxxx andary start --share-to http://192.168.1.20:4747
+```
 
-## Security and privacy
+The second is a **view-only link** to watch the shared town in a browser. Lina's crews arrive in
+the host's town with her name on their Foreman and a badge on the crews board.
 
-Andary sees what your agents see (prompts, commands, file paths), so it is locked down:
+What is shared and what is not:
 
-- listens on `127.0.0.1` only (unless you choose `--host` or host a team town), and checks the `Host` header (DNS rebinding) and the WebSocket
-  `Origin` (cross-site hijacking);
-- the browser signs in with a random per-start token, exchanged for an `HttpOnly`,
-  `SameSite=Strict` cookie; hooks authenticate with a separate secret; both live in
-  `~/.andary/server.json`, readable only by you;
-- strict Content-Security-Policy, no third-party requests (fonts and three.js are bundled), and
-  event text is never rendered as HTML;
-- secrets that look like API keys, tokens or passwords are redacted before anything leaves the
-  server; nothing you or Claude wrote is logged or written to disk by default (small state files
-  in `~/.andary` keep usage totals with the transcript paths they came from, and the town's
-  points);
-- the hook forwarder only talks to a live server of yours, and only obeys replies signed with a
-  per-start key that never leaves `~/.andary` (a stale state file cannot hand your prompts, or
-  control of Claude Code, to whoever grabs the old port);
-- the installer refuses symlinked settings files, and the state folder must belong to you.
+- **Shared:** the events of her sessions (prompts, commands, file paths, edits), already
+  sanitized by her own Andary. Whoever has the view link sees every crew in the town, the
+  host's too, so keep it within the team.
+- **Not shared:** costs (they stay on each computer), phone notifications, and control: each
+  person answers their own permission prompts, and viewers cannot change anything.
+- **Network:** plain HTTP, for a network you trust. Across the internet, use a private network
+  such as Tailscale and start the host with `--team-host <its-vpn-name>` so the link works at
+  that name.
+- **Revoke:** `andary team reset` on the host invalidates every key and the view link.
 
-Known limits, with what to do about them, are in the
-[final report](docs/FINAL-REPORT.md#5-remaining-risks).
+### A demo anyone can open
 
-Details: [docs/INTEGRATION.md](docs/INTEGRATION.md) and the
-[security review](docs/reviews/security-review-2026-11-17.md).
+The `public/` folder is a complete static site: without an Andary server behind it, it plays the
+built-in simulation. Serve that folder from any static host and share the link: for example
+GitHub Pages with a Pages workflow that uploads `public/` (a branch can only publish its root or
+`docs/`), or Netlify or Cloudflare Pages pointed at `public/`. Nothing of yours is in it.
 
-## CLI
+### A recording of a real session
+
+```sh
+andary start --record              # writes every (sanitized) event to ~/.andary/recordings/
+andary replay recording.jsonl      # plays it back into a running town (--speed 4 for 4×)
+```
+
+A recording holds the prompts and commands of that session (secrets are redacted), so read it
+before you send it to anyone.
+
+### The project itself
+
+Point people to the repository: `npm install -g github:eylem2002/andary`, or the Claude Code
+plugin (`/plugin marketplace add eylem2002/andary`).
+
+## 6. Security and privacy
+
+Andary sees what your agents see, so it is locked down:
+
+- the server listens on `127.0.0.1` only (unless you choose `--host` or host a team town), checks
+  the `Host` header (DNS rebinding) and the WebSocket `Origin` (cross-site hijacking);
+- browsers sign in with a random per-start token, traded for an `HttpOnly`, `SameSite=Strict`
+  cookie; hooks use a separate secret; both live in `~/.andary/server.json`, readable only by you;
+- the hook forwarder only talks to a live server of yours and only obeys replies signed with a
+  key that never leaves `~/.andary`, so a stale state file cannot hand your prompts, or control
+  of your agent, to whoever takes the old port;
+- secrets that look like API keys, tokens or passwords are redacted before anything is kept or
+  sent; prompts and commands are never written to disk unless you pass `--record` (small state
+  files in `~/.andary` keep usage totals with the transcript paths they came from, and the
+  town's points);
+- a strict Content-Security-Policy, no third-party requests (fonts and three.js are bundled), and
+  no event text is ever rendered as HTML;
+- the installer refuses symlinked settings files and keeps a backup of every file it changes.
+
+Known limits and what to do about them: [final report, section 5](docs/FINAL-REPORT.md#5-remaining-risks).
+The full model: [docs/INTEGRATION.md](docs/INTEGRATION.md).
+
+## 7. Troubleshooting
+
+| Problem | Try |
+| --- | --- |
+| The town stays empty | `andary doctor`. It names the broken step and the fix. Restart agent sessions that were running before you installed. |
+| Codex sessions don't show up | Start `codex` and trust Andary's hooks when it asks (or open `/hooks`); `andary status` should list "Codex, user scope: installed". |
+| "Sign in with the link…" | The server restarted with a new token: use the link `andary start` printed, or `andary status` to see it again. |
+| Port 4747 is in use | `andary start --port 5000` (or `--port 0` for any free port). |
+| Events arrive twice | The plugin and `andary install` are both active, or one agent is installed in two scopes: `andary doctor` says which; uninstall one. |
+| A teammate's view link says "Forbidden" | Start the host with `--team-host <the name in the link>`, or use the IP address the invite printed. |
+| The 3D view is blank or slow | Settings → Graphics → Low power; the boards and log keep working without WebGL. |
+
+## 8. Command reference
 
 ```
 andary [command] [options]
 
-  start                 start the town and open it (default). --port, --host, --no-open,
+  start                 start the town and open it (the default command)
+                        --port <n>, --host <address>, --no-open, --detach, --record,
                         --remote-approvals, --approval-timeout <s>, --notify, --notify-url <url>,
-                        --team [--team-host <name>], --share-to <address> (key in
-                        ANDARY_TEAM_KEY or --team-key), --record, --detach
-  demo                  start the town in demo mode
+                        --team [--team-host <name>], --share-to <address> (key in ANDARY_TEAM_KEY)
+  demo                  start the town with the built-in simulation
   stop                  stop the running town
-  install / uninstall   add or remove the hooks. --scope user|project|local, --dir, --dry-run, --print
+  install [codex]       add the hooks for Claude Code (default) or Codex
+                        --scope user|project|local, --dir <path>, --dry-run, --print
+  uninstall [codex]     remove exactly the hooks Andary added
   team invite <name>    on a team host: a teammate's key and the view link (--url <address>)
   team reset            on a team host: revoke every key and the view link
-  status                server, sign-in link, hooks per scope
+  status                server, sign-in link, hooks per agent and scope
   doctor                check the whole pipeline end to end
   simulate              send simulated sessions to the running town (--speed, --seed)
-  replay <file.jsonl>   replay a recording made with --record (--speed)
+  replay <file.jsonl>   play back a recording made with --record (--speed)
 ```
 
 Environment: `ANDARY_HOME` (default `~/.andary`), `ANDARY_PORT` (default 4747),
-`CLAUDE_CONFIG_DIR` (default `~/.claude`). Agent teams need
-`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in Claude Code.
+`CLAUDE_CONFIG_DIR` (default `~/.claude`), `CODEX_HOME` (default `~/.codex`),
+`ANDARY_NOTIFY_URL`, `ANDARY_SHARE_TO`, `ANDARY_TEAM_KEY`.
 
-## Development
+## 9. How it works
+
+```mermaid
+flowchart LR
+  CC["Claude Code"] -- "hook JSON" --> F["hooks/hook.mjs<br/>(one forwarder)"]
+  CX["Codex"] -- "hook JSON" --> F
+  F -- "POST /api/hook" --> S["Andary server (127.0.0.1)<br/>adapters → ingest → history"]
+  T["A teammate's Andary"] -- "POST /api/team" --> S
+  S -- "WebSocket" --> B["Browser: store → director → 3D town, HUD"]
+  B -- "Allow / Deny" --> S
+  S -- "decision" --> F
+```
+
+- **Hooks:** both agents run the same small forwarder for each event; observation hooks are
+  asynchronous, so they never slow your agent down. Only a permission request waits, and only
+  when remote approvals are on.
+- **Server:** Node built-ins only. Every source is translated into one event format at the edge,
+  then one pipeline sanitizes it, keeps the last 2,000 events in memory for newly opened tabs and
+  sends it to the browsers.
+- **Browser:** plain ES modules and three.js, no build step. A store keeps the state, a director
+  turns it into who walks where, and the HUD and the 3D world render it. The demo feeds the same
+  pipeline.
+
+The full design, its layer rules and where to find things: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Exact interfaces: [docs/CONTRACTS.md](docs/CONTRACTS.md). Decisions: [docs/adr/](docs/adr/README.md).
+
+## 10. Development
 
 ```sh
-npm ci                                 # dev tools only
+npm ci                                 # dev tools only; the app has no runtime dependencies
 npx playwright install chromium        # browser for the end-to-end tests
 npm run hooks:install                  # fast checks before every git push
 npm run demo                           # or: npm start
@@ -236,61 +327,51 @@ npm run demo                           # or: npm start
 | --- | --- |
 | `npm run lint` | ESLint, zero warnings allowed |
 | `npm run lint:config` | JSON, shellcheck, actionlint, yamllint |
-| `npm run deadcode` | exports that nothing imports (`scripts/find-unused-exports.mjs`) |
 | `npm run typecheck` | `tsc --checkJs` over all sources |
+| `npm run deadcode` | exports that nothing imports |
+| `npm run boundaries` | the layer rules (core is pure, the HUD never imports the 3D world, …) |
 | `npm test` | unit + integration tests (`node:test`) |
 | `npm run test:e2e` | Playwright end-to-end and axe accessibility suites, desktop + mobile |
 | `npm run perf` | Lighthouse, desktop + mobile |
 | `npm run licenses` | licence allow-list over every installed package and vendored asset |
 | `npm run secrets` | secret scan of the working tree and the full git history |
-| `npm run check` | **everything above** (the full local check) |
-| `npm run check:fast` | lint, config lint, typecheck, dead code, tests, licences, secrets (the pre-push hook) |
+| `npm run check:fast` | all of the above except audit, e2e and Lighthouse (the pre-push hook) |
+| `npm run check` | everything, end-to-end and accessibility included |
 
-Containers without Playwright's browser can use an installed Chrome:
-`CHROME_PATH=/usr/bin/google-chrome npm run check`.
+Handy pages: `/world-lab.html` (characters and effects), `/world-env-lab.html` (the town),
+`?demo=1&speed=4&world=fake` for HUD-only work. Containers without Playwright's browser can use
+an installed Chrome: `CHROME_PATH=/usr/bin/google-chrome npm run check`.
 
-Handy pages while hacking: `/world-lab.html` (characters and effects) and
-`/world-env-lab.html` (the town itself); `?demo=1&speed=4&world=fake` for HUD-only work.
+GitHub Actions ([ci.yml](.github/workflows/ci.yml)) runs the same checks on every pull request
+(free on public repositories); Dependabot keeps dependencies and pinned actions current.
 
-### Continuous integration
-
-GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every pull request
-and on `main`: audit, lint, config lint, typecheck, dead code, tests, licences and a
-full-history secrets scan on Node 22 and 24, then the end-to-end and accessibility suites. It is
-free on public repositories (and about 10 of the 2,000 free minutes per push on private ones).
-Dependabot keeps dependencies and pinned actions current.
-
-Before every push, the pre-push hook (`npm run hooks:install`, once per clone) runs the same fast
-checks locally; `npm run check` runs everything, end-to-end and accessibility included.
-
-### Deploying
-
-Andary is a local tool, so there is nothing to deploy for normal use. To host the demo, serve the
-`public/` folder from any static host: without a server it runs the simulation automatically.
-
-## Project layout
+### Project layout
 
 ```
-bin/andary.mjs        CLI
-server/               HTTP + WebSocket server, auth, approvals, sanitising, installer
-hooks/                hook forwarder and plugin hook config
-public/js/core/       hook normalisation, store, director, humour
-public/js/world/      3D town (env/), characters (agents/), world facade
-public/js/ui/         HUD
-public/js/sim/        simulation (demo mode and `andary simulate`)
-test/, e2e/           node:test and Playwright suites
-docs/                 contracts, ADRs, QA and security reports, owner setup
+bin/andary.mjs        CLI entry
+server/               HTTP + WebSocket server, auth, approvals, sanitizing, team town
+server/adapters/      Claude Code and Codex → one event format
+server/ingest.mjs     the one pipeline every event enters through
+server/cli/           one module per command
+hooks/                the hook forwarder (shared by Claude Code and Codex) and plugin hooks
+public/js/core/       pure logic: events, store, director, catalog, rules shared with the server
+public/js/sources/    where events come from: live (WebSocket) or demo (simulation)
+public/js/ui/         the HUD
+public/js/world/      the 3D town (env/), its people (agents/), and the world facade
+public/js/sim/        the simulation (demo mode and `andary simulate`)
+test/unit/…           unit tests, mirroring the source tree; test/integration/, e2e/
+docs/                 architecture, contracts, ADRs, reviews, owner setup
 ```
 
-## Documentation
+### Documentation
 
-- [Owner setup](docs/OWNER-SETUP.md): the few things that need you
-- [Integration and security model](docs/INTEGRATION.md)
-- [Architecture contracts](docs/CONTRACTS.md) and [ADRs](docs/adr/README.md)
-- [Assumptions](docs/ASSUMPTIONS.md)
-- [QA checks](docs/qa/checks-2026-11-17.md), [security review](docs/reviews/security-review-2026-11-17.md),
-  [code-quality review](docs/reviews/code-quality-review-2026-11-17.md)
-- [Final report](docs/FINAL-REPORT.md)
+- [Architecture](docs/ARCHITECTURE.md) · [Contracts](docs/CONTRACTS.md) · [ADRs](docs/adr/README.md)
+- [Integration and security model](docs/INTEGRATION.md) · [Assumptions](docs/ASSUMPTIONS.md)
+- Reviews: [security](docs/reviews/security-review-2026-11-17.md),
+  [code quality](docs/reviews/code-quality-review-2026-11-17.md),
+  [architecture](docs/reviews/architecture-review-2026-11-20.md),
+  [features](docs/reviews/feature-review-2026-11-20.md)
+- [Owner setup](docs/OWNER-SETUP.md) · [Final report](docs/FINAL-REPORT.md)
 
 ## License
 

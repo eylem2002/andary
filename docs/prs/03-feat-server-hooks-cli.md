@@ -1,6 +1,6 @@
 # Local server, hook forwarder, CLI, installer and Claude Code plugin
 
-Part 3 of 23 · base: `ci/github-actions-and-pre-push`
+Part 3 of 26 · base: `ci/github-actions-and-pre-push`
 
 ## What changed
 

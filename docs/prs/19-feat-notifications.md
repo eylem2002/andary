@@ -1,6 +1,6 @@
 # Phone and desktop notifications
 
-Part 19 of 23 · base: `feat/leaderboard`
+Part 19 of 26 · base: `feat/leaderboard`
 
 ## What changed
 
