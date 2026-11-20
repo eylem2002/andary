@@ -80,6 +80,7 @@ export function socketUrl(pageUrl) {
  * @property {(status: LinkStatus) => void} [onStatus]
  * @property {(settings: object) => void} [onSettings]
  * @property {(message: string) => void} [onError]
+ * @property {(progress: unknown) => void} [onProgress]  the town's growth and busy days (§4.9)
  * @property {new (url: string) => WebSocket} [WebSocketImpl]
  * @property {() => Promise<Hello|null>} [hello]
  * @property {string} [url]
@@ -95,6 +96,7 @@ export function connectLive({
   onStatus = () => {},
   onSettings = () => {},
   onError = () => {},
+  onProgress = () => {},
   WebSocketImpl = globalThis.WebSocket,
   hello = () => fetchHello(),
   url = socketUrl(globalThis.location?.href ?? 'http://127.0.0.1/'),
@@ -163,6 +165,7 @@ export function connectLive({
     else if (message.t === 'approval' && message.a) store.setApproval(message.a);
     else if (message.t === 'settings') onSettings(message.settings ?? {});
     else if (message.t === 'usage') store.setUsage?.(message.u, message.days);
+    else if (message.t === 'progress') onProgress(message.p);
     else if (message.t === 'error') onError(String(message.message ?? 'The server reported an error.'));
   }
 
@@ -176,6 +179,7 @@ export function connectLive({
     for (const record of Array.isArray(usage.agents) ? usage.agents : []) store.setUsage?.(record);
     if (Array.isArray(usage.days)) store.setUsage?.(null, usage.days);
     onSettings(message.settings ?? {});
+    if (message.progress) onProgress(message.progress);
     setStatus('live');
     startPing();
   }

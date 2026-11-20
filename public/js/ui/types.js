@@ -130,6 +130,7 @@
  * @property {(q: 'high'|'low') => void} setQuality
  * @property {(h: number|'auto') => void} setTimeOfDay
  * @property {(w: import('../core/town-weather.js').TownWeather) => void} [setTownWeather]
+ * @property {(ids: string[], options?: { grow?: boolean }) => void} [setLandmarks]
  * @property {() => number} getTimeOfDay
  * @property {(on: boolean) => void} setReducedMotion
  * @property {(id: string, opts?: { follow?: boolean, zoom?: number }) => void} focusAgent
@@ -168,6 +169,7 @@
  * @property {boolean} hosted              a demo on a static host, with no server to connect to
  * @property {boolean} worldFailed         the 3D town could not start (no WebGL); the panels stay
  * @property {{ remoteApprovals?: boolean, approvalTimeoutMs?: number }} serverSettings
+ * @property {{ points: number, days: string[] }|null} progress  the town's growth (§4.9)
  * @property {Selection|null} selection
  * @property {boolean} follow
  * @property {boolean} paused

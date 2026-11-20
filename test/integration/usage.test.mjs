@@ -47,3 +47,24 @@ describe('Token usage from transcripts', () => {
     await closeBrowser(browser);
   });
 });
+
+describe('The town\'s growth', () => {
+  /** @type {Awaited<ReturnType<typeof startTown>>} */
+  let town;
+  before(async () => {
+    town = await startTown();
+  });
+  after(async () => {
+    await town?.stop();
+  });
+
+  it('counts finished work and sends the progress to browsers, also in hello', async () => {
+    const browser = await connectBrowser(town);
+    const hello = await waitForMessage(browser, (m) => m?.t === 'hello');
+    assert.deepEqual(hello.progress, { points: 0, days: [] });
+    await postHook(town, hookPayload('Stop', { last_assistant_message: 'done', stop_hook_active: false }));
+    const update = await waitForMessage(browser, (m) => m?.t === 'progress' && m.p.points === 1);
+    assert.equal(update.p.days.length, 1);
+    await closeBrowser(browser);
+  });
+});

@@ -19,3 +19,4 @@ bottom; after a merge GitHub retargets the next pull request to `main`.
 - `feat/file-diffs` — click a file in the agent inspector to see its diff
 - `feat/cost-meter` — tokens and estimated cost per crew and agent, and a 14-day usage chart
 - `feat/town-weather` — rain, storms, fog and rainbows from what the crews go through
+- `feat/town-growth` — finished work earns points, and points build landmarks

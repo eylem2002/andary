@@ -63,6 +63,13 @@ is a sunset coast (pastel stucco, palms, a beach, neon at dusk) that follows you
 `N` for day, sunset or night. Click any agent for its details, including a diff of every file
 it changed, or any building for who is inside.
 
+### The town grows with you
+
+Every finished turn, finished helper and completed task is a point, and points unlock
+landmarks: bunting over the avenue at 10, an ice-cream cart at 25, a curly-brace statue at 50, a
+Ferris wheel on the beach at 100, a hot-air balloon at 200 and a golden dome on the Town Hall at
+500. The count is kept across restarts.
+
 ### Weather
 
 The town's weather follows the work: rain when commands fail, a storm with lightning when they
@@ -117,8 +124,9 @@ flowchart LR
   run with `"async": true`, so they never slow Claude down; only `PermissionRequest` waits, and
   only when remote approvals are on.
 - **Server**: Node built-ins only. Sanitises and redacts every payload, keeps the last 2,000
-  events in memory for newly opened tabs. On disk it keeps only number totals (tokens and cost
-  per day) in `~/.andary`; prompts and commands are written only if you pass `--record`.
+  events in memory for newly opened tabs. On disk it keeps only numbers and dates in `~/.andary`
+  (tokens and cost per day, the town's growth); prompts and commands are written only if you
+  pass `--record`.
 - **Browser**: plain ES modules and three.js, no build step. The same pipeline runs the demo.
 
 Design notes and interfaces: [docs/CONTRACTS.md](docs/CONTRACTS.md) and

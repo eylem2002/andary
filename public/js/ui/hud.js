@@ -14,6 +14,7 @@ import { handleShortcut, openDialog, panelsHidden, runAction, select, setFollow 
 import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
 import { createInspector } from './inspector.js';
 import { createWeatherDriver } from '../core/town-weather.js';
+import { MILESTONES, unlockedAt } from '../core/growth.js';
 import { createDiffDialog } from './changes.js';
 import { createUsageDialog } from './usage.js';
 import { createMasthead } from './masthead.js';
@@ -100,6 +101,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     /** @param {World} world @param {{ failed?: boolean }} [options] */
     attachWorld(world, { failed = false } = {}) {
       shell.world = world;
+      if (view.progress) world.setLandmarks?.(unlockedAt(view.progress.points));
       world.on?.('select', (sel) => select(hud, sel, { from: 'world', camera: false }));
       applyTheme(prefs, world);
       applyMotion(prefs, world);
@@ -129,6 +131,13 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     setServerSettings(settings) {
       view.serverSettings = { ...view.serverSettings, ...settings };
       ctx.refresh();
+    },
+    /**
+     * The town's growth and busy days (§4.9), from the server or the demo.
+     * @param {unknown} progress
+     */
+    setProgress(progress) {
+      showProgress(hud, shell, progress);
     },
     /** @param {boolean} available */
     setServerAvailable(available) {
@@ -169,6 +178,32 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
   };
 }
 
+/**
+ * Keeps the town's progress in the view and builds the landmarks it has earned. A landmark
+ * unlocked while the viewer watches rises into place, with a toast; ones earned before are
+ * simply there.
+ * @param {{ ctx: HudContext, ui: Parts }} hud
+ * @param {{ world: World|null }} shell
+ * @param {unknown} raw
+ */
+function showProgress({ ctx }, shell, raw) {
+  const value = /** @type {any} */ (raw);
+  const points = Number.isInteger(value?.points) && value.points > 0 ? value.points : 0;
+  const days = Array.isArray(value?.days) ? value.days.filter((/** @type {unknown} */ d) => typeof d === 'string') : [];
+  const before = ctx.view.progress;
+  ctx.view.progress = { points, days };
+  const ids = unlockedAt(points);
+  const fresh = before ? ids.filter((id) => !unlockedAt(before.points).includes(id)) : [];
+  shell.world?.setLandmarks?.(ids, { grow: fresh.length > 0 });
+  for (const id of fresh) {
+    const milestone = MILESTONES.find((m) => m.id === id);
+    if (!milestone) continue;
+    ctx.toasts.show({ tone: 'achievement', icon: 'spark', title: 'The town grew', body: `${milestone.name} ${milestone.where}.` });
+    ctx.announcer.polite(`The town grew: ${milestone.name} ${milestone.where}.`);
+  }
+  ctx.refresh();
+}
+
 /** What screen readers hear when the town's weather turns. */
 const WEATHER_WORDS = Object.freeze({
   storm: 'A storm over the town: something keeps failing.',
@@ -191,6 +226,7 @@ function initialView(prefs) {
     hosted: false,
     worldFailed: false,
     serverSettings: {},
+    progress: null,
     selection: null,
     follow: false,
     paused: false,

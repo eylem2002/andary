@@ -203,11 +203,12 @@ same `subagent_type` (FIFO). Normalise ids by stripping a leading `agent-`.
 Server → browser:
 
 ```js
-{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs }, history: Envelope[], approvals: Approval[], usage: { agents: UsageRecord[], days: UsageDay[] } }
+{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs }, history: Envelope[], approvals: Approval[], usage: { agents: UsageRecord[], days: UsageDay[] }, progress: { points, days } }
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
 { t: 'settings', settings: {...} }
 { t: 'usage', u: UsageRecord, days: UsageDay[] }   // §4.8, when an agent's totals change
+{ t: 'progress', p: { points, days: string[] } }   // §4.9, when a point or a busy day is added
 { t: 'error', message }
 // Envelope = { id: number /* server sequence */, ts: number /* hook start, ms */, rx: number /* server receive */, event: object /* sanitized payload */ }
 // Approval = { id, status: 'pending'|'allowed'|'denied'|'expired'|'resolved', held: boolean, sessionId, agentId: string|null,
@@ -279,6 +280,15 @@ UsageDay { date: 'YYYY-MM-DD', tokens, costUsd }
 
 The browser store keeps `usage` (agentKey → totals) and `usageDays`; the demo makes up repeatable
 numbers (`public/js/ui/demo-usage.js`).
+
+### 4.9 The town's growth
+
+`server/progress.mjs` with `public/js/core/growth.js`. Every `Stop`, `SubagentStop` and
+`TaskCompleted` hook is a point; every local day with any hook is a busy day (the last 400 are
+kept). Both live in `<ANDARY_HOME>/progress.json` (0600). Points unlock `MILESTONES` (bunting 10,
+icecream 25, statue 50, wheel 100, balloon 200, golden 500); the HUD hands the unlocked ids to
+`world.setLandmarks(ids, { grow })` (§6), with `grow` only for ones unlocked while watching. The
+demo keeps its points in `localStorage['andary:demo-progress']`, starting at 92.
 
 ## 5. Browser: events, store, director
 
@@ -378,6 +388,7 @@ World {
   setReducedMotion(on: boolean): void
 
   focusAgent(id, opts?: { follow?: boolean, zoom?: number }): void  // zoom: eases there (1 = whole town)
+  setLandmarks(ids: string[], opts?: { grow?: boolean }): void  // landmarks earned (§4.9); grow: rise into place
   setTownWeather(w: { kind: 'clear'|'rain'|'storm'|'fog'|'rainbow', rain, overcast, fog, rainbow /* 0–1 */, storm: boolean }): void
     // core/town-weather.js decides it from the store's events (rules in that file); the HUD's
     // driver sends it at most once a second, only when it changed, and clear when Settings turns it off

@@ -63,14 +63,16 @@ export function beachSpots(rng) {
   const umbrellas = [];
   const palms = [];
   for (let x = BEACH.minX + 2.2, i = 0; x < BEACH.maxX - 1.5; x += UMBRELLA_STEP, i += 1) {
-    if (i % 3 === 1 && Math.abs(x + UMBRELLA_STEP / 2 - LIFEGUARD_X) > 2.4) palms.push({ x: x + UMBRELLA_STEP / 2, z: -22.35 });
-    if (Math.abs(x - LIFEGUARD_X) < 2.2) continue;
+    if (i % 3 === 1 && Math.abs(x + UMBRELLA_STEP / 2 - LIFEGUARD_X) > 2.4 && Math.abs(x + UMBRELLA_STEP / 2 - WHEEL_SPOT.x) > 3) palms.push({ x: x + UMBRELLA_STEP / 2, z: -22.35 });
+    if (Math.abs(x - LIFEGUARD_X) < 2.2 || Math.abs(x - WHEEL_SPOT.x) < 3) continue;
     umbrellas.push({ x, z: range(rng, -23.25, -22.85) });
   }
   return { umbrellas, palms };
 }
 
 const LIFEGUARD_X = -8.2;
+/** Where the Ferris wheel stands once the town earns it (landmarks.js); no umbrellas there. */
+export const WHEEL_SPOT = Object.freeze({ x: -20.5, z: -24.2 });
 
 /**
  * @typedef {object} Slope  a slab across the beach whose top runs from `high` down to `low`

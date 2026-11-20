@@ -502,6 +502,14 @@ class World {
   }
 
   /**
+   * Landmarks the town has earned (core/growth.js).
+   * @param {string[]} ids @param {{ grow?: boolean }} [options]
+   */
+  setLandmarks(ids, options) {
+    this.envCall('setLandmarks', ids, options);
+  }
+
+  /**
    * Weather over the whole town (core/town-weather.js).
    * @param {import('../core/town-weather.js').TownWeather} w
    */
