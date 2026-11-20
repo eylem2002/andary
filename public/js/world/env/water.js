@@ -49,8 +49,9 @@ float wRectDistance( vec2 p, vec4 r ) {
 
 const SEA_COLOR = /* glsl */ `
 #include <color_fragment>
-// West of the groyne the water ends on the beach, further out than the seawall.
-float wShore = vWaterWorld.x < uBeach.x ? uBeach.y : uShoreZ;
+// West of the groyne the water ends on the beach, further out than the seawall; the two blend
+// across the groyne so no line shows in open water.
+float wShore = mix( uBeach.y, uShoreZ, smoothstep( uBeach.x - 1.5, uBeach.x + 2.5, vWaterWorld.x ) );
 float wDepth = clamp( ( wShore - vWaterWorld.z ) / 11.0, 0.0, 1.0 );
 float wPierD = wRectDistance( vWaterWorld.xz, uPier );
 wDepth = min( wDepth, clamp( wPierD / 3.0 + 0.15, 0.0, 1.0 ) );
@@ -74,7 +75,7 @@ normal = normalize( ( viewMatrix * vec4( wN, 0.0 ) ).xyz );
 const SEA_EMISSIVE = /* glsl */ `
 #include <emissivemap_fragment>
 // Shimmering reflections of the town's neon near the shore at night, pink and cyan.
-float wNear = 1.0 - smoothstep( 0.0, 3.5, ( vWaterWorld.x < uBeach.x ? uBeach.y : uShoreZ ) - vWaterWorld.z );
+float wNear = 1.0 - smoothstep( 0.0, 3.5, mix( uBeach.y, uShoreZ, smoothstep( uBeach.x - 1.5, uBeach.x + 2.5, vWaterWorld.x ) ) - vWaterWorld.z );
 float wStreak = smoothstep( 0.55, 0.95, wNoise( vec2( vWaterWorld.x * 2.2, vWaterWorld.z * 9.0 + uTtTime * 0.7 ) ) );
 totalEmissiveRadiance += mix( vec3( 1.0, 0.5, 0.75 ), vec3( 0.4, 0.9, 1.0 ), step( 0.5, fract( vWaterWorld.x * 0.21 ) ) ) * wNear * wStreak * uTtNight * 0.6;
 `;

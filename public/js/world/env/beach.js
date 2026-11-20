@@ -39,15 +39,35 @@ export function buildBeach(kit, trees, rng) {
   kit.building = 0;
   sand(kit);
   groyne(kit, rng);
-  for (let x = BEACH.minX + 2.2; x < BEACH.maxX - 1.5; x += 3.1) {
-    if (Math.abs(x - LIFEGUARD_X) < 2.2) continue;
-    const z = range(rng, -23.25, -22.85);
+  const spots = beachSpots(rng);
+  for (const { x, z } of spots.umbrellas) {
     umbrella(kit, x, z, UMBRELLAS[Math.floor(rng() * UMBRELLAS.length)]);
     lounger(kit, x + 0.75, z - 0.15, rng() < 0.5 ? 0xffffff : C.tealLight);
     if (rng() < 0.7) towel(kit, x - 0.85, z - 0.55, TOWELS[Math.floor(rng() * TOWELS.length)], range(rng, -0.4, 0.4));
   }
   lifeguardTower(kit, LIFEGUARD_X, -23.1);
-  for (const x of [-21.5, -12.5, -3.5, 5.5]) trees.push({ kind: 'palm', x: x + range(rng, -0.4, 0.4), z: -22.5, y: sandHeight(-22.5), scale: range(rng, 0.8, 0.95) });
+  for (const { x, z } of spots.palms) trees.push({ kind: 'palm', x, z, y: sandHeight(z), scale: range(rng, 0.8, 0.95) });
+}
+
+/** Spacing of the umbrellas along the beach. */
+const UMBRELLA_STEP = 3.1;
+
+/**
+ * Where the umbrellas and the beach palms stand: an umbrella every 3.1 units (none by the
+ * lifeguard tower), and a palm halfway between every third pair, near the seawall, so no trunk
+ * runs through a canopy.
+ * @param {() => number} rng
+ * @returns {{ umbrellas: { x: number, z: number }[], palms: { x: number, z: number }[] }}
+ */
+export function beachSpots(rng) {
+  const umbrellas = [];
+  const palms = [];
+  for (let x = BEACH.minX + 2.2, i = 0; x < BEACH.maxX - 1.5; x += UMBRELLA_STEP, i += 1) {
+    if (i % 3 === 1 && Math.abs(x + UMBRELLA_STEP / 2 - LIFEGUARD_X) > 2.4) palms.push({ x: x + UMBRELLA_STEP / 2, z: -22.35 });
+    if (Math.abs(x - LIFEGUARD_X) < 2.2) continue;
+    umbrellas.push({ x, z: range(rng, -23.25, -22.85) });
+  }
+  return { umbrellas, palms };
 }
 
 const LIFEGUARD_X = -8.2;

@@ -1,6 +1,7 @@
 // Time-of-day maths: where the sun and moon are and what colour the sky, light and fog are at any
-// hour: azure days, a long golden hour, a hot-pink dusk and violet nights. Pure (no three.js) so it is unit-tested in Node; lighting.js and sky.js turn these numbers
-// into lights and uniforms. Colours are sRGB triplets in [0, 1].
+// hour: azure days, a long golden hour, a hot-pink dusk and violet nights. Pure (no three.js) so
+// it is unit-tested in Node; lighting.js and sky.js turn these numbers into lights and uniforms.
+// Colours are sRGB triplets in [0, 1].
 //
 // The day is stylised rather than astronomical: the sun rises at 06:00 and sets at 18:30 every day,
 // so the town looks the same in winter and summer and evenings always get a golden hour.

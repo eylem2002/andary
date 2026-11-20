@@ -33,3 +33,17 @@ test('reduced motion: override or system', () => {
   assert.equal(resolveReducedMotion({ motion: 'system' }, true), true);
   assert.equal(resolveReducedMotion({ motion: 'system' }, false), false);
 });
+
+test('N cycles the local clock, day, sunset and night, and every saved time mode loads', async () => {
+  const { NEXT_TIME } = await import('../../../public/js/ui/hud-actions.js');
+  const { parsePrefs } = await import('../../../public/js/ui/prefs.js');
+  let mode = 'auto';
+  const seen = [];
+  for (let i = 0; i < 4; i += 1) {
+    mode = NEXT_TIME[mode];
+    seen.push(mode);
+  }
+  assert.deepEqual(seen, ['day', 'sunset', 'night', 'auto']);
+  for (const timeMode of seen) assert.equal(parsePrefs(JSON.stringify({ timeMode })).timeMode, timeMode);
+  assert.equal(parsePrefs(JSON.stringify({ timeMode: 'dusk' })).timeMode, 'auto');
+});

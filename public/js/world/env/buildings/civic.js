@@ -1,4 +1,4 @@
-// Civic buildings: Town Hall (golden dome, portico, glowing portal), Library (arched windows,
+// Civic buildings: Town Hall (dome, portico, glowing portal), Library (arched windows,
 // giant open book), Skill Academy (clock tower, mortarboard) and Permit Office (stern facade,
 // queue barriers). Local frame: origin at the lot centre on the courtyard, +z = front (south).
 import * as THREE from 'three';
@@ -67,7 +67,7 @@ function hallPortal(kit) {
   kit.cyl([0, 1.63, 1.63], 0.85, 0.04, C.portal, { ...glow, rotZ: Math.PI / 2, rotY: Math.PI / 2, arc: Math.PI, seg: 16 });
 }
 
-/** Drum with windows, golden dome and lantern. */
+/** Drum with windows, dome and lantern. */
 function hallDome(kit) {
   const z = -0.8;
   kit.cyl([0, 3.4, z], 1.75, 0.75, C.stone, { seg: 28, surface: S.stone });

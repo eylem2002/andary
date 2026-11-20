@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { C, NEON, PAINT, paintMap, shade } from '../../../public/js/world/env/palette.js';
-import { BEACH, WATERLINE_Z, sandHeight } from '../../../public/js/world/env/beach.js';
+import { BEACH, WATERLINE_Z, beachSpots, sandHeight } from '../../../public/js/world/env/beach.js';
+import { createRng } from '../../../public/js/world/env/rand.js';
 import { SEA } from '../../../public/js/world/env/terrain.js';
 import { GRADE, gradeAt } from '../../../public/js/world/env/grade.js';
 import { BUILDING_KEYS } from '../../../public/js/core/catalog.js';
@@ -33,6 +34,19 @@ test('paintMap swaps the shared stucco tones for the building paint', () => {
   assert.equal(map.get(C.gold), paint.accent);
   assert.equal(map.get(C.brick), paint.deep);
   assert.equal(map.get(C.glass), undefined, 'glass keeps its colour');
+  assert.equal(map.size, 10, 'no two shared tones have the same colour, or one would repaint the other');
+});
+
+test('beach palms keep clear of the umbrellas and the lifeguard tower', () => {
+  for (const seed of [1, 5, 42, 999]) {
+    const { umbrellas, palms } = beachSpots(createRng(seed));
+    assert.ok(umbrellas.length >= 6 && palms.length >= 2);
+    for (const palm of palms) {
+      for (const u of umbrellas) assert.ok(Math.hypot(palm.x - u.x, palm.z - u.z) > 1.2, `seed ${seed}: palm at ${palm.x} too close to an umbrella`);
+      assert.ok(Math.abs(palm.x - -8.2) > 2.4, 'clear of the lifeguard tower');
+      assert.ok(palm.x > BEACH.minX && palm.x < BEACH.maxX);
+    }
+  }
 });
 
 test('the beach slopes from the seawall into the sea and the waterline lies on it', () => {

@@ -150,7 +150,7 @@ export function paintMap(paint) {
  */
 export const S = Object.freeze({
   matte: 0,
-  stone: 1, // limestone ashlar courses on walls
+  stone: 1, // trowelled stucco on walls
   ground: 2, // speckled lawn / gravel
   glass: 3, // windows: glossy by day, lit at night
   gold: 4,

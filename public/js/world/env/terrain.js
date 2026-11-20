@@ -1,4 +1,4 @@
-// The ground: a floating diorama plinth (soil and limestone strata on its sides), one tile box per
+// The ground: a floating diorama plinth (coral rock and sandy soil strata on its sides), one tile box per
 // map cell (asphalt roads, paved plaza, lawns, courtyards), sidewalks, road markings, zebra
 // crossings, the seawall and promenade, the sea floor and the resin-look sea sides, and the
 // tunnel portals where buses leave the island.
@@ -110,7 +110,7 @@ function buildRoadTile(kit, col, row, x, z) {
 }
 
 /**
- * Plaza paving: four slabs per tile in two alternating limestone tones.
+ * Plaza paving: four slabs per tile in two alternating stone tones.
  * @param {import('./kit.js').Kit} kit
  */
 function buildPlazaTile(kit, col, row, x, z) {

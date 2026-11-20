@@ -13,8 +13,8 @@ and has no runtime dependencies.
 ### The town
 - A sunset coast on a floating diorama plinth: pastel stucco blocks each in their own paint,
   palms, a beach with umbrellas and a lifeguard tower, neon that comes on at dusk, a plaza with
-  a fountain, a sandbox labelled "Sandbox" and
-  a node_modules box pile that grows with every install.
+  a fountain, a sandbox labelled "Sandbox" and a node_modules box pile that grows with every
+  install.
 - Fifteen buildings, one per kind of work: Town Hall, Library, Workshop, Terminal Works, Search
   Bureau, Web Tower, Goal Board, Post Office, MCP Harbor, Permit Office, Memory Spa, Skill
   Academy, Café, Worktree Grove, Bus Stop. Signs show live counters ("42 reads").

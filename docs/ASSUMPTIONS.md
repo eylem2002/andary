@@ -133,14 +133,14 @@ section.
     and on a narrow window the full toolbar wraps too, rather than dropping controls or running
     off the screen. The caption, the side boards and the notices sit above whatever height it
     takes.
-38. **"Like GTA 6" means the mood, not the game's assets.** The town takes on an original
-    sunset-coast look (pastel stucco, palms, a beach, a pink-and-violet dusk and neon at night)
-    in the spirit of a Miami-style coast. No logo, names, characters, artwork, fonts or other
-    material from Rockstar's game is copied or imitated. This replaces the limestone hill-town
-    look of assumption 3; the layout, buildings and their meanings are unchanged.
+38. **"Make it look like that game" means the mood, not its assets.** The town takes on an
+    original sunset-coast look (pastel stucco, palms, a beach, a pink-and-violet dusk and neon
+    at night) in the spirit of a Miami-style coast. No logo, name, character, artwork, font or
+    other material from any third-party game is copied or imitated. This replaces the limestone
+    hill-town look of assumption 3; the layout, buildings and their meanings are unchanged.
 39. **Each building gets its own paint.** Buildings still name shared materials ("stone",
     "gold"), and the kit repaints them per building (`PAINT` in `palette.js`), so a new building
-    gets a colour by adding one line. Neon strips under the cornices only glow at night.
+    gets a colour by adding one line. Neon strips under the cornices light up from dusk.
 40. **A sunset time setting.** `N` now cycles local clock → day → sunset → night, and sunset
     holds the town at 18:00 for the golden-hour look.
 41. **The HUD follows the theme.** Pink-to-violet sign, warm paper boards and a plum dark mode;
