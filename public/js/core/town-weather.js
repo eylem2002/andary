@@ -22,6 +22,11 @@ const RAINBOW_MS = 30_000;
 const RED_MEMORY_MS = 10 * 60_000;
 const FOG_AFTER_MS = 30_000;
 const FOG_FULL_MS = 90_000;
+/**
+ * Nobody thinks for this long without a tool or a reply: past it the session was interrupted
+ * (Esc sends no hook) or the events are an old replay, so its fog lifts.
+ */
+const FOG_GIVE_UP_MS = 8 * 60_000;
 
 export const CLEAR = Object.freeze({ kind: 'clear', rain: 0, overcast: 0, fog: 0, rainbow: 0, storm: false });
 
@@ -88,7 +93,10 @@ export function createTownWeather() {
       const sinceRainbow = now - rainbowAt;
       const rainbow = sinceRainbow >= 0 && sinceRainbow < RAINBOW_MS ? Math.min(1, sinceRainbow / 2000, (RAINBOW_MS - sinceRainbow) / 4000) : 0;
       let longest = 0;
-      for (const since of thinking.values()) longest = Math.max(longest, now - since);
+      for (const [session, since] of thinking) {
+        if (now - since > FOG_GIVE_UP_MS) thinking.delete(session);
+        else longest = Math.max(longest, now - since);
+      }
       const fog = longest > FOG_AFTER_MS ? Math.min(1, (longest - FOG_AFTER_MS) / (FOG_FULL_MS - FOG_AFTER_MS)) * 0.8 : 0;
       const overcast = Math.max(rain, fog * 0.5);
       /** @type {TownWeather['kind']} */

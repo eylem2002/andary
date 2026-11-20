@@ -15,6 +15,7 @@ import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
 import { createInspector } from './inspector.js';
 import { createWeatherDriver } from '../core/town-weather.js';
 import { MILESTONES, unlockedAt } from '../core/growth.js';
+import { LOOK } from '../world/env/look.js';
 import { createDiffDialog } from './changes.js';
 import { createUsageDialog } from './usage.js';
 import { createLeaderboard } from './leaderboard.js';
@@ -53,7 +54,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     prefs,
     view,
     controls,
-    sound: createSound({ enabled: prefs.sound, volume: prefs.volume }),
+    sound: createSound({ enabled: prefs.sound, volume: prefs.volume, ambient: prefs.ambient }),
     announcer,
     toasts: createToasts(),
     world: () => shell.world,
@@ -121,6 +122,8 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     },
     /** @param {'live'|'demo'} mode */
     setMode(mode) {
+      // Progress belongs to one town: the demo's must not be compared with the live one's.
+      if (view.mode !== mode) view.progress = null;
       view.mode = mode;
       if (mode === 'live') view.paused = false;
       ctx.refresh();
@@ -177,6 +180,8 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       stopShortcuts();
       stopTicker();
       ctx.cinema.dispose();
+      shell.weather?.dispose();
+      shell.weather = null;
     },
   };
 }
@@ -217,7 +222,8 @@ function showProgress({ ctx }, shell, raw) {
 function ambientMood(ctx, rain) {
   const working = Object.values(ctx.store.getState().agents).filter((agent) => agent.status === 'working').length;
   const hour = ctx.world()?.getTimeOfDay?.() ?? new Date().getHours();
-  return { activity: Math.min(1, working / 6), night: hour < 6 || hour >= 19.5, rain };
+  // Snow falls silently: the snowy look's weather has no rain to hear.
+  return { activity: Math.min(1, working / 6), night: hour < 6 || hour >= 19.5, rain: LOOK === 'snow' ? 0 : rain };
 }
 
 /** What screen readers hear when the town's weather turns. */

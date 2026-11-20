@@ -43,6 +43,10 @@ export function createAtmosphere(deps, initial = 'auto') {
   let mode = initial;
   let hour = 12;
   let envHour = Number.NaN;
+  /** The overcast the environment map was last drawn with. */
+  let envOvercast = 0;
+  /** Seconds since the weather was last eased: the sky follows it ten times a second, not every frame. */
+  let weatherClock = 0;
   let envDue = true;
   let envStamp = -Infinity;
   let clockCheck = 0;
@@ -72,6 +76,8 @@ export function createAtmosphere(deps, initial = 'auto') {
     toColor(state.light, envUniforms.uSun.value).multiplyScalar(state.sunUp ? state.lightIntensity * 0.35 : 0.08);
     envUniforms.uSunDir.value.set(...state.lightDir);
     if (!(Math.abs(hourDelta(envHour, hour)) < ENV_HOUR_STEP)) envDue = true;
+    // A greyer sky also greys the reflections, once it has changed enough to see.
+    if (Math.abs(weather.overcast - envOvercast) > 0.05) envDue = true;
     deps.onChange?.(state);
   }
 
@@ -81,12 +87,16 @@ export function createAtmosphere(deps, initial = 'auto') {
     envDue = false;
     envStamp = now;
     envHour = hour;
+    envOvercast = weather.overcast;
     scene.environment = skyEnv.update();
   }
 
   /** Moves the weather a little towards its target each frame; re-applies the sky when it moved. @param {number} dt */
   function easeWeather(dt) {
-    const step = Math.min(1, dt * 0.6);
+    weatherClock += dt;
+    if (weatherClock < 0.1) return;
+    const step = Math.min(1, weatherClock * 0.6);
+    weatherClock = 0;
     let moved = false;
     for (const k of /** @type {const} */ (['overcast', 'fog'])) {
       const next = Math.abs(target[k] - weather[k]) < 0.004 ? target[k] : weather[k] + (target[k] - weather[k]) * step;

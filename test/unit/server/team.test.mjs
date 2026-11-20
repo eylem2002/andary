@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { browserRole } from '../../../server/auth.mjs';
 import { createHub } from '../../../server/browsers.mjs';
-import { parseShareTo, parseTeamUrl } from '../../../server/cli/options.mjs';
+import { parseShareTo, parseTeamHosts, parseTeamUrl } from '../../../server/cli/options.mjs';
 import { allowedHostHeaders } from '../../../server/security.mjs';
-import { TEAM_HEADER, cleanMemberName, createTeamHost, createTeamRelay, memberKey, teamSecret, verifyMemberKey, viewToken } from '../../../server/team.mjs';
+import { TEAM_HEADER, cleanMemberName, createTeamHost, createTeamRelay, lanAddresses, memberKey, teamSecret, verifyMemberKey, viewToken } from '../../../server/team.mjs';
 
 // A made-up team secret for these tests only.
 const SECRET = 'test-only-'.repeat(4);
@@ -63,14 +63,14 @@ test('the team host rate-limits each member and announces each new member once',
 });
 
 test('the relay sends batches with the key, keeps the newest 1,000 and retries when the host is away', async () => {
-  /** @type {{ url: string, headers: any, body: any }[]} */
+  /** @type {{ url: string, headers: any, body: any, redirect: string }[]} */
   const calls = [];
   let up = false;
   /** @type {any} */
   const fetchImpl = async (/** @type {string} */ url, /** @type {any} */ init) => {
-    calls.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+    calls.push({ url, headers: init.headers, body: JSON.parse(init.body), redirect: init.redirect });
     if (!up) throw new Error('connect ECONNREFUSED');
-    return { ok: true, status: 200 };
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
   };
   const logs = /** @type {string[]} */ ([]);
   const relay = createTeamRelay({ url: 'http://192.168.1.20:4747', key: 'Lina.key', fetchImpl, log: (m) => logs.push(m), flushMs: 60_000 });
@@ -79,6 +79,7 @@ test('the relay sends batches with the key, keeps the newest 1,000 and retries w
   await relay.flush();
   assert.equal(calls[0].url, 'http://192.168.1.20:4747/api/team');
   assert.equal(calls[0].headers[TEAM_HEADER], 'Lina.key');
+  assert.equal(calls[0].redirect, 'error', 'a redirect never carries the key elsewhere');
   assert.equal(calls[0].body.v, 1);
   assert.equal(calls[0].body.events.length, 100);
   assert.equal(calls[0].body.events[0].event.n, 5, 'the oldest five were dropped');
@@ -135,4 +136,47 @@ test('a team host on every interface also answers to its network addresses', () 
   assert.ok(allowed.has('192.168.1.20:4747'));
   assert.ok(allowed.has('127.0.0.1:4747'));
   assert.ok(!allowedHostHeaders(4747, '0.0.0.0').has('192.168.1.20:4747'));
+});
+
+test('the relay cuts batches by size, skips huge events and doctor probes, and only trusts {ok:true}', async () => {
+  /** @type {any[]} */
+  const bodies = [];
+  let answer = { ok: false };
+  /** @type {any} */
+  const fetchImpl = async (/** @type {string} */ _url, /** @type {any} */ init) => {
+    bodies.push(JSON.parse(init.body));
+    return { ok: true, status: 200, json: async () => answer };
+  };
+  const logs = /** @type {string[]} */ ([]);
+  const relay = createTeamRelay({ url: 'http://host:4747', key: 'k', fetchImpl, log: (m) => logs.push(m), flushMs: 60_000 });
+  relay.send({ ts: 1, event: { session_id: 'andary-doctor-123', hook_event_name: 'Stop' } });
+  assert.equal(relay.pending, 0, 'doctor probes stay home');
+  relay.send({ ts: 1, event: { session_id: 's', blob: 'x'.repeat(1_600_000) } });
+  assert.equal(relay.pending, 0, 'an event too big for any batch is dropped');
+  assert.match(logs[0], /too big/);
+  for (let i = 0; i < 5; i += 1) relay.send({ ts: i, event: { session_id: 's', n: i, blob: 'y'.repeat(400_000) } });
+  await relay.flush();
+  assert.equal(bodies[0].events.length, 3, 'about 1.5 MB per request');
+  assert.equal(relay.pending, 5, 'a 200 without {ok:true} (a captive portal, say) is not delivery');
+  answer = { ok: true };
+  await relay.flush();
+  await relay.flush();
+  assert.equal(relay.pending, 0);
+  assert.deepEqual(bodies.slice(-2).map((b) => b.events.map((/** @type {any} */ e) => e.event.n)), [[0, 1, 2], [3, 4]]);
+  relay.dispose();
+  relay.send({ ts: 9, event: { session_id: 's' } });
+  assert.equal(relay.pending, 0, 'nothing is queued after dispose');
+});
+
+test('network addresses: private ranges first, container bridges last', () => {
+  const nic = (/** @type {string} */ address) => [{ address, family: 'IPv4', internal: false }];
+  /** @type {any} */
+  const interfaces = { docker0: nic('172.17.0.1'), lo: [{ address: '127.0.0.1', family: 'IPv4', internal: true }], tailscale0: nic('100.101.1.2'), eth0: nic('192.168.1.20'), v6: [{ address: 'fe80::1', family: 'IPv6', internal: false }] };
+  assert.deepEqual(lanAddresses(interfaces), ['192.168.1.20', '100.101.1.2', '172.17.0.1']);
+});
+
+test('--team-host takes host names without a port', () => {
+  assert.deepEqual(parseTeamHosts(['Box.tailnet.ts.net', 'studio']), ['box.tailnet.ts.net', 'studio']);
+  assert.deepEqual(parseTeamHosts(undefined), []);
+  for (const bad of ['box:4747', 'http://box', 'a..b', '-x']) assert.throws(() => parseTeamHosts([bad]), /host name without a port/);
 });

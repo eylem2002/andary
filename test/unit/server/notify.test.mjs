@@ -42,11 +42,20 @@ test('notifications are posted to ntfy with a title, priority and tags, and rate
   notifier.observe({ hook_event_name: 'PermissionRequest' });
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(posts.length, 2);
+  // Test notes: one every 30 s at most, and they never use up the hour's budget.
+  assert.equal(await notifier.test(), true);
+  assert.equal(await notifier.test(), false, 'a second test right away is not sent');
   for (let i = 0; i < 40; i += 1) {
-    now += 31_000 / 40;
+    now += 31_000;
     await notifier.test();
   }
-  assert.equal(posts.length, 30, 'at most 30 an hour');
+  assert.equal(posts.length, 43);
+  for (let i = 0; i < 40; i += 1) {
+    now += 31_000;
+    notifier.observe({ hook_event_name: 'PermissionRequest' });
+  }
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(posts.length, 43 + 28, 'at most 30 real notes an hour, tests aside');
   assert.equal(await createNotifier({ url: null }).test(), false);
 });
 
@@ -88,4 +97,6 @@ test('this computer\'s notifications: fresh approvals, finished turns and failur
   assert.equal(notificationFor({ type: 'event', event: { kind: 'turn.stop', ts: now, sessionId: 's1', agentKey: 's1:abc' } }, state, now), null);
   assert.equal(notificationFor({ type: 'event', event: { kind: 'turn.fail', ts: now, sessionId: 's2', agentKey: 's2:main' } }, state, now)?.body, 'A crew stopped with an error.');
   assert.equal(notificationFor({ type: 'usage' }, state, now), null);
+  const team = /** @type {any} */ ({ ...state, sessions: [...state.sessions, { id: 'Lina~s3', project: 'web-app', member: 'Lina' }] });
+  assert.equal(notificationFor({ type: 'event', event: { kind: 'turn.stop', ts: now, sessionId: 'Lina~s3', agentKey: 'Lina~s3:main' } }, team, now), null, 'a teammate\'s crew is theirs to watch');
 });

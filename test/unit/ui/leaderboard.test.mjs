@@ -44,7 +44,7 @@ test('busiestAgents ranks by tool calls, then files changed', () => {
 });
 
 test('growthText and holderName read naturally', () => {
-  assert.equal(growthText(0), '0 points. Next: bunting over the north avenue, in 10 points.');
+  assert.equal(growthText(0), '0 points. Next: bunting along the north avenue, in 10 points.');
   assert.equal(growthText(99), '99 points. Next: a Ferris wheel on the beach, in 1 point.');
   assert.equal(growthText(600), '600 points: every landmark is built.');
   const state = /** @type {any} */ ({ agents: { 's1:main': { name: 'Foreman', sessionId: 's1' } }, sessions: [{ id: 's1', project: 'api-server' }] });

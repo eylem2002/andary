@@ -563,7 +563,7 @@ function rememberFile(a, path) {
  * @property {string} path      relative to the crew's folder where possible
  * @property {string} tool
  * @property {number} ts
- * @property {boolean} whole    the whole file was written (no "before" to compare with)
+ * @property {boolean} whole    the whole file (or notebook cell) was written: no "before" to compare with
  * @property {{ before: string, after: string }[]} hunks
  */
 
@@ -589,16 +589,22 @@ function recordChange(a, e, s) {
  * The before and after text of an editing tool's input, or null for other tools.
  * @param {string} tool
  * @param {Record<string, any>} input
- * @returns {{ whole: boolean, list: { before: string, after: string }[] }|null}
+ * @returns {{ whole: boolean, list: { before: string, after: string, cut?: boolean }[] }|null}
  */
 export function changeHunks(tool, input) {
   const text = (/** @type {unknown} */ v) => (typeof v === 'string' ? v.slice(0, MAX_HUNK_CHARS) : '');
-  if (tool === 'Edit') return { whole: false, list: [{ before: text(input.old_string), after: text(input.new_string) }] };
+  const long = (/** @type {unknown} */ v) => typeof v === 'string' && v.length > MAX_HUNK_CHARS;
+  const hunk = (/** @type {unknown} */ before, /** @type {unknown} */ after) => {
+    const cut = long(before) || long(after);
+    return { before: text(before), after: text(after), ...(cut ? { cut } : {}) };
+  };
+  if (tool === 'Edit') return { whole: false, list: [hunk(input.old_string, input.new_string)] };
   if (tool === 'MultiEdit' && Array.isArray(input.edits)) {
-    return { whole: false, list: input.edits.slice(0, 20).filter((edit) => edit && typeof edit === 'object').map((edit) => ({ before: text(edit.old_string), after: text(edit.new_string) })) };
+    return { whole: false, list: input.edits.slice(0, 20).filter((edit) => edit && typeof edit === 'object').map((edit) => hunk(edit.old_string, edit.new_string)) };
   }
-  if (tool === 'Write') return { whole: true, list: [{ before: '', after: text(input.content) }] };
-  if (tool === 'NotebookEdit') return { whole: false, list: [{ before: '', after: text(input.new_source) }] };
+  if (tool === 'Write') return { whole: true, list: [hunk('', input.content)] };
+  // A notebook cell is replaced whole: its old source is not in the hook.
+  if (tool === 'NotebookEdit') return { whole: true, list: [hunk('', input.new_source)] };
   return null;
 }
 

@@ -58,7 +58,9 @@ function dateOf(ms) {
 function pastDays(ms) {
   const days = [];
   for (let back = 13; back >= 1; back -= 1) {
-    const date = new Date(ms - back * 86_400_000);
+    // Calendar days, not 24-hour steps (daylight saving).
+    const date = new Date(ms);
+    date.setDate(date.getDate() - back);
     const weekend = date.getDay() === 0 || date.getDay() === 6;
     const costUsd = weekend ? 0.4 + ((back * 37) % 9) / 10 : 2.2 + ((back * 53) % 31) / 10;
     days.push({ date: dateOf(date.getTime()), tokens: Math.round(costUsd * 820_000), costUsd: Math.round(costUsd * 100) / 100 });

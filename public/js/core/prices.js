@@ -11,7 +11,9 @@ const PRICES = Object.freeze([
   { match: /(fable|mythos)-5-2/, input: 8, output: 40, cacheRead: 0.8 },
   { match: /fable-5-1/, input: 10, output: 50, cacheRead: 1 },
   { match: /sonnet-5(?!-5)/, input: 2, output: 10, cacheRead: 0.2 },
-  { match: /opus-(5(?!-5)|4)/, input: 5, output: 25, cacheRead: 0.5 },
+  { match: /opus-(5(?!-5)|4-[5-9])/, input: 5, output: 25, cacheRead: 0.5 },
+  // Opus 4 and 4.1 (claude-opus-4-2025…, claude-opus-4-1-…) kept the older, higher price.
+  { match: /opus-4/, input: 15, output: 75, cacheRead: 1.5 },
   { match: /sonnet-4/, input: 3, output: 15, cacheRead: 0.3 },
   { match: /haiku-4/, input: 1, output: 5, cacheRead: 0.1 },
 ]);
@@ -30,7 +32,10 @@ export function messageCost(model, usage) {
   const input = count(usage.input_tokens);
   const cacheRead = count(usage.cache_read_input_tokens);
   const write1h = count(usage.cache_creation?.ephemeral_1h_input_tokens);
-  const write5m = usage.cache_creation ? count(usage.cache_creation.ephemeral_5m_input_tokens) : count(usage.cache_creation_input_tokens);
+  // The breakdown, when it has the 5-minute part; otherwise whatever the total leaves.
+  const write5m = typeof usage.cache_creation?.ephemeral_5m_input_tokens === 'number'
+    ? count(usage.cache_creation.ephemeral_5m_input_tokens)
+    : Math.max(0, count(usage.cache_creation_input_tokens) - write1h);
   const rates = price.long && input + cacheRead + write5m + write1h > LONG_PROMPT_TOKENS ? price.long : price;
   return (input * rates.input + write5m * rates.input * 1.25 + write1h * rates.input * 2 + cacheRead * rates.cacheRead + count(usage.output_tokens) * rates.output) / 1e6;
 }

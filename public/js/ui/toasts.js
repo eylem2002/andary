@@ -19,6 +19,8 @@ import { roundel } from './parts.js';
 
 const MAX_VISIBLE = 3;
 const DURATION_MS = 6500;
+/** A toast with a button waits longer, so there is time to reach it. */
+const ACTION_DURATION_MS = 15_000;
 
 export function createToasts() {
   const list = h('ol', { class: 'hud-toasts__list' });
@@ -33,7 +35,19 @@ export function createToasts() {
   /** @param {HTMLElement} toast */
   function arm(toast) {
     clearTimeout(Number(toast.dataset.timer));
-    toast.dataset.timer = String(setTimeout(() => dismiss(toast), DURATION_MS));
+    toast.dataset.timer = String(setTimeout(() => dismiss(toast), toast.dataset.action ? ACTION_DURATION_MS : DURATION_MS));
+  }
+
+  /**
+   * Makes room for a new toast: the oldest one without a button goes first, so a burst of
+   * achievements cannot push away an offer the reader has yet to reach.
+   */
+  function overflow() {
+    while (list.children.length > MAX_VISIBLE) {
+      const toasts = /** @type {HTMLElement[]} */ ([...list.children]);
+      const plain = toasts.findLast((toast) => !toast.dataset.action);
+      dismiss(plain ?? toasts[toasts.length - 1]);
+    }
   }
 
   /** @param {ToastOptions} options */
@@ -44,8 +58,9 @@ export function createToasts() {
     toast.addEventListener('pointerleave', () => arm(toast));
     toast.addEventListener('focusin', () => clearTimeout(Number(toast.dataset.timer)));
     toast.addEventListener('focusout', () => arm(toast));
+    if (options.action) toast.dataset.action = 'true';
     list.prepend(toast);
-    while (list.children.length > MAX_VISIBLE) dismiss(/** @type {HTMLElement} */ (list.lastElementChild));
+    overflow();
     arm(toast);
   }
 

@@ -38,7 +38,9 @@ export function createDemoProgress(onProgress, now, storage = safeStorage()) {
 function madeUpDays(ms) {
   const days = [];
   for (let back = 8; back >= 0; back -= 1) {
-    const d = new Date(ms - back * 86_400_000);
+    // Calendar days, not 24-hour steps: a daylight-saving change would skip or repeat a day.
+    const d = new Date(ms);
+    d.setDate(d.getDate() - back);
     days.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
   }
   return days;

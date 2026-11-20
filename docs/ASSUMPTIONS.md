@@ -163,8 +163,8 @@ section.
     `message.id`, `message.model`, `message.usage`, `timestamp`; subagents in
     `<session>/subagents/agent-<id>.jsonl`.
 46. **Two small files on disk.** To keep day totals across restarts without counting anything
-    twice, `~/.andary/usage.json` holds day totals and how far each transcript was read (numbers
-    and paths only, mode 0600). The promise "nothing on disk without `--record`" now reads
+    twice, `~/.andary/usage.json` holds day totals, how far each transcript was read and the ids
+    of recent messages (numbers, ids and transcript paths, which name project folders; mode 0600). The promise "nothing on disk without `--record`" now reads
     "none of your prompts or commands on disk without `--record`".
 47. **Usage is a dialog, not a fourth board tab.** `U`, the toolbar's coins button or a crew's
     cost opens it; the board stays at three tabs on a phone.
@@ -185,8 +185,9 @@ section.
 51. **The demo starts at 92 points**, so a visitor sees the Ferris wheel rise within a few
     minutes; its count stays in that browser.
 52. **Leaderboard records.** A "fix" runs from a crew's first failing test run to its next
-    passing one (within two hours; interrupts don't count). Records are kept since Andary
-    started (in memory); the streak counts busy days ending today or yesterday. Agents are
+    passing one (within two hours; interrupts don't count). Records cover the events the town
+    still holds (the server keeps the last 2,000, and the page rebuilds them from those on every
+    load or reconnect); the streak counts busy days ending today or yesterday. Agents are
     ranked by tool calls, then files changed, among those in town now. In a team town
     (feature 9) the same board covers everyone's crews.
 53. **Phone notifications through ntfy.** "Phone notifications" with zero cost and no account
@@ -219,8 +220,11 @@ section.
     the host's town but never held there: only they can answer it, in their own terminal or town.
 59. **One view link per team.** Watching is view-only and the same link works for everyone the
     host gives it to; `andary team reset` revokes it together with every member key. Viewers
-    see the whole town (the host's crews too) but not the host's prompts waiting for approval,
-    costs, settings or ntfy topic.
+    see everything the town shows about every crew, the host's included: prompts, commands, file
+    paths and edits, permission requests with what they ask for. They cannot answer prompts, and
+    do not get the host's approval cards, costs, settings or ntfy topic. The invite and a
+    sharing member's banner both say so. A team host answers to its network addresses (checked
+    every 30 s) and to names given with `--team-host` (a VPN name), so the view link works there.
 60. **"Their own neighbourhood" is their name, not a district.** The town is laid out by kind of
     work (the library, the terminal, the docks…), so a teammate's crew still walks to the same
     buildings. Their foreman carries their name on the name tag and in the log, and their crew

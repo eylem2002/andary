@@ -44,10 +44,12 @@ export function createAmbient(ctx, out) {
   const bus = ctx.createGain();
   bus.gain.value = 0;
   bus.connect(out);
+  /** @type {AudioScheduledSourceNode[]} the loops, stopped on dispose */
+  const sources = [];
   const layers = {
-    waves: waves(ctx, bus),
-    hum: noiseLayer(ctx, bus, { type: 'lowpass', freq: 220, brown: true }),
-    rain: noiseLayer(ctx, bus, { type: 'highpass', freq: 1800, brown: false }),
+    waves: waves(ctx, bus, sources),
+    hum: noiseLayer(ctx, bus, { type: 'lowpass', freq: 220, brown: true }, sources),
+    rain: noiseLayer(ctx, bus, { type: 'highpass', freq: 1800, brown: false }, sources),
     pad: ctx.createGain(),
   };
   const padFilter = ctx.createBiquadFilter();
@@ -108,6 +110,14 @@ export function createAmbient(ctx, out) {
     dispose() {
       if (timer) clearInterval(timer);
       timer = null;
+      running = false;
+      for (const source of sources) {
+        try {
+          source.stop();
+        } catch {
+          // already stopped
+        }
+      }
       bus.disconnect();
     },
   };
@@ -118,8 +128,9 @@ export function createAmbient(ctx, out) {
  * @param {AudioContext} ctx
  * @param {AudioNode} out
  * @param {{ type: BiquadFilterType, freq: number, brown: boolean }} options
+ * @param {AudioScheduledSourceNode[]} sources
  */
-function noiseLayer(ctx, out, { type, freq, brown }) {
+function noiseLayer(ctx, out, { type, freq, brown }, sources) {
   const source = ctx.createBufferSource();
   source.buffer = noiseBuffer(ctx, 4, brown);
   source.loop = true;
@@ -130,6 +141,7 @@ function noiseLayer(ctx, out, { type, freq, brown }) {
   gain.gain.value = 0;
   source.connect(filter).connect(gain).connect(out);
   source.start();
+  sources.push(source);
   return gain;
 }
 
@@ -137,9 +149,10 @@ function noiseLayer(ctx, out, { type, freq, brown }) {
  * Waves: brown noise whose loudness and brightness rise and fall like surf.
  * @param {AudioContext} ctx
  * @param {AudioNode} out
+ * @param {AudioScheduledSourceNode[]} sources
  */
-function waves(ctx, out) {
-  const gain = noiseLayer(ctx, out, { type: 'lowpass', freq: 520, brown: true });
+function waves(ctx, out, sources) {
+  const gain = noiseLayer(ctx, out, { type: 'lowpass', freq: 520, brown: true }, sources);
   const swell = ctx.createGain();
   swell.gain.value = 0.6;
   const lfo = ctx.createOscillator();
@@ -148,6 +161,7 @@ function waves(ctx, out) {
   depth.gain.value = 0.4;
   lfo.connect(depth).connect(swell.gain);
   lfo.start();
+  sources.push(lfo);
   // Re-route the layer through the swell.
   gain.disconnect();
   gain.connect(swell).connect(out);

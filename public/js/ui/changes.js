@@ -29,6 +29,8 @@ export function createDiffDialog(ctx) {
   const nav = h('div', { class: 'hud-dialog__actions' }, previous, next);
   const dialog = createDialog({ id: 'hud-diff', title: 'Changes', body: [subtitle, body, nav], wide: true });
   const title = /** @type {HTMLElement} */ (dialog.el.querySelector('.hud-dialog__title'));
+  // Focus can land on the title when both Newer and Older are gone.
+  title.tabIndex = -1;
   /** @type {{ agentKey: string, id: string }|null} */
   let current = null;
 
@@ -53,8 +55,8 @@ export function createDiffDialog(ctx) {
     body.replaceChildren(...change.hunks.map((hunk, i) => hunkView(hunk, i, change.hunks.length)));
     setHidden(previous, index <= 0);
     setHidden(next, index >= list.length - 1);
-    previous.onclick = () => show(current?.agentKey ?? '', list[index - 1]?.id);
-    next.onclick = () => show(current?.agentKey ?? '', list[index + 1]?.id);
+    previous.onclick = () => step(list[index - 1]?.id, previous);
+    next.onclick = () => step(list[index + 1]?.id, next);
   }
 
   /** @param {string} agentKey @param {string|undefined} id */
@@ -62,6 +64,20 @@ export function createDiffDialog(ctx) {
     if (!id) return;
     current = { agentKey, id };
     render();
+  }
+
+  /**
+   * Newer/Older: shows the other change, says which one it is, and keeps the focus on a button
+   * (the one pressed hides at the end of the list).
+   * @param {string|undefined} id
+   * @param {HTMLElement} pressed
+   */
+  function step(id, pressed) {
+    show(current?.agentKey ?? '', id);
+    ctx.announcer.polite(`${title.textContent ?? ''}. ${subtitle.textContent ?? ''}`);
+    if (!pressed.hidden) return;
+    const other = pressed === previous ? next : previous;
+    (other.hidden ? title : other).focus();
   }
 
   return {
@@ -84,7 +100,7 @@ export function createDiffDialog(ctx) {
 }
 
 /**
- * @param {{ before: string, after: string }} hunk
+ * @param {{ before: string, after: string, cut?: boolean }} hunk
  * @param {number} index
  * @param {number} count
  */
@@ -96,5 +112,6 @@ function hunkView(hunk, index, count) {
     h('span', { class: 'hud-diff__text', text: line.text || ' ' })));
   return h('section', { class: 'hud-diff__hunk', 'aria-label': count > 1 ? `Edit ${index + 1} of ${count}` : 'Edit' },
     count > 1 ? h('h3', { class: 'hud-diff__hunk-title', text: `Edit ${index + 1} of ${count}` }) : null,
-    h('div', { class: 'hud-diff__code hud-mono', role: 'group', tabindex: '0', 'aria-label': 'Diff' }, ...(rows.length ? rows : [h('div', { class: 'hud-diff__line', text: 'No text changed.' })])));
+    h('div', { class: 'hud-diff__code hud-mono', role: 'group', tabindex: '0', 'aria-label': 'Diff' }, ...(rows.length ? rows : [h('div', { class: 'hud-diff__line', text: 'No text changed.' })])),
+    hunk.cut ? h('p', { class: 'hud-dialog__note', text: 'Long edit: only its first 4,000 characters are shown.' }) : null);
 }

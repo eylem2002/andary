@@ -20,8 +20,10 @@ const START_HELP = `Options:
       --notify-url <url>    Your own ntfy topic URL instead (or ANDARY_NOTIFY_URL)
       --team                Host a team town: teammates' Andarys can share their sessions here
                             (listens on your network unless --host says otherwise)
+      --team-host <name>    Another name teammates reach this town by, e.g. a Tailscale name
       --share-to <address>  Share your sessions with a team town (or ANDARY_SHARE_TO)
-      --team-key <key>      Your key from "andary team invite" on the host (or ANDARY_TEAM_KEY)
+      --team-key <key>      Your key from "andary team invite" on the host (better: put it in
+                            ANDARY_TEAM_KEY, so it stays out of ps and your shell history)
       --remote-approvals    Let the town answer Claude Code's permission prompts
       --approval-timeout <s>
                             Seconds a prompt waits for the town before the terminal asks

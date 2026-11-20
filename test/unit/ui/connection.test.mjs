@@ -75,7 +75,7 @@ describe('connectLive', () => {
     socket.receive([1, 2]);
     assert.deepEqual(store.calls, [['reset'], ['ingest', 1], ['ingest', 2], ['approval', 'a1'], ['ingest', 3], ['approval', 'a1']]);
     assert.deepEqual(statuses, ['live']);
-    assert.deepEqual(settings, [{ remoteApprovals: true, notifyUrl: null }, { remoteApprovals: false }]);
+    assert.deepEqual(settings, [{ remoteApprovals: true, team: null, notifyUrl: null }, { remoteApprovals: false }]);
     assert.deepEqual(errors, ['Too many browsers']);
   });
 

@@ -11,9 +11,9 @@ const MIN_GAP_MS = { pop: 140, chime: 900, buzz: 1600, bell: 1200, whoosh: 1200 
 const MAX_PER_SECOND = 6;
 
 /**
- * @param {{ enabled?: boolean, volume?: number }} [options]
+ * @param {{ enabled?: boolean, volume?: number, ambient?: boolean }} [options]  ambient: the bed is wanted (Settings)
  */
-export function createSound({ enabled = false, volume = 0.6 } = {}) {
+export function createSound({ enabled = false, volume = 0.6, ambient: ambientWanted = false } = {}) {
   /** @type {AudioContext|null} */
   let ctx = null;
   /** @type {GainNode|null} */
@@ -26,16 +26,32 @@ export function createSound({ enabled = false, volume = 0.6 } = {}) {
   let recent = [];
   /** @type {ReturnType<typeof createAmbient>|null} */
   let ambient = null;
-  const bed = { wanted: true, hidden: false, mood: { activity: 0, night: false, rain: 0 } };
+  const bed = { wanted: ambientWanted, hidden: false, mood: { activity: 0, night: false, rain: 0 } };
+  /** @type {ReturnType<typeof setTimeout>|null} */
+  let release = null;
 
-  /** Starts or stops the ambient bed to match sound, the setting and the tab. */
+  /**
+   * Starts or stops the ambient bed to match sound, the setting and the tab. Stopped, it fades
+   * out and then lets go of its loops, so nothing keeps running silently.
+   */
   function syncAmbient() {
     const play = on && bed.wanted && !bed.hidden && ctx?.state === 'running';
+    if (play && release) {
+      clearTimeout(release);
+      release = null;
+    }
     if (play && !ambient && ctx && master) {
       ambient = createAmbient(ctx, master);
       ambient.setMood(bed.mood);
     }
     ambient?.setPlaying(Boolean(play));
+    if (!play && ambient && !release) {
+      release = setTimeout(() => {
+        release = null;
+        ambient?.dispose();
+        ambient = null;
+      }, 5000);
+    }
   }
 
   /** Creates or resumes the context; must run inside a user gesture the first time. */

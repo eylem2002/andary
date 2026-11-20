@@ -26,7 +26,7 @@ export async function handleRequest(ctx, req, res) {
   const teamPost = Boolean(ctx.team) && req.method === 'POST' && req.url === '/api/team';
   if (!teamPost && !isAllowedHost(req.headers.host, ctx.allowedHosts)) {
     req.resume();
-    sendText(res, 403, 'Forbidden: Andary only answers to 127.0.0.1, localhost and [::1].\n');
+    sendText(res, 403, 'Forbidden: Andary does not answer to this host name. Open it at 127.0.0.1 or localhost (a team town also answers to its network address and to --team-host names).\n');
     return;
   }
   const url = parseUrl(req.url);
@@ -144,6 +144,8 @@ const API_ROUTES = {
 
 /** Most events one teammate may send in one request. */
 const TEAM_BATCH = 200;
+/** Team uploads read at the same time, from everyone. */
+const TEAM_UPLOADS = 4;
 
 /**
  * POST /api/team from a teammate's Andary: authenticate the member, rate-limit, read, then ingest
@@ -160,21 +162,27 @@ async function handleTeam(ctx, req, res) {
     sendJson(res, ctx.team ? 401 : 404, { error: ctx.team ? 'Missing or wrong team key' : 'Not found' });
     return;
   }
-  const bucket = /** @type {NonNullable<TownContext['team']>} */ (ctx.team).limiter(member);
-  if (bucket.available() < 1) {
+  const team = /** @type {NonNullable<TownContext['team']>} */ (ctx.team);
+  const bucket = team.limiter(member);
+  // One token before the body is read, and only a few uploads at a time: a key cannot be used to
+  // keep many 2 MB uploads open at once.
+  if (team.uploads >= TEAM_UPLOADS || !bucket.take(1)) {
     req.resume();
     sendJson(res, 429, { error: 'Too many team events' }, { 'Retry-After': '1' });
     return;
   }
   let events;
+  team.uploads += 1;
   try {
     events = await readTeamEvents(req);
   } catch (error) {
     if (!(error instanceof HttpError)) throw error;
     sendJson(res, error.status, { error: error.message }, error.status === 413 ? { Connection: 'close' } : {});
     return;
+  } finally {
+    team.uploads -= 1;
   }
-  if (!bucket.take(events.length)) {
+  if (events.length > 1 && !bucket.take(events.length - 1)) {
     sendJson(res, 429, { error: 'Too many team events' }, { 'Retry-After': '1' });
     return;
   }

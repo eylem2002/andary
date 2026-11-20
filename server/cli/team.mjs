@@ -43,16 +43,23 @@ function invite(rawName, values, home, io) {
   const port = state?.port ?? DEFAULT_PORT;
   const lan = lanAddresses()[0];
   const base = values.url ? parseTeamUrl(values.url, '--url') : `http://${lan ?? '127.0.0.1'}:${port}`;
-  const command = `andary start --share-to ${base} --team-key ${memberKey(secret, name)}`;
+  // The key goes in the environment: as an argument it would sit in ps and the shell history.
+  const command = `ANDARY_TEAM_KEY=${memberKey(secret, name)} andary start --share-to ${base}`;
   io.out(`Invite for ${name}. Send them these two lines privately: the key lets anyone add sessions to your town as ${name}.`);
   io.out('');
   io.out('  To share their Claude Code sessions with the team town, they run:');
   io.out(`    ${command}`);
+  io.out('  (In PowerShell: $env:ANDARY_TEAM_KEY="<key>"; andary start --share-to <address>)');
   io.out('  To watch the team town in a browser (view only):');
   io.out(`    ${base}/?view=${viewToken(secret)}`);
   io.out('');
+  io.out('Whoever has the view link sees every crew\'s prompts, commands, file paths and edits, yours');
+  io.out('included, over plain HTTP: share it only with the team, on a network you trust.');
   if (!values.url && !lan) io.out('No network address found: pass the address teammates use with --url http://<address>:<port>.');
   if (!state) io.out(`The team town is not running: start it with ${cliInvocation()} start --team`);
+  else if (!state.team) io.out(`The running town is not a team host: restart it with ${cliInvocation()} start --team`);
+  const host = new URL(base).hostname;
+  if (values.url && !/^[\d.]+$/.test(host)) io.out(`For the view link to work at ${host}, start the team town with --team-host ${host}`);
   io.out(`Revoke every key and the view link with: ${cliInvocation()} team reset`);
   return 0;
 }

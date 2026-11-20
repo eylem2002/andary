@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { memberKey, teamSecret, viewToken } from '../../server/team.mjs';
 import { closeBrowser, connectBrowser, hookPayload, postHook, rawRequest, startTown, waitForMessage } from './helpers.mjs';
@@ -23,9 +25,10 @@ describe('Team town', () => {
 
   before(async () => {
     // --host keeps the test off the network; a real host leaves it out and listens on the LAN.
-    host = await startTown({ args: ['--team', '--host', '127.0.0.1'] });
+    host = await startTown({ args: ['--team', '--host', '127.0.0.1', '--team-host', 'andary-host.tailnet.example'] });
     secret = /** @type {string} */ (teamSecret(host.home, { create: false }));
-    member = await startTown({ args: ['--share-to', host.baseUrl, '--team-key', memberKey(secret, 'Lina')] });
+    // The key by environment, as the invite prints it.
+    member = await startTown({ args: ['--share-to', host.baseUrl], env: { ANDARY_TEAM_KEY: memberKey(secret, 'Lina') } });
   });
   after(async () => {
     await member?.stop();
@@ -56,7 +59,7 @@ describe('Team town', () => {
     assert.equal((await postTeam(host.port, batch, { 'x-andary-team': memberKey(secret, 'Omar'), host: 'andary-host.tailnet.example:4747' })).status, 200);
     assert.equal((await postTeam(host.port, { v: 2 }, { 'x-andary-team': memberKey(secret, 'Omar') })).status, 400);
     // Only the team endpoint skips the Host check: the rest of the town still refuses other names.
-    assert.equal((await rawRequest(host.port, { path: '/', headers: { host: 'andary-host.tailnet.example:4747' } })).status, 403);
+    assert.equal((await rawRequest(host.port, { path: '/', headers: { host: `evil.example:${host.port}` } })).status, 403);
     // A town that does not host a team has no team endpoint.
     assert.equal((await postTeam(member.port, batch, { 'x-andary-team': memberKey(secret, 'Lina') })).status, 404);
 
@@ -71,6 +74,8 @@ describe('Team town', () => {
   it('lets teammates watch with the view link, but not answer prompts or see the owner\'s settings', async () => {
     const view = viewToken(secret);
     assert.equal((await rawRequest(host.port, { path: '/?view=wrong' })).status, 403);
+    // The link works at a --team-host name too (a VPN name).
+    assert.equal((await rawRequest(host.port, { path: `/?view=${view}`, headers: { host: `andary-host.tailnet.example:${host.port}` } })).status, 302);
     const login = await rawRequest(host.port, { path: `/?view=${view}` });
     assert.equal(login.status, 302);
     assert.equal(login.headers.location, '/');
@@ -93,5 +98,19 @@ describe('Team town', () => {
 
     // The view link does nothing on a town that does not host a team.
     assert.equal((await rawRequest(member.port, { path: `/?view=${view}` })).status, 403);
+  });
+
+  it('invites print the key for the environment, the view link, and what the link shows', () => {
+    const cli = fileURLToPath(new URL('../../bin/andary.mjs', import.meta.url));
+    const run = spawnSync(process.execPath, [cli, 'team', 'invite', 'Omar', '--url', 'http://box.tailnet.example:4747'], { env: { ...process.env, ANDARY_HOME: host.home }, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /ANDARY_TEAM_KEY=Omar\.[\w-]{32} andary start --share-to http:\/\/box\.tailnet\.example:4747/);
+    assert.ok(!run.stdout.includes('--team-key'), 'the key is not an argument');
+    assert.match(run.stdout, /\?view=[\w-]{32}/);
+    assert.match(run.stdout, /sees every crew's prompts/);
+    assert.match(run.stdout, /--team-host box\.tailnet\.example/);
+    assert.doesNotMatch(run.stdout, /not a team host/);
+    const plain = spawnSync(process.execPath, [cli, 'team', 'invite', 'Omar'], { env: { ...process.env, ANDARY_HOME: member.home }, encoding: 'utf8' });
+    assert.match(plain.stdout, /The running town is not a team host/);
   });
 });

@@ -264,15 +264,20 @@ Settled during implementation; they refine §4.3–§4.5.
 ### 4.8 Token usage and cost
 
 `server/usage.mjs`. Every hook's `transcript_path` (and, for a subagent, `agent_transcript_path`
-or `<transcript without .jsonl>/subagents/agent-<id>.jsonl`) is read, 0.8 s after the last hook
-for that agent, from where the last read stopped (at most 16 MB at a time, whole lines only).
-Only `.jsonl` files whose real path is inside `<CLAUDE_CONFIG_DIR or ~/.claude>/projects` are
-read. Each `type: "assistant"` line's `message.usage` is counted once per `message.id` (Claude
-Code splits one message over several lines), priced with `public/js/core/prices.js` (API list
-prices; 5-minute cache writes 1.25× input, 1-hour 2×, Haiku 5.5's long-prompt rate over 100,000
-tokens) and added to its agent and to the local day of its `timestamp`. Day totals (last 30) and
-read offsets are kept in `<ANDARY_HOME>/usage.json` (mode 0600; numbers and transcript paths
-only) so a restart counts nothing twice; agent totals live in memory.
+or `<transcript without .jsonl>/subagents/agent-<id>.jsonl`) is read 0.8 s after the first hook
+that asks for it (later hooks in that window share the read: a throttle, not a debounce), from
+where the last read of that file stopped (at most 16 MB at a time, whole lines only; a single
+line longer than that is skipped). Only regular `.jsonl` files whose real path is inside
+`<CLAUDE_CONFIG_DIR or ~/.claude>/projects` are read, opened without following links or blocking,
+and offsets are kept per real path. Each `type: "assistant"` line's `message.usage` is counted
+once per `message.id` + `requestId` across all transcripts (Claude Code splits one message over
+several lines, and a resumed session copies earlier messages into its new file); a later line of
+the same message reporting more output tokens adds the difference. It is priced with
+`public/js/core/prices.js` (API list prices; 5-minute cache writes 1.25× input, 1-hour 2×,
+Haiku 5.5's long-prompt rate over 100,000 tokens) and added to its agent and to the local day of
+its `timestamp`. Day totals (last 30), read offsets by transcript path and the newest 4,000
+message ids are kept in `<ANDARY_HOME>/usage.json` (mode 0600; numbers, ids and transcript paths,
+which name your project folders) so a restart counts nothing twice; agent totals live in memory.
 
 ```js
 UsageRecord { sessionId, agentId: string|null, tokens: { input, output, cacheRead, cacheWrite },
@@ -319,16 +324,24 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
 - **View token**: `HMAC-SHA256(secret, "view")`, same length. `GET /?view=<token>` (pages only)
   sets the `andary_view` cookie (`HttpOnly; SameSite=Strict; Path=/`) and redirects without it;
   a wrong token answers 403.
-- **Sharing**: `andary start --share-to <address> --team-key <key>` (or `ANDARY_SHARE_TO`,
-  `ANDARY_TEAM_KEY`; both or neither; not together with `--team`). After its own `/api/hook`
-  ingest, the member's server queues the **sanitized** envelope and posts batches to
-  `POST <address>/api/team` with header `x-andary-team: <key>` and body
-  `{"v":1,"events":[{"ts":<ms>,"event":{...}}]}` (at most 100 per post, every 500 ms; the
-  newest 1,000 wait while the host is away, retried after 1, 2, 4… up to 30 s).
+- **Host names**: a team host answers to loopback names, to `--team-host <name>` (repeatable;
+  for a VPN or local DNS name) and, listening on every interface, to its IPv4 network addresses
+  (read again every 30 s). `team invite` prints the private-range address first.
+- **Sharing**: `andary start --share-to <address>` with the key in `ANDARY_TEAM_KEY` (what the
+  invite prints: an argument would show in `ps`) or `--team-key <key>`; `ANDARY_SHARE_TO` works
+  too; both or neither; not together with `--team`. A detached server gets the key, and the ntfy
+  topic, through its environment. After its own `/api/hook` ingest, the member's server queues
+  the **sanitized** envelope (not `andary doctor`'s `andary-doctor-…` sessions; an event over
+  1.5 MB is dropped) and posts batches to `POST <address>/api/team` with header
+  `x-andary-team: <key>` and body `{"v":1,"events":[{"ts":<ms>,"event":{...}}]}` (at most 100
+  events and 1.5 MB per post, every 500 ms; redirects are refused; a batch counts as delivered
+  only on a `{"ok":true}` answer; the newest 1,000 wait while the host is away, retried after 1,
+  2, 4… up to 30 s).
 - **`POST /api/team`** on the host: 404 unless hosting; 401 for a missing or wrong key. It is the
   one route that skips the Host check (the key authenticates it; browsers cannot send the
   header cross-site without a preflight we never answer). Body ≤ 2 MB, at most 200 events used;
-  a token bucket per member (300 events/s, burst 600) answers 429. Each event is ingested like
+  a token bucket per member (300 events/s, burst 600; one token is taken before the body is
+  read) and at most 4 bodies read at once answer 429. Each event is ingested like
   a hook (sanitized again) with `andary_member: <name>` and `session_id: "<name>~<id>"`, its
   `ts` kept within the last hour and not in the future; it counts towards the town's growth
   (§4.9) but not usage, notifications or approvals: a teammate answers their own prompts.
@@ -344,7 +357,10 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
 - **Browser**: `TownEvent.member` (from `andary_member`, one line, ≤ 24 characters) →
   `Session.member`; a member's lead agent is named after them, and the crews board shows a
   `crew-member` badge. Settings shows a "Team town" note for both roles and hides remote
-  approvals and phone notifications from viewers.
+  approvals and phone notifications from viewers. Notifications on this computer skip
+  teammates' crews, and a viewer gets none. `hello` always sets `settings.team` (null when not
+  a team host). `server.json` records `team: true` on a host, so `team invite` can warn when the
+  running town is not one.
 
 ## 5. Browser: events, store, director
 

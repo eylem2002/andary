@@ -30,6 +30,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {string|null} [notifyUrl]    ntfy topic URL for phone notifications (null: off)
  * @property {string} [claudeDir]          Claude Code's config folder, for reading token usage from transcripts
  * @property {boolean} [team]              host a team town: teammates' Andarys may send their events here
+ * @property {string[]} [teamHosts]        names teammates reach a team host by (a VPN name), besides its addresses
  * @property {{ url: string, key: string }|null} [shareTo]  send this town's events to a team host
  * @property {number} [approvalTimeoutMs]
  * @property {boolean} [record]            append every envelope to <home>/recordings/*.jsonl
@@ -61,6 +62,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {(message: string) => void} log
  * @property {{ events: number }} counts
  * @property {NodeJS.Timeout|null} graceTimer
+ * @property {NodeJS.Timeout|null} [hostTimer]  a team host's refresh of its network names
  */
 
 /**
@@ -91,9 +93,18 @@ export async function startTownServer(options = {}) {
   await listen(server, config.port, config.host);
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : config.port;
-  // A team host listening on every interface also answers to its LAN addresses (the view link).
-  const extraHosts = ctx.team && isWildcardHost(config.host) ? lanAddresses() : [];
+  // A team host also answers to the names given with --team-host and, listening on every
+  // interface, to its network addresses (looked at again every 30 s: they can change).
+  const teamHosts = ctx.team ? (options.teamHosts ?? []) : [];
+  const hostNames = () => [...teamHosts, ...(ctx.team && isWildcardHost(config.host) ? lanAddresses() : [])];
+  const extraHosts = hostNames();
   ctx.allowedHosts = allowedHostHeaders(port, config.host, extraHosts);
+  if (ctx.team) {
+    ctx.hostTimer = setInterval(() => {
+      ctx.allowedHosts = allowedHostHeaders(port, config.host, hostNames());
+    }, 30_000);
+    ctx.hostTimer.unref();
+  }
 
   const state = {
     pid: process.pid,
@@ -105,6 +116,7 @@ export async function startTownServer(options = {}) {
     version: ctx.version,
     startedAt: Date.now(),
     approvalTimeoutMs: config.approvalTimeoutMs,
+    ...(ctx.team ? { team: true } : {}),
   };
   if (config.writeState) writeStateFile(config.home, state);
 
@@ -255,6 +267,7 @@ function listen(server, port, host) {
  */
 async function stopServer(ctx, server, config) {
   if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
+  if (ctx.hostTimer) clearInterval(ctx.hostTimer);
   ctx.broker.releaseAll();
   // Last events to the team host, but never hold up shutdown for long.
   if (ctx.relay) await Promise.race([ctx.relay.flush(), new Promise((resolve) => setTimeout(resolve, 1500).unref())]);
