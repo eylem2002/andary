@@ -60,6 +60,16 @@ export function applyTheme(prefs, world) {
   else delete root.dataset.theme;
 }
 
+/**
+ * Everything the preferences say about a world that has just arrived: theme, motion, place names.
+ * @param {Prefs} prefs @param {World} world
+ */
+export function applyWorldPrefs(prefs, world) {
+  applyTheme(prefs, world);
+  applyMotion(prefs, world);
+  world.setPlaceNames?.(prefs.placeNames);
+}
+
 /** Whether motion is reduced right now, as last applied by applyMotion (Settings or the system). */
 export function motionReduced() {
   return document.documentElement.dataset.motion === 'reduce';

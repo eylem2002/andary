@@ -21,6 +21,8 @@ describe('shortcutFor', () => {
       C: 'director',
       h: 'toggle-panels',
       H: 'toggle-panels',
+      p: 'place-names',
+      P: 'place-names',
       '?': 'help',
     };
     for (const [key, action] of Object.entries(cases)) assert.equal(shortcutFor({ key }), action, key);

@@ -2,6 +2,7 @@
 // toolbar / keyboard actions. Each function takes the HUD (its context and components).
 import { timeOfDayFor } from './appearance.js';
 import { directorActive } from './cinema.js';
+import { nextPlaceNames } from '../core/place-names.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').Selection} Selection */
@@ -143,6 +144,7 @@ export function runAction(hud, action) {
       world?.resetCamera();
     }),
     'cycle-time': () => cycleTime(ctx),
+    'place-names': () => cyclePlaceNames(ctx),
     'toggle-quality': () => ctx.setPrefs({ quality: ctx.prefs.quality === 'low' ? 'high' : 'low' }),
     'toggle-sound': () => toggleSound(ctx),
     pause: () => togglePause(ctx),
@@ -188,6 +190,19 @@ function cycleTime(ctx) {
   ctx.setPrefs({ timeMode: /** @type {any} */ (NEXT_TIME[ctx.prefs.timeMode]) });
   ctx.world()?.setTimeOfDay(timeOfDayFor(ctx.prefs.timeMode));
   ctx.announcer.polite(TIME_SPOKEN[ctx.prefs.timeMode]);
+}
+
+/** What screen readers hear after the "P" key. */
+const PLACE_NAMES_SPOKEN = Object.freeze({
+  auto: 'Place names on the buildings where they fit. Zoom in to see more.',
+  always: 'Place names always shown.',
+  off: 'Place names off. Point at a building to see its name.',
+});
+
+/** @param {HudContext} ctx */
+function cyclePlaceNames(ctx) {
+  ctx.setPrefs({ placeNames: nextPlaceNames(ctx.prefs.placeNames) });
+  ctx.announcer.polite(PLACE_NAMES_SPOKEN[ctx.prefs.placeNames]);
 }
 
 /** Runs inside a click or key handler, which is what lets the browser start audio. @param {HudContext} ctx */
