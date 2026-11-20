@@ -42,8 +42,8 @@ const MOBILE_QUERY = '(max-width: 640px)';
 export function createHud({ store, prefs: initialPrefs, controls }) {
   const prefs = { ...initialPrefs };
   const view = initialView(prefs);
-  /** @type {{ world: World|null, frame: number, measureSheets: () => void }} */
-  const shell = { world: null, frame: 0, measureSheets: () => {} };
+  /** @type {{ world: World|null, frame: number, measureSheets: () => void, weather: ReturnType<typeof createWeatherDriver>|null }} */
+  const shell = { world: null, frame: 0, measureSheets: () => {}, weather: null };
   const announcer = createAnnouncer();
   announcer.setActivityEnabled(prefs.announce);
 
@@ -95,7 +95,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     ctx.refresh();
   });
   const stopShortcuts = installShortcuts({ getMode: () => view.mode, handle: (action, event) => handleShortcut(hud, action, event) });
-  const stopTicker = watchEnvironment(ctx, ui);
+  const stopTicker = watchEnvironment(ctx, ui, shell);
   installNotifications(ctx);
   shell.measureSheets = trackSheets(ui.board.el, [ui.inspector.el, ui.place.el], ui.toolbar.el);
   ctx.refresh();
@@ -113,7 +113,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
         ui.notices.showWorldFallback();
       } else {
         ctx.cinema.start(/** @type {HTMLElement} */ (document.getElementById('world')));
-        createWeatherDriver({ store, world: () => shell.world, enabled: () => ctx.prefs.weather, onChange: (w) => sayWeather(ctx, w) });
+        shell.weather = createWeatherDriver({ store, world: () => shell.world, enabled: () => ctx.prefs.weather, onChange: (w) => sayWeather(ctx, w) });
       }
       ctx.refresh();
       // Panel slides animate from now on; two frames later, so a layout settled at boot never does.
@@ -205,6 +205,19 @@ function showProgress({ ctx }, shell, raw) {
     ctx.announcer.polite(`The town grew: ${milestone.name} ${milestone.where}.`);
   }
   ctx.refresh();
+}
+
+/**
+ * How the ambient sound should feel now: busier with more agents at work, night by the town's
+ * clock, rain with the town's weather.
+ * @param {HudContext} ctx
+ * @param {number} rain
+ * @returns {import('./ambient.js').AmbientMood}
+ */
+function ambientMood(ctx, rain) {
+  const working = Object.values(ctx.store.getState().agents).filter((agent) => agent.status === 'working').length;
+  const hour = ctx.world()?.getTimeOfDay?.() ?? new Date().getHours();
+  return { activity: Math.min(1, working / 6), night: hour < 6 || hour >= 19.5, rain };
 }
 
 /** What screen readers hear when the town's weather turns. */
@@ -397,9 +410,10 @@ function trackSheets(board, others, toolbar) {
  * countdowns (stopped while the tab is hidden), and the first-gesture sound unlock.
  * @param {HudContext} ctx
  * @param {Parts} ui
+ * @param {{ weather: { current: { rain: number } }|null }} shell
  * @returns {() => void} stops the ticker
  */
-function watchEnvironment(ctx, ui) {
+function watchEnvironment(ctx, ui, shell) {
   const mobileQuery = matchMedia(MOBILE_QUERY);
   mobileQuery.addEventListener('change', () => {
     ctx.view.mobile = mobileQuery.matches;
@@ -426,8 +440,10 @@ function watchEnvironment(ctx, ui) {
     ui.inspector.tick(now);
     if (++ticks % 5 === 0) ui.activity.tick(now);
     if (ticks % 60 === 0) applyTheme(ctx.prefs, ctx.world());
+    if (ticks % 2 === 0) ctx.sound.setAmbient({ wanted: ctx.prefs.ambient, mood: ambientMood(ctx, shell.weather?.current.rain ?? 0) });
   };
   const sync = () => {
+    ctx.sound.setAmbient({ hidden: document.hidden });
     if (document.hidden && ticker) {
       clearInterval(ticker);
       ticker = null;

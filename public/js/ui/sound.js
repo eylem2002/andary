@@ -1,6 +1,8 @@
 // Sound effects, synthesised with WebAudio (no audio files). Off by default. Browsers only let an
 // AudioContext start inside a user gesture, so the context is created when the viewer turns sound
 // on (a click or key press) or, if sound was left on last time, at their first gesture on the page.
+// The ambient bed (ambient.js) shares the context and the volume.
+import { createAmbient } from './ambient.js';
 
 /** @typedef {'pop'|'chime'|'buzz'|'bell'|'whoosh'} SoundName */
 
@@ -22,6 +24,19 @@ export function createSound({ enabled = false, volume = 0.6 } = {}) {
   const lastPlayed = {};
   /** @type {number[]} */
   let recent = [];
+  /** @type {ReturnType<typeof createAmbient>|null} */
+  let ambient = null;
+  const bed = { wanted: true, hidden: false, mood: { activity: 0, night: false, rain: 0 } };
+
+  /** Starts or stops the ambient bed to match sound, the setting and the tab. */
+  function syncAmbient() {
+    const play = on && bed.wanted && !bed.hidden && ctx?.state === 'running';
+    if (play && !ambient && ctx && master) {
+      ambient = createAmbient(ctx, master);
+      ambient.setMood(bed.mood);
+    }
+    ambient?.setPlaying(Boolean(play));
+  }
 
   /** Creates or resumes the context; must run inside a user gesture the first time. */
   function wake() {
@@ -33,7 +48,8 @@ export function createSound({ enabled = false, volume = 0.6 } = {}) {
       master.gain.value = level * 0.5;
       master.connect(ctx.destination);
     }
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    if (ctx.state === 'suspended') ctx.resume().then(syncAmbient, () => {});
+    syncAmbient();
   }
 
   /** @param {SoundName} name */
@@ -55,6 +71,19 @@ export function createSound({ enabled = false, volume = 0.6 } = {}) {
     setEnabled(value) {
       on = value;
       if (on) wake();
+      syncAmbient();
+    },
+    /**
+     * The ambient bed: whether it is wanted (Settings), whether the tab is hidden, and the mood.
+     * @param {{ wanted?: boolean, hidden?: boolean, mood?: import('./ambient.js').AmbientMood }} patch
+     */
+    setAmbient(patch) {
+      Object.assign(bed, patch);
+      if (patch.mood) ambient?.setMood(bed.mood);
+      syncAmbient();
+    },
+    get ambientPlaying() {
+      return Boolean(ambient?.playing);
     },
     /** Called on the first user gesture when sound was already on at load. */
     unlock() {

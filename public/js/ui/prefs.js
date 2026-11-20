@@ -20,6 +20,7 @@
  * @property {'auto'|'shown'|'hidden'} panels  side panels; auto hides them in a hosted demo
  * @property {boolean} weather       rain, storms, fog and rainbows from what the crews go through
  * @property {boolean} desktopNotify notifications on this computer while the town is in the background
+ * @property {boolean} ambient       waves, gulls, city hum and soft music while sound is on
  */
 
 /** @type {Readonly<Prefs>} */
@@ -40,6 +41,7 @@ export const DEFAULT_PREFS = Object.freeze({
   panels: 'auto',
   weather: true,
   desktopNotify: false,
+  ambient: true,
 });
 
 export const STORAGE_KEY = 'andary:prefs';
