@@ -10,7 +10,7 @@ tell you what each one is doing (with jokes, but mostly with real file names and
 
 ![Andary by day: crews on the left, the town in the middle, live activity on the right](docs/media/andary-day.webp)
 
-![Andary at night, with the agent inspector open](docs/media/andary-night.webp)
+![Andary at night: neon trim and lit windows along the coast](docs/media/andary-night.webp)
 
 <img src="docs/media/andary-mobile.webp" width="260" alt="Andary on a phone: the town on top, crews in a bottom sheet">
 
@@ -58,8 +58,9 @@ Now use `claude` as usual, in any project. The town fills up as your agents work
 
 Also: hats show the model (crown for Opus, beret for Sonnet, sun hat for Haiku), failing tests
 bring a personal rain cloud, rate limits a thunderstorm, passing tests fireworks, and there are
-achievements to unlock ("Red to Green", "node_modules Black Hole", "Night Shift"…). Day and
-night follow your clock. Click any agent for its details, or any building for who is inside.
+achievements to unlock ("Red to Green", "node_modules Black Hole", "Night Shift"…). The town
+is a sunset coast (pastel stucco, palms, a beach, neon at dusk) that follows your clock, or press
+`N` for day, sunset or night. Click any agent for its details, or any building for who is inside.
 
 ### Director camera and full-screen town
 

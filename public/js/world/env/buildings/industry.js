@@ -9,8 +9,8 @@ import { back, cornice, door, east, flowerBed, front, onFace, parapet, roofClutt
 
 /** The harbour pier (world units): centre x, width, shore end z0 and sea end z1. */
 export const PIER = Object.freeze({ x: 15, w: 1.8, z0: -22, z1: -31.5 });
-const BRICK = 0xb9694a;
-const BRICK_DARK = 0x9c5439;
+const BRICK = C.brick;
+const BRICK_DARK = C.brickDark;
 
 /**
  * @param {import('../kit.js').Kit} kit

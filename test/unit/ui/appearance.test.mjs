@@ -5,6 +5,7 @@ import { isNightHour, resolveReducedMotion, resolveTheme, timeOfDayFor } from '.
 test('time of day for each mode', () => {
   assert.equal(timeOfDayFor('auto'), 'auto');
   assert.equal(timeOfDayFor('day'), 13);
+  assert.equal(timeOfDayFor('sunset'), 18);
   assert.equal(timeOfDayFor('night'), 22);
 });
 
@@ -21,6 +22,7 @@ test('theme: explicit choice wins, then the town clock, then the system', () => 
   assert.equal(resolveTheme({ theme: 'dark', timeMode: 'day' }, 13), 'dark');
   assert.equal(resolveTheme({ theme: 'auto', timeMode: 'night' }, 13), 'dark');
   assert.equal(resolveTheme({ theme: 'auto', timeMode: 'day' }, 23), null);
+  assert.equal(resolveTheme({ theme: 'auto', timeMode: 'sunset' }, 23), null);
   assert.equal(resolveTheme({ theme: 'auto', timeMode: 'auto' }, 23), 'dark');
   assert.equal(resolveTheme({ theme: 'auto', timeMode: 'auto' }, 10), null);
 });

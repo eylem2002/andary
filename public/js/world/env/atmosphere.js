@@ -56,6 +56,7 @@ export function createAtmosphere(deps, initial = 'auto') {
     town.uTtNight.value = state.night;
     town.uTtLate.value = state.late;
     post.setBloom(state.bloom, state.bloomThreshold);
+    post.setGrade(state.night);
     scene.environmentIntensity = state.envIntensity;
     toColor(state.zenith, envUniforms.uZenith.value);
     toColor(state.horizon, envUniforms.uHorizon.value);

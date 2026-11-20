@@ -18,7 +18,7 @@ export const SHORTCUT_HELP = Object.freeze([
   { keys: ['[', ']'], label: 'Rotate the view' },
   { keys: ['+', '−'], label: 'Zoom in and out' },
   { keys: ['0'], label: 'Reset the view' },
-  { keys: ['N'], label: 'Switch between day, night and the local clock' },
+  { keys: ['N'], label: 'Switch between day, sunset, night and the local clock' },
   { keys: ['M'], label: 'Sound on or off' },
   { keys: ['A'], label: 'Go to approvals' },
   { keys: ['1', '9'], label: 'Jump to crew 1 to 9' },

@@ -1,7 +1,8 @@
-/* Andary HUD — town wayfinding signage.
-   The brand is a street sign; panels are information boards (paper, ink, hairlines, a dark header
-   band); crews are metro lines with their agents as stations. Overpass was drawn after highway
-   signage lettering, Overpass Mono carries commands and paths.
+/* Andary HUD — signage for a sunset coast.
+   The brand is a beachfront sign: a hot-pink-to-violet board with a white inner border that
+   glows faintly like neon; panels are information boards (warm paper, indigo ink, hairlines, a
+   dark plum header band); crews are metro lines with their agents as stations. Overpass was drawn
+   after highway signage lettering, Overpass Mono carries commands and paths.
    Light palette in :root; the dark one applies at night, with prefers-color-scheme: dark, or with
    [data-theme="dark"] (an explicit [data-theme="light"] opts out of the system preference). */
 
@@ -9,22 +10,24 @@
   --font-ui: 'Overpass', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'Overpass Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-  --sign: #0E6B4F;
-  --sign-hover: #0A5A42;
-  --sign-soft: #DCEFE6;
-  --paper: #FBFCFA;
-  --paper-2: #F0F3EF;
-  --paper-3: #E3E9E2;
-  --ink: #18222F;
-  --ink-2: #4A5562;
-  --ink-3: #5D6874;
-  --hairline: #D5DBD3;
-  --edge: #8A948C;
-  --band: #18222F;
-  --band-ink: #FBFCFA;
-  --band-ink-2: #C9D1D8;
-  --band-hover: #253244;
-  --code-bg: #EDF1EC;
+  --sign: #B5176B;
+  --sign-hover: #96115A;
+  --sign-soft: #FBE2EF;
+  --sign-board: linear-gradient(100deg, #C2185B 0%, #A31C86 55%, #7B2CBF 100%);
+  --sign-glow: 0 0 26px -8px rgb(255 63 164 / 0.6);
+  --paper: #FFFBF7;
+  --paper-2: #F8F2F0;
+  --paper-3: #F2E8E5;
+  --ink: #1E1A2E;
+  --ink-2: #4F4760;
+  --ink-3: #625A72;
+  --hairline: #E6D9D6;
+  --edge: #93848A;
+  --band: #241A3D;
+  --band-ink: #FFFBF7;
+  --band-ink-2: #CFC6E6;
+  --band-hover: #33255A;
+  --code-bg: #F6EEEB;
 
   --working: #1F5FBF;
   --waiting: #9A5B00;
@@ -37,9 +40,9 @@
   --focus: #1F5FBF;
   --focus-on-band: #9EC3FF;
 
-  --shadow: 0 1px 2px rgb(24 34 47 / 0.1), 0 12px 30px -16px rgb(24 34 47 / 0.45);
-  --shadow-lift: 0 2px 4px rgb(24 34 47 / 0.12), 0 22px 48px -20px rgb(24 34 47 / 0.55);
-  --stage: #CBD8D2;
+  --shadow: 0 1px 2px rgb(36 26 61 / 0.1), 0 12px 30px -16px rgb(36 26 61 / 0.45);
+  --shadow-lift: 0 2px 4px rgb(36 26 61 / 0.12), 0 22px 48px -20px rgb(36 26 61 / 0.55);
+  --stage: #EBD6DA;
 
   --gap: 16px;
   --sign-h: 84px;
@@ -54,60 +57,58 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --sign-soft: #D5ECE2;
-    --paper: #16202B;
-    --paper-2: #1E2A36;
-    --paper-3: #283544;
-    --ink: #E6ECEF;
-    --ink-2: #AEB9C2;
-    --ink-3: #93A0AB;
-    --hairline: #2E3B48;
-    --edge: #6A7A8A;
-    --band: #0C131B;
-    --band-ink: #E6ECEF;
-    --band-ink-2: #AEB9C2;
-    --band-hover: #17222E;
-    --code-bg: #0F1720;
+    --paper: #1A1428;
+    --paper-2: #231B35;
+    --paper-3: #2E2443;
+    --ink: #F1ECF7;
+    --ink-2: #BDB2CF;
+    --ink-3: #A497B8;
+    --hairline: #3A2F50;
+    --edge: #7B6E92;
+    --band: #120C1F;
+    --band-ink: #F1ECF7;
+    --band-ink-2: #BDB2CF;
+    --band-hover: #1E1631;
+    --code-bg: #140F21;
     --working: #6EA8FF;
     --waiting: #F2B544;
     --error: #FF8A80;
     --error-soft: #3A2024;
     --done: #55C98F;
-    --idle: #93A0AB;
-    --mark-cut: #16202B;
+    --idle: #A497B8;
+    --mark-cut: #1A1428;
     --focus: #8DBBFF;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.45), 0 14px 34px -16px rgb(0 0 0 / 0.8);
     --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.5), 0 24px 52px -20px rgb(0 0 0 / 0.85);
-    --stage: #0E1822;
+    --stage: #120D1E;
   }
 }
 
 :root[data-theme="dark"] {
-  --sign-soft: #D5ECE2;
-  --paper: #16202B;
-  --paper-2: #1E2A36;
-  --paper-3: #283544;
-  --ink: #E6ECEF;
-  --ink-2: #AEB9C2;
-  --ink-3: #93A0AB;
-  --hairline: #2E3B48;
-  --edge: #6A7A8A;
-  --band: #0C131B;
-  --band-ink: #E6ECEF;
-  --band-ink-2: #AEB9C2;
-  --band-hover: #17222E;
-  --code-bg: #0F1720;
+  --paper: #1A1428;
+  --paper-2: #231B35;
+  --paper-3: #2E2443;
+  --ink: #F1ECF7;
+  --ink-2: #BDB2CF;
+  --ink-3: #A497B8;
+  --hairline: #3A2F50;
+  --edge: #7B6E92;
+  --band: #120C1F;
+  --band-ink: #F1ECF7;
+  --band-ink-2: #BDB2CF;
+  --band-hover: #1E1631;
+  --code-bg: #140F21;
   --working: #6EA8FF;
   --waiting: #F2B544;
   --error: #FF8A80;
   --error-soft: #3A2024;
   --done: #55C98F;
-  --idle: #93A0AB;
-  --mark-cut: #16202B;
+  --idle: #A497B8;
+  --mark-cut: #1A1428;
   --focus: #8DBBFF;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.45), 0 14px 34px -16px rgb(0 0 0 / 0.8);
   --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.5), 0 24px 52px -20px rgb(0 0 0 / 0.85);
-  --stage: #0E1822;
+  --stage: #120D1E;
   color-scheme: dark;
 }
 
@@ -549,8 +550,9 @@ body {
   padding: 4px;
   border-radius: 10px;
   background: var(--sign);
+  background-image: var(--sign-board);
   color: #FFFFFF;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow), var(--sign-glow);
 }
 
 .hud-sign__inner {

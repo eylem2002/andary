@@ -1,6 +1,6 @@
 // Reusable architectural details in a building's local frame (+z = front/south): windows with
-// sills and shutters, doors, cornices, parapets and the rooftop clutter that makes a skyline look
-// like Amman: water tanks, satellite dishes and solar water heaters.
+// sills, shutters and the "eyebrow" sunshades of seaside art deco, doors, cornices with a neon
+// tube under them, parapets, and rooftop clutter: air-conditioning units and satellite dishes.
 import { C, S } from '../palette.js';
 import { range } from '../rand.js';
 
@@ -79,6 +79,9 @@ function windowAt(kit, f, [u, y, w, h], row) {
   onFace(kit, f, [u, y, w + 0.1, h + 0.05, 0.03], frame, { surface: S.matte });
   onFace(kit, f, [u, y, w, h, 0.05], C.glass, glass);
   if (row.arched) archTop(kit, f, [u, y + h, w], glass, frame);
+  // A thin sunshade over the window: the "eyebrow" of seaside art deco.
+  const top = row.arched ? y + h + w / 2 : y + h;
+  onFace(kit, f, [u, top + 0.07, w + 0.34, 0.045, 0.24], frame, { surface: S.stone });
   if (row.shutters != null) {
     for (const side of [-1, 1]) onFace(kit, f, [u + side * (w / 2 + 0.13), y, 0.22, h, 0.05], row.shutters, { surface: S.gloss });
   }
@@ -148,11 +151,13 @@ export function parapet(kit, [x, y, z], [w, d], color = C.stoneTrim) {
 export function cornice(kit, [x, y, z], [w, d], color = C.stoneTrim) {
   kit.box([x, y, z], [w + 0.16, 0.12, d + 0.16], color, { surface: S.stone });
   kit.box([x, y + 0.12, z], [w + 0.26, 0.08, d + 0.26], color, { surface: S.stone });
+  // The building's neon tube under the cornice: a coloured line by day, a glowing outline at night.
+  if (kit.neon != null) kit.box([x, y - 0.075, z], [w + 0.07, 0.05, d + 0.07], kit.neon, { surface: S.bulb, glow: 1, seed: 0.04 });
 }
 
 /**
- * Rooftop clutter: water tanks on stands, satellite dishes and solar water heaters. The rect is
- * the free roof area [x0, z0, x1, z1] at height y.
+ * Rooftop clutter: air-conditioning units, vent stacks and satellite dishes. The rect is the free
+ * roof area [x0, z0, x1, z1] at height y.
  * @param {import('../kit.js').Kit} kit
  * @param {[number, number, number, number]} rect
  * @param {number} y
@@ -161,7 +166,7 @@ export function cornice(kit, [x, y, z], [w, d], color = C.stoneTrim) {
  */
 export function roofClutter(kit, rect, y, rng, count = 3) {
   const [x0, z0, x1, z1] = rect;
-  const makers = [waterTank, solarHeater, satelliteDish, waterTank, satelliteDish];
+  const makers = [acUnit, ventStack, satelliteDish, acUnit, satelliteDish];
   for (let i = 0; i < count; i++) {
     const x = range(rng, x0 + 0.4, x1 - 0.4);
     const z = range(rng, z0 + 0.4, z1 - 0.4);
@@ -169,25 +174,24 @@ export function roofClutter(kit, rect, y, rng, count = 3) {
   }
 }
 
-/** Cylindrical water tank on a small steel stand (white, black or blue). */
-function waterTank(kit, x, y, z, rng) {
-  const colors = [0xf2f2ee, 0x2f3338, 0x3b78b8, 0xf2f2ee];
-  const color = colors[Math.floor(rng() * colors.length)];
-  for (const [dx, dz] of [[-0.18, -0.18], [0.18, -0.18], [-0.18, 0.18], [0.18, 0.18]]) {
-    kit.box([x + dx, y, z + dz], [0.05, 0.25, 0.05], C.steelDark, { surface: S.steel });
-  }
-  kit.cyl([x, y + 0.25, z], 0.3, 0.5, color, { seg: 14, surface: S.gloss });
-  kit.cyl([x, y + 0.75, z], 0.31, 0.06, color, { seg: 14, top: 0.18, surface: S.gloss });
+/** Boxy air-conditioning unit with a fan grille on top. */
+function acUnit(kit, x, y, z, rng) {
+  const rotY = range(rng, -0.2, 0.2);
+  kit.push(x, y, z, rotY);
+  kit.box([0, 0, 0], [0.62, 0.36, 0.48], 0xe9edf0, { surface: S.gloss });
+  kit.box([0, 0.36, 0], [0.64, 0.03, 0.5], C.steel, { surface: S.steel });
+  kit.cyl([0, 0.37, 0], 0.18, 0.02, C.steelDark, { seg: 14, surface: S.steel });
+  kit.cyl([0, 0.38, 0], 0.05, 0.02, C.iron, { seg: 8, surface: S.steel });
+  kit.pop();
 }
 
-/** Solar water heater: tilted dark panel facing south with a white tank above. */
-function solarHeater(kit, x, y, z, rng) {
-  const rotY = range(rng, -0.25, 0.25);
-  kit.push(x, y, z, rotY);
-  kit.box([0, 0, -0.15], [0.9, 0.35, 0.06], C.steelDark, { surface: S.steel });
-  kit.box([0, 0.18, 0.05], [0.9, 0.06, 0.62], 0x1d3557, { surface: S.glass, rotX: 0.75 });
-  kit.cyl([0, 0.52, -0.18], 0.13, 0.94, 0xf4f4f0, { rotZ: Math.PI / 2, seg: 12, surface: S.gloss, center: true });
-  kit.pop();
+/** A pair of vent pipes with rain caps. */
+function ventStack(kit, x, y, z, rng) {
+  for (const dx of [-0.12, 0.14]) {
+    const h = range(rng, 0.35, 0.55);
+    kit.cyl([x + dx, y, z], 0.06, h, C.steel, { seg: 10, surface: S.steel });
+    kit.cone([x + dx, y + h, z], 0.1, 0.08, C.steelDark, { seg: 10, surface: S.steel });
+  }
 }
 
 /** Small white satellite dish on a short post, pointing south-ish. */

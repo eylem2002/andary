@@ -1,6 +1,6 @@
 # Director camera and the full-screen town
 
-Part 12 of 12 · base: `docs/readme-adrs-and-reports` · merge last
+Part 12 of 13 · base: `docs/readme-adrs-and-reports`
 
 ## What changed
 

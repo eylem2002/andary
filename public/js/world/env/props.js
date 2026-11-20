@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { DECOR, MAP, tileToWorld } from '../layout.js';
 import { PIER } from './buildings/industry.js';
+import { buildBeach } from './beach.js';
 import { bench, flowerBed, hedge } from './buildings/details.js';
 import { C, S } from './palette.js';
 import { createRng, range } from './rand.js';
@@ -24,6 +25,7 @@ export function buildProps(kit, ctx) {
   const lamps = lampPositions();
   for (const p of lamps) streetLamp(kit, p.x, p.z, rng);
   promenade(kit, ctx.trees);
+  buildBeach(kit, ctx.trees, rng);
   plaza(kit, rng);
   park(kit, ctx.trees, rng);
   sandbox(kit);
@@ -65,7 +67,8 @@ function placeMapTrees(trees, rng) {
       if (ch === 't') {
         const front = row >= 24 || col === 25;
         if (front && (col + row) % 2 === 1) continue;
-        const kind = (col * 7 + row * 3) % 9 === 0 ? 'cypress' : 'round';
+        // Mostly palms, with a few broad shade trees among them.
+        const kind = (col * 7 + row * 3) % 5 === 0 ? 'round' : 'palm';
         trees.push({ kind, x: x + range(rng, -0.35, 0.35), z: z + range(rng, -0.35, 0.35), y: 0.1, scale: front ? range(rng, 0.62, 0.8) : range(rng, 0.8, 1.05) });
       } else if (ch === '.' && rng() < 0.3) {
         trees.push({ kind: 'round', x: x + range(rng, -0.5, 0.5), z: z + range(rng, -0.5, 0.5), y: 0.07, scale: range(rng, 0.32, 0.45) });
@@ -157,7 +160,7 @@ function stringLights(kit, rng) {
     kit.sphere([x, 3.02, z], 0.06, C.gold, { surface: S.gold });
   }
   const strings = [[0, 3], [2, 1], [0, 1], [2, 3]];
-  const bulbColors = [0xffd27a, 0xffb36b, 0xfff0c2, 0xff9e7a];
+  const bulbColors = [0xff5fae, 0x52eaff, 0xffd36b, 0xb987ff];
   for (const [a, b] of strings) {
     const [x0, z0] = poles[a];
     const [x1, z1] = poles[b];

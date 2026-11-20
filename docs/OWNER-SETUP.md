@@ -18,7 +18,7 @@ scripts/publish-github.sh              # secrets scan → push all branches → 
 ```
 
 The script stops before pushing anything if it finds a possible secret. It pushes `main` (an
-empty first commit) and the 12 feature branches, opens the 12 pull requests in merge order, scans
+empty first commit) and the 13 feature branches, opens the 13 pull requests in merge order, scans
 again, and only then makes the repository public. `KEEP_PRIVATE=1 scripts/publish-github.sh`
 keeps it private. It never merges anything.
 

@@ -1,6 +1,6 @@
 # HUD, approvals, live/demo boot and end-to-end suites
 
-Part 7 of 12 · base: `feat/event-core-and-simulation` · the app works end to end from here
+Part 7 of 13 · base: `feat/event-core-and-simulation` · the app works end to end from here
 
 ## What changed
 
