@@ -18,6 +18,7 @@
  * @property {boolean} setupSeen      the "run it yourself" dialog was shown once
  * @property {'auto'|'on'|'off'} directorCam  the camera follows the action by itself; auto is on unless motion is reduced
  * @property {'auto'|'shown'|'hidden'} panels  side panels; auto hides them in a hosted demo
+ * @property {boolean} weather       rain, storms, fog and rainbows from what the crews go through
  */
 
 /** @type {Readonly<Prefs>} */
@@ -36,6 +37,7 @@ export const DEFAULT_PREFS = Object.freeze({
   setupSeen: false,
   directorCam: 'auto',
   panels: 'auto',
+  weather: true,
 });
 
 export const STORAGE_KEY = 'andary:prefs';

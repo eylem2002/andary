@@ -116,6 +116,12 @@ export function createSettingsDialog(ctx) {
     settingRow('hud-set-announce', 'Read out activity', announce),
     h('p', { class: 'hud-setting__help', text: 'Screen readers hear a short summary of new activity at most every five seconds.' }));
 
+  const weather = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-weather', role: 'switch', checked: ctx.prefs.weather, 'data-testid': 'weather-toggle' }));
+  weather.addEventListener('change', () => ctx.setPrefs({ weather: weather.checked }));
+  const weatherBlock = h('div', { class: 'hud-setting' },
+    settingRow('hud-set-weather', 'Town weather', weather),
+    h('p', { class: 'hud-setting__help', text: 'Rain when commands fail, a storm when they keep failing, a rainbow when tests pass again, fog while a crew thinks for a long time.' }));
+
   const helpButton = h('button', { type: 'button', class: 'hud-btn' }, icon('help', { size: 18 }), 'Shortcuts and help');
   const setupButton = h('button', { type: 'button', class: 'hud-btn' }, icon('terminal', { size: 18 }), 'Use your own Claude Code');
   const leaveButton = h('button', { type: 'button', class: 'hud-btn' }, icon('external', { size: 18 }), 'Leave the demo');
@@ -123,7 +129,7 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [remoteBlock, theme.el, motion.el, quality.el, volumeBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    body: [remoteBlock, theme.el, motion.el, quality.el, weatherBlock, volumeBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -152,6 +158,7 @@ export function createSettingsDialog(ctx) {
       theme.set(ctx.prefs.theme);
       motion.set(ctx.prefs.motion);
       quality.set(ctx.prefs.quality);
+      weather.checked = ctx.prefs.weather;
       dialog.open();
     },
     /** Keeps the switch in step when the server reports a settings change. */

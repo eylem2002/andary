@@ -67,3 +67,20 @@ test('crews show what they cost, and U opens the usage chart', async ({ page }) 
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
   expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([]);
 });
+
+test('failures bring weather to the town, and Settings can turn it off', async ({ page }) => {
+  await openDemo(page);
+  const lastWeather = () => page.evaluate(() => {
+    const calls = /** @type {any} */ (window).__andary.world.calls.filter((c) => c.method === 'setTownWeather');
+    return calls.at(-1)?.args[0]?.kind ?? null;
+  });
+  // The demo's first crew chases a failing test, so rain (or worse) comes early.
+  await expect.poll(lastWeather, { timeout: 60_000 }).toMatch(/rain|storm|rainbow|fog/);
+  await page.getByTestId('settings-button').click();
+  const toggle = page.getByTestId('weather-toggle');
+  await expect(toggle).toBeChecked();
+  await toggle.uncheck();
+  await expect.poll(lastWeather, { timeout: 5000 }).toBe('clear');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('andary:prefs') ?? '{}').weather);
+  expect(saved).toBe(false);
+});

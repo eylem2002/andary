@@ -501,6 +501,14 @@ class World {
     this.crowd.setBadge(id, text);
   }
 
+  /**
+   * Weather over the whole town (core/town-weather.js).
+   * @param {import('../core/town-weather.js').TownWeather} w
+   */
+  setTownWeather(w) {
+    this.envCall('setWeather', w);
+  }
+
   /** @param {string} id @param {'rain'|'storm'|null} kind */
   weather(id, kind) {
     this.crowd.setWeather(id, kind);

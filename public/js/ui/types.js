@@ -129,6 +129,7 @@
  * @property {(paused: boolean) => void} setPaused
  * @property {(q: 'high'|'low') => void} setQuality
  * @property {(h: number|'auto') => void} setTimeOfDay
+ * @property {(w: import('../core/town-weather.js').TownWeather) => void} [setTownWeather]
  * @property {() => number} getTimeOfDay
  * @property {(on: boolean) => void} setReducedMotion
  * @property {(id: string, opts?: { follow?: boolean, zoom?: number }) => void} focusAgent

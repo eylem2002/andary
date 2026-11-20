@@ -168,4 +168,13 @@ section.
     "none of your prompts or commands on disk without `--record`".
 47. **Usage is a dialog, not a fourth board tab.** `U`, the toolbar's coins button or a crew's
     cost opens it; the board stays at three tabs on a phone.
+48. **Town weather rules.** Failures rain (test failures count double), the rain halves every
+    minute; a failed turn (rate limit, overload) or a pile of failures brings a storm with
+    lightning now and then; tests that pass again within ten minutes of failing bring a rainbow
+    for half a minute and wash most of the rain away; a crew that has thought for more than 30
+    seconds after a prompt without using a tool brings fog. Interrupts never rain. It is on by
+    default and can be turned off in Settings.
+49. **No flashes with reduced motion.** Lightning is a single short flash at most every five
+    seconds (well under the three-flashes-a-second limit), and none at all with reduced motion,
+    where the rain also stands still. Screen readers hear only storms and rainbows.
 

@@ -11,6 +11,17 @@ import { BUILDINGS, BUILDING_KEYS } from '../../../core/catalog.js';
 import { createEnvironment } from '../environment.js';
 import { buildPanel } from './panel.js';
 
+/**
+ * ?weather= presets for looking at the town's weather.
+ * @type {Readonly<Record<string, import('../../../core/town-weather.js').TownWeather>>}
+ */
+const WEATHERS = Object.freeze({
+  rain: { kind: 'rain', rain: 0.7, overcast: 0.7, fog: 0, rainbow: 0, storm: false },
+  storm: { kind: 'storm', rain: 1, overcast: 1, fog: 0, rainbow: 0, storm: true },
+  fog: { kind: 'fog', rain: 0, overcast: 0.4, fog: 0.8, rainbow: 0, storm: false },
+  rainbow: { kind: 'rainbow', rain: 0, overcast: 0, fog: 0, rainbow: 1, storm: false },
+});
+
 const params = new URLSearchParams(location.search);
 const container = /** @type {HTMLElement} */ (document.getElementById('world'));
 const panelRoot = /** @type {HTMLElement} */ (document.getElementById('lab-panel'));
@@ -101,6 +112,7 @@ function applyCameraParams() {
   }
 }
 
+
 function applyFeatureParams() {
   if (params.get('board') === '1') env.setBoard(SAMPLE_BOARD, 'Fix the login bug');
   if (params.has('nm')) env.setNodeModules(Number(params.get('nm')));
@@ -108,7 +120,11 @@ function applyFeatureParams() {
   const names = ['main', 'feature/login', 'fix/flaky-test', 'docs/readme', 'perf/cache'];
   for (let i = 0; i < worktrees; i++) env.addWorktree(`wt-${i}`, names[i % names.length]);
   if (params.get('stats') === '1') for (const [key, text] of Object.entries(SAMPLE_STATS)) env.setBuildingStat(/** @type {any} */ (key), text);
+  const name = params.get('weather') ?? '';
+  const weather = Object.hasOwn(WEATHERS, name) ? WEATHERS[name] : null;
+  if (weather) env.setWeather(weather);
 }
+
 
 function applyEffectParams() {
   const highlight = params.get('hl');
