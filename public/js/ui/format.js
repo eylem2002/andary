@@ -68,12 +68,28 @@ const HOME = /^(?:\/home\/[^/]+|\/Users\/[^/]+|[A-Za-z]:[\\/]Users[\\/][^\\/]+)(
  * @param {{ cwd?: string, max?: number }} [options]
  */
 export function shortenPath(path, { cwd, max = 44 } = {}) {
-  let text = String(path ?? '');
-  if (!text) return '';
-  const base = cwd ? cwd.replace(/[\\/]+$/, '') : '';
-  if (base && (text.startsWith(`${base}/`) || text.startsWith(`${base}\\`))) text = text.slice(base.length + 1);
-  else text = text.replace(HOME, '~');
+  const text = crewRelativePath(String(path ?? ''), cwd);
   if (text.length <= max) return text;
+  return collapseMiddle(text, max);
+}
+
+/**
+ * A path relative to the crew's folder when inside it, otherwise with the home folder as `~`.
+ * @param {string} text
+ * @param {string} [cwd]
+ */
+function crewRelativePath(text, cwd) {
+  const base = cwd ? cwd.replace(/[\\/]+$/, '') : '';
+  if (base && (text.startsWith(`${base}/`) || text.startsWith(`${base}\\`))) return text.slice(base.length + 1);
+  return text.replace(HOME, '~');
+}
+
+/**
+ * Collapses middle segments ("src/…/auth/login.ts") until the path fits in `max` characters.
+ * @param {string} text
+ * @param {number} max
+ */
+function collapseMiddle(text, max) {
   const sep = text.includes('/') ? '/' : '\\';
   const parts = text.split(sep);
   const name = parts[parts.length - 1];
@@ -116,7 +132,7 @@ export function progressOf(items) {
   return { done, total, ratio: total ? done / total : 0 };
 }
 
-export const STATUS_LABELS = Object.freeze({
+const STATUS_LABELS = Object.freeze({
   working: 'Working',
   waiting: 'Waiting for approval',
   idle: 'Idle',
@@ -139,24 +155,6 @@ export function roleLabel(agent) {
   if (agent.role === 'teammate') return agent.type && agent.type !== 'teammate' ? `Teammate (${agent.type})` : 'Teammate';
   const type = agent.type && agent.type !== 'main' ? agent.type : '';
   return type ? `${type.charAt(0).toUpperCase()}${type.slice(1)} subagent` : 'Subagent';
-}
-
-const MODEL_FAMILIES = ['opus', 'sonnet', 'haiku', 'fable', 'mythos'];
-
-/**
- * Human model name: "claude-opus-5-5" → "Opus 5.5", "claude-3-5-sonnet-20241022" → "Sonnet 3.5".
- * @param {string} [modelId]
- */
-export function modelLabel(modelId) {
-  if (!modelId) return '';
-  const id = String(modelId).toLowerCase();
-  const family = MODEL_FAMILIES.find((name) => id.includes(name));
-  if (!family) return truncate(modelId, 24);
-  const name = family.charAt(0).toUpperCase() + family.slice(1);
-  const after = id.match(new RegExp(`${family}-(\\d{1,2})(?:[-.](\\d{1,2}))?(?![\\d])`));
-  const before = id.match(new RegExp(`(\\d)-(\\d)-${family}`));
-  const version = after ? [after[1], after[2]] : before ? [before[1], before[2]] : [];
-  return [name, version.filter(Boolean).join('.')].filter(Boolean).join(' ');
 }
 
 /** True for text that is a shell command ("$ npm test", "PS> dir"), shown in the mono face. */

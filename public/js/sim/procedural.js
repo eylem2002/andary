@@ -311,7 +311,7 @@ async function idleSpell(crew) {
  * One generated prompt-to-Stop turn.
  * @param {Crew} crew
  */
-export async function proceduralTurn(crew) {
+async function proceduralTurn(crew) {
   const goal = crew.rng.pick(crew.project.goals);
   const turn = newTurn(goal);
   await crew.prompt(goal.prompt);

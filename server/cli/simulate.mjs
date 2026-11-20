@@ -84,7 +84,7 @@ async function loadSimulation(modulePath, io) {
  * @param {Record<string, any>} payload
  * @returns {Promise<{ decision: 'allow'|'deny' } | undefined>}
  */
-export async function emitToServer(state, payload) {
+async function emitToServer(state, payload) {
   const permission = payload?.hook_event_name === 'PermissionRequest';
   const { output } = await postHook(state, payload, { timeoutMs: permission ? state.approvalTimeoutMs + 5000 : 5000 });
   if (!permission) return undefined;

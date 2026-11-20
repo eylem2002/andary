@@ -79,7 +79,8 @@ const mdIndex = process.argv.indexOf('--md');
 if (mdIndex > -1) {
   const rows = packages.map((p) => `| ${p.name} | ${p.version} | ${p.license} | ${isAllowed(p.license) ? 'yes' : '**no**'} |`);
   const assetRows = SHIPPED_ASSETS.map((a) => `| ${a.name} | — | ${a.license} | ${assetProblems.includes(a) ? '**missing**' : 'yes'} |`);
-  writeFileSync(process.argv[mdIndex + 1], ['| Package | Version | Licence | Allowed |', '| --- | --- | --- | --- |', ...assetRows, ...rows].join('\n') + '\n');
+  const table = ['| Package | Version | Licence | Allowed |', '| --- | --- | --- | --- |', ...assetRows, ...rows];
+  writeFileSync(process.argv[mdIndex + 1], `${table.join('\n')}\n`);
 }
 
 if (rejected.length || assetProblems.length || ownLicence !== 'MIT') {

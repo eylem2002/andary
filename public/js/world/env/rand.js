@@ -27,16 +27,6 @@ export function range(rng, min, max) {
 }
 
 /**
- * @template T
- * @param {() => number} rng
- * @param {readonly T[]} list
- * @returns {T}
- */
-export function pick(rng, list) {
-  return list[Math.floor(rng() * list.length) % list.length];
-}
-
-/**
  * Stable 32-bit hash of a string (FNV-1a), for per-id variation such as a worktree's tree shape.
  * @param {string} text
  */

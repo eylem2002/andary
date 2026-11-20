@@ -65,6 +65,9 @@ describe('decision helpers', () => {
     assert.equal(normalizeAgentId('a1b2'), 'a1b2');
     assert.equal(normalizeAgentId(''), null);
     assert.equal(normalizeAgentId(undefined), null);
+    // Same rule as the browser (public/js/core/events.js), so approvals always match their agent.
+    assert.equal(normalizeAgentId('  agent-a1b2 '), 'a1b2');
+    assert.equal(normalizeAgentId('agent-'), 'agent-');
   });
 });
 

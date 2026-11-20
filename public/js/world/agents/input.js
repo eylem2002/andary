@@ -5,7 +5,7 @@
 /** @typedef {{x: number, y: number, z: number}} Vec3 */
 
 /** Pointer travel (px) above which a press counts as a drag (camera pan), not a click. */
-export const CLICK_SLOP_PX = 6;
+const CLICK_SLOP_PX = 6;
 const CLICK_MAX_MS = 700;
 const HOVER_INTERVAL_MS = 90;
 

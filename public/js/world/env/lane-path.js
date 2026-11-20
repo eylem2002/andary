@@ -128,15 +128,3 @@ function findSegment(cumulative, d) {
   }
   return Math.max(0, lo);
 }
-
-/**
- * Shortest signed difference between two angles (radians), in (-π, π].
- * @param {number} from
- * @param {number} to
- */
-export function angleDelta(from, to) {
-  let d = (to - from) % (Math.PI * 2);
-  if (d > Math.PI) d -= Math.PI * 2;
-  if (d <= -Math.PI) d += Math.PI * 2;
-  return d;
-}

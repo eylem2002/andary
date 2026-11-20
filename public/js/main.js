@@ -56,8 +56,7 @@ async function boot() {
   const live = Boolean(hello) && !forceDemo;
   // Say which mode this is right away; the 3D view may still be loading.
   hud.setServerAvailable(Boolean(hello));
-  // A forced demo usually comes from `andary demo`, so offer the way back to the live town
-  // without probing the server (on static hosting the probe would only log a 404).
+  // A forced demo usually comes from `andary demo`, so the HUD offers the way back to the live town.
   hud.setDemoForced(forceDemo);
   hud.setMode(live ? 'live' : 'demo');
   hud.setConnection(live ? (hello.authenticated ? 'connecting' : 'signin') : 'demo');

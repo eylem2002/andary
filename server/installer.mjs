@@ -21,7 +21,7 @@ import { HOOK_SOURCE, resolveClaudeConfigDir } from './config.mjs';
 import { ensureHome } from './state-file.mjs';
 
 /** Every command we register ends with this, so uninstall can find exactly our entries. */
-export const HOOK_MARKER = '# andary';
+const HOOK_MARKER = '# andary';
 const MARKER_AT_END = /(?:^|\s)#\s*andary\s*$/;
 
 /** Observation-only events: async, so they never slow Claude down. */
@@ -131,7 +131,7 @@ export function hookCommand(home) {
  * @param {Registration} registration
  * @returns {Record<string, any>}
  */
-export function hookEntry(command, registration) {
+function hookEntry(command, registration) {
   return {
     type: 'command',
     command,
@@ -172,7 +172,7 @@ export function isAndaryHook(entry, hookPath) {
  * @param {Set<string>} [keepEvents] event lists to keep in place even when emptied
  * @returns {{ hooks: Record<string, any>, removed: number }}
  */
-export function stripHooks(hooksMap, isOurs, keepEvents = new Set()) {
+function stripHooks(hooksMap, isOurs, keepEvents = new Set()) {
   let removed = 0;
   /** @type {Array<[string, any]>} */
   const kept = [];
@@ -312,7 +312,7 @@ function saveRecord(home, key, shape) {
  * @param {string} [hookPath]
  * @returns {string[]}
  */
-export function registeredEvents(settings, hookPath) {
+function registeredEvents(settings, hookPath) {
   if (!isPlainObject(settings.hooks)) return [];
   return Object.entries(settings.hooks)
     .filter(
@@ -328,7 +328,7 @@ export function registeredEvents(settings, hookPath) {
  * @param {Record<string, any>} settings
  * @returns {boolean}
  */
-export function pluginEnabledIn(settings) {
+function pluginEnabledIn(settings) {
   const enabled = settings.enabledPlugins;
   return isPlainObject(enabled) && Object.entries(enabled).some(([id, on]) => id.startsWith('andary@') && on === true);
 }
@@ -339,7 +339,7 @@ export function pluginEnabledIn(settings) {
  * @param {string} filePath
  * @returns {{ exists: boolean, text: string|null, settings: Record<string, any> }}
  */
-export function readSettingsFile(filePath) {
+function readSettingsFile(filePath) {
   let text;
   try {
     text = readFileSync(filePath, 'utf8');
@@ -502,7 +502,7 @@ function writeFileAtomic(filePath, text) {
  * @param {string} home
  * @returns {string} the destination
  */
-export function copyForwarder(home) {
+function copyForwarder(home) {
   ensureHome(home);
   const target = forwarderPath(home);
   copyFileSync(HOOK_SOURCE, target);

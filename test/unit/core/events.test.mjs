@@ -408,3 +408,12 @@ describe('classifyCommand and classifyError', () => {
     assert.equal(classifyError('Exit code 2', false, null), 'generic');
   });
 });
+
+describe('andary doctor probes', () => {
+  it('leave no trace in the town: no crew, no log entry, no achievement', () => {
+    const probe = { session_id: 'andary-doctor-1b2c', cwd: CWD, hook_event_name: 'Notification', notification_type: 'andary_doctor', message: 'probe' };
+    assert.deepEqual(normalize(envelope(probe)), []);
+    assert.deepEqual(normalize(envelope({ ...probe, hook_event_name: 'SessionEnd', reason: 'other' })), []);
+    assert.ok(normalize(envelope({ ...probe, session_id: SESSION })).length > 0, 'ordinary sessions still count');
+  });
+});

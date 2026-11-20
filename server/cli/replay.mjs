@@ -11,7 +11,7 @@ import { UsageError, parseSpeed } from './options.mjs';
 export const REPLAY_OPTIONS = Object.freeze({ speed: { type: 'string' } });
 
 /** Long silences in a recording (lunch breaks) are shortened to this, before --speed applies. */
-export const MAX_GAP_MS = 5000;
+const MAX_GAP_MS = 5000;
 
 /**
  * Reads a JSONL recording. Each line is an envelope ({ts, event}) as written by --record, or a
@@ -19,7 +19,7 @@ export const MAX_GAP_MS = 5000;
  * @param {string} text
  * @returns {{ items: Array<{ ts: number|null, event: Record<string, any> }>, skipped: number }}
  */
-export function parseRecording(text) {
+function parseRecording(text) {
   const items = [];
   let skipped = 0;
   for (const line of text.split(/\r?\n/)) {

@@ -8,7 +8,7 @@ import { gzip as gzipCallback } from 'node:zlib';
 const gzip = promisify(gzipCallback);
 
 /** @type {Readonly<Record<string, string>>} */
-export const MIME_TYPES = Object.freeze({
+const MIME_TYPES = Object.freeze({
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',

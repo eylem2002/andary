@@ -8,7 +8,6 @@ import { revealHidden,
   formatDuration,
   isCommandText,
   listJoin,
-  modelLabel,
   plural,
   progressOf,
   roleLabel,
@@ -119,16 +118,6 @@ describe('words', () => {
   test('progressOf counts completed items', () => {
     assert.deepEqual(progressOf([]), { done: 0, total: 0, ratio: 0 });
     assert.deepEqual(progressOf([{ status: 'completed' }, { status: 'pending' }, { status: 'in_progress' }, { status: 'completed' }]), { done: 2, total: 4, ratio: 0.5 });
-  });
-
-  test('model labels', () => {
-    assert.equal(modelLabel('claude-opus-5-5'), 'Opus 5.5');
-    assert.equal(modelLabel('claude-sonnet-4-5-20250929'), 'Sonnet 4.5');
-    assert.equal(modelLabel('claude-opus-4-20250514'), 'Opus 4');
-    assert.equal(modelLabel('claude-3-5-sonnet-20241022'), 'Sonnet 3.5');
-    assert.equal(modelLabel('claude-haiku-5'), 'Haiku 5');
-    assert.equal(modelLabel('gpt-something'), 'gpt-something');
-    assert.equal(modelLabel(undefined), '');
   });
 
   test('role and status labels', () => {

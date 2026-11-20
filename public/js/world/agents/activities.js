@@ -37,12 +37,12 @@ export const PROP_NAMES = Object.freeze([
 export const HAMMER_PERIOD = 1.05;
 /** Fraction of the hammer cycle at which the head lands (sparks fly). */
 export const HAMMER_IMPACT = 0.7;
-export const HOP_PERIOD = 0.62;
-export const SIP_PERIOD = 4.2;
+const HOP_PERIOD = 0.62;
+const SIP_PERIOD = 4.2;
 /** How far the body drops when a figure sits on the ground. */
-export const SIT_DROP = 0.235;
+const SIT_DROP = 0.235;
 /** Seconds of waiting until impatience is at its peak. */
-export const PATIENCE_SECONDS = 18;
+const PATIENCE_SECONDS = 18;
 
 /** @param {Float32Array} o @param {number} t @param {AnimContext} c */
 function breathe(o, t, c) {
@@ -57,7 +57,7 @@ function breathe(o, t, c) {
  * Head yaw for idle glances: every few seconds the figure looks to one side and back.
  * @param {number} t @param {AnimContext} c
  */
-export function glanceYaw(t, c) {
+function glanceYaw(t, c) {
   const period = 4.2 + 2.6 * c.seed;
   const k = Math.floor(t / period);
   const u = t / period - k;
@@ -493,5 +493,5 @@ export const ACTIVITY_EMITTERS = Object.freeze({
 
 /** @param {string} name */
 export function isActivity(name) {
-  return Object.prototype.hasOwnProperty.call(ACTIVITY_DEFS, name);
+  return Object.hasOwn(ACTIVITY_DEFS, name);
 }

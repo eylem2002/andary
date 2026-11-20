@@ -4,14 +4,11 @@
 // story time without one (so the card's countdown runs faster at 2× and 4×, like the story, and
 // stands still while the demo is paused).
 
+import { normalizeAgentId } from '../core/events.js';
+
 /** @typedef {import('./types.js').Approval} Approval */
 
 export const DEMO_APPROVAL_MS = 25_000;
-
-/** Agent ids arrive as "agent-abc" or "abc"; the store keys agents without the prefix. @param {unknown} id */
-export function normalizeAgentId(id) {
-  return typeof id === 'string' && id ? id.replace(/^agent-/, '') : null;
-}
 
 /**
  * @typedef {object} DemoOptions

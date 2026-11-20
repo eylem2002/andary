@@ -83,6 +83,50 @@ export function pendingCount(state) {
   return state.approvals.filter((approval) => approval.status === 'pending').length;
 }
 
+/**
+ * The DOM of one card; the panel wires its behaviour. The card takes focus (for A / D): its
+ * heading names it and the command describes it.
+ * @param {string} id prefix for the ids the card's aria attributes point at
+ * @param {string} approvalId
+ */
+function buildCard(id, approvalId) {
+  const mark = roundel(0);
+  const who = h('h3', { class: 'hud-approval__who', id: `${id}-who` });
+  const crew = h('span', { class: 'hud-approval__crew' });
+  const tool = h('code', { class: 'hud-approval__tool hud-mono' });
+  const detail = h('code', { class: 'hud-approval__detail hud-mono', id: `${id}-detail` });
+  const bar = h('span', { class: 'hud-approval__bar' });
+  const countdown = h('span', { class: 'hud-approval__left' });
+  const timer = h('div', { class: 'hud-approval__timer' }, h('span', { class: 'hud-approval__track', 'aria-hidden': 'true' }, bar), countdown);
+  const allow = h('button', { type: 'button', class: 'hud-btn hud-btn--allow', 'data-testid': 'approve' }, icon('check', { size: 18 }), 'Allow', kbd('A'));
+  const deny = h('button', { type: 'button', class: 'hud-btn hud-btn--deny', 'data-testid': 'deny' }, icon('cross', { size: 18 }), 'Deny', kbd('D'));
+  const actions = h('div', { class: 'hud-approval__actions' }, allow, deny);
+  const terminal = h('p', { class: 'hud-approval__terminal' }, icon('terminal', { size: 16 }), h('span', { text: 'Answer in your terminal.' }));
+  const result = h('p', { class: 'hud-approval__result' });
+  const card = h('article', { class: 'hud-approval', 'data-testid': 'approval-card', 'data-approval-id': approvalId, 'aria-labelledby': `${id}-who`, 'aria-describedby': `${id}-detail` },
+    h('header', { class: 'hud-approval__head' }, mark, h('div', {}, who, h('p', { class: 'hud-approval__meta' }, crew, tool))),
+    h('pre', { class: 'hud-approval__code' }, detail), timer, actions, terminal, result);
+  const item = h('li', { class: 'hud-approvals__item' }, card);
+  return { item, parts: { mark, who, crew, tool, detail, timer, bar, countdown, actions, allow, deny, terminal, result, card, index: -1, armedAt: 0, armTimer: 0 } };
+}
+
+/**
+ * Who asks, in which crew, to run what.
+ * @param {any} p the card's parts
+ * @param {Approval} approval
+ * @param {StoreState} state
+ */
+function describeRequest(p, approval, state) {
+  const session = findSession(state, approval.sessionId);
+  const agent = state.agents[approvalAgentKey(approval)];
+  const { action, detail } = describeApproval(approval, { exact: true });
+  updateRoundel(p.mark, crewNumber(state, approval.sessionId), session?.color);
+  setText(p.who, `${agent?.name ?? 'An agent'} wants to ${action}`);
+  setText(p.crew, session ? `in ${session.project}` : '');
+  setText(p.tool, approval.toolName || 'Tool');
+  setText(p.detail, detail || approval.toolName);
+}
+
 /** @param {HudContext} ctx */
 export function createApprovalsPanel(ctx) {
   const noteText = h('p', { class: 'hud-note__text' });
@@ -116,34 +160,16 @@ export function createApprovalsPanel(ctx) {
 
   /** @param {Approval} first */
   function createCard(first) {
-    // The card takes focus (for A / D): its heading names it and the command describes it.
-    const id = `hud-approval-${++cards}`;
-    const mark = roundel(0);
-    const who = h('h3', { class: 'hud-approval__who', id: `${id}-who` });
-    const crew = h('span', { class: 'hud-approval__crew' });
-    const tool = h('code', { class: 'hud-approval__tool hud-mono' });
-    const detail = h('code', { class: 'hud-approval__detail hud-mono', id: `${id}-detail` });
-    const bar = h('span', { class: 'hud-approval__bar' });
-    const countdown = h('span', { class: 'hud-approval__left' });
-    const timer = h('div', { class: 'hud-approval__timer' }, h('span', { class: 'hud-approval__track', 'aria-hidden': 'true' }, bar), countdown);
-    const allow = h('button', { type: 'button', class: 'hud-btn hud-btn--allow', 'data-testid': 'approve' }, icon('check', { size: 18 }), 'Allow', kbd('A'));
-    const deny = h('button', { type: 'button', class: 'hud-btn hud-btn--deny', 'data-testid': 'deny' }, icon('cross', { size: 18 }), 'Deny', kbd('D'));
-    const actions = h('div', { class: 'hud-approval__actions' }, allow, deny);
-    const terminal = h('p', { class: 'hud-approval__terminal' }, icon('terminal', { size: 16 }), h('span', { text: 'Answer in your terminal.' }));
-    const result = h('p', { class: 'hud-approval__result' });
-    const card = h('article', { class: 'hud-approval', 'data-testid': 'approval-card', 'data-approval-id': first.id, 'aria-labelledby': `${id}-who`, 'aria-describedby': `${id}-detail` },
-      h('header', { class: 'hud-approval__head' }, mark, h('div', {}, who, h('p', { class: 'hud-approval__meta' }, crew, tool))),
-      h('pre', { class: 'hud-approval__code' }, detail), timer, actions, terminal, result);
-    const item = h('li', { class: 'hud-approvals__item' }, card);
-    parts.set(item, { mark, who, crew, tool, detail, timer, bar, countdown, actions, allow, deny, terminal, result, card, index: -1, armedAt: 0, armTimer: 0 });
-    allow.addEventListener('click', (event) => clickCounts(event, parts.get(item)) && decide(parts.get(item).approval, 'allow'));
-    deny.addEventListener('click', (event) => clickCounts(event, parts.get(item)) && decide(parts.get(item).approval, 'deny'));
-    card.addEventListener('keydown', (event) => {
+    const { item, parts: p } = buildCard(`hud-approval-${++cards}`, first.id);
+    parts.set(item, p);
+    p.allow.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'allow'));
+    p.deny.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'deny'));
+    p.card.addEventListener('keydown', (event) => {
       const key = event.key.toLowerCase();
       if ((key !== 'a' && key !== 'd') || event.ctrlKey || event.metaKey || event.altKey) return;
       event.preventDefault();
       event.stopPropagation();
-      decide(parts.get(item).approval, key === 'a' ? 'allow' : 'deny');
+      decide(p.approval, key === 'a' ? 'allow' : 'deny');
     });
     return item;
   }
@@ -154,14 +180,17 @@ export function createApprovalsPanel(ctx) {
     p.approval = approval;
     armCard(p, index);
     if (approval.status !== 'pending') sending.delete(approval.id);
-    const session = findSession(state, approval.sessionId);
-    const agent = state.agents[approvalAgentKey(approval)];
-    const { action, detail } = describeApproval(approval, { exact: true });
-    updateRoundel(p.mark, crewNumber(state, approval.sessionId), session?.color);
-    setText(p.who, `${agent?.name ?? 'An agent'} wants to ${action}`);
-    setText(p.crew, session ? `in ${session.project}` : '');
-    setText(p.tool, approval.toolName || 'Tool');
-    setText(p.detail, detail || approval.toolName);
+    describeRequest(p, approval, state);
+    showAnswerState(p, approval);
+    tickCard(item, Date.now());
+  }
+
+  /**
+   * Which of the buttons, countdown, terminal hint and result line a card shows.
+   * @param {any} p the card's parts
+   * @param {Approval} approval
+   */
+  function showAnswerState(p, approval) {
     const pending = approval.status === 'pending';
     const answerable = pending && approval.held;
     const busy = sending.has(approval.id);
@@ -179,7 +208,6 @@ export function createApprovalsPanel(ctx) {
     p.deny.disabled = busy;
     setText(p.result, busy ? 'Sending your answer…' : resultText(approval, ctx.view.mode));
     setHidden(p.result, pending && !busy);
-    tickCard(item, Date.now());
   }
 
   /** @param {HTMLElement} item @param {number} now */

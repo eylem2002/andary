@@ -3,7 +3,8 @@
 // and for how long; clicking it selects the agent and points the camera at it.
 import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from './dom.js';
 import { icon } from './icons.js';
-import { doingText, formatDuration, isCommandText, modelLabel, plural, truncate } from './format.js';
+import { modelLabel } from '../core/catalog.js';
+import { doingText, formatDuration, isCommandText, plural, truncate } from './format.js';
 import { approvalAgentKey, roundel, setCurrent, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */

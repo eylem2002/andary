@@ -155,7 +155,7 @@ function describeListenError(error, settings) {
 function warnIfExposed(host, io) {
   if (isLoopbackHost(host)) return;
   io.err('');
-  io.err('  WARNING: --host ' + host + ' makes Andary reachable from other machines.');
+  io.err(`  WARNING: --host ${host} makes Andary reachable from other machines.`);
   io.err('  Hook events contain your prompts, commands and file paths, and with remote approvals');
   io.err('  anyone who gets the sign-in link can approve tool calls. Use this only on a network you trust.');
   io.err('');
@@ -185,7 +185,7 @@ function printBanner(server, settings, io) {
  * @param {string} home
  * @param {import('./io.mjs').CliIo} io
  */
-export async function offerHookInstall(home, io) {
+async function offerHookInstall(home, io) {
   if (inspectInstallations({ dir: io.cwd, env: io.env, home }).installed) return;
   io.out('');
   io.out('Claude Code is not reporting to the town yet: its hooks are not installed.');

@@ -7,7 +7,7 @@ import { clamp } from './easing.js';
 export const BUBBLE_MAX_CHARS = 120;
 /** A bubble stays at least this long before a newer line may replace it (no flicker). */
 export const BUBBLE_MIN_VISIBLE_MS = 1400;
-export const BUBBLE_TONES = Object.freeze(['speech', 'thought', 'shout', 'code']);
+const BUBBLE_TONES = Object.freeze(['speech', 'thought', 'shout', 'code']);
 
 /**
  * Control characters and bidi overrides: hook text comes from untrusted repositories, and an

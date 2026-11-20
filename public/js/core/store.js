@@ -5,12 +5,11 @@
 // created on first sight.
 
 import { ACHIEVEMENTS, achievementFor, createAchievementTracker } from './achievements.js';
-import { BUILDINGS, BUILDING_KEYS, CREW_COLORS, hatForModel } from './catalog.js';
+import { BUILDINGS, BUILDING_KEYS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
 import {
   agentKeyOf,
   clip,
   isObject,
-  modelLabel,
   normalize,
   normalizeAgentId,
   oneLine,
@@ -982,6 +981,24 @@ const APPROVAL_LOG = Object.freeze({
 });
 
 /**
+ * A pending request parks its agent at the Permit Office; an answer sends it back to work.
+ * @param {Model} m
+ * @param {AgentState} a
+ * @param {string} key
+ * @param {Approval['status']} status
+ * @param {string} tool
+ */
+function waitForAnswer(m, a, key, status, tool) {
+  if (status === 'pending') {
+    a.status = 'waiting';
+    place(a, 'permits', 'wait');
+    if (!m.awaiting.has(key)) m.awaiting.set(key, { tool, counted: false });
+  } else if ((status === 'allowed' || status === 'denied') && a.status === 'waiting') {
+    a.status = 'working';
+  }
+}
+
+/**
  * @param {Model} m
  * @param {Approval} approval
  * @param {number} ts
@@ -992,12 +1009,7 @@ function approvalChanged(m, approval, ts) {
   const key = agentKeyOf(approval.sessionId, normalizeAgentId(approval.agentId));
   const a = m.state.agents[key];
   const tool = str(approval.toolName) || 'Tool';
-  if (approval.status === 'pending' && a) {
-    a.status = 'waiting';
-    place(a, 'permits', 'wait');
-    if (!m.awaiting.has(key)) m.awaiting.set(key, { tool, counted: false });
-  }
-  if ((approval.status === 'allowed' || approval.status === 'denied') && a?.status === 'waiting') a.status = 'working';
+  if (a) waitForAnswer(m, a, key, approval.status, tool);
   if (s && s.status !== 'ended') s.status = sessionStatus(m, s);
   const log = own(APPROVAL_LOG, approval.status);
   if (log) {

@@ -3,7 +3,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 export const UI_COOKIE = 'andary_ui';
-export const HOOK_SECRET_HEADER = 'x-andary-secret';
+const HOOK_SECRET_HEADER = 'x-andary-secret';
 /** The forwarder's per-request nonce, and the server's signature over nonce + reply body. */
 export const HOOK_NONCE_HEADER = 'x-andary-nonce';
 export const HOOK_SIGNATURE_HEADER = 'x-andary-signature';

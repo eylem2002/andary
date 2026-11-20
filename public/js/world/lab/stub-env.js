@@ -4,8 +4,8 @@
 // (world-lab.html?env=stub, or createWorld(container, { envFactory: createStubEnvironment })).
 
 import * as THREE from 'three';
-import { BUILDINGS, BUILDING_KEYS } from '../../../core/catalog.js';
-import { COLS, LOTS, MAP, ROWS, TILE, lotBounds, tileToWorld } from '../../layout.js';
+import { BUILDINGS, BUILDING_KEYS } from '../../core/catalog.js';
+import { COLS, LOTS, MAP, ROWS, TILE, lotBounds, tileToWorld } from '../layout.js';
 
 const TILE_COLORS = { '#': '#8F8A80', P: '#D9CDB4', '=': '#E6DAC0', '~': '#4FA3C7', F: '#7EC8E3', x: '#E9D9A6', n: '#B8A98A' };
 const HEIGHTS = { hall: 4.2, harbor: 2.2, terminal: 3.4, web: 5.2, grove: 0.6, station: 1.6, board: 2.6 };

@@ -10,7 +10,7 @@ import { addProps } from './figure-props.js';
 import { createSkeleton } from './rig.js';
 
 /** Shared by every figure: plastic toy look, colours come from the vertices. */
-export const FIGURE_MATERIAL = new THREE.MeshStandardMaterial({
+const FIGURE_MATERIAL = new THREE.MeshStandardMaterial({
   vertexColors: true,
   roughness: 0.55,
   metalness: 0,
@@ -36,7 +36,7 @@ function buildGeometry(look) {
  * Geometry for a look, built once and shared while anyone uses it.
  * @param {import('./looks.js').Look} look
  */
-export function acquireGeometry(look) {
+function acquireGeometry(look) {
   let entry = cache.get(look.key);
   if (!entry) {
     entry = { geometry: buildGeometry(look), refs: 0 };
@@ -47,7 +47,7 @@ export function acquireGeometry(look) {
 }
 
 /** @param {string} key */
-export function releaseGeometry(key) {
+function releaseGeometry(key) {
   const entry = cache.get(key);
   if (!entry) return;
   entry.refs--;
@@ -55,11 +55,6 @@ export function releaseGeometry(key) {
     entry.geometry.dispose();
     cache.delete(key);
   }
-}
-
-/** Number of distinct figure geometries alive (for tests and stats). */
-export function cachedGeometryCount() {
-  return cache.size;
 }
 
 /**

@@ -409,7 +409,7 @@ export function createEffects(scene, options = {}) {
      * @param {EmitOptions} [opts]
      */
     emit(kind, p, opts) {
-      const recipe = Object.prototype.hasOwnProperty.call(RECIPES, kind) ? RECIPES[kind] : null;
+      const recipe = Object.hasOwn(RECIPES, kind) ? RECIPES[kind] : null;
       if (!recipe || !Number.isFinite(p?.x) || !Number.isFinite(p?.y) || !Number.isFinite(p?.z)) return;
       O.scale = opts?.scale ?? 1;
       O.ground = opts?.ground ?? 0;

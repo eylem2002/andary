@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { compactSigns, formatStat, signLabel, signScale } from '../../../public/js/world/env/sign-format.js';
 import { MAX_BOXES, PILE_COUNTS, clampLevel, pileLayout } from '../../../public/js/world/env/pile-layout.js';
 import { GROVE_SLOTS, nextFreeSlot, worktreeLabel } from '../../../public/js/world/env/grove-slots.js';
-import { createRng, hashString, pick, range } from '../../../public/js/world/env/rand.js';
+import { createRng, hashString, range } from '../../../public/js/world/env/rand.js';
 import { boxCorners, fitLightFrame } from '../../../public/js/world/env/shadow-fit.js';
 
 test('formatStat trims, strips control characters and caps the length', () => {
@@ -80,7 +80,6 @@ test('createRng is deterministic and in range; helpers behave', () => {
   const rng = createRng(5);
   const v = range(rng, 2, 3);
   assert.ok(v >= 2 && v < 3);
-  assert.ok(['a', 'b'].includes(pick(rng, ['a', 'b'])));
   assert.equal(hashString('abc'), hashString('abc'));
   assert.notEqual(hashString('abc'), hashString('abd'));
 });

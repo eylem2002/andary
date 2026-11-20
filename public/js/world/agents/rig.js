@@ -97,8 +97,6 @@ const ALL_BONES = [
   ...PROP_NAMES.filter((n) => n !== 'hat').map((name) => [PROP_HOLDERS[name], 0, 0, 0]),
 ];
 
-export const BONE_COUNT = ALL_BONES.length;
-
 /** Rest-pose matrix of each bone in figure space, computed once. */
 const REST_MATRICES = (() => {
   const bones = buildBones();
@@ -108,15 +106,6 @@ const REST_MATRICES = (() => {
 
 /** Bind inverses are identical for every figure, so all skeletons share these matrices. */
 const BONE_INVERSES = REST_MATRICES.map((m) => m.clone().invert());
-
-/**
- * Figure-space rest position of a bone (where its parts should be modelled).
- * @param {number} bone
- * @returns {THREE.Vector3}
- */
-export function restPosition(bone) {
-  return new THREE.Vector3().setFromMatrixPosition(REST_MATRICES[bone]);
-}
 
 function buildBones() {
   /** @type {THREE.Bone[]} */
