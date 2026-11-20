@@ -84,7 +84,7 @@ export function tildify(path) {
 
 /**
  * How the user should invoke the CLI in printed hints: `andary` when it came from a package
- * bin on the PATH, `npx andary` from npx, otherwise `node "<path to bin/andary.mjs>"`.
+ * bin on the PATH, `npx andary` from npx, otherwise `node "<path to cli/andary.mjs>"`.
  * @param {string} [argv1]
  * @returns {string}
  */

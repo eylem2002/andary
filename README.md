@@ -29,12 +29,12 @@ You need **Node.js 20 or newer** (22 LTS recommended), a browser with WebGL 2, a
 npm install -g github:eylem2002/andary    # installs the `andary` command from GitHub
 ```
 
-Prefer not to install globally? Clone it and use `node bin/andary.mjs` wherever this guide says
+Prefer not to install globally? Clone it and use `node cli/andary.mjs` wherever this guide says
 `andary`:
 
 ```sh
 git clone https://github.com/eylem2002/andary && cd andary
-node bin/andary.mjs --help
+node cli/andary.mjs --help
 ```
 
 Just curious? `andary demo` opens the town with a built-in simulation of three projects, no
@@ -369,7 +369,7 @@ GitHub Actions ([ci.yml](.github/workflows/ci.yml)) runs the same checks on ever
 ### Project layout
 
 ```
-bin/andary.mjs        CLI entry
+cli/andary.mjs        CLI entry (not bin/: plugin hosts put a plugin's bin/ on the PATH)
 server/               HTTP + WebSocket server, auth, approvals, sanitizing, team town
 server/adapters/      Claude Code and Codex → one event format
 server/ingest.mjs     the one pipeline every event enters through

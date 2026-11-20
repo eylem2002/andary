@@ -51,9 +51,9 @@ next pull request to `main`. Nothing is merged until you decide.
 Needs Node.js 20+ (22 LTS recommended) and Claude Code. From the clone:
 
 ```sh
-node bin/andary.mjs install     # adds hooks to ~/.claude/settings.json (a backup is made)
-node bin/andary.mjs install codex   # and/or Codex's (~/.codex/hooks.json); trust them in Codex
-node bin/andary.mjs start       # opens the town; then run `claude` or `codex` in any project
+node cli/andary.mjs install     # adds hooks to ~/.claude/settings.json (a backup is made)
+node cli/andary.mjs install codex   # and/or Codex's (~/.codex/hooks.json); trust them in Codex
+node cli/andary.mjs start       # opens the town; then run `claude` or `codex` in any project
 ```
 
 Once the pull requests are merged into `main`, anyone can install the command directly:

@@ -9,7 +9,7 @@ import { runHookScript } from '../../server/hook-runner.mjs';
 import { loginUrl, probeServer, readStateFile, serverOrigin } from '../../server/state-file.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const CLI = join(ROOT, 'bin', 'andary.mjs');
+const CLI = join(ROOT, 'cli', 'andary.mjs');
 const START_TIMEOUT_MS = 15_000;
 
 /**

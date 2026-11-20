@@ -9,7 +9,7 @@ import { ROOT_DIR, readVersion } from '../../server/config.mjs';
 import { probeServer, readStateFile } from '../../server/state-file.mjs';
 import { closeBrowser, connectBrowser, hookPayload, postHook, startTown, waitForMessage } from './helpers.mjs';
 
-const CLI = join(ROOT_DIR, 'bin', 'andary.mjs');
+const CLI = join(ROOT_DIR, 'cli', 'andary.mjs');
 
 /** @type {string} */
 let scratch;
@@ -44,7 +44,7 @@ function sandbox(name) {
 }
 
 /**
- * Runs bin/andary.mjs and collects its output.
+ * Runs cli/andary.mjs and collects its output.
  * @param {string[]} args
  * @param {{ env?: Record<string, string>, cwd?: string, timeoutMs?: number }} [options]
  * @returns {Promise<{ code: number|null, stdout: string, stderr: string }>}

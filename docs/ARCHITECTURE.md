@@ -84,7 +84,7 @@ references may cross.
 | --- | --- |
 | `hooks/` | Node built-ins only (it is copied out and must stand alone) |
 | `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text` |
-| `server/cli/`, `bin/` | the server, those core modules, the simulation (for `andary simulate`) |
+| `server/cli/`, `cli/` | the server, those core modules, the simulation (for `andary simulate`) |
 | `public/js/core/` | `core/` only |
 | `public/js/sources/` | `sources/`, `core/` |
 | `public/js/page.js` | `core/` only |

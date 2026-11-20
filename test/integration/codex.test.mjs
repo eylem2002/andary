@@ -9,7 +9,7 @@ import { after, before, describe, it } from 'node:test';
 import { decisionOutput } from '../../server/approvals.mjs';
 import { closeBrowser, connectBrowser, startTown, waitForMessage } from './helpers.mjs';
 
-const CLI = fileURLToPath(new URL('../../bin/andary.mjs', import.meta.url));
+const CLI = fileURLToPath(new URL('../../cli/andary.mjs', import.meta.url));
 const run = promisify(execFile);
 
 /** A Codex hook payload (Codex uses Claude Code's field names). @param {string} event @param {Record<string, any>} [extra] */

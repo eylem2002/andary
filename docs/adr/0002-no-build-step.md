@@ -5,7 +5,7 @@ Status: Accepted
 ## Context
 
 The UI is a few dozen modules plus three.js. A bundler (Vite, esbuild) would add a build step, a
-dev server and a large dependency tree to a tool whose users just want `node bin/andary.mjs`.
+dev server and a large dependency tree to a tool whose users just want `node cli/andary.mjs`.
 
 ## Decision
 

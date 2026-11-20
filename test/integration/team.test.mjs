@@ -100,7 +100,7 @@ describe('Team town', () => {
   });
 
   it('invites print the key for the environment, the view link, and what the link shows', () => {
-    const cli = fileURLToPath(new URL('../../bin/andary.mjs', import.meta.url));
+    const cli = fileURLToPath(new URL('../../cli/andary.mjs', import.meta.url));
     const run = spawnSync(process.execPath, [cli, 'team', 'invite', 'Omar', '--url', 'http://box.tailnet.example:4747'], { env: { ...process.env, ANDARY_HOME: host.home }, encoding: 'utf8' });
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /ANDARY_TEAM_KEY=Omar\.[\w-]{32} andary start --share-to http:\/\/box\.tailnet\.example:4747/);

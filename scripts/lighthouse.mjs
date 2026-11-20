@@ -22,7 +22,7 @@ mkdirSync(outDir, { recursive: true });
 
 async function startServer() {
   const home = mkdtempSync(join(tmpdir(), 'tt-lh-'));
-  const child = spawn(process.execPath, [join(root, 'bin', 'andary.mjs'), 'start', '--port', '0', '--no-open'], {
+  const child = spawn(process.execPath, [join(root, 'cli', 'andary.mjs'), 'start', '--port', '0', '--no-open'], {
     env: { ...process.env, ANDARY_HOME: home },
     stdio: 'ignore',
   });

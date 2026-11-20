@@ -16,7 +16,7 @@ The interfaces are specified in [CONTRACTS.md §4](CONTRACTS.md#4-claude-code-or
 ## Quick start
 
 ```sh
-npm install -g github:eylem2002/andary   # or use node bin/andary.mjs from a checkout
+npm install -g github:eylem2002/andary   # or use node cli/andary.mjs from a checkout
 andary install             # register the hooks in ~/.claude/settings.json (Codex: andary install codex)
 andary start
 ```
@@ -104,9 +104,14 @@ The repository is also a Claude Code plugin and a one-plugin marketplace:
   `node "${CLAUDE_PLUGIN_ROOT}/hooks/hook.mjs" # andary` in place,
 - `commands/town.md` adds `/andary:town`, which starts the server in the background
   (`start --detach`) if needed and opens the town. Only you can run it (the model cannot).
-  To run its one command without a prompt, it pre-approves `node` commands for that turn
-  (`allowed-tools: Bash(node *)`); no narrower pattern helps, because `node -e …` would match it
-  too. If you would rather approve nothing in advance, run `andary start` in a terminal instead.
+  It pre-approves exactly its one command for that turn:
+  `allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/cli/andary.mjs" start --detach)`. Claude Code
+  2.1.0 and later fill in `${CLAUDE_PLUGIN_ROOT}` there as in the body, so the rule matches that
+  command and nothing else. Older versions leave the variable as written, so the rule matches
+  nothing: Claude Code then asks you first or does not run the command, and approves nothing
+  else. If that happens, run `andary start` in a terminal instead.
+- The CLI lives in `cli/`, not `bin/`: Claude Code puts a plugin's `bin/` folder on the Bash
+  tool's `PATH`, and claude.ai and Cowork refuse to install a plugin that has one.
 
 The plugin's forwarder finds the server exactly like the installed copy: `ANDARY_HOME` if set,
 otherwise `~/.andary/server.json`. Use either the plugin or settings hooks, not both, or every

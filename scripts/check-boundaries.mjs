@@ -20,7 +20,7 @@ export const SERVER_CORE = Object.freeze(['public/js/core/prices.js', 'public/js
  * @type {ReadonlyArray<[string, string]>}
  */
 const AREAS = Object.freeze([
-  ['bin/', 'cli'],
+  ['cli/', 'cli'],
   ['server/cli/', 'cli'],
   ['server/', 'server'],
   ['hooks/', 'hooks'],

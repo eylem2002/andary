@@ -25,7 +25,9 @@ dusk, on a floating diorama plinth beside a turquoise sea.
 ## 2. Repository layout and ownership
 
 ```
-bin/andary.mjs               CLI (start | demo | install | uninstall | team | status | doctor | replay | simulate)
+cli/andary.mjs               CLI (start | demo | install | uninstall | team | status | doctor | replay | simulate);
+                             not in bin/, because the repository root is also the plugin root and
+                             Claude Code puts a plugin's bin/ on the PATH (claude.ai rejects it)
 server/*.mjs                 HTTP + WebSocket server, auth, approvals, sanitizing, installer logic
 server/ingest.mjs            The one pipeline every event enters through, with a policy per origin
 server/adapters/             Source adapters: Claude Code (as is) and Codex → the town's event contract

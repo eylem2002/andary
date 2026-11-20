@@ -1,4 +1,4 @@
-// Command dispatch for bin/andary.mjs.
+// Command dispatch for cli/andary.mjs.
 import { parseArgs } from 'node:util';
 import { readVersion } from '../config.mjs';
 import { runDoctor } from './doctor.mjs';
