@@ -28,6 +28,9 @@ const START_HELP = `Options:
       --approval-timeout <s>
                             Seconds a prompt waits for the town before the terminal asks
                             (default 120, at most 140)
+      --tls-cert <file>     Serve HTTPS to other computers with this certificate (PEM; or
+      --tls-key <file>      ANDARY_TLS_CERT / ANDARY_TLS_KEY), e.g. from "tailscale cert";
+                            this computer keeps plain HTTP on 127.0.0.1
       --record              Also write every event to ~/.andary/recordings (holds prompts and commands)
       --detach              Run the server in the background and return`;
 

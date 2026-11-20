@@ -140,6 +140,12 @@ that data as private.
 - **Loopback only.** The server binds `127.0.0.1` by default. `--host` with any other address
   prints a loud warning: anyone who can reach the port and obtain the sign-in link could watch
   your sessions and, with remote approvals on, approve tool calls.
+- **HTTPS for other computers.** With `--tls-cert <file> --tls-key <file>` (PEM, or
+  `ANDARY_TLS_CERT` / `ANDARY_TLS_KEY`) the same port speaks HTTPS to the network and refuses
+  plain HTTP from it; this computer's own clients (the forwarder, the CLI, a browser on
+  `127.0.0.1`) keep plain HTTP on loopback, which never leaves the machine (ADR 0016). A team
+  host then prints `https://` invites and view links at its first `--team-host` name, which
+  should be the name on the certificate.
 - **DNS-rebinding defence.** Every request must carry `Host: 127.0.0.1:<port>`, `localhost:<port>`
   or `[::1]:<port>` (plus the `--host` address, when one is given); anything else gets `403`.
 - **Browser sign-in.** Each start creates a new random UI token (32 bytes). Opening the sign-in
@@ -213,7 +219,7 @@ At most 50 prompts wait at once; beyond that the oldest is handed back to the te
 
 | Command | What it does |
 | --- | --- |
-| `start` (default) | Runs the server in the foreground. `--port` (default 4747, `ANDARY_PORT`, `0` = any free port), `--host`, `--no-open`, `--remote-approvals`, `--approval-timeout <s>`, `--record`, `--detach` (run in the background and return). If a server is already running for this `ANDARY_HOME`, prints its link and exits. |
+| `start` (default) | Runs the server in the foreground. `--port` (default 4747, `ANDARY_PORT`, `0` = any free port), `--host`, `--tls-cert <file> --tls-key <file>` (HTTPS for other computers), `--no-open`, `--remote-approvals`, `--approval-timeout <s>`, `--record`, `--detach` (run in the background and return). If a server is already running for this `ANDARY_HOME`, prints its link and exits. |
 | `demo` | Like `start`, opening the simulation (`/?demo=1`). |
 | `stop` | Stops the running server. |
 | `install` / `uninstall` | `--scope user\|project\|local`, `--dir`, `--dry-run`, `--print`. |

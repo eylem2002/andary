@@ -21,6 +21,8 @@ const STATE_FILE = 'server.json';
  * @property {number} startedAt
  * @property {number} approvalTimeoutMs
  * @property {boolean} [team]     hosts a team town (§4.11)
+ * @property {boolean} [tls]      serves HTTPS to the network (ADR 0016)
+ * @property {string[]} [teamHosts]  names a team host is reached by (--team-host)
  */
 
 /**

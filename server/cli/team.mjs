@@ -42,7 +42,10 @@ function invite(rawName, values, home, io) {
   const state = readStateFile(home);
   const port = state?.port ?? DEFAULT_PORT;
   const lan = lanAddresses()[0];
-  const base = values.url ? parseTeamUrl(values.url, '--url') : `http://${lan ?? '127.0.0.1'}:${port}`;
+  // With a certificate, the address must be the name on it (the first --team-host).
+  const scheme = state?.tls ? 'https' : 'http';
+  const address = state?.tls ? (state.teamHosts?.[0] ?? lan) : lan;
+  const base = values.url ? parseTeamUrl(values.url, '--url') : `${scheme}://${address ?? '127.0.0.1'}:${port}`;
   // The key goes in the environment: as an argument it would sit in ps and the shell history.
   const command = `ANDARY_TEAM_KEY=${memberKey(secret, name)} andary start --share-to ${base}`;
   io.out(`Invite for ${name}. Send them these two lines privately: the key lets anyone add sessions to your town as ${name}.`);

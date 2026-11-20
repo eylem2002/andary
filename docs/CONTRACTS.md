@@ -287,6 +287,11 @@ Settled during implementation; they refine §4.3–§4.5.
   server in the background). `--approval-timeout` is capped at 140 s because Claude Code kills the
   hook at 150 s. An explicit `--host` address is added to the Host allowlist. Sign-in links also
   work on `/<page>.html`.
+- HTTPS (ADR 0016, `server/listener.mjs`): with `--tls-cert`/`--tls-key` one port takes both;
+  a connection whose first byte is `0x16` (a TLS handshake) gets HTTPS (TLS 1.2 or newer), any
+  other gets plain HTTP only from a loopback peer and `400` otherwise. `server.json` then has
+  `"tls": true` and, on a team host, `"teamHosts"`; `serverOrigin` stays `http://127.0.0.1:<port>`
+  for local clients. WebSocket `Origin` may be `http://` or `https://` with an allowed host.
 - The forwarder shrinks payloads over 1 MiB instead of dropping them, and also looks for
   `server.json` next to itself (plugin installs).
 - Approvals: `SubagentStop` also resolves that subagent's terminal-answered approvals; approval

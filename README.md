@@ -204,9 +204,22 @@ What is shared and what is not:
   host's too, so keep it within the team.
 - **Not shared:** costs (they stay on each computer), phone notifications, and control: each
   person answers their own permission prompts, and viewers cannot change anything.
-- **Network:** plain HTTP, for a network you trust. Across the internet, use a private network
-  such as Tailscale and start the host with `--team-host <its-vpn-name>` so the link works at
-  that name.
+- **Network:** plain HTTP unless you give the host a certificate (below), so only on a network
+  you trust. Across the internet, use a private network such as Tailscale and start the host
+  with `--team-host <its-vpn-name>` so the link works at that name.
+- **Encrypted (HTTPS):** start the host with a certificate for the name teammates use, for
+  example one from `tailscale cert` (free on Tailscale):
+
+  ```sh
+  tailscale cert my-laptop.tailnet.ts.net
+  andary start --team --team-host my-laptop.tailnet.ts.net \
+    --tls-cert my-laptop.tailnet.ts.net.crt --tls-key my-laptop.tailnet.ts.net.key
+  ```
+
+  Other computers must then use `https://`: the invite and the view link say so, and plain
+  HTTP is refused from the network. Your own computer keeps using plain HTTP on `127.0.0.1`,
+  which never leaves it. A self-signed certificate works too if every teammate trusts it
+  (`NODE_EXTRA_CA_CERTS=<cert> andary start --share-to …`, and in their browser).
 - **Revoke:** `andary team reset` on the host invalidates every key and the view link.
 
 ### A demo anyone can open
@@ -276,7 +289,8 @@ andary [command] [options]
   start                 start the town and open it (the default command)
                         --port <n>, --host <address>, --no-open, --detach, --record,
                         --remote-approvals, --approval-timeout <s>, --notify, --notify-url <url>,
-                        --team [--team-host <name>], --share-to <address> (key in ANDARY_TEAM_KEY)
+                        --team [--team-host <name>], --share-to <address> (key in ANDARY_TEAM_KEY),
+                        --tls-cert <file> --tls-key <file> (HTTPS for other computers)
   demo                  start the town with the built-in simulation
   stop                  stop the running town
   install [codex]       add the hooks for Claude Code (default) or Codex
@@ -292,7 +306,7 @@ andary [command] [options]
 
 Environment: `ANDARY_HOME` (default `~/.andary`), `ANDARY_PORT` (default 4747),
 `CLAUDE_CONFIG_DIR` (default `~/.claude`), `CODEX_HOME` (default `~/.codex`),
-`ANDARY_NOTIFY_URL`, `ANDARY_SHARE_TO`, `ANDARY_TEAM_KEY`.
+`ANDARY_NOTIFY_URL`, `ANDARY_SHARE_TO`, `ANDARY_TEAM_KEY`, `ANDARY_TLS_CERT`, `ANDARY_TLS_KEY`.
 
 ## 9. How it works
 
