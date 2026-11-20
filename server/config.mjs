@@ -25,6 +25,8 @@ export const MAX_APPROVAL_TIMEOUT_MS = 140_000;
 
 export const LIMITS = Object.freeze({
   hookBodyBytes: 1024 * 1024,
+  /** A teammate's batch: up to 200 events, each already trimmed by their own server. */
+  teamBodyBytes: 2 * 1024 * 1024,
   hookRatePerSecond: 300,
   hookBurst: 600,
   wsClients: 16,

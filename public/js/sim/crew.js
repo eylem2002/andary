@@ -100,7 +100,7 @@ export class Crew {
   /**
    * @param {SimRuntime} sim
    * @param {import('./corpus.js').Project} project
-   * @param {{model: string, permissionMode?: string}} options
+   * @param {{model: string, permissionMode?: string, member?: string}} options  member: a teammate's crew in a team town
    */
   constructor(sim, project, options) {
     this.sim = sim;
@@ -111,6 +111,8 @@ export class Crew {
     this.transcriptPath = `${HOME}/.claude/projects/${this.cwd.replace(/[/.]/g, '-')}/${this.sessionId}.jsonl`;
     this.model = options.model;
     this.permissionMode = options.permissionMode ?? 'default';
+    /** In a team town the host's server tags a teammate's events with their name (CONTRACTS §4.11). */
+    this.member = options.member ?? null;
     this.taskSeq = 0;
     /** @type {Map<string, number>} tool calls per helper, for the Agent tool's response */
     this.toolCalls = new Map();
@@ -144,6 +146,7 @@ export class Crew {
       payload.agent_id = agent.id;
       payload.agent_type = agent.type;
     }
+    if (this.member) payload.andary_member = this.member;
     return payload;
   }
 

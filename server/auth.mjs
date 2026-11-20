@@ -3,6 +3,8 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 export const UI_COOKIE = 'andary_ui';
+/** The team town's view-only cookie (server/team.mjs). */
+export const VIEW_COOKIE = 'andary_view';
 const HOOK_SECRET_HEADER = 'x-andary-secret';
 /** The forwarder's per-request nonce, and the server's signature over nonce + reply body. */
 export const HOOK_NONCE_HEADER = 'x-andary-nonce';
@@ -106,3 +108,26 @@ export function signHookReply(responseKey, nonce, body) {
   if (typeof nonce !== 'string' || nonce === '' || nonce.length > MAX_NONCE_CHARS) return null;
   return createHmac('sha256', responseKey).update(`${nonce}\n${body}`).digest('base64url');
 }
+
+/**
+ * The view-only cookie for a team town: same protections as the sign-in cookie.
+ * @param {string} token
+ */
+export function viewCookie(token) {
+  return `${VIEW_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/`;
+}
+
+/**
+ * Who a browser is: the owner (signed in), a teammate watching (view cookie), or nobody.
+ * @param {import('node:http').IncomingMessage} req
+ * @param {string} uiToken
+ * @param {string|null} view  the team's view token, null when this is not a team host
+ * @returns {'owner'|'viewer'|null}
+ */
+export function browserRole(req, uiToken, view) {
+  const cookies = parseCookies(req.headers.cookie);
+  if (safeEqual(cookies[UI_COOKIE], uiToken)) return 'owner';
+  if (view && safeEqual(cookies[VIEW_COOKIE], view)) return 'viewer';
+  return null;
+}
+

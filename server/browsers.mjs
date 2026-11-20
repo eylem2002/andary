@@ -1,30 +1,61 @@
 // Browsers connect over /ws (CONTRACTS §4.5). This module accepts them (after the Host, Origin and
 // cookie checks), sends the hello snapshot, and handles their decide/settings/ping messages.
-import { hasUiCookie } from './auth.mjs';
+// On a team host (§4.11) a browser is either the owner (signed in) or a teammate watching with
+// the view link: viewers get the town but not the owner's prompts, costs, settings or topic.
+import { browserRole } from './auth.mjs';
 import { LIMITS } from './config.mjs';
 import { createTokenBucket } from './rate-limit.mjs';
 import { isAllowedHost, isAllowedOrigin } from './security.mjs';
 import { acceptUpgrade, rejectUpgrade, validateUpgradeRequest } from './websocket.mjs';
 import { CLOSE_CODE } from './ws-frame.mjs';
 
+/** @typedef {'owner'|'viewer'} BrowserRole */
+
+/** Places kept free for the owner: viewers can never fill the town's last few connections. */
+const OWNER_RESERVE = 4;
+
 /**
- * The set of connected browsers.
+ * The set of connected browsers and who each one is.
  * @param {number} maxClients
  */
 export function createHub(maxClients) {
-  /** @type {Set<import('./websocket.mjs').WsConnection>} */
-  const clients = new Set();
+  /** @type {Map<import('./websocket.mjs').WsConnection, BrowserRole>} */
+  const clients = new Map();
+  const count = (/** @type {BrowserRole} */ role) => [...clients.values()].filter((r) => r === role).length;
   return {
     get size() {
       return clients.size;
     },
-    get full() {
-      return clients.size >= maxClients;
+    /** Signed-in browsers: only they can answer prompts. */
+    get owners() {
+      return count('owner');
+    },
+    /** @param {BrowserRole} [role] */
+    full(role = 'owner') {
+      if (clients.size >= maxClients) return true;
+      return role === 'viewer' && count('viewer') >= maxClients - OWNER_RESERVE;
+    },
+    /**
+     * @param {import('./websocket.mjs').WsConnection} connection
+     * @param {BrowserRole} [role]
+     */
+    add(connection, role = 'owner') {
+      clients.set(connection, role);
+      connection.once('close', () => clients.delete(connection));
     },
     /** @param {import('./websocket.mjs').WsConnection} connection */
-    add(connection) {
-      clients.add(connection);
-      connection.once('close', () => clients.delete(connection));
+    roleOf(connection) {
+      return clients.get(connection) ?? null;
+    },
+    /** @param {(connection: import('./websocket.mjs').WsConnection, role: BrowserRole) => void} fn */
+    each(fn) {
+      for (const [connection, role] of clients) fn(connection, role);
+    },
+    /** @param {object} message for signed-in browsers only (prompts, costs, settings) */
+    broadcastOwners(message) {
+      if (clients.size === 0) return;
+      const text = JSON.stringify(message);
+      for (const [connection, role] of clients) if (role === 'owner') connection.send(text);
     },
     /**
      * @param {import('./websocket.mjs').WsConnection} connection
@@ -40,17 +71,17 @@ export function createHub(maxClients) {
     },
     /** @param {string} text an already serialised message */
     broadcastText(text) {
-      for (const connection of clients) connection.send(text);
+      for (const connection of clients.keys()) connection.send(text);
     },
     /**
      * @param {number} code
      * @param {string} reason
      */
     closeAll(code, reason) {
-      for (const connection of clients) connection.close(code, reason);
+      for (const connection of clients.keys()) connection.close(code, reason);
     },
     terminateAll() {
-      for (const connection of clients) connection.terminate();
+      for (const connection of clients.keys()) connection.terminate();
     },
   };
 }
@@ -64,6 +95,33 @@ export function createHub(maxClients) {
 export function publicSettings(ctx) {
   // Whether phone notifications are on, never the topic: /api/hello answers without signing in.
   return { remoteApprovals: ctx.settings.remoteApprovals, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: ctx.notifier.on };
+}
+
+/**
+ * The team part of a browser's settings, null when this server is not a team host.
+ * @param {import('./app.mjs').TownContext} ctx
+ * @param {BrowserRole} role
+ */
+export function teamSettings(ctx, role) {
+  return ctx.team ? { role, members: ctx.team.members() } : null;
+}
+
+/**
+ * Settings as one browser may see them: a viewer never sees the owner's approval or phone settings.
+ * @param {import('./app.mjs').TownContext} ctx
+ * @param {BrowserRole} role
+ */
+function settingsFor(ctx, role) {
+  const settings = role === 'owner' ? publicSettings(ctx) : { remoteApprovals: false, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: false };
+  return ctx.team ? { ...settings, team: teamSettings(ctx, role) } : settings;
+}
+
+/**
+ * Tells every browser who is in the team town (a teammate's first events just arrived).
+ * @param {import('./app.mjs').TownContext} ctx
+ */
+export function announceTeam(ctx) {
+  ctx.hub.each((connection, role) => ctx.hub.send(connection, { t: 'settings', settings: { team: teamSettings(ctx, role) } }));
 }
 
 /**
@@ -91,7 +149,8 @@ export function handleUpgrade(ctx, req, socket, head) {
  * @param {Buffer} head
  */
 function upgrade(ctx, req, socket, head) {
-  const verdict = checkUpgrade(ctx, req);
+  const role = browserRole(req, ctx.uiToken, ctx.team?.view ?? null);
+  const verdict = checkUpgrade(ctx, req, role);
   if (!verdict.ok) {
     rejectUpgrade(socket, verdict.status, verdict.message, verdict.headers);
     return;
@@ -101,22 +160,24 @@ function upgrade(ctx, req, socket, head) {
     maxBufferedBytes: LIMITS.wsBufferedBytes,
     heartbeatMs: LIMITS.wsHeartbeatMs,
   });
-  attachBrowser(ctx, connection);
+  // checkUpgrade refuses a browser without a role.
+  attachBrowser(ctx, connection, /** @type {BrowserRole} */ (role));
 }
 
 /**
  * @param {import('./app.mjs').TownContext} ctx
  * @param {import('node:http').IncomingMessage} req
+ * @param {BrowserRole|null} role
  * @returns {import('./websocket.mjs').UpgradeVerdict}
  */
-function checkUpgrade(ctx, req) {
+function checkUpgrade(ctx, req, role) {
   if (!isAllowedHost(req.headers.host, ctx.allowedHosts)) return { ok: false, status: 403, message: 'Forbidden host' };
   if (pathOf(req.url) !== '/ws') return { ok: false, status: 404, message: 'Not found' };
   const handshake = validateUpgradeRequest(req);
   if (!handshake.ok) return handshake;
   if (!isAllowedOrigin(req.headers.origin, ctx.allowedHosts)) return { ok: false, status: 403, message: 'Forbidden origin' };
-  if (!hasUiCookie(req, ctx.uiToken)) return { ok: false, status: 401, message: 'Sign in with the link printed by andary start' };
-  if (ctx.hub.full) return { ok: false, status: 503, message: 'Too many browser connections' };
+  if (!role) return { ok: false, status: 401, message: 'Sign in with the link printed by andary start' };
+  if (ctx.hub.full(role)) return { ok: false, status: 503, message: 'Too many browser connections' };
   return handshake;
 }
 
@@ -135,21 +196,23 @@ function pathOf(rawUrl) {
 /**
  * @param {import('./app.mjs').TownContext} ctx
  * @param {import('./websocket.mjs').WsConnection} connection
+ * @param {BrowserRole} role
  */
-function attachBrowser(ctx, connection) {
-  ctx.hub.add(connection);
-  cancelRelease(ctx);
-  ctx.log(`Browser connected (${ctx.hub.size} open)`);
+function attachBrowser(ctx, connection, role) {
+  ctx.hub.add(connection, role);
+  const owner = role === 'owner';
+  if (owner) cancelRelease(ctx);
+  ctx.log(`${owner ? 'Browser' : 'Team viewer'} connected (${ctx.hub.size} open)`);
   ctx.hub.send(connection, {
     t: 'hello',
     version: ctx.version,
     serverTime: Date.now(),
-    settings: publicSettings(ctx),
+    settings: settingsFor(ctx, role),
     history: ctx.history.list(),
-    approvals: ctx.broker.list(),
-    usage: ctx.usage.snapshot(),
+    approvals: owner ? ctx.broker.list() : [],
+    usage: owner ? ctx.usage.snapshot() : { agents: [], days: [] },
     progress: ctx.progress.snapshot(),
-    notifyUrl: ctx.notifier.url,
+    notifyUrl: owner ? ctx.notifier.url : null,
   });
   const limiter = createTokenBucket({ ratePerSecond: LIMITS.wsMessagesPerSecond, burst: LIMITS.wsMessageBurst });
   connection.on('message', (text) => {
@@ -160,8 +223,8 @@ function attachBrowser(ctx, connection) {
     handleBrowserMessage(ctx, connection, text);
   });
   connection.on('close', () => {
-    ctx.log(`Browser disconnected (${ctx.hub.size} open)`);
-    if (ctx.hub.size === 0) scheduleRelease(ctx);
+    ctx.log(`${owner ? 'Browser' : 'Team viewer'} disconnected (${ctx.hub.size} open)`);
+    if (ctx.hub.owners === 0) scheduleRelease(ctx);
   });
 }
 
@@ -176,6 +239,10 @@ function handleBrowserMessage(ctx, connection, text) {
     message = JSON.parse(text);
   } catch {
     sendError(ctx, connection, 'Messages must be JSON');
+    return;
+  }
+  if (ctx.hub.roleOf(connection) === 'viewer' && message?.t !== 'ping') {
+    sendError(ctx, connection, 'Viewers can only watch: the team town\'s host answers prompts and changes settings.');
     return;
   }
   switch (message?.t) {
@@ -211,7 +278,7 @@ function applySettings(ctx, connection, settings) {
     ctx.settings.remoteApprovals = settings.remoteApprovals;
     ctx.log(`Remote approvals turned ${settings.remoteApprovals ? 'on' : 'off'} from the town`);
   }
-  ctx.hub.broadcast({ t: 'settings', settings: publicSettings(ctx) });
+  ctx.hub.broadcastOwners({ t: 'settings', settings: publicSettings(ctx) });
   // Nobody may answer from the town any more: give waiting prompts back to the terminal.
   if (!settings.remoteApprovals) ctx.broker.releaseAll();
 }
@@ -234,7 +301,7 @@ function scheduleRelease(ctx) {
   if (ctx.broker.heldCount() === 0 || ctx.graceTimer) return;
   ctx.graceTimer = setTimeout(() => {
     ctx.graceTimer = null;
-    if (ctx.hub.size === 0) ctx.broker.releaseAll();
+    if (ctx.hub.owners === 0) ctx.broker.releaseAll();
   }, LIMITS.browserGraceMs);
   ctx.graceTimer.unref?.();
 }

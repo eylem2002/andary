@@ -36,6 +36,7 @@ import { BUILDINGS, activityForTool, buildingForTool } from './catalog.js';
  * @property {string|null} agentId  subagent/teammate id with any "agent-" prefix removed
  * @property {string|null} agentType
  * @property {string} cwd
+ * @property {string|null} member    the teammate whose session this is, in a team town (§4.11)
  * @property {Record<string, any>} data  kind-specific fields, see the *Data typedefs below
  */
 
@@ -679,6 +680,7 @@ function baseOf(envelope, payload, now) {
     agentId,
     agentType: str(payload.agent_type) || null,
     cwd: str(payload.cwd),
+    member: clip(oneLine(payload.andary_member), 24) || null,
   };
 }
 

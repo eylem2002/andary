@@ -97,7 +97,7 @@ export function createSimulation(options) {
   /**
    * One session from arrival to departure; when it leaves, another is on its way.
    * @param {string} projectName
-   * @param {{model: string, permissionMode: string}} setup
+   * @param {{model: string, permissionMode: string, member?: string}} setup
    * @param {(crew: Crew) => Promise<void>} story
    */
   async function session(projectName, setup, story) {
@@ -138,7 +138,8 @@ export function createSimulation(options) {
     });
     run(async () => {
       await clock.sleep(7000);
-      await session('web-app', { model: MODELS.opus, permissionMode: 'acceptEdits' }, async (crew) => {
+      // Shown as a teammate's crew, as in a team town (§4.11): its foreman carries her name.
+      await session('web-app', { model: MODELS.opus, permissionMode: 'acceptEdits', member: 'Lina' }, async (crew) => {
         const team = await webAppTeamScenario(crew);
         await teamRounds(crew, team, 2);
         await disbandTeam(crew, team);

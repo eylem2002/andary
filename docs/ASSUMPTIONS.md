@@ -209,4 +209,21 @@ section.
     snowmen, snow instead of rain), Neon city (dark towers, neon on all day), Desert oasis
     (adobe and tiles, red rock) and Amman old town (the first limestone look, kept from
     before the sunset coast).
-
+57. **The team town is a LAN feature over plain HTTP.** Zero cost rules out a relay service, so
+    one teammate's Andary is the host and the others post to it directly. `--team` listens on
+    every interface (with the usual warning) and the CLI suggests a private network such as
+    Tailscale when people are not on the same network; there is no TLS of our own.
+58. **Teammates share events, not money or control.** A member's server relays its already
+    sanitized hook events. Token usage and costs stay on each person's own town, phone
+    notifications fire only for your own crews, and a teammate's permission prompt is shown in
+    the host's town but never held there: only they can answer it, in their own terminal or town.
+59. **One view link per team.** Watching is view-only and the same link works for everyone the
+    host gives it to; `andary team reset` revokes it together with every member key. Viewers
+    see the whole town (the host's crews too) but not the host's prompts waiting for approval,
+    costs, settings or ntfy topic.
+60. **"Their own neighbourhood" is their name, not a district.** The town is laid out by kind of
+    work (the library, the terminal, the docks…), so a teammate's crew still walks to the same
+    buildings. Their foreman carries their name on the name tag and in the log, and their crew
+    has a name badge on the crews board.
+61. **Hosting and sharing are exclusive** in one town, and the demo shows the web-app crew as
+    Lina's so the feature can be seen without a second computer.
