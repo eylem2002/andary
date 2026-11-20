@@ -73,7 +73,7 @@ section.
     families (opus, sonnet, haiku…).
 21. **Demo story.** The simulation uses a fixed default seed, so the demo tells the same story each
     time (`?seed=` changes it). Demo approvals expire after 25 s of story time.
-22. **Characters.** Figures are drawn 1.3× life size so they read next to doors and lamp posts;
+22. **Characters.** Figures are drawn 1.6× life size so they read as people at a glance;
     the Foreman is taller and wears a hard hat and hi-vis vest; everyone walks on the right.
     Default entrance is a pop, default exit a poof.
 23. **Sun and sea.** The sun follows a stylised winter arc (south-east → south → south-west) so
@@ -87,9 +87,11 @@ section.
 26. **Cache policy.** `vendor/` files are cached for a day; everything else is `no-cache` with an
     ETag so updates show up immediately.
 27. **Uninstall keeps `~/.andary`** (the forwarder and install records); deleting it is safe.
-28. **No hosted demo.** The brief says not to create cloud resources, so the demo was not
-    published anywhere. `public/` runs the demo on any static host if you want one (for example
-    GitHub Pages, free for public repositories).
+28. **One private hosted demo, on request.** The brief says not to create cloud resources, so
+    nothing was deployed on our own initiative. When you asked to see it running, the demo was
+    published as a private claude.ai artifact (visible only to you until you share it; no
+    account, server or cost on your side). `public/` runs the same demo on any static host (for
+    example GitHub Pages, free for public repositories).
 29. **Performance scores come from software rendering.** The build environment has no GPU, so
     Chrome drew the 3D town on the CPU (SwiftShader) and Lighthouse's mobile preset throttled the
     CPU 4× on top. Performance numbers are therefore far below what a laptop GPU gives; the other
@@ -107,3 +109,27 @@ section.
 33. **"Build" means packaging.** There is no build step (ADR 0002); the verification checks that
     the vendored files regenerate identically from `node_modules` and that the npm package
     installs and runs.
+34. **The director camera is on by default, unless motion is reduced.** The town is most fun
+    when the camera goes where the action is. Because it moves the view by itself, it starts off
+    when the system or Settings asks for reduced motion; `C` or the toolbar button turns it on or
+    off either way, and that choice is remembered (WCAG 2.2.2). It reacts only to events less than
+    30 s old, so a reconnect that replays history does not send it flying; it only ever stops a
+    follow it started itself; and after you select an agent or move the camera it waits 20 quiet
+    seconds before taking over again.
+35. **What counts as interesting.** Arrivals of subagents and crews, permission prompts and
+    failures score highest, then handoffs, finished tasks and compactions, then routine tool
+    calls. A shot lasts 5.5–11 s; only a strong moment cuts in before 11 s; every fourth shot is
+    a wider one; phones zoom 1.5× further because zoom 1 shows less of the town there. It only
+    films agents who are in the 3D town, so a helper that has left is never the subject.
+36. **Full-screen town on a static host.** With no server the page is a demo for visitors, so the
+    side boards start put away and the setup steps are offered in a toast (also announced to
+    screen readers) after 8 s, instead of a dialog over the first view; the sign's "Use your own
+    Claude Code" button and Settings have them all along. Locally the boards start shown, and `H`
+    remembers your choice either way. Asking for a board tab (`A`, or Review on an approval
+    toast) brings the boards back, because an approval must be reachable; if focus was inside a
+    board when it goes, focus moves to the button that brings it back. If the 3D view cannot
+    start, the boards always show and the two new buttons are not offered.
+37. **The toolbar wraps.** On a phone the demo toolbar has ten buttons and wraps to a second row,
+    and on a narrow window the full toolbar wraps too, rather than dropping controls or running
+    off the screen. The caption, the side boards and the notices sit above whatever height it
+    takes.

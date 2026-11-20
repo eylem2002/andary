@@ -16,6 +16,8 @@ import { createDemo } from './ui/demo-mode.js';
 import { resolveReducedMotion, timeOfDayFor } from './ui/appearance.js';
 
 const params = new URLSearchParams(location.search);
+/** How long a visitor on a static host watches the town before the setup steps are offered. */
+const SETUP_HINT_MS = 8000;
 
 /** @typedef {import('./ui/types.js').World} World */
 
@@ -60,6 +62,9 @@ async function boot() {
   hud.setDemoForced(forceDemo);
   hud.setMode(live ? 'live' : 'demo');
   hud.setConnection(live ? (hello.authenticated ? 'connecting' : 'signin') : 'demo');
+  // On a static host (no server at all) the town is the show: it fills the screen from the start.
+  const hosted = !hello && !forceDemo;
+  hud.setHosted(hosted);
 
   // Events start flowing only once the director is listening, so the town misses none of them.
   const world = await worldReady;
@@ -71,7 +76,7 @@ async function boot() {
     console.error('Andary: the director could not start; the HUD still works.', error);
   }
   if (live) startLive(hello);
-  else await startDemo({ hosted: !hello && !forceDemo });
+  else await startDemo({ hosted });
 
   /** @param {import('./core/connection.js').Hello} info */
   function startLive(info) {
@@ -94,7 +99,9 @@ async function boot() {
     hud.setMode('demo');
     hud.setConnection('demo');
     demo.start();
-    if (hosted && !prefs.setupSeen) hud.openDialog('setup');
+    // The setup steps are offered once the first crews have arrived, instead of a dialog over the
+    // first view; the sign's "Use your own Claude Code" button has them all along.
+    if (hosted) setTimeout(() => hud.offerSetup(), SETUP_HINT_MS);
   }
 
   /** The "Watch the demo" button: leave live mode in place, without a reload. */

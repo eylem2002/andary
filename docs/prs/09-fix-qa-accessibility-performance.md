@@ -1,6 +1,6 @@
 # Fixes from the independent QA, accessibility and performance review
 
-Part 9 of 11 · base: `fix/security-review`
+Part 9 of 12 · base: `fix/security-review`
 
 ## What changed
 

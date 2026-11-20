@@ -81,6 +81,88 @@ test.describe('keyboard', () => {
     expect((await worldCalls(page)).some(([method]) => method === 'stopFollow')).toBe(true);
   });
 
+  test('the director camera takes close-ups by itself, and C turns it off and on', async ({ page }) => {
+    await openDemo(page);
+    const caption = page.getByTestId('director-caption');
+    const director = page.locator('[data-tool="director"]');
+    await expect(director).toHaveAttribute('aria-pressed', 'true');
+    await expect(caption).toBeVisible({ timeout: 30_000 });
+    await expect(caption.locator('.hud-cinema__name')).not.toBeEmpty();
+    const closeUps = (await worldCalls(page)).filter(([method, , options]) => method === 'focusAgent' && options?.follow && options.zoom > 1);
+    expect(closeUps.length).toBeGreaterThan(0);
+
+    const stops = async () => (await worldCalls(page)).filter(([method]) => method === 'stopFollow').length;
+    const stopsBefore = await stops();
+    await page.keyboard.press('c');
+    await expect(director).toHaveAttribute('aria-pressed', 'false');
+    await expect(caption).toBeHidden();
+    expect(await stops()).toBeGreaterThan(stopsBefore);
+    await page.keyboard.press('c');
+    await expect(director).toHaveAttribute('aria-pressed', 'true');
+    await expect(caption).toBeVisible({ timeout: 30_000 });
+  });
+
+  test('the director camera stands back while an agent is selected', async ({ page }) => {
+    await openDemo(page);
+    const caption = page.getByTestId('director-caption');
+    await expect(caption).toBeVisible({ timeout: 30_000 });
+    await page.keyboard.press('1');
+    await expect(page.getByTestId('agent-inspector')).toBeVisible();
+    await expect(caption).toBeHidden();
+    await page.keyboard.press('Escape');
+    await expect(caption).toBeVisible({ timeout: 30_000 });
+  });
+
+  test('H puts the side boards away and brings them back', async ({ page }) => {
+    await openDemo(page);
+    const board = page.getByRole('complementary', { name: 'Town board' });
+    const crews = page.getByRole('heading', { name: 'Crews' });
+    await page.keyboard.press('h');
+    await expect(page.locator('[data-tool="toggle-panels"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(board).toBeHidden();
+    await expect(crews).toBeHidden();
+    // Put away means out of the tab order too.
+    await page.keyboard.press('Tab');
+    await expect(page.locator('.hud-board :focus, .hud-left :focus')).toHaveCount(0);
+    await page.keyboard.press('h');
+    await expect(board).toBeVisible();
+    await expect(crews).toBeVisible();
+  });
+
+  test('putting the boards away while focus is in them hands focus to the button that brings them back', async ({ page }) => {
+    await openDemo(page);
+    const activity = page.getByRole('tab', { name: /^Activity/ });
+    await activity.focus();
+    await page.keyboard.press('h');
+    await expect(page.getByRole('complementary', { name: 'Town board' })).toBeHidden();
+    await expect(page.locator('[data-tool="toggle-panels"]')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('complementary', { name: 'Town board' })).toBeVisible();
+  });
+
+  test('A reaches the approvals even with the boards put away', async ({ page }) => {
+    await openDemo(page);
+    const board = page.getByRole('complementary', { name: 'Town board' });
+    await page.keyboard.press('h');
+    await expect(board).toBeHidden();
+    await page.keyboard.press('a');
+    await expect(board).toBeVisible();
+    await expect(page.getByRole('tab', { name: /^Approvals/ })).toBeFocused();
+    await expect(page.locator('[data-tool="toggle-panels"]')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('with reduced motion the director camera starts off, and C still turns it on', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openDemo(page);
+    const director = page.locator('[data-tool="director"]');
+    await expect(director).toHaveAttribute('aria-pressed', 'false');
+    await page.waitForTimeout(2000);
+    await expect(page.getByTestId('director-caption')).toBeHidden();
+    await page.keyboard.press('c');
+    await expect(director).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('director-caption')).toBeVisible({ timeout: 30_000 });
+  });
+
   test('? opens help and Escape closes it, returning focus', async ({ page }) => {
     await openDemo(page);
     await page.getByTestId('settings-button').focus();

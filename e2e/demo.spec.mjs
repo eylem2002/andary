@@ -139,6 +139,20 @@ test('toolbar buttons drive the camera, time, sound and the demo', async ({ page
   await tool('cycle-speed').click();
   await expect(tool('cycle-speed')).toHaveAccessibleName('Demo speed: 1×');
 
+  const board = page.getByRole('complementary', { name: 'Town board' });
+  await tool('toggle-panels').click();
+  await expect(tool('toggle-panels')).toHaveAttribute('aria-pressed', 'true');
+  await expect(board).toBeHidden();
+  await tool('toggle-panels').click();
+  await expect(tool('toggle-panels')).toHaveAttribute('aria-pressed', 'false');
+  await expect(board).toBeVisible();
+
+  await expect(tool('director')).toHaveAttribute('aria-pressed', 'true');
+  await tool('director').click();
+  await expect(tool('director')).toHaveAttribute('aria-pressed', 'false');
+  await tool('director').click();
+  await expect(tool('director')).toHaveAttribute('aria-pressed', 'true');
+
   if (!phone) {
     await tool('toggle-quality').click();
     await expect(tool('toggle-quality')).toHaveAttribute('aria-pressed', 'false');
@@ -150,25 +164,41 @@ test('toolbar buttons drive the camera, time, sound and the demo', async ({ page
   }
 });
 
-test('without a server the demo starts by itself and offers the setup steps', async ({ page, context }) => {
+test('without a server the town fills the screen, then offers the setup steps', async ({ page, context }) => {
   // A static host answers /api/hello with a 404, which Chrome logs: that one is expected here.
   problems = watchConsole(page, { ignore: [/Failed to load resource.*404/] });
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto(`${site.baseUrl}/`);
-  const dialog = page.getByRole('dialog', { name: 'Run it with your own Claude Code' });
-  await expect(dialog).toBeVisible();
   await expect(page.getByTestId('connection-status')).toContainText('Demo');
+  await expect(page.locator('html')).toHaveClass(/hud-panels-hidden/);
+  await expect(page.getByRole('complementary', { name: 'Town board' })).toBeHidden();
+  await expect(page.locator('[data-tool="toggle-panels"]')).toHaveAttribute('aria-pressed', 'true');
+
+  const dialog = page.getByRole('dialog', { name: 'Run it with your own Claude Code' });
+  await expect(dialog).toBeHidden();
+  const offer = page.getByRole('button', { name: 'How to connect' });
+  await expect(offer).toBeVisible({ timeout: 30_000 });
+  await offer.click();
+  await expect(dialog).toBeVisible();
   await expect(dialog.getByText('npm install -g github:eylem2002/andary')).toBeVisible();
   await expect(dialog.getByText('andary install', { exact: true })).toBeVisible();
   const copy = dialog.locator('.hud-steps__step').first().getByRole('button');
   await copy.click();
-  await expect(copy).toHaveText(/Copied|Press Ctrl\+C/);
+  // The button says "Copied" for a moment only, which a busy software-rendered page can outlast, so
+  // the clipboard itself is checked.
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('npm install -g github:eylem2002/andary');
   await dialog.getByRole('button', { name: 'Keep watching the demo' }).click();
   await expect(dialog).toBeHidden();
+  // Seen once, it is not offered again.
+  const seen = await page.evaluate(() => JSON.parse(localStorage.getItem('andary:prefs') ?? '{}').setupSeen);
+  expect(seen).toBe(true);
+
+  // The boards come back with one press, and stay back on the next visit.
+  await page.locator('[data-tool="toggle-panels"]').click();
+  await expect(page.getByRole('complementary', { name: 'Town board' })).toBeVisible();
   await page.reload();
-  await expect(page.getByTestId('connection-status')).toContainText('Demo');
-  await expect(page.getByTestId('agent-row').first()).toBeAttached({ timeout: 45_000 });
-  await expect(dialog).toBeHidden();
+  await expect(page.getByTestId('agent-row').first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.locator('html')).not.toHaveClass(/hud-panels-hidden/);
 });
 
 test('a forced demo (as `andary demo` opens it) offers the way back to the live town', async ({ page }) => {

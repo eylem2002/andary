@@ -7,9 +7,10 @@ import { applyMotion, applyTheme } from './appearance.js';
 import { createApprovalsPanel, pendingCount } from './approvals.js';
 import { createBoard } from './board.js';
 import { createBuildingCard } from './building-card.js';
+import { createCinema } from './cinema.js';
 import { createCrewsPanel } from './crews.js';
 import { createHelpDialog, createSettingsDialog, createSetupDialog } from './dialogs.js';
-import { handleShortcut, openDialog, runAction, select, setFollow } from './hud-actions.js';
+import { handleShortcut, openDialog, panelsHidden, runAction, select, setFollow } from './hud-actions.js';
 import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
 import { createInspector } from './inspector.js';
 import { createMasthead } from './masthead.js';
@@ -35,8 +36,8 @@ const MOBILE_QUERY = '(max-width: 640px)';
 export function createHud({ store, prefs: initialPrefs, controls }) {
   const prefs = { ...initialPrefs };
   const view = initialView(prefs);
-  /** @type {{ world: World|null, frame: number }} */
-  const shell = { world: null, frame: 0 };
+  /** @type {{ world: World|null, frame: number, measureSheets: () => void }} */
+  const shell = { world: null, frame: 0, measureSheets: () => {} };
   const announcer = createAnnouncer();
   announcer.setActivityEnabled(prefs.announce);
 
@@ -56,10 +57,13 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     setPrefs: (patch) => updatePrefs(ctx, patch),
     select: (sel, options) => select(hud, sel, options),
     setFollow: (on) => setFollow(hud, on),
-    showTab: (tab, options) => ui.board.select(tab, { focus: options?.focus, open: true }),
+    showTab: (tab, options) => showTab(hud, shell, tab, options),
     openDialog: (name) => openDialog(hud, name),
     run: (action) => runAction(hud, action),
+    // The director camera needs the finished context, so it is attached right below.
+    cinema: /** @type {any} */ (null),
   };
+  ctx.cinema = createCinema(ctx);
   const ui = createParts(ctx);
   const hud = { ctx, ui };
   const effects = createEffectQueue();
@@ -82,7 +86,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
   });
   const stopShortcuts = installShortcuts({ getMode: () => view.mode, handle: (action, event) => handleShortcut(hud, action, event) });
   const stopTicker = watchEnvironment(ctx, ui);
-  trackSheets(ui.board.el, [ui.inspector.el, ui.place.el]);
+  shell.measureSheets = trackSheets(ui.board.el, [ui.inspector.el, ui.place.el], ui.toolbar.el);
   ctx.refresh();
 
   return {
@@ -92,8 +96,15 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       world.on?.('select', (sel) => select(hud, sel, { from: 'world', camera: false }));
       applyTheme(prefs, world);
       applyMotion(prefs, world);
-      if (failed) ui.notices.showWorldFallback();
+      if (failed) {
+        view.worldFailed = true;
+        ui.notices.showWorldFallback();
+      } else {
+        ctx.cinema.start(/** @type {HTMLElement} */ (document.getElementById('world')));
+      }
       ctx.refresh();
+      // Panel slides animate from now on; two frames later, so a layout settled at boot never does.
+      requestAnimationFrame(() => requestAnimationFrame(() => document.documentElement.classList.add('hud-ready')));
     },
     /** @param {'live'|'demo'} mode */
     setMode(mode) {
@@ -121,13 +132,31 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       view.demoForced = forced;
       ctx.refresh();
     },
+    /** @param {boolean} hosted a demo on a static host: the town fills the screen by default */
+    setHosted(hosted) {
+      view.hosted = hosted;
+      ctx.refresh();
+    },
     /** @param {'help'|'settings'|'setup'} name */
     openDialog: (name) => openDialog(hud, name),
+    /** Points a first-time visitor to the setup steps, unless they have seen them already. */
+    offerSetup() {
+      if (ctx.prefs.setupSeen || ui.dialogs.setup.isOpen) return;
+      ctx.toasts.show({
+        icon: 'terminal',
+        title: 'This is a demo town',
+        body: 'See your own agents here.',
+        action: { label: 'How to connect', run: () => openDialog(hud, 'setup') },
+      });
+      // Toasts are not announced; this one matters, so it is said too, with where the steps live.
+      ctx.announcer.polite('This is a demo town. To watch your own agents, open Settings and choose Use your own Claude Code.');
+    },
     /** @param {import('./toasts.js').ToastOptions} options */
     notify: (options) => ctx.toasts.show(options),
     dispose() {
       stopShortcuts();
       stopTicker();
+      ctx.cinema.dispose();
     },
   };
 }
@@ -139,6 +168,8 @@ function initialView(prefs) {
     connection: 'connecting',
     serverAvailable: false,
     demoForced: false,
+    hosted: false,
+    worldFailed: false,
     serverSettings: {},
     selection: null,
     follow: false,
@@ -181,17 +212,18 @@ function createParts(ctx) {
 function mount(ctx, ui) {
   const main = /** @type {HTMLElement} */ (document.getElementById('main'));
   main.before(ui.masthead.el, ui.board.leftDock, ui.inspector.el);
-  main.append(ui.notices.el, ui.place.el, ui.toolbar.el, ...ctx.announcer.elements);
+  main.append(ui.notices.el, ui.place.el, ctx.cinema.el, ui.toolbar.el, ...ctx.announcer.elements);
   main.after(ui.board.el, ctx.toasts.el, ...Object.values(ui.dialogs).map((dialog) => dialog.el));
 }
 
 /**
  * One render of everything from the current state.
  * @param {{ ctx: HudContext, ui: Parts }} hud
- * @param {{ frame: number }} shell
+ * @param {{ frame: number, measureSheets: () => void }} shell
  * @param {ReturnType<typeof createEffectQueue>} effects
  */
-function flush({ ctx, ui }, shell, effects) {
+function flush(hud, shell, effects) {
+  const { ctx, ui } = hud;
   shell.frame = 0;
   const state = ctx.store.getState();
   ui.masthead.render(state);
@@ -204,10 +236,45 @@ function flush({ ctx, ui }, shell, effects) {
   ui.inspector.render(state);
   ui.place.render(state);
   ui.toolbar.render();
+  applyPanels(hud, shell.measureSheets);
   ui.notices.show(noticeKind(ctx.view, state));
   ui.dialogs.settings.sync();
   playEffects(ctx, effects.take(), state);
   ui.activity.settle();
+}
+
+/**
+ * Hidden panels slide away and become inert, so they cannot be reached by keyboard or read out.
+ * Focus inside them moves to the button that brings them back, so the keyboard does not fall
+ * to the top of the page. A slide does not resize the sheets, so phones are measured again.
+ * @param {{ ctx: HudContext, ui: Parts }} hud
+ * @param {() => void} measureSheets
+ */
+function applyPanels({ ctx, ui }, measureSheets) {
+  const hidden = panelsHidden(ctx);
+  if (ui.board.el.inert === hidden) return;
+  const docks = [ui.board.el, ui.board.leftDock];
+  if (hidden && docks.some((dock) => dock.contains(document.activeElement))) ui.toolbar.focusTool('toggle-panels');
+  document.documentElement.classList.toggle('hud-panels-hidden', hidden);
+  for (const dock of docks) dock.inert = hidden;
+  measureSheets();
+}
+
+/**
+ * Opens a board tab. A tab the viewer asked for (an approval to review) must be reachable, so the
+ * side boards come back first if they were put away.
+ * @param {{ ctx: HudContext, ui: Parts }} hud
+ * @param {{ measureSheets: () => void }} shell
+ * @param {string} tab
+ * @param {{ focus?: boolean }} [options]
+ */
+function showTab(hud, shell, tab, options) {
+  const { ctx, ui } = hud;
+  if (panelsHidden(ctx)) {
+    ctx.setPrefs({ panels: 'shown' });
+    applyPanels(hud, shell.measureSheets);
+  }
+  ui.board.select(tab, { focus: options?.focus, open: true });
 }
 
 /**
@@ -240,22 +307,28 @@ function updatePrefs(ctx, patch) {
  * top of whichever is tallest (--sheet-h), so it is never hidden behind one; the 3D view ends at
  * the board (--board-h) so the town is framed in the part of the screen you can see. The
  * inspector does not shrink the view: it comes and goes, and the camera should not jump with it.
+ * A sheet put away by the full-screen view (inert) counts as no height. The toolbar's own height
+ * (--tools-h; two rows on a narrow phone) places the director's caption above it.
  * @param {HTMLElement} board
  * @param {HTMLElement[]} others
+ * @param {HTMLElement} toolbar
+ * @returns {() => void} measures again
  */
-function trackSheets(board, others) {
+function trackSheets(board, others, toolbar) {
   const root = document.documentElement.style;
-  const heightOf = (/** @type {HTMLElement} */ sheet) => (sheet.hidden ? 0 : Math.round(sheet.getBoundingClientRect().height));
+  const heightOf = (/** @type {HTMLElement} */ sheet) => (sheet.hidden || sheet.inert ? 0 : Math.round(sheet.getBoundingClientRect().height));
   const measure = () => {
     root.setProperty('--board-h', `${heightOf(board)}px`);
     root.setProperty('--sheet-h', `${Math.max(heightOf(board), ...others.map(heightOf))}px`);
+    root.setProperty('--tools-h', `${heightOf(toolbar)}px`);
   };
   // Measured once right away, before the first paint: left to the observer, the first frame
   // showed the toolbar at the bottom of the screen and then moved it above the sheet, a layout
   // shift (CLS 0.13 on phones).
   measure();
   const observer = new ResizeObserver(measure);
-  for (const sheet of [board, ...others]) observer.observe(sheet);
+  for (const sheet of [board, ...others, toolbar]) observer.observe(sheet);
+  return measure;
 }
 
 /**

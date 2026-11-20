@@ -1,6 +1,6 @@
 # README, architecture decisions, owner setup and final report
 
-Part 11 of 11 · base: `refactor/code-quality-review` · merge last
+Part 11 of 12 · base: `refactor/code-quality-review`
 
 ## What changed
 

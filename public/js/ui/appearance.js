@@ -57,6 +57,11 @@ export function applyTheme(prefs, world) {
   else delete root.dataset.theme;
 }
 
+/** Whether motion is reduced right now, as last applied by applyMotion (Settings or the system). */
+export function motionReduced() {
+  return document.documentElement.dataset.motion === 'reduce';
+}
+
 /** @param {Prefs} prefs @param {World|null} world */
 export function applyMotion(prefs, world) {
   const reduce = resolveReducedMotion(prefs, matchMedia('(prefers-reduced-motion: reduce)').matches);

@@ -375,12 +375,14 @@ class World {
     this.crowd.setReducedMotion(this.reducedMotion);
   }
 
-  /** @param {string} id @param {{follow?: boolean}} [opts] */
+  /** @param {string} id @param {{follow?: boolean, zoom?: number}} [opts] */
   focusAgent(id, opts) {
     const p = this.crowd.followPoint(id);
     if (!p) return;
-    const follow = opts?.follow ? () => this.crowd.followPoint(id) : undefined;
-    this.envCall('focus', { x: p.x, y: p.y, z: p.z }, follow ? { follow } : {});
+    const focus = {};
+    if (opts?.follow) focus.follow = () => this.crowd.followPoint(id);
+    if (Number.isFinite(opts?.zoom)) focus.zoom = opts.zoom;
+    this.envCall('focus', { x: p.x, y: p.y, z: p.z }, focus);
   }
 
   /** @param {string} key */

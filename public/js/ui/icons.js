@@ -11,6 +11,8 @@ const rect = (x, y, width, height, rx = 2) => /** @type {Shape} */ (['rect', { x
 
 /** @type {Record<string, Shape[]>} */
 const ICONS = {
+  video: [rect(2.5, 6.5, 13, 11, 2.2), 'M15.5 10.5 21.5 7v10l-6-3.5'],
+  panels: [rect(2.5, 4.5, 19, 15, 2.2), 'M8.5 4.5v15M15.5 4.5v15'],
   follow: [circle(12, 12, 6.5), 'M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4', dot(12, 12, 1.9)],
   rotateLeft: ['M4.5 4v5h5', 'M4.9 9A7.6 7.6 0 1 1 4.6 14.5'],
   rotateRight: ['M19.5 4v5h-5', 'M19.1 9A7.6 7.6 0 1 0 19.4 14.5'],

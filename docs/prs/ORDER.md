@@ -14,3 +14,4 @@ bottom; after a merge GitHub retargets the next pull request to `main`.
 - `fix/qa-accessibility-performance` — fixes from QA: accessibility, performance, mobile
 - `refactor/code-quality-review` — fixes from the independent code-quality review
 - `docs/readme-adrs-and-reports` — README, ADRs, owner setup, QA and final reports
+- `feat/game-view-director-camera` — director camera close-ups and the full-screen town

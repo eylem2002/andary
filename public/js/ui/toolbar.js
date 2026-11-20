@@ -3,6 +3,8 @@
 // button shows a tooltip with its name and shortcut on hover and on keyboard focus.
 import { h, setAttr, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
+import { directorActive } from './cinema.js';
+import { panelsHidden } from './hud-actions.js';
 import { kbd } from './parts.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
@@ -19,6 +21,8 @@ import { kbd } from './parts.js';
 
 /** @type {(Tool|'|')[]} */
 const TOOLS = [
+  { id: 'director', label: 'Director camera', key: 'C', keyName: 'C', compact: true },
+  { id: 'toggle-panels', label: 'Full-screen town', key: 'H', keyName: 'H', compact: true },
   { id: 'follow', label: 'Follow', key: 'F', keyName: 'F', compact: true },
   '|',
   { id: 'rotate-left', label: 'Rotate left', key: '[', keyName: '[', compact: true },
@@ -99,11 +103,16 @@ export function createToolbar(ctx) {
     const { view, prefs } = ctx;
     const demo = view.mode === 'demo';
     for (const tool of TOOLS) if (tool !== '|' && tool.only === 'demo') setHidden(buttons[tool.id], !demo);
+    // Without a 3D view there is no camera to direct and no town to fill the screen with.
+    setHidden(buttons.director, view.worldFailed);
+    setHidden(buttons['toggle-panels'], view.worldFailed);
     for (const sep of el.querySelectorAll('.hud-toolbar__sep')) {
       // The separator before the demo group disappears with it.
       const next = /** @type {HTMLElement|null} */ (sep.nextElementSibling);
       setHidden(/** @type {HTMLElement} */ (sep), Boolean(next?.hidden));
     }
+    setButton('director', 'video', 'Director camera', directorActive(ctx));
+    setButton('toggle-panels', 'panels', 'Full-screen town', panelsHidden(ctx));
     setButton('follow', 'follow', 'Follow the selected agent', view.follow);
     setButton('rotate-left', 'rotateLeft', 'Rotate left', null);
     setButton('rotate-right', 'rotateRight', 'Rotate right', null);
@@ -124,5 +133,16 @@ export function createToolbar(ctx) {
     if (!current || current.hidden || (view.mobile && current.classList.contains('hud-tool--wide-only'))) setRoving(buttons.follow);
   }
 
-  return { el, render };
+  /**
+   * Moves keyboard focus to a tool, keeping it the toolbar's one tab stop.
+   * @param {string} id
+   */
+  function focusTool(id) {
+    const button = buttons[id];
+    if (!button || button.hidden) return;
+    setRoving(button);
+    button.focus();
+  }
+
+  return { el, render, focusTool };
 }

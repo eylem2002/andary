@@ -1,6 +1,7 @@
 // What the viewer can do: select an agent or building, follow, switch tabs, open dialogs, and the
 // toolbar / keyboard actions. Each function takes the HUD (its context and components).
 import { timeOfDayFor } from './appearance.js';
+import { directorActive } from './cinema.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').Selection} Selection */
@@ -105,6 +106,16 @@ export function openDialog({ ui }, name) {
 }
 
 /**
+ * The side panels are hidden when the viewer asked for it, and by default in a hosted demo,
+ * where the town itself is the point. Without a 3D view the panels are all there is to see.
+ * @param {HudContext} ctx
+ */
+export function panelsHidden(ctx) {
+  if (ctx.view.worldFailed) return false;
+  return ctx.prefs.panels === 'hidden' || (ctx.prefs.panels === 'auto' && ctx.view.hosted);
+}
+
+/**
  * Runs a toolbar action by name (also used by the keyboard shortcuts).
  * @param {Hud} hud
  * @param {string} action
@@ -112,17 +123,24 @@ export function openDialog({ ui }, name) {
 export function runAction(hud, action) {
   const { ctx } = hud;
   const world = ctx.world();
+  // Moving the camera by hand tells the director camera to stand back for a while.
+  const byHand = (/** @type {() => void} */ move) => () => {
+    ctx.cinema.viewerTookCamera();
+    move();
+  };
   /** @type {Record<string, () => void>} */
   const actions = {
+    director: () => toggleDirector(hud),
+    'toggle-panels': () => togglePanels(ctx),
     follow: () => setFollow(hud),
-    'rotate-left': () => world?.rotateCamera(-1),
-    'rotate-right': () => world?.rotateCamera(1),
-    'zoom-in': () => world?.zoomBy(1.25),
-    'zoom-out': () => world?.zoomBy(0.8),
-    'reset-view': () => {
+    'rotate-left': byHand(() => world?.rotateCamera(-1)),
+    'rotate-right': byHand(() => world?.rotateCamera(1)),
+    'zoom-in': byHand(() => world?.zoomBy(1.25)),
+    'zoom-out': byHand(() => world?.zoomBy(0.8)),
+    'reset-view': byHand(() => {
       if (ctx.view.follow) setFollow(hud, false);
       world?.resetCamera();
-    },
+    }),
     'cycle-time': () => cycleTime(ctx),
     'toggle-quality': () => ctx.setPrefs({ quality: ctx.prefs.quality === 'low' ? 'high' : 'low' }),
     'toggle-sound': () => toggleSound(ctx),
@@ -131,6 +149,35 @@ export function runAction(hud, action) {
     help: () => openDialog(hud, 'help'),
   };
   actions[action]?.();
+}
+
+/**
+ * Turning the director camera on hands it the camera now: any selection and follow are dropped.
+ * @param {Hud} hud
+ */
+function toggleDirector(hud) {
+  const { ctx } = hud;
+  const on = !directorActive(ctx);
+  ctx.setPrefs({ directorCam: on ? 'on' : 'off' });
+  if (on) {
+    if (ctx.view.selection) select(hud, null, { camera: false });
+    if (ctx.view.follow) setFollow(hud, false);
+  }
+  ctx.cinema.setEnabled(on);
+  ctx.announcer.polite(on ? 'Director camera on: it follows the action by itself.' : 'Director camera off.');
+  ctx.refresh();
+}
+
+/** @param {HudContext} ctx */
+function togglePanels(ctx) {
+  if (ctx.view.worldFailed) {
+    ctx.announcer.polite('The 3D town could not start, so the side boards stay on screen.');
+    return;
+  }
+  const hide = !panelsHidden(ctx);
+  ctx.setPrefs({ panels: hide ? 'hidden' : 'shown' });
+  ctx.announcer.polite(hide ? 'Full-screen town on: the side boards are put away.' : 'Full-screen town off: the side boards are back.');
+  ctx.refresh();
 }
 
 /** @param {HudContext} ctx */

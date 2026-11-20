@@ -118,7 +118,7 @@
  * @property {(h: number|'auto') => void} setTimeOfDay
  * @property {() => number} getTimeOfDay
  * @property {(on: boolean) => void} setReducedMotion
- * @property {(id: string, opts?: { follow?: boolean }) => void} focusAgent
+ * @property {(id: string, opts?: { follow?: boolean, zoom?: number }) => void} focusAgent
  * @property {(key: string) => void} focusBuilding
  * @property {() => void} stopFollow
  * @property {() => void} resetCamera
@@ -151,6 +151,8 @@
  * @property {ConnectionStatus} connection
  * @property {boolean} serverAvailable     an Andary server answered (live mode is possible)
  * @property {boolean} demoForced          the URL asked for the demo (?demo=1), e.g. `andary demo`
+ * @property {boolean} hosted              a demo on a static host, with no server to connect to
+ * @property {boolean} worldFailed         the 3D town could not start (no WebGL); the panels stay
  * @property {{ remoteApprovals?: boolean, approvalTimeoutMs?: number }} serverSettings
  * @property {Selection|null} selection
  * @property {boolean} follow
@@ -178,6 +180,7 @@
  * @property {ReturnType<typeof import('./announcer.js').createAnnouncer>} announcer
  * @property {ReturnType<typeof import('./toasts.js').createToasts>} toasts
  * @property {() => void} refresh   re-renders view-dependent parts (toolbar, masthead, panels)
+ * @property {ReturnType<typeof import('./cinema.js').createCinema>} cinema   the director camera
  */
 
 export {};
