@@ -1,0 +1,111 @@
+// Viewer preferences, persisted in localStorage. Storage can be unavailable (private windows,
+// blocked third-party storage) or hold values from an older version, so reading validates every
+// field and falls back to the default, and writing never throws.
+
+/**
+ * @typedef {object} Prefs
+ * @property {boolean} sound          sound effects (off until the viewer turns them on)
+ * @property {number} volume          0–1
+ * @property {'auto'|'day'|'night'} timeMode
+ * @property {'auto'|'high'|'low'} quality
+ * @property {'system'|'reduce'|'full'} motion
+ * @property {'auto'|'light'|'dark'} theme
+ * @property {boolean} crewsCollapsed
+ * @property {'crews'|'tasks'|'activity'|'approvals'} tab
+ * @property {1|2|4} speed            demo speed
+ * @property {boolean} errorsOnly     activity log filter
+ * @property {boolean} announce       read out activity summaries to screen readers
+ * @property {boolean} setupSeen      the "run it yourself" dialog was shown once
+ */
+
+/** @type {Readonly<Prefs>} */
+export const DEFAULT_PREFS = Object.freeze({
+  sound: false,
+  volume: 0.6,
+  timeMode: 'auto',
+  quality: 'auto',
+  motion: 'system',
+  theme: 'auto',
+  crewsCollapsed: false,
+  tab: 'activity',
+  speed: 1,
+  errorsOnly: false,
+  announce: true,
+  setupSeen: false,
+});
+
+export const STORAGE_KEY = 'andary:prefs';
+
+/** @type {Record<string, readonly any[]>} */
+const CHOICES = {
+  timeMode: ['auto', 'day', 'night'],
+  quality: ['auto', 'high', 'low'],
+  motion: ['system', 'reduce', 'full'],
+  theme: ['auto', 'light', 'dark'],
+  tab: ['crews', 'tasks', 'activity', 'approvals'],
+  speed: [1, 2, 4],
+};
+
+/**
+ * Parses stored preferences, keeping only valid fields.
+ * @param {string|null|undefined} raw
+ * @returns {Prefs}
+ */
+export function parsePrefs(raw) {
+  /** @type {any} */
+  let data;
+  try {
+    data = JSON.parse(raw ?? 'null');
+  } catch {
+    data = null;
+  }
+  const prefs = { ...DEFAULT_PREFS };
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return prefs;
+  for (const key of /** @type {(keyof Prefs)[]} */ (Object.keys(DEFAULT_PREFS))) {
+    if (isValid(key, data[key])) /** @type {any} */ (prefs)[key] = data[key];
+  }
+  return prefs;
+}
+
+/**
+ * @param {keyof Prefs} key
+ * @param {unknown} value
+ */
+function isValid(key, value) {
+  if (CHOICES[key]) return CHOICES[key].includes(value);
+  if (key === 'volume') return typeof value === 'number' && value >= 0 && value <= 1;
+  return typeof value === typeof DEFAULT_PREFS[key];
+}
+
+/**
+ * @param {Pick<Storage, 'getItem'>|null} [storage]
+ * @returns {Prefs}
+ */
+export function loadPrefs(storage = safeStorage()) {
+  try {
+    return parsePrefs(storage?.getItem(STORAGE_KEY));
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
+
+/**
+ * @param {Prefs} prefs
+ * @param {Pick<Storage, 'setItem'>|null} [storage]
+ */
+export function savePrefs(prefs, storage = safeStorage()) {
+  try {
+    storage?.setItem(STORAGE_KEY, JSON.stringify(prefs));
+  } catch {
+    // Quota exceeded or storage disabled: preferences just won't survive a reload.
+  }
+}
+
+/** localStorage, or null where touching it throws (sandboxed frames, disabled storage). */
+function safeStorage() {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
