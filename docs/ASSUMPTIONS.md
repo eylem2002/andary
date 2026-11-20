@@ -261,3 +261,23 @@ section.
     board, but the town grows only for finished work.
 70. **The page's look is read in `public/js/page.js`.** `core/` stays free of browser state; the
     HUD and the town's environment read the look from one small module that does nothing else.
+71. **The sign-in lives in page storage, not a cookie (ADR 0015).** A cookie for `127.0.0.1` is
+    sent to every port; `localStorage` belongs to one origin, port included. The trade-off is
+    that the town's own page script could read it; the page runs only its own scripts under a
+    strict CSP and never renders event text as HTML, so that was judged the smaller risk. Old
+    cookies are simply ignored; signing in again takes the link once.
+72. **A denial's reason is one line.** Typed by you for the agent to read: whitespace and control
+    characters become single spaces, at most 500 characters. Enter in the field denies.
+73. **The forwarder's challenge costs one more local request per event.** Loopback round trips
+    take about a millisecond, observation hooks are asynchronous, and nothing (not even the hook
+    secret) is sent to a program that cannot prove it holds the key.
+74. **HTTPS is for other computers; loopback stays plain (ADR 0016).** Local clients would not
+    match a certificate issued for a network name, and their traffic never leaves the machine.
+    Plain HTTP from the network is refused once a certificate is given. Andary does not make
+    certificates: `tailscale cert` (free) or your own CA does.
+75. **CI's linters are pinned by hash; Lighthouse by lockfile.** Hashes come from actionlint's
+    published checksums and PyPI's published digests at the time of pinning; bumping a version
+    means regenerating them.
+76. **Two remaining risks are accepted, not fixed.** A local denial of service (flooding the
+    port) needs an account on the computer and cannot read or change anything; phone
+    notifications through ntfy.sh are opt-in and never name a project, file or command.
