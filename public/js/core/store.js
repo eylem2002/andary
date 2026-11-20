@@ -6,18 +6,10 @@
 
 import { ACHIEVEMENTS, achievementFor, createAchievementTracker } from './achievements.js';
 import { BUILDINGS, BUILDING_KEYS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
-import {
-  agentKeyOf,
-  clip,
-  isObject,
-  normalize,
-  normalizeAgentId,
-  oneLine,
-  own,
-  relativePath,
-  str,
-  summarizeTool,
-} from './events.js';
+import { normalize } from './events.js';
+import { agentKeyOf, normalizeAgentId } from './ids.js';
+import { summarizeTool } from './summaries.js';
+import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
 
 export { ACHIEVEMENTS };
 

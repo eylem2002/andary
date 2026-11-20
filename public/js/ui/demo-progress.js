@@ -2,6 +2,7 @@
 // a returning visitor finds the town as they left it. It starts a little short of the Ferris
 // wheel, so a visitor sees the town grow within a few minutes.
 import { earnsPoint } from '../core/growth.js';
+import { localDateBefore } from '../core/dates.js';
 
 export const DEMO_PROGRESS_KEY = 'andary:demo-progress';
 const START_POINTS = 92;
@@ -38,10 +39,7 @@ export function createDemoProgress(onProgress, now, storage = safeStorage()) {
 function madeUpDays(ms) {
   const days = [];
   for (let back = 8; back >= 0; back -= 1) {
-    // Calendar days, not 24-hour steps: a daylight-saving change would skip or repeat a day.
-    const d = new Date(ms);
-    d.setDate(d.getDate() - back);
-    days.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+    days.push(localDateBefore(ms, back));
   }
   return days;
 }

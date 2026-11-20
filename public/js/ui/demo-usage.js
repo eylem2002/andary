@@ -2,7 +2,8 @@
 // Each prompt, tool call and stop costs a plausible, repeatable amount (cache-heavy, as Claude
 // Code's turns are), priced like the real thing; the 13 days before today get made-up totals.
 import { messageCost } from '../core/prices.js';
-import { normalizeAgentId } from '../core/events.js';
+import { localDate } from '../core/dates.js';
+import { normalizeAgentId } from '../core/ids.js';
 
 const COUNTED = new Set(['UserPromptSubmit', 'PreToolUse', 'Stop', 'SubagentStop']);
 
@@ -44,26 +45,20 @@ export function createDemoUsage(store, now) {
     record.costUsd += cost;
     records.set(key, record);
     today = { tokens: today.tokens + usage.input_tokens + usage.output_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens, costUsd: today.costUsd + cost };
-    store.setUsage?.({ ...record, tokens: { ...record.tokens } }, [...history, { date: dateOf(now()), ...today }]);
+    store.setUsage?.({ ...record, tokens: { ...record.tokens } }, [...history, { date: localDate(now()), ...today }]);
   };
 }
 
-/** @param {number} ms */
-function dateOf(ms) {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 /** Thirteen made-up days before today, quieter at weekends. @param {number} ms */
 function pastDays(ms) {
   const days = [];
   for (let back = 13; back >= 1; back -= 1) {
-    // Calendar days, not 24-hour steps (daylight saving).
     const date = new Date(ms);
     date.setDate(date.getDate() - back);
     const weekend = date.getDay() === 0 || date.getDay() === 6;
     const costUsd = weekend ? 0.4 + ((back * 37) % 9) / 10 : 2.2 + ((back * 53) % 31) / 10;
-    days.push({ date: dateOf(date.getTime()), tokens: Math.round(costUsd * 820_000), costUsd: Math.round(costUsd * 100) / 100 });
+    days.push({ date: localDate(date.getTime()), tokens: Math.round(costUsd * 820_000), costUsd: Math.round(costUsd * 100) / 100 });
   }
   return days;
 }

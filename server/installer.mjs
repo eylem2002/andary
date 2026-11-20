@@ -21,6 +21,7 @@ import { dirname, join, resolve } from 'node:path';
 import { CLIENTS } from './clients.mjs';
 import { HOOK_SOURCE } from './config.mjs';
 import { ensureHome } from './state-file.mjs';
+import { isObject } from '../public/js/core/text.js';
 
 /** @typedef {import('./clients.mjs').HookClient} HookClient */
 /** @typedef {import('./clients.mjs').Registration} Registration */
@@ -39,14 +40,6 @@ export class SettingsError extends Error {
     super(message);
     this.name = 'SettingsError';
   }
-}
-
-/**
- * @param {unknown} value
- * @returns {value is Record<string, any>}
- */
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**
@@ -126,7 +119,7 @@ export function buildHooksConfig(command, client = CLIENTS.claude) {
  * @returns {boolean}
  */
 export function isAndaryHook(entry, hookPath) {
-  if (!isPlainObject(entry) || typeof entry.command !== 'string') return false;
+  if (!isObject(entry) || typeof entry.command !== 'string') return false;
   if (MARKER_AT_END.test(entry.command)) return true;
   if (!hookPath) return false;
   return forwardSlashes(entry.command).toLowerCase().includes(forwardSlashes(hookPath).toLowerCase());
@@ -168,7 +161,7 @@ function stripHooks(hooksMap, isOurs, keepEvents = new Set()) {
  * @returns {{ group: any, removed: number }}
  */
 function stripGroup(group, isOurs) {
-  if (!isPlainObject(group) || !Array.isArray(group.hooks)) return { group, removed: 0 };
+  if (!isObject(group) || !Array.isArray(group.hooks)) return { group, removed: 0 };
   const keptHooks = group.hooks.filter((entry) => !isOurs(entry));
   const removed = group.hooks.length - keptHooks.length;
   if (removed === 0) return { group, removed: 0 };
@@ -183,7 +176,7 @@ function stripGroup(group, isOurs) {
  */
 export function withAndaryHooks(settings, { command, hookPath, client = CLIENTS.claude }) {
   const current = settings.hooks ?? {};
-  if (!isPlainObject(current)) throw new SettingsError('"hooks" in the settings file is not an object; nothing was changed.');
+  if (!isObject(current)) throw new SettingsError('"hooks" in the settings file is not an object; nothing was changed.');
   // Our event lists stay where they are while being refilled, so re-installing never reorders.
   const registered = new Set(client.registrations.map((r) => r.event));
   const { hooks } = stripHooks(current, (entry) => isAndaryHook(entry, hookPath), registered);
@@ -219,7 +212,7 @@ const UNKNOWN_SHAPE = Object.freeze({ createdFile: false, emptyHooks: false, emp
  * @returns {{ settings: Record<string, any>, removed: number }}
  */
 export function withoutAndaryHooks(settings, hookPath, shape = UNKNOWN_SHAPE) {
-  if (!isPlainObject(settings.hooks)) return { settings, removed: 0 };
+  if (!isObject(settings.hooks)) return { settings, removed: 0 };
   const isOurs = (/** @type {unknown} */ entry) => isAndaryHook(entry, hookPath);
   const { hooks, removed } = stripHooks(settings.hooks, isOurs, new Set(shape.emptyEvents));
   if (removed === 0) return { settings, removed };
@@ -235,12 +228,12 @@ export function withoutAndaryHooks(settings, hookPath, shape = UNKNOWN_SHAPE) {
  */
 function originalShape(file, previous) {
   const hooks = file.settings.hooks;
-  const emptyNow = isPlainObject(hooks)
+  const emptyNow = isObject(hooks)
     ? Object.entries(hooks).filter(([, groups]) => Array.isArray(groups) && groups.length === 0).map(([event]) => event)
     : [];
   return {
     createdFile: previous ? previous.createdFile : !file.exists,
-    emptyHooks: Boolean(previous?.emptyHooks) || (isPlainObject(hooks) && Object.keys(hooks).length === 0),
+    emptyHooks: Boolean(previous?.emptyHooks) || (isObject(hooks) && Object.keys(hooks).length === 0),
     emptyEvents: [...new Set([...(previous?.emptyEvents ?? []), ...emptyNow])],
   };
 }
@@ -255,7 +248,7 @@ const RECORD_FILE = 'installs.json';
 function readRecords(home) {
   try {
     const records = JSON.parse(readFileSync(join(home, RECORD_FILE), 'utf8'));
-    return isPlainObject(records) ? records : {};
+    return isObject(records) ? records : {};
   } catch {
     return {};
   }
@@ -282,12 +275,12 @@ function saveRecord(home, key, shape) {
  * @returns {string[]}
  */
 function registeredEvents(settings, hookPath) {
-  if (!isPlainObject(settings.hooks)) return [];
+  if (!isObject(settings.hooks)) return [];
   return Object.entries(settings.hooks)
     .filter(
       ([, groups]) =>
         Array.isArray(groups) &&
-        groups.some((group) => isPlainObject(group) && Array.isArray(group.hooks) && group.hooks.some((e) => isAndaryHook(e, hookPath))),
+        groups.some((group) => isObject(group) && Array.isArray(group.hooks) && group.hooks.some((e) => isAndaryHook(e, hookPath))),
     )
     .map(([event]) => event);
 }
@@ -299,7 +292,7 @@ function registeredEvents(settings, hookPath) {
  */
 function pluginEnabledIn(settings) {
   const enabled = settings.enabledPlugins;
-  return isPlainObject(enabled) && Object.entries(enabled).some(([id, on]) => id.startsWith('andary@') && on === true);
+  return isObject(enabled) && Object.entries(enabled).some(([id, on]) => id.startsWith('andary@') && on === true);
 }
 
 /**
@@ -323,7 +316,7 @@ function readSettingsFile(filePath) {
   } catch (error) {
     throw new SettingsError(`${filePath} is not valid JSON${jsonErrorLocation(error)}. Fix it and run the command again; nothing was changed.`);
   }
-  if (!isPlainObject(settings)) throw new SettingsError(`${filePath} does not contain a JSON object; nothing was changed.`);
+  if (!isObject(settings)) throw new SettingsError(`${filePath} does not contain a JSON object; nothing was changed.`);
   return { exists: true, text, settings };
 }
 

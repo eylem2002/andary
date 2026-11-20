@@ -7,6 +7,7 @@ import { findRunningServer } from '../state-file.mjs';
 import { postHook } from './client.mjs';
 import { cliInvocation, sleep } from './io.mjs';
 import { UsageError, parseSpeed } from './options.mjs';
+import { isObject } from '../../public/js/core/text.js';
 
 export const REPLAY_OPTIONS = Object.freeze({ speed: { type: 'string' } });
 
@@ -37,14 +38,6 @@ function parseRecording(text) {
     else skipped += 1;
   }
   return { items, skipped };
-}
-
-/**
- * @param {unknown} value
- * @returns {value is Record<string, any>}
- */
-function isObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**

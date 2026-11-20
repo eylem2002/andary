@@ -7,7 +7,7 @@ import { BUILDING_ICONS, icon } from './icons.js';
 import { kbd } from './parts.js';
 import { SHORTCUT_HELP } from './shortcuts.js';
 import { setDesktopNotify } from './notifications.js';
-import { LOOK, LOOKS } from '../world/env/look.js';
+import { LOOK, LOOKS } from '../core/looks.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 

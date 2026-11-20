@@ -10,6 +10,7 @@ import { probeServer, readStateFile, serverOrigin } from '../state-file.mjs';
 import { connectWebSocket, waitForMessage } from '../ws-client.mjs';
 import { describeScope } from './status.mjs';
 import { cliInvocation, tildify } from './io.mjs';
+import { DOCTOR_SESSION_PREFIX } from '../../public/js/core/ids.js';
 
 const SYMBOLS = { ok: '✔', warn: '!', fail: '✖' };
 
@@ -142,7 +143,7 @@ async function checkRoundTrip(report, home, io) {
   const script = existsSync(forwarderPath(home)) ? forwarderPath(home) : HOOK_SOURCE;
   // The browser ignores this prefix (DOCTOR_SESSION_PREFIX in public/js/core/events.js), so the
   // probe proves delivery without leaving a crew in the town.
-  const sessionId = `andary-doctor-${randomUUID()}`;
+  const sessionId = `${DOCTOR_SESSION_PREFIX}${randomUUID()}`;
   const env = { ...io.env, ANDARY_HOME: home };
   const base = { session_id: sessionId, cwd: io.cwd, transcript_path: '', permission_mode: 'default' };
   let socket = null;

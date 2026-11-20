@@ -4,7 +4,7 @@
 // story time without one (so the card's countdown runs faster at 2× and 4×, like the story, and
 // stands still while the demo is paused).
 
-import { normalizeAgentId } from '../core/events.js';
+import { normalizeAgentId } from '../core/ids.js';
 import { createDemoUsage } from './demo-usage.js';
 import { createDemoProgress } from './demo-progress.js';
 

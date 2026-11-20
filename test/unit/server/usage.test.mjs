@@ -4,7 +4,9 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSy
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { claudeConfigDir, createUsageTracker, dayOf, isInside, readAppended, readUsageLine, resolveInside, subagentTranscript } from '../../../server/usage.mjs';
+import { createUsageTracker, isInside, readAppended, readUsageLine, resolveInside, subagentTranscript } from '../../../server/usage.mjs';
+import { resolveClaudeConfigDir } from '../../../server/config.mjs';
+import { localDate as dayOf } from '../../../public/js/core/dates.js';
 import { messageCost } from '../../../public/js/core/prices.js';
 
 /** One assistant line as Claude Code writes it. */
@@ -42,7 +44,7 @@ test('readUsageLine reads assistant messages only', () => {
 test('helpers: days, subagent paths, the config folder', () => {
   assert.match(dayOf(Date.now()), /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(subagentTranscript('/c/projects/p/s1.jsonl', 'agent-abc'), join('/c/projects/p/s1', 'subagents', 'agent-abc.jsonl'));
-  assert.equal(claudeConfigDir({ CLAUDE_CONFIG_DIR: '/x' }), '/x');
+  assert.equal(resolveClaudeConfigDir({ CLAUDE_CONFIG_DIR: '/x' }), '/x');
 });
 
 /** A Claude config folder with one project. */

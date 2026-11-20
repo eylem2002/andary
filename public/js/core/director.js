@@ -8,7 +8,8 @@
 // they play no effects and say nothing.
 
 import { modelLabel } from './catalog.js';
-import { agentKeyOf, clip, hostOf, isObject, normalizeAgentId, oneLine, own, shortCommand, str } from './events.js';
+import { agentKeyOf, normalizeAgentId } from './ids.js';
+import { clip, hostOf, isObject, oneLine, own, shortCommand, str } from './text.js';
 import * as defaultHumor from './humor.js';
 
 /** @typedef {import('./catalog.js').BuildingKey} BuildingKey */

@@ -3,6 +3,7 @@
 // readers) and today's crews. Costs are estimates at API list prices (core/prices.js).
 import { createDialog } from './dialogs.js';
 import { h, setHidden, setText } from './dom.js';
+import { localDateBefore } from '../core/dates.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -89,9 +90,7 @@ export function lastDays(days, todayMs, count = 14) {
   const byDate = new Map(days.map((day) => [day.date, day]));
   const out = [];
   for (let back = count - 1; back >= 0; back -= 1) {
-    const d = new Date(todayMs);
-    d.setDate(d.getDate() - back);
-    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const date = localDateBefore(todayMs, back);
     out.push(byDate.get(date) ?? { date, tokens: 0, costUsd: 0 });
   }
   return out;

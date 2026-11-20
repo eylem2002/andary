@@ -7,8 +7,9 @@
 // it read each file (by its real path) and the ids of recent messages in <ANDARY_HOME>/usage.json,
 // so a restart does not count anything twice.
 import { closeSync, constants, existsSync, fstatSync, openSync, readFileSync, readSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
+import { localDate } from '../public/js/core/dates.js';
+import { agentKeyOf, normalizeAgentId } from '../public/js/core/ids.js';
 import { messageCost } from '../public/js/core/prices.js';
 
 /**
@@ -36,14 +37,6 @@ function count(n) {
   return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/**
- * The local calendar day of a timestamp, as YYYY-MM-DD.
- * @param {number} ms
- */
-export function dayOf(ms) {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 /**
  * Where a subagent's own transcript lives, next to its session's.
@@ -51,7 +44,7 @@ export function dayOf(ms) {
  * @param {string} agentId
  */
 export function subagentTranscript(sessionTranscript, agentId) {
-  return join(sessionTranscript.replace(/\.jsonl$/, ''), 'subagents', `agent-${agentId.replace(/^agent-/, '')}.jsonl`);
+  return join(sessionTranscript.replace(/\.jsonl$/, ''), 'subagents', `agent-${normalizeAgentId(agentId)}.jsonl`);
 }
 
 /**
@@ -228,11 +221,11 @@ export function createUsageTracker({ claudeDir, stateFile, onChange, throttleMs 
     const sessionId = typeof event?.session_id === 'string' ? event.session_id : '';
     const transcript = typeof event?.transcript_path === 'string' ? event.transcript_path : '';
     if (!sessionId || !transcript) return;
-    const agentId = typeof event.agent_id === 'string' && event.agent_id ? event.agent_id.replace(/^agent-/, '') : null;
+    const agentId = normalizeAgentId(event.agent_id);
     const file = agentId
       ? (typeof event.agent_transcript_path === 'string' && event.agent_transcript_path) || subagentTranscript(transcript, agentId)
       : transcript;
-    const key = `${sessionId}:${agentId ?? 'main'}`;
+    const key = agentKeyOf(sessionId, agentId);
     if (pending.has(key)) return;
     pending.set(key, setTimeout(() => {
       pending.delete(key);
@@ -260,7 +253,7 @@ export function createUsageTracker({ claudeDir, stateFile, onChange, throttleMs 
       save();
       return;
     }
-    const key = `${sessionId}:${agentId ?? 'main'}`;
+    const key = agentKeyOf(sessionId, agentId);
     const record = agents.get(key) ?? { sessionId, agentId, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0, unpriced: false, model: null };
     let changed = false;
     for (const line of text.split('\n')) {
@@ -301,7 +294,7 @@ export function createUsageTracker({ claudeDir, stateFile, onChange, throttleMs 
     if (cost === null) record.unpriced = true;
     else record.costUsd += cost;
     if (seen.model) record.model = seen.model;
-    const date = dayOf(seen.ts ?? now());
+    const date = localDate(seen.ts ?? now());
     const day = days.get(date) ?? { date, tokens: 0, costUsd: 0 };
     day.tokens += tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
     day.costUsd += cost ?? 0;
@@ -331,14 +324,6 @@ export function createUsageTracker({ claudeDir, stateFile, onChange, throttleMs 
       }
     },
   };
-}
-
-/**
- * Claude Code's config folder: CLAUDE_CONFIG_DIR or ~/.claude.
- * @param {NodeJS.ProcessEnv} [env]
- */
-export function claudeConfigDir(env = process.env) {
-  return env.CLAUDE_CONFIG_DIR ? env.CLAUDE_CONFIG_DIR : join(homedir(), '.claude');
 }
 
 

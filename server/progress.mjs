@@ -2,7 +2,7 @@
 // (numbers and dates only, mode 0600). See public/js/core/growth.js for what the points unlock.
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { earnsPoint } from '../public/js/core/growth.js';
-import { dayOf } from './usage.mjs';
+import { localDate } from '../public/js/core/dates.js';
 
 /**
  * @typedef {object} Progress
@@ -49,7 +49,7 @@ export function createProgress({ stateFile, onChange, now = Date.now }) {
      */
     observe(event) {
       let changed = false;
-      const today = dayOf(now());
+      const today = localDate(now());
       if (progress.days.at(-1) !== today) {
         progress = { ...progress, days: [...progress.days.filter((d) => d !== today), today].slice(-DAYS_KEPT) };
         changed = true;

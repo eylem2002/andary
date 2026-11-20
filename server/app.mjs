@@ -4,17 +4,16 @@ import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { generateToken } from './auth.mjs';
 import { createApprovalBroker } from './approvals.mjs';
-import { claudeConfigDir, createUsageTracker } from './usage.mjs';
+import { createUsageTracker } from './usage.mjs';
 import { createProgress } from './progress.mjs';
 import { createNotifier } from './notify.mjs';
 import { announceTeam, createHub, handleUpgrade } from './browsers.mjs';
 import { createTeamHost, createTeamRelay, lanAddresses, teamSecret } from './team.mjs';
-import { DEFAULT_APPROVAL_TIMEOUT_MS, DEFAULT_HOST, DEFAULT_PORT, LIMITS, PUBLIC_DIR, readVersion, resolveHome } from './config.mjs';
+import { DEFAULT_APPROVAL_TIMEOUT_MS, DEFAULT_HOST, DEFAULT_PORT, LIMITS, PUBLIC_DIR, readVersion, resolveClaudeConfigDir, resolveHome } from './config.mjs';
 import { createHistory, createRecorder, recordingPath } from './history.mjs';
 import { NOT_FOUND_PAGE, sendHtml, sendText } from './http-util.mjs';
 import { createTokenBucket } from './rate-limit.mjs';
 import { handleRequest } from './routes.mjs';
-import { sanitize } from './sanitize.mjs';
 import { allowedHostHeaders, buildCsp, computeImportMapHashes, connectHost, hostWithPort, isWildcardHost, securityHeaders } from './security.mjs';
 import { loginUrl, removeStateFileIfOwned, serverOrigin, writeStateFile } from './state-file.mjs';
 import { createStaticHandler } from './static.mjs';
@@ -58,7 +57,6 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {import('./rate-limit.mjs').TokenBucket} hookLimiter
  * @property {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, pathname: string) => Promise<void>} serveStatic
  * @property {ReturnType<typeof createRecorder>|null} recorder
- * @property {(body: { ts: number, event: object }) => import('./history.mjs').Envelope & { event: Record<string, any> }} ingest
  * @property {(message: string) => void} log
  * @property {{ events: number }} counts
  * @property {NodeJS.Timeout|null} graceTimer
@@ -204,7 +202,7 @@ function createContext(config, options) {
       : null,
     relay: options.shareTo ? createTeamRelay({ url: options.shareTo.url, key: options.shareTo.key, log: config.log }) : null,
     usage: createUsageTracker({
-      claudeDir: options.claudeDir ?? claudeConfigDir(),
+      claudeDir: options.claudeDir ?? resolveClaudeConfigDir(),
       stateFile: config.writeState ? join(config.home, 'usage.json') : null,
       onChange: (record, days) => hub.broadcastOwners({ t: 'usage', u: record, days }),
     }),
@@ -216,30 +214,11 @@ function createContext(config, options) {
     hookLimiter: createTokenBucket({ ratePerSecond: LIMITS.hookRatePerSecond, burst: LIMITS.hookBurst }),
     serveStatic: createStaticHandler({ root: config.publicDir, notFound: (_req, res) => sendHtml(res, 404, NOT_FOUND_PAGE) }),
     recorder: options.record ? createRecorder(recordingPath(config.home)) : null,
-    ingest: (body) => ingest(ctx, body),
     log: config.log,
     counts: { events: 0 },
     graceTimer: null,
   };
   return ctx;
-}
-
-/**
- * Sanitizes a hook payload into an envelope, keeps it, records it (with --record) and sends it
- * to every browser.
- * @param {TownContext} ctx
- * @param {{ ts: number, event: object }} body
- */
-function ingest(ctx, { ts, event }) {
-  ctx.counts.events += 1;
-  const envelope = { id: ctx.counts.events, ts, rx: Date.now(), event: sanitize(event) };
-  if (envelope.id === 1) ctx.log('Receiving hook events from Claude Code');
-  // Serialised once: its length is the envelope's share of the history budget.
-  const text = JSON.stringify(envelope);
-  ctx.history.push(envelope, text.length);
-  ctx.recorder?.write(envelope);
-  ctx.hub.broadcastText(`{"t":"hook","e":${text}}`);
-  return envelope;
 }
 
 /**
