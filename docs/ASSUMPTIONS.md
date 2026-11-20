@@ -231,3 +231,22 @@ section.
     has a name badge on the crews board.
 61. **Hosting and sharing are exclusive** in one town, and the demo shows the web-app crew as
     Lina's so the feature can be seen without a second computer.
+62. **Codex through its own hooks, not its session files.** Codex's hooks (on by default in
+    recent versions) use Claude Code's event and field names and read the same permission
+    decision, so the same forwarder serves both; a `codex` argument tells the server which
+    adapter to use. Tailing `~/.codex/sessions` was the fallback and is not needed (ADR 0013).
+63. **What Codex sends was taken from its documentation and third-party references**, not from
+    a live Codex: no Codex account or API key is used here (zero cost). Unknowns are handled
+    defensively: the patch text is read from `tool_input.command`, `.input` or `.patch`; an exit
+    code from `exit_code`, `exitCode` or `metadata.exit_code`; `spawn_agent`'s task from
+    `message`, `prompt`, `task` or `description`. Anything else passes through unchanged and shows
+    as an ordinary tool call.
+64. **Remote approvals for Codex use the same switch and the same card.** Codex reads the same
+    `hookSpecificOutput.decision` shape, and the request is shown exactly as Codex sent it (a
+    patch as its raw text). Like everything Codex-specific, this was tested with recorded
+    payloads, not a live Codex.
+65. **Codex costs are not counted yet.** The usage reader reads Claude Code transcripts only;
+    a Codex crew shows its model but no cost. Reading Codex rollouts is a possible follow-up.
+66. **No session id prefix for Codex.** Codex and Claude Code both use random session ids, so they
+    cannot collide; the crew's "Codex" badge comes from `andary_source`, not from the id.
+

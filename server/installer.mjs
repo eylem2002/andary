@@ -1,4 +1,5 @@
-// Registers the Andary hooks in a Claude Code settings file (CONTRACTS §4.1) and removes them.
+// Registers the Andary hooks in a Claude Code settings file or a Codex hooks file (CONTRACTS
+// §4.1) and removes them; what differs between the two lives in clients.mjs.
 // Settings files belong to the user and often to other tools too, so the merge is conservative:
 // unrelated settings and other hooks are kept as they are, a malformed file is never touched,
 // a timestamped backup is written before every change, and running install twice changes nothing.
@@ -17,48 +18,19 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { HOOK_SOURCE, resolveClaudeConfigDir } from './config.mjs';
+import { CLIENTS } from './clients.mjs';
+import { HOOK_SOURCE } from './config.mjs';
 import { ensureHome } from './state-file.mjs';
+
+/** @typedef {import('./clients.mjs').HookClient} HookClient */
+/** @typedef {import('./clients.mjs').Registration} Registration */
 
 /** Every command we register ends with this, so uninstall can find exactly our entries. */
 const HOOK_MARKER = '# andary';
 const MARKER_AT_END = /(?:^|\s)#\s*andary\s*$/;
 
-/** Observation-only events: async, so they never slow Claude down. */
-export const ASYNC_EVENTS = Object.freeze([
-  'SessionStart',
-  'UserPromptSubmit',
-  'PreToolUse',
-  'PostToolUse',
-  'PostToolUseFailure',
-  'PermissionDenied',
-  'Notification',
-  'SubagentStart',
-  'SubagentStop',
-  'Stop',
-  'StopFailure',
-  'TaskCreated',
-  'TaskCompleted',
-  'TeammateIdle',
-  'PreCompact',
-  'PostCompact',
-  'PostModelSwitch',
-]);
-
-/**
- * @typedef {{ event: string, async?: boolean, timeout?: number }} Registration
- */
-
-/** @type {ReadonlyArray<Registration>} */
-export const HOOK_REGISTRATIONS = Object.freeze([
-  ...ASYNC_EVENTS.map((event) => ({ event, async: true })),
-  // Synchronous so the town can answer; Claude Code cancels the hook after 150 s.
-  { event: 'PermissionRequest', timeout: 150 },
-  // Synchronous: async hooks may be killed while the session exits.
-  { event: 'SessionEnd', timeout: 3 },
-]);
-
-export const SCOPES = Object.freeze(['user', 'project', 'local']);
+/** Claude Code's registrations (the default client throughout this module). */
+export const HOOK_REGISTRATIONS = CLIENTS.claude.registrations;
 
 /** A problem with a settings file; the message is meant for the user. Nothing was written. */
 export class SettingsError extends Error {
@@ -78,21 +50,15 @@ function isPlainObject(value) {
 }
 
 /**
- * @param {string} scope user | project | local
- * @param {{ dir?: string, env?: NodeJS.ProcessEnv }} [where]
+ * The hooks file of a client for a scope.
+ * @param {string} scope user | project | local (Claude Code only)
+ * @param {{ dir?: string, env?: NodeJS.ProcessEnv, client?: HookClient }} [where]
  * @returns {string}
  */
-export function settingsPathFor(scope, { dir = process.cwd(), env = process.env } = {}) {
-  switch (scope) {
-    case 'user':
-      return join(resolveClaudeConfigDir(env), 'settings.json');
-    case 'project':
-      return join(resolve(dir), '.claude', 'settings.json');
-    case 'local':
-      return join(resolve(dir), '.claude', 'settings.local.json');
-    default:
-      throw new SettingsError(`Unknown scope "${scope}". Use user, project or local.`);
-  }
+export function settingsPathFor(scope, { dir = process.cwd(), env = process.env, client = CLIENTS.claude } = {}) {
+  const file = client.scopes.includes(scope) ? client.file(scope, { dir, env }) : null;
+  if (!file) throw new SettingsError(`Unknown scope "${scope}" for ${client.name}. Use ${client.scopes.join(' or ')}.`);
+  return file;
 }
 
 /**
@@ -112,18 +78,20 @@ function forwardSlashes(path) {
 }
 
 /**
- * The command Claude Code runs: `node "<home>/hook.mjs" # andary`, with forward slashes on
- * every OS (they work in sh, Git Bash and PowerShell alike).
+ * The command the agent runs: `node "<home>/hook.mjs" # andary` for Claude Code and
+ * `node "<home>/hook.mjs" codex # andary` for Codex, with forward slashes on every OS (they work
+ * in sh, Git Bash and PowerShell alike).
  * @param {string} home
+ * @param {HookClient} [client]
  * @returns {string}
  */
-export function hookCommand(home) {
+export function hookCommand(home, client = CLIENTS.claude) {
   const target = forwardSlashes(forwarderPath(home));
   // These characters would change the meaning of a double-quoted shell word.
   if (/["`$]/.test(target)) {
     throw new SettingsError(`The path ${target} contains " \` or $, which cannot be used in a hook command. Set ANDARY_HOME to a simpler folder.`);
   }
-  return `node "${target}" ${HOOK_MARKER}`;
+  return `node "${target}"${client.argument ? ` ${client.argument}` : ''} ${HOOK_MARKER}`;
 }
 
 /**
@@ -144,10 +112,11 @@ function hookEntry(command, registration) {
  * The `hooks` object Andary registers (also the content of the plugin's hooks/hooks.json).
  * Tool events have no matcher, so they match every tool.
  * @param {string} command
+ * @param {HookClient} [client]
  * @returns {Record<string, Array<{ hooks: Array<Record<string, any>> }>>}
  */
-export function buildHooksConfig(command) {
-  return Object.fromEntries(HOOK_REGISTRATIONS.map((r) => [r.event, [{ hooks: [hookEntry(command, r)] }]]));
+export function buildHooksConfig(command, client = CLIENTS.claude) {
+  return Object.fromEntries(client.registrations.map((r) => [r.event, [{ hooks: [hookEntry(command, r)] }]]));
 }
 
 /**
@@ -209,16 +178,16 @@ function stripGroup(group, isOurs) {
 /**
  * Pure: the settings with our previous entries replaced by one fresh group per registered event.
  * @param {Record<string, any>} settings
- * @param {{ command: string, hookPath: string }} options
+ * @param {{ command: string, hookPath: string, client?: HookClient }} options
  * @returns {Record<string, any>}
  */
-export function withAndaryHooks(settings, { command, hookPath }) {
+export function withAndaryHooks(settings, { command, hookPath, client = CLIENTS.claude }) {
   const current = settings.hooks ?? {};
   if (!isPlainObject(current)) throw new SettingsError('"hooks" in the settings file is not an object; nothing was changed.');
   // Our event lists stay where they are while being refilled, so re-installing never reorders.
-  const registered = new Set(HOOK_REGISTRATIONS.map((r) => r.event));
+  const registered = new Set(client.registrations.map((r) => r.event));
   const { hooks } = stripHooks(current, (entry) => isAndaryHook(entry, hookPath), registered);
-  for (const registration of HOOK_REGISTRATIONS) {
+  for (const registration of client.registrations) {
     const groups = hooks[registration.event] ?? [];
     if (!Array.isArray(groups)) {
       throw new SettingsError(`"hooks.${registration.event}" in the settings file is not a list; nothing was changed.`);
@@ -324,7 +293,7 @@ function registeredEvents(settings, hookPath) {
 }
 
 /**
- * Whether these settings enable the Andary plugin (from any marketplace).
+ * Whether these settings enable the Andary plugin (from any marketplace; Claude Code only).
  * @param {Record<string, any>} settings
  * @returns {boolean}
  */
@@ -393,6 +362,7 @@ function serialize(settings, format) {
 /**
  * @typedef {object} HooksPlan
  * @property {'install'|'uninstall'} action
+ * @property {HookClient} client
  * @property {string} scope
  * @property {string} settingsPath
  * @property {string} home
@@ -409,19 +379,20 @@ function serialize(settings, format) {
 
 /**
  * Works out a change without writing anything (used by --dry-run as well).
- * @param {{ action: 'install'|'uninstall', scope: string, dir?: string, home: string, env?: NodeJS.ProcessEnv }} options
+ * @param {{ action: 'install'|'uninstall', scope: string, dir?: string, home: string, env?: NodeJS.ProcessEnv, client?: HookClient }} options
  * @returns {HooksPlan}
  */
-export function planHooksChange({ action, scope, dir, home, env }) {
-  const settingsPath = settingsPathFor(scope, { dir, env });
+export function planHooksChange({ action, scope, dir, home, env, client = CLIENTS.claude }) {
+  const settingsPath = settingsPathFor(scope, { dir, env, client });
   const hookPath = forwarderPath(home);
   const file = readSettingsFile(settingsPath);
   const recorded = readRecords(home)[resolve(settingsPath)];
   const shape = action === 'install' ? originalShape(file, recorded) : (recorded ?? UNKNOWN_SHAPE);
   const { settings: stripped, removed } = withoutAndaryHooks(file.settings, hookPath, shape);
-  const after = action === 'install' ? withAndaryHooks(file.settings, { command: hookCommand(home), hookPath }) : stripped;
+  const after = action === 'install' ? withAndaryHooks(file.settings, { command: hookCommand(home, client), hookPath, client }) : stripped;
   return {
     action,
+    client,
     scope,
     settingsPath,
     home,
@@ -431,7 +402,7 @@ export function planHooksChange({ action, scope, dir, home, env }) {
     after,
     output: serialize(after, detectFormat(file.text)),
     removed,
-    added: action === 'install' ? HOOK_REGISTRATIONS.length : 0,
+    added: action === 'install' ? client.registrations.length : 0,
     shape,
     deleteFile: action === 'uninstall' && file.exists && shape.createdFile && removed > 0 && Object.keys(after).length === 0,
   };
@@ -527,6 +498,7 @@ export function refreshForwarder(home) {
 
 /**
  * @typedef {object} ScopeReport
+ * @property {HookClient} client
  * @property {string} scope
  * @property {string} settingsPath
  * @property {string[]} events     events that have an Andary entry
@@ -536,39 +508,43 @@ export function refreshForwarder(home) {
  */
 
 /**
- * Where Andary is registered: each settings scope for `dir`, plus the plugin.
- * @param {{ dir?: string, env?: NodeJS.ProcessEnv, home: string }} options
+ * Where Andary is registered: each scope of each client for `dir`, plus the Claude Code plugin.
+ * `scopes` lists Claude Code's scopes first, then Codex's.
+ * @param {{ dir?: string, env?: NodeJS.ProcessEnv, home: string, clients?: HookClient[] }} options
  * @returns {{ scopes: ScopeReport[], plugin: boolean, installed: boolean }}
  */
-export function inspectInstallations({ dir, env, home }) {
+export function inspectInstallations({ dir, env, home, clients = Object.values(CLIENTS) }) {
   const hookPath = forwarderPath(home);
   const seen = new Set();
   /** @type {ScopeReport[]} */
   const scopes = [];
-  for (const scope of SCOPES) {
-    const settingsPath = settingsPathFor(scope, { dir, env });
-    // In the home folder, the project file is the user file: report it once.
-    if (seen.has(settingsPath)) continue;
-    seen.add(settingsPath);
-    scopes.push(inspectScope(scope, settingsPath, hookPath));
+  for (const client of clients) {
+    for (const scope of client.scopes) {
+      const settingsPath = settingsPathFor(scope, { dir, env, client });
+      // In the home folder, the project file is the user file: report it once.
+      if (seen.has(settingsPath)) continue;
+      seen.add(settingsPath);
+      scopes.push(inspectScope(client, scope, settingsPath, hookPath));
+    }
   }
   const plugin = scopes.some((report) => report.plugin);
   return { scopes, plugin, installed: plugin || scopes.some((report) => report.events.length > 0) };
 }
 
 /**
+ * @param {HookClient} client
  * @param {string} scope
  * @param {string} settingsPath
  * @param {string} hookPath
  * @returns {ScopeReport}
  */
-function inspectScope(scope, settingsPath, hookPath) {
+function inspectScope(client, scope, settingsPath, hookPath) {
   try {
     const { settings } = readSettingsFile(settingsPath);
     const events = registeredEvents(settings, hookPath);
-    const complete = HOOK_REGISTRATIONS.every((r) => events.includes(r.event));
-    return { scope, settingsPath, events, complete, plugin: pluginEnabledIn(settings), error: null };
+    const complete = client.registrations.every((r) => events.includes(r.event));
+    return { client, scope, settingsPath, events, complete, plugin: client.id === 'claude' && pluginEnabledIn(settings), error: null };
   } catch (error) {
-    return { scope, settingsPath, events: [], complete: false, plugin: false, error: error.message };
+    return { client, scope, settingsPath, events: [], complete: false, plugin: false, error: error.message };
   }
 }

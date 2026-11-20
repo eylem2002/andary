@@ -43,7 +43,7 @@ test('model ids map to hats by family', () => {
   assert.equal(hatForModel('claude-sonnet-5-5'), 'beret');
   assert.equal(hatForModel('claude-haiku-5-5'), 'sunhat');
   assert.equal(hatForModel('claude-fable-5-2'), 'wizard');
-  assert.equal(hatForModel('gpt-x'), null);
+  assert.equal(hatForModel('mistral-large'), null, 'unknown vendors keep the role hat');
   assert.equal(hatForModel(undefined), null);
 });
 
@@ -60,7 +60,13 @@ test('model labels read the version on either side of the family, never a date s
   assert.equal(modelLabel('claude-haiku-5'), 'Haiku 5');
   assert.equal(modelLabel('claude-fable-5-2'), 'Fable 5.2');
   assert.equal(modelLabel('sonnet'), 'Sonnet');
-  assert.equal(modelLabel('gpt-something'), 'gpt-something');
+  // OpenAI models, from a Codex crew.
+  assert.equal(modelLabel('gpt-5.3-codex'), 'GPT-5.3 Codex');
+  assert.equal(modelLabel('gpt-5-codex-mini'), 'GPT-5 Codex Mini');
+  assert.equal(modelLabel('o4-mini'), 'o4-mini');
+  assert.equal(hatForModel('gpt-5.3-codex'), 'cap');
+  assert.equal(hatForModel('o3'), 'cap');
+  assert.equal(buildingForTool('apply_patch', {}), 'workshop');
   assert.equal(modelLabel('a-very-long-model-name-from-another-vendor'), 'a-very-long-model-name-…');
   assert.equal(modelLabel(undefined), '');
 });

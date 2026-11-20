@@ -9,8 +9,11 @@ describe('parseHookBody', () => {
   it('accepts the forwarder format', () => {
     assert.deepEqual(parseHookBody(body({ v: 1, ts: 123, event: { hook_event_name: 'Stop' } })), {
       ts: 123,
+      source: 'claude',
       event: { hook_event_name: 'Stop' },
     });
+    assert.equal(parseHookBody(body({ v: 1, ts: 1, source: 'codex', event: {} })).source, 'codex');
+    assert.equal(parseHookBody(body({ v: 1, ts: 1, source: 'other', event: {} })).source, 'claude', 'unknown sources read as Claude Code');
   });
 
   it('uses the receive time when ts is missing or not a number', () => {

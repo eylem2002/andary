@@ -2,6 +2,7 @@
 // name one of our own hosts.
 import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, browserRole, hasHookSecret, loginCookie, safeEqual, signHookReply, viewCookie } from './auth.mjs';
 import { TEAM_HEADER, verifyMemberKey } from './team.mjs';
+import { sourceOf, toTownPayloads } from './adapters/index.mjs';
 import { APP_ID, LIMITS } from './config.mjs';
 import { publicSettings } from './browsers.mjs';
 import { BAD_TOKEN_PAGE, HttpError, readBody, sendHtml, sendJson, sendText } from './http-util.mjs';
@@ -268,18 +269,21 @@ async function handleHook(ctx, req, res) {
     sendJson(res, error.status, { error: error.message }, error.status === 413 ? { Connection: 'close' } : {});
     return;
   }
-  // Only the team endpoint may say whose session an event is.
-  delete body.event.andary_member;
-  ctx.usage.observe(body.event);
-  ctx.progress.observe(body.event);
-  ctx.notifier.observe(body.event);
-  const envelope = ctx.ingest(body);
-  ctx.relay?.send(envelope);
-  if (envelope.event.hook_event_name === 'PermissionRequest') {
-    await answerPermissionRequest(ctx, req, res, envelope.event, shownInFull(body.event.tool_input, envelope.event.tool_input));
-    return;
+  // Token usage is read from Claude Code's transcripts only.
+  if (body.source === 'claude') ctx.usage.observe(body.event);
+  const events = toTownPayloads(body.source, body.event);
+  for (const event of events) {
+    ctx.progress.observe(event);
+    ctx.notifier.observe(event);
+    const envelope = ctx.ingest({ ts: body.ts, event });
+    ctx.relay?.send(envelope);
+    // Adapters never split or rewrite a permission request (see adapters/codex.mjs).
+    if (envelope.event.hook_event_name === 'PermissionRequest') {
+      await answerPermissionRequest(ctx, req, res, envelope.event, shownInFull(body.event.tool_input, envelope.event.tool_input));
+      return;
+    }
+    ctx.broker.observe(envelope.event);
   }
-  ctx.broker.observe(envelope.event);
   sendHookReply(ctx, req, res, null);
 }
 
@@ -313,9 +317,9 @@ function isObject(value) {
 }
 
 /**
- * Validates the forwarder's body: {"v":1,"ts":<ms>,"event":{…}}.
+ * Validates the forwarder's body: {"v":1,"ts":<ms>,"source"?:"codex","event":{…}}.
  * @param {Buffer} raw
- * @returns {{ ts: number, event: Record<string, any> }}
+ * @returns {{ ts: number, source: import('./adapters/index.mjs').Source, event: Record<string, any> }}
  */
 export function parseHookBody(raw) {
   let body;
@@ -327,7 +331,7 @@ export function parseHookBody(raw) {
   if (!isObject(body) || body.v !== 1 || !isObject(body.event)) {
     throw new HttpError(400, 'Body must look like {"v":1,"ts":<ms>,"event":{...}}');
   }
-  return { ts: Number.isFinite(body.ts) ? body.ts : Date.now(), event: body.event };
+  return { ts: Number.isFinite(body.ts) ? body.ts : Date.now(), source: sourceOf(body.source), event: body.event };
 }
 
 /** Why a request the town could otherwise answer goes to the terminal (Approval.message). */

@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { HOOK_SOURCE } from '../../../server/config.mjs';
 import { ensureHome } from '../../../server/state-file.mjs';
 import {
-  ASYNC_EVENTS,
   HOOK_REGISTRATIONS,
   SettingsError,
   applyHooksChange,
@@ -21,6 +20,7 @@ import {
   withAndaryHooks,
   withoutAndaryHooks,
 } from '../../../server/installer.mjs';
+import { CLIENTS } from '../../../server/clients.mjs';
 
 /** @type {string} */
 let dir;
@@ -34,7 +34,7 @@ let userSettings;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'tt-install-'));
   home = join(dir, 'tt-home');
-  env = { CLAUDE_CONFIG_DIR: join(dir, 'claude') };
+  env = { CLAUDE_CONFIG_DIR: join(dir, 'claude'), CODEX_HOME: join(dir, 'codex') };
   userSettings = join(dir, 'claude', 'settings.json');
 });
 
@@ -63,7 +63,7 @@ const backupsOf = (/** @type {string} */ file) => readdirSync(join(file, '..')).
 
 describe('registration table', () => {
   it('matches CONTRACTS §4.1', () => {
-    assert.equal(ASYNC_EVENTS.length, 17);
+    assert.equal(HOOK_REGISTRATIONS.filter((r) => r.async).length, 17);
     assert.deepEqual(HOOK_REGISTRATIONS.at(-2), { event: 'PermissionRequest', timeout: 150 });
     assert.deepEqual(HOOK_REGISTRATIONS.at(-1), { event: 'SessionEnd', timeout: 3 });
     const config = buildHooksConfig('node "/h/hook.mjs" # andary');
@@ -316,7 +316,7 @@ describe('inspection helpers', () => {
     run('install');
     writeJson(join(dir, 'project', '.claude', 'settings.local.json'), { enabledPlugins: { 'andary@andary': true } });
     const report = inspectInstallations({ dir: join(dir, 'project'), env, home });
-    const byScope = Object.fromEntries(report.scopes.map((s) => [s.scope, s]));
+    const byScope = Object.fromEntries(report.scopes.filter((s) => s.client.id === 'claude').map((s) => [s.scope, s]));
     assert.ok(byScope.user.complete);
     assert.equal(byScope.project.events.length, 0);
     assert.equal(byScope.local.plugin, true);
@@ -328,7 +328,7 @@ describe('inspection helpers', () => {
     mkdirSync(join(dir, 'project', '.claude'), { recursive: true });
     writeFileSync(join(dir, 'project', '.claude', 'settings.json'), '{oops');
     const report = inspectInstallations({ dir: join(dir, 'project'), env, home });
-    const byScope = Object.fromEntries(report.scopes.map((s) => [s.scope, s]));
+    const byScope = Object.fromEntries(report.scopes.filter((s) => s.client.id === 'claude').map((s) => [s.scope, s]));
     assert.deepEqual(byScope.user.events, ['Stop']);
     assert.equal(byScope.user.complete, false);
     assert.match(byScope.project.error ?? '', /not valid JSON/);
@@ -364,5 +364,44 @@ describe('hostile folders', () => {
     assert.equal(statSync(home).mode & 0o777, 0o700);
     const owner = statSync(home).uid;
     assert.throws(() => ensureHome(home, { uid: owner + 1 }), (/** @type {any} */ error) => error.code === 'EUNSAFEHOME' && /another user/.test(error.message));
+  });
+});
+
+describe('Codex', () => {
+  const codex = CLIENTS.codex;
+  const codexHooks = () => join(dir, 'codex', 'hooks.json');
+
+  it('writes its hooks to CODEX_HOME/hooks.json (or the project .codex/hooks.json) with the codex argument', () => {
+    assert.equal(settingsPathFor('user', { env, client: codex }), codexHooks());
+    assert.equal(settingsPathFor('project', { dir: '/repo', env, client: codex }), join('/repo', '.codex', 'hooks.json'));
+    assert.throws(() => settingsPathFor('local', { env, client: codex }), /Use user or project/);
+    assert.equal(hookCommand('/h', codex), 'node "/h/hook.mjs" codex # andary');
+    const plan = planHooksChange({ action: 'install', scope: 'user', home, env, client: codex });
+    applyHooksChange(plan);
+    const written = readJson(codexHooks());
+    assert.deepEqual(Object.keys(written.hooks), codex.registrations.map((r) => r.event));
+    assert.deepEqual(written.hooks.PermissionRequest, [{ hooks: [{ type: 'command', command: hookCommand(home, codex), timeout: 150 }] }]);
+    assert.deepEqual(written.hooks.Interrupt[0].hooks[0].timeout, 3);
+    assert.equal(written.hooks.PreToolUse[0].hooks[0].async, true);
+    assert.ok(!('PostToolUseFailure' in written.hooks), 'only events Codex has');
+  });
+
+  it('keeps other Codex hooks, and uninstall removes only ours', () => {
+    writeJson(codexHooks(), { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'python3 ~/.codex/hooks/policy.py' }] }] } });
+    applyHooksChange(planHooksChange({ action: 'install', scope: 'user', home, env, client: codex }));
+    assert.equal(readJson(codexHooks()).hooks.PreToolUse.length, 2);
+    const plan = planHooksChange({ action: 'uninstall', scope: 'user', home, env, client: codex });
+    applyHooksChange(plan);
+    assert.deepEqual(readJson(codexHooks()).hooks, { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'python3 ~/.codex/hooks/policy.py' }] }] });
+  });
+
+  it('is reported next to Claude Code', () => {
+    applyHooksChange(planHooksChange({ action: 'install', scope: 'user', home, env, client: codex }));
+    const report = inspectInstallations({ dir: join(dir, 'project'), env, home });
+    const codexUser = report.scopes.find((s) => s.client.id === 'codex' && s.scope === 'user');
+    assert.ok(codexUser?.complete);
+    assert.equal(codexUser?.plugin, false);
+    assert.ok(report.installed);
+    assert.ok(report.scopes.filter((s) => s.client.id === 'claude').every((s) => s.events.length === 0));
   });
 });

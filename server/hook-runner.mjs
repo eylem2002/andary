@@ -1,16 +1,16 @@
-// Runs the hook forwarder the way Claude Code does (payload on stdin, decision on stdout).
-// Used by `andary doctor` and by the test helpers.
+// Runs the hook forwarder the way Claude Code (or Codex, with args ['codex']) does: payload on
+// stdin, decision on stdout. Used by `andary doctor` and by the test helpers.
 import { spawn } from 'node:child_process';
 import { HOOK_SOURCE } from './config.mjs';
 
 /**
- * @param {{ payload: unknown, script?: string, env?: NodeJS.ProcessEnv, input?: string, timeoutMs?: number }} options
+ * @param {{ payload: unknown, script?: string, args?: string[], env?: NodeJS.ProcessEnv, input?: string, timeoutMs?: number }} options
  *   `input` overrides the stdin text (to send something that is not JSON).
  * @returns {Promise<{ code: number|null, stdout: string, stderr: string }>}
  */
-export function runHookScript({ payload, script = HOOK_SOURCE, env = process.env, input, timeoutMs = 10_000 }) {
+export function runHookScript({ payload, script = HOOK_SOURCE, args = [], env = process.env, input, timeoutMs = 10_000 }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [script], { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(process.execPath, [script, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8').on('data', (chunk) => {

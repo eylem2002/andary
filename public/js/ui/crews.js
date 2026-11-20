@@ -61,6 +61,8 @@ export function createCrewsPanel(ctx) {
     const model = h('span', { class: 'hud-line__model' });
     const memberName = h('span', {});
     const member = h('span', { class: 'hud-line__member', 'data-testid': 'crew-member' }, srOnly('Shared by '), memberName);
+    // Codex crews say so; Claude Code is the town's default and carries no badge.
+    const agent = h('span', { class: 'hud-line__member hud-line__member--agent', 'data-testid': 'crew-agent', text: 'Codex' });
     const cost = h('button', { type: 'button', class: 'hud-line__cost', 'data-testid': 'crew-cost', on: { click: () => ctx.openDialog('usage') } });
     const goal = h('p', { class: 'hud-line__goal' });
     const stations = h('ol', { class: 'hud-stations' });
@@ -71,8 +73,8 @@ export function createCrewsPanel(ctx) {
       render(ctx.store.getState());
     });
     const line = h('li', { class: 'hud-line', 'data-testid': 'crew', 'data-session-id': session.id },
-      h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, member, model, cost)), goal, stations, more);
-    parts.set(line, { mark, number, title, name, model, cost, member, memberName, goal, stations, more });
+      h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, member, agent, model, cost)), goal, stations, more);
+    parts.set(line, { mark, number, title, name, model, cost, member, memberName, agent, goal, stations, more });
     return line;
   }
 
@@ -94,6 +96,7 @@ export function createCrewsPanel(ctx) {
     setAttr(p.name, 'title', session.cwd);
     setText(p.memberName, session.member ?? '');
     setHidden(p.member, !session.member);
+    setHidden(p.agent, session.source !== 'codex');
     setText(p.model, ended ? 'Ended' : modelLabel(session.model));
     const spent = usageShort(crewUsage(state, session.id));
     setText(p.cost, spent);

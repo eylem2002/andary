@@ -32,6 +32,7 @@
  * @property {{ text: string, status: 'pending'|'in_progress'|'completed' }[]} todos
  * @property {{ id: string, subject: string, status: 'pending'|'in_progress'|'completed', owner?: string }[]} tasks
  * @property {string|null} [member]  the teammate whose session this is, in a team town
+ * @property {'claude'|'codex'} [source]  the agent behind the session
  */
 
 /**

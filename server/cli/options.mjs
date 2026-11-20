@@ -1,7 +1,7 @@
 // Validation for command-line values. Bad input raises UsageError (exit code 2) with a message
 // that says what was expected.
 import { DEFAULT_PORT, MAX_APPROVAL_TIMEOUT_MS } from '../config.mjs';
-import { SCOPES } from '../installer.mjs';
+import { CLIENTS, clientById } from '../clients.mjs';
 import { checkNotifyUrl } from '../notify.mjs';
 import { cleanMemberName } from '../team.mjs';
 
@@ -74,13 +74,26 @@ export function parseSeed(value) {
 }
 
 /**
+ * `andary install [claude|codex]`: which agent's hooks to change (default Claude Code).
  * @param {string|undefined} value
- * @returns {'user'|'project'|'local'}
+ * @returns {import('../clients.mjs').HookClient}
  */
-export function parseScope(value) {
-  const scope = value ?? 'user';
-  if (!SCOPES.includes(scope)) throw new UsageError(`--scope must be user, project or local (got "${scope}").`);
-  return /** @type {'user'|'project'|'local'} */ (scope);
+export function parseClient(value) {
+  const client = clientById((value ?? 'claude').toLowerCase());
+  if (!client) throw new UsageError(`Andary connects to ${Object.keys(CLIENTS).join(' or ')} (got "${value}").`);
+  return client;
+}
+
+/**
+ * --scope for a client: user (default), project, or local (Claude Code only).
+ * @param {string|undefined} value
+ * @param {import('../clients.mjs').HookClient} [client]
+ * @returns {string}
+ */
+export function parseScope(value, client = CLIENTS.claude) {
+  const scope = value ?? client.scopes[0];
+  if (!client.scopes.includes(scope)) throw new UsageError(`--scope for ${client.name} must be ${client.scopes.join(', ')} (got "${scope}").`);
+  return scope;
 }
 
 /**

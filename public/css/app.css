@@ -798,6 +798,14 @@ body {
   font-weight: 800;
 }
 
+/* The agent behind a crew (Codex): an outline, so it reads apart from a teammate's name. */
+.hud-line__member--agent {
+  padding: 0 6px;
+  border: 1px solid var(--ink-2);
+  background: transparent;
+  color: var(--ink);
+}
+
 .hud-line__model {
   padding-top: 2px;
   color: var(--ink-3);

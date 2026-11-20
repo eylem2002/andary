@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Andary hook forwarder (CONTRACTS §4.3). Claude Code runs this for every registered hook
-// event: it passes the event to the local Andary server and, for PermissionRequest, prints
-// the decision the town returned.
+// Andary hook forwarder (CONTRACTS §4.3). Claude Code (or Codex, which runs it with the argument
+// `codex`) runs this for every registered hook event: it passes the event to the local Andary
+// server and, for PermissionRequest, prints the decision the town returned. Both agents read the
+// same decision format.
 //
 // It must never get in Claude's way: it prints nothing but that decision object, it always exits
 // 0, and when no server is running it exits at once. Self-contained (Node built-ins only),
@@ -15,6 +16,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ts = Date.now();
+/** Who runs this hook: Codex passes `codex`; Claude Code passes nothing. */
+const SOURCE = process.argv[2] === 'codex' ? 'codex' : null;
 const EVENT_TIMEOUT_MS = 1500;
 const APPROVAL_GRACE_MS = 5000;
 const STDIN_TIMEOUT_MS = 3000;
@@ -143,13 +146,14 @@ function shrink(value, depth = 0) {
  * @returns {string}
  */
 function buildBody(event) {
-  const body = JSON.stringify({ v: 1, ts, event });
+  const source = SOURCE ? { source: SOURCE } : {};
+  const body = JSON.stringify({ v: 1, ts, ...source, event });
   if (Buffer.byteLength(body) <= MAX_BODY_BYTES) return body;
-  const smaller = JSON.stringify({ v: 1, ts, event: shrink(event) });
+  const smaller = JSON.stringify({ v: 1, ts, ...source, event: shrink(event) });
   if (Buffer.byteLength(smaller) <= MAX_BODY_BYTES) return smaller;
   // Still too big (a huge object): keep the identifying fields only.
   const essentials = Object.entries(event).filter(([, value]) => typeof value !== 'object');
-  return JSON.stringify({ v: 1, ts, event: { ...Object.fromEntries(essentials.map(([k, v]) => [k, shrink(v)])), truncated: true } });
+  return JSON.stringify({ v: 1, ts, ...source, event: { ...Object.fromEntries(essentials.map(([k, v]) => [k, shrink(v)])), truncated: true } });
 }
 
 /**

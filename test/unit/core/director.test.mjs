@@ -408,7 +408,7 @@ describe('director: permits, compaction, models, board, shipping', () => {
     assert.equal(modelLabel('claude-opus-5-5'), 'Opus 5.5');
     assert.equal(modelLabel('claude-haiku-4-5'), 'Haiku 4.5');
     assert.equal(modelLabel('sonnet'), 'Sonnet');
-    assert.equal(modelLabel('gpt-x'), 'gpt-x');
+    assert.equal(modelLabel('mistral-x'), 'mistral-x');
   });
 
   it('todos and shared tasks go on the Goal Board', async () => {
