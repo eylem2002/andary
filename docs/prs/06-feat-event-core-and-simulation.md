@@ -1,6 +1,6 @@
 # Hook normalisation, store, director, humour and simulation
 
-Part 6 of 12 · base: `feat/agents-and-world`
+Part 6 of 13 · base: `feat/agents-and-world`
 
 ## What changed
 

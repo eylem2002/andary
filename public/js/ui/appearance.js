@@ -6,6 +6,8 @@
 /** @typedef {import('./types.js').World} World */
 
 const DAY_HOUR = 13;
+/** Golden hour turning pink, with the first neon on. */
+const SUNSET_HOUR = 18;
 const NIGHT_HOUR = 22;
 
 /**
@@ -15,6 +17,7 @@ const NIGHT_HOUR = 22;
  */
 export function timeOfDayFor(mode) {
   if (mode === 'day') return DAY_HOUR;
+  if (mode === 'sunset') return SUNSET_HOUR;
   if (mode === 'night') return NIGHT_HOUR;
   return 'auto';
 }
@@ -33,7 +36,7 @@ export function isNightHour(hour) {
 export function resolveTheme(prefs, hour) {
   if (prefs.theme === 'light' || prefs.theme === 'dark') return prefs.theme;
   if (prefs.timeMode === 'night') return 'dark';
-  if (prefs.timeMode === 'day') return null;
+  if (prefs.timeMode === 'day' || prefs.timeMode === 'sunset') return null;
   return isNightHour(hour) ? 'dark' : null;
 }
 

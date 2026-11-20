@@ -79,8 +79,8 @@ function createCars(group, material, others) {
   const anticlockwise = createPath(roundCorners(offsetPolyline([...corners].reverse(), LANE, true), 1.4, true, 8), true);
   const specs = [
     { path: clockwise, color: C.red, start: 0.05 },
-    { path: clockwise, color: 0xf2c14e, start: 0.55 },
-    { path: anticlockwise, color: 0x3d7dd8, start: 0.3 },
+    { path: clockwise, color: 0xff4f9a, start: 0.55 },
+    { path: anticlockwise, color: 0x19c6c0, start: 0.3 },
   ];
   const cars = specs.map((spec) => {
     const mesh = createCar(spec.color, material);

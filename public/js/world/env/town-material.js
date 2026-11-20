@@ -1,8 +1,8 @@
 // The town's one shared material family: MeshStandardMaterial with vertex colours, patched so a
-// single draw call can hold limestone walls, gold domes, glossy windows, lawns and lamps.
+// single draw call can hold stucco walls, domes, glossy windows, lawns, lamps and neon.
 // Per-vertex `aInfo` = [building id, surface kind, glow, seed] drives:
-//  - roughness/metalness per surface kind (glass shines, gold is metallic),
-//  - procedural detail: stone grain, ashlar courses on walls, lawn speckle, plinth strata,
+//  - roughness/metalness per surface kind (glass shines, metalwork is metallic),
+//  - procedural detail: stucco with thin horizontal reveals on walls, lawn speckle, cliff strata,
 //  - night glow: windows switch on one by one at dusk and some go dark late at night,
 //  - per-building highlight (emissive lift + rim) and pulse bounce (squash and stretch).
 import * as THREE from 'three';
@@ -113,33 +113,29 @@ float ttNoise( vec3 x ) {
                    mix( ttHash( i + vec3( 0, 1, 1 ) ), ttHash( i + vec3( 1, 1, 1 ) ), f.x ), f.y ), f.z );
 }
 
-// Soil and rock layers on the plinth's sides, with wavy boundaries and embedded pebbles.
+// Layers on the island's sides: a grass lip, sandy soil, then pale coral rock, with wavy
+// boundaries and embedded shells and pebbles.
 vec3 ttStrata( vec3 w ) {
   float wave = ( ttNoise( vec3( w.x * 0.35 + w.z * 0.35, 0.0, 0.0 ) ) - 0.5 ) * 0.5 + sin( ( w.x + w.z ) * 0.7 ) * 0.08;
   float y = w.y + wave;
-  vec3 c = vec3( 0.31, 0.22, 0.14 );
-  c = mix( c, vec3( 0.42, 0.29, 0.17 ), smoothstep( -0.95, -0.85, y ) );
-  c = mix( c, vec3( 0.28, 0.20, 0.12 ), smoothstep( -0.45, -0.38, y ) );
-  c = mix( c, vec3( 0.36, 0.48, 0.17 ), smoothstep( -0.16, -0.08, y ) );
-  vec3 stone = mix( vec3( 0.66, 0.57, 0.42 ), vec3( 0.55, 0.46, 0.34 ), step( 0.5, fract( y * 1.6 ) ) * 0.6 );
-  c = mix( stone, c, smoothstep( -1.75, -1.6, y ) );
-  c = mix( vec3( 0.42, 0.36, 0.29 ), c, smoothstep( -3.3, -3.1, y ) );
+  vec3 c = vec3( 0.55, 0.38, 0.27 );
+  c = mix( c, vec3( 0.66, 0.47, 0.32 ), smoothstep( -0.95, -0.85, y ) );
+  c = mix( c, vec3( 0.52, 0.36, 0.25 ), smoothstep( -0.45, -0.38, y ) );
+  c = mix( c, vec3( 0.34, 0.6, 0.2 ), smoothstep( -0.16, -0.08, y ) );
+  vec3 rock = mix( vec3( 0.94, 0.82, 0.7 ), vec3( 0.86, 0.71, 0.6 ), step( 0.5, fract( y * 1.6 ) ) * 0.6 );
+  c = mix( rock, c, smoothstep( -1.75, -1.6, y ) );
+  c = mix( vec3( 0.62, 0.48, 0.42 ), c, smoothstep( -3.3, -3.1, y ) );
   float pebble = smoothstep( 0.72, 0.78, ttNoise( w * vec3( 3.0, 5.0, 3.0 ) ) );
-  return mix( c, c * 1.35 + 0.04, pebble * 0.7 );
+  return mix( c, c * 1.2 + 0.06, pebble * 0.7 );
 }
 
-// Limestone ashlar: staggered block courses with faint mortar joints and per-block tint.
-float ttAshlar( vec3 w, vec3 n ) {
+// Smooth stucco with faint trowel marks and thin horizontal reveals, as on seaside art deco.
+float ttStucco( vec3 w, vec3 n ) {
   float vertical = 1.0 - smoothstep( 0.3, 0.6, abs( n.y ) );
-  float course = 0.36;
-  float row = floor( w.y / course );
-  float along = dot( w.xz, normalize( vec2( -n.z, n.x ) + 1e-4 ) );
-  float block = along / 0.62 + 0.5 * mod( row, 2.0 );
-  float fy = fract( w.y / course );
-  float fx = fract( block );
-  float joint = max( 1.0 - smoothstep( 0.0, 0.045, fy ), 1.0 - smoothstep( 0.0, 0.03, min( fx, 1.0 - fx ) ) );
-  float tint = ttHash( vec3( row, floor( block ), 3.7 ) ) - 0.5;
-  return 1.0 + vertical * ( tint * 0.07 - joint * 0.09 );
+  float trowel = ttNoise( vec3( ( w.x + w.z ) * 2.3, w.y * 0.6, 1.7 ) ) - 0.5;
+  float fy = fract( w.y / 1.15 + 0.08 );
+  float reveal = 1.0 - smoothstep( 0.0, 0.035, min( fy, 1.0 - fy ) );
+  return 1.0 + vertical * ( trowel * 0.04 - reveal * 0.07 );
 }
 `;
 
@@ -157,7 +153,7 @@ if ( ttSurf == 11.0 ) {
 } else if ( ttSurf != 3.0 && ttSurf != 10.0 ) {
   diffuseColor.rgb *= 0.94 + 0.1 * ttGrain;
 }
-if ( ttSurf == 1.0 ) diffuseColor.rgb *= ttAshlar( vTtWorld, vTtNormalW );
+if ( ttSurf == 1.0 ) diffuseColor.rgb *= ttStucco( vTtWorld, vTtNormalW );
 if ( ttSurf <= 1.0 || ttSurf == 5.0 ) {
   // Contact darkening where walls meet the ground.
   float ttWall = 1.0 - smoothstep( 0.4, 0.7, abs( vTtNormalW.y ) );
@@ -192,6 +188,11 @@ if ( ttGlow > 0.0 ) {
     if ( ttSurf == 3.0 ) ttLit *= step( uTtLate * 0.7, fract( ttSeed * 7.13 + 0.05 ) );
   }
   vec3 ttGlowColor = ttSurf == 3.0 ? mix( uTtWarmA, uTtWarmB, fract( ttSeed * 13.7 ) ) : diffuseColor.rgb;
+  // A few windows glow cyan or pink instead (screens, party lights).
+  if ( ttSurf == 3.0 ) {
+    float ttTv = fract( ttSeed * 29.3 );
+    if ( ttTv > 0.86 ) ttGlowColor = ttTv > 0.93 ? vec3( 1.0, 0.45, 0.78 ) : vec3( 0.45, 0.85, 1.0 );
+  }
   totalEmissiveRadiance += ttGlowColor * ttGlow * ttLit * uTtGlowGain;
   if ( ttSurf == 3.0 ) diffuseColor.rgb *= 1.0 - 0.7 * ttLit;
 }

@@ -1,4 +1,4 @@
-// Civic buildings: Town Hall (golden dome, portico, glowing portal), Library (arched windows,
+// Civic buildings: Town Hall (dome, portico, glowing portal), Library (arched windows,
 // giant open book), Skill Academy (clock tower, mortarboard) and Permit Office (stern facade,
 // queue barriers). Local frame: origin at the lot centre on the courtyard, +z = front (south).
 import * as THREE from 'three';
@@ -67,7 +67,7 @@ function hallPortal(kit) {
   kit.cyl([0, 1.63, 1.63], 0.85, 0.04, C.portal, { ...glow, rotZ: Math.PI / 2, rotY: Math.PI / 2, arc: Math.PI, seg: 16 });
 }
 
-/** Drum with windows, golden dome and lantern. */
+/** Drum with windows, dome and lantern. */
 function hallDome(kit) {
   const z = -0.8;
   kit.cyl([0, 3.4, z], 1.75, 0.75, C.stone, { seg: 28, surface: S.stone });
@@ -260,25 +260,25 @@ export function createClockHands(lot, material) {
 export function buildPermits(kit, lot, ctx) {
   const rng = ctx.rng;
   const z0 = -2.4;
-  kit.rbox([0, 0, z0], [5.4, 0.3, 6.2], C.stoneGrey, { surface: S.stone, radius: 0.03, segments: 1 });
-  kit.rbox([0, 0.3, z0], [5.2, 3.9, 5.8], C.stoneGrey, { surface: S.stone, radius: 0.04 });
-  cornice(kit, [0, 4.2, z0], [5.2, 5.8], 0xbdb5a6);
-  parapet(kit, [0, 4.4, z0], [5.5, 6.1], 0xbdb5a6);
+  kit.rbox([0, 0, z0], [5.4, 0.3, 6.2], C.stoneTrim, { surface: S.stone, radius: 0.03, segments: 1 });
+  kit.rbox([0, 0.3, z0], [5.2, 3.9, 5.8], C.stone, { surface: S.stone, radius: 0.04 });
+  cornice(kit, [0, 4.2, z0], [5.2, 5.8]);
+  parapet(kit, [0, 4.4, z0], [5.5, 6.1]);
   const zf = z0 + 2.9;
   // Heavy pilasters frame a recessed entrance.
-  for (const x of [-2.2, -0.75, 0.75, 2.2]) onFace(kit, front(zf), [x, 0.3, 0.28, 3.9, 0.14], 0xc7bfb1, { surface: S.stone });
-  door(kit, front(zf), [0, 1.0, 1.55], { color: 0x3b4148, frame: 0xa9a092, rng, y: 0.3 });
-  onFace(kit, front(zf), [0, 2.15, 0.9, 0.12, 0.16], 0xa9a092, { surface: S.stone });
+  for (const x of [-2.2, -0.75, 0.75, 2.2]) onFace(kit, front(zf), [x, 0.3, 0.28, 3.9, 0.14], C.stonePale, { surface: S.stone });
+  door(kit, front(zf), [0, 1.0, 1.55], { color: C.navy, rng, y: 0.3 });
+  onFace(kit, front(zf), [0, 2.15, 0.9, 0.12, 0.16], C.stoneTrim, { surface: S.stone });
   // The red "stamp" emblem.
   kit.cyl([0, 2.95, zf + 0.12], 0.42, 0.06, C.red, { rotX: Math.PI / 2, seg: 24, surface: S.gloss });
   kit.cyl([0, 2.95, zf + 0.15], 0.3, 0.05, 0xf3e9e0, { rotX: Math.PI / 2, seg: 24 });
   kit.box([0, 2.82, zf + 0.18], [0.32, 0.26, 0.03], C.red);
-  windows(kit, front(zf), { from: -2.2, to: -0.75, count: 1, y: 0.75, w: 0.36, h: 1.15, rng, frame: 0xa9a092 });
-  windows(kit, front(zf), { from: 0.75, to: 2.2, count: 1, y: 0.75, w: 0.36, h: 1.15, rng, frame: 0xa9a092 });
-  windows(kit, front(zf), { from: -2.6, to: 2.6, count: 4, y: 2.5, w: 0.32, h: 0.95, rng, frame: 0xa9a092 });
+  windows(kit, front(zf), { from: -2.2, to: -0.75, count: 1, y: 0.75, w: 0.36, h: 1.15, rng });
+  windows(kit, front(zf), { from: 0.75, to: 2.2, count: 1, y: 0.75, w: 0.36, h: 1.15, rng });
+  windows(kit, front(zf), { from: -2.6, to: 2.6, count: 4, y: 2.5, w: 0.32, h: 0.95, rng });
   for (const f of [east(2.6), west(-2.6)]) {
-    windows(kit, f, { from: z0 - 2.4, to: z0 + 2.4, count: 4, y: 0.8, w: 0.32, h: 1.1, rng, frame: 0xa9a092 });
-    windows(kit, f, { from: z0 - 2.4, to: z0 + 2.4, count: 4, y: 2.5, w: 0.32, h: 0.95, rng, frame: 0xa9a092 });
+    windows(kit, f, { from: z0 - 2.4, to: z0 + 2.4, count: 4, y: 0.8, w: 0.32, h: 1.1, rng });
+    windows(kit, f, { from: z0 - 2.4, to: z0 + 2.4, count: 4, y: 2.5, w: 0.32, h: 0.95, rng });
   }
   cupola(kit, [0, 4.4, z0], 0.7);
   roofClutter(kit, [-2.3, z0 - 2.4, -1.0, z0 + 1.6], 4.4, rng, 2);

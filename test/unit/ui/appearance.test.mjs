@@ -5,6 +5,7 @@ import { isNightHour, resolveReducedMotion, resolveTheme, timeOfDayFor } from '.
 test('time of day for each mode', () => {
   assert.equal(timeOfDayFor('auto'), 'auto');
   assert.equal(timeOfDayFor('day'), 13);
+  assert.equal(timeOfDayFor('sunset'), 18);
   assert.equal(timeOfDayFor('night'), 22);
 });
 
@@ -21,6 +22,7 @@ test('theme: explicit choice wins, then the town clock, then the system', () => 
   assert.equal(resolveTheme({ theme: 'dark', timeMode: 'day' }, 13), 'dark');
   assert.equal(resolveTheme({ theme: 'auto', timeMode: 'night' }, 13), 'dark');
   assert.equal(resolveTheme({ theme: 'auto', timeMode: 'day' }, 23), null);
+  assert.equal(resolveTheme({ theme: 'auto', timeMode: 'sunset' }, 23), null);
   assert.equal(resolveTheme({ theme: 'auto', timeMode: 'auto' }, 23), 'dark');
   assert.equal(resolveTheme({ theme: 'auto', timeMode: 'auto' }, 10), null);
 });
@@ -30,4 +32,18 @@ test('reduced motion: override or system', () => {
   assert.equal(resolveReducedMotion({ motion: 'full' }, true), false);
   assert.equal(resolveReducedMotion({ motion: 'system' }, true), true);
   assert.equal(resolveReducedMotion({ motion: 'system' }, false), false);
+});
+
+test('N cycles the local clock, day, sunset and night, and every saved time mode loads', async () => {
+  const { NEXT_TIME } = await import('../../../public/js/ui/hud-actions.js');
+  const { parsePrefs } = await import('../../../public/js/ui/prefs.js');
+  let mode = 'auto';
+  const seen = [];
+  for (let i = 0; i < 4; i += 1) {
+    mode = NEXT_TIME[mode];
+    seen.push(mode);
+  }
+  assert.deepEqual(seen, ['day', 'sunset', 'night', 'auto']);
+  for (const timeMode of seen) assert.equal(parsePrefs(JSON.stringify({ timeMode })).timeMode, timeMode);
+  assert.equal(parsePrefs(JSON.stringify({ timeMode: 'dusk' })).timeMode, 'auto');
 });

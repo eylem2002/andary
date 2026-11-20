@@ -1,4 +1,4 @@
-// The ground: a floating diorama plinth (soil and limestone strata on its sides), one tile box per
+// The ground: a floating diorama plinth (coral rock and sandy soil strata on its sides), one tile box per
 // map cell (asphalt roads, paved plaza, lawns, courtyards), sidewalks, road markings, zebra
 // crossings, the seawall and promenade, the sea floor and the resin-look sea sides, and the
 // tunnel portals where buses leave the island.
@@ -110,7 +110,7 @@ function buildRoadTile(kit, col, row, x, z) {
 }
 
 /**
- * Plaza paving: four slabs per tile in two alternating limestone tones.
+ * Plaza paving: four slabs per tile in two alternating stone tones.
  * @param {import('./kit.js').Kit} kit
  */
 function buildPlazaTile(kit, col, row, x, z) {
@@ -217,9 +217,9 @@ function buildSeaBed(kit, rng) {
   const top = SEA.level - 0.02;
   const h = top - SEA.floor;
   const water = { surface: S.water, shade: /** @type {[number, number]} */ ([0.45, 1]) };
-  kit.box([minX + 0.03, SEA.floor, (minZ + SEA.shoreZ) / 2], [0.06, h, d], 0x3fb3c4, water);
-  kit.box([maxX - 0.03, SEA.floor, (minZ + SEA.shoreZ) / 2], [0.06, h, d], 0x3fb3c4, water);
-  kit.box([0, SEA.floor, minZ + 0.03], [w, h, 0.06], 0x3fb3c4, water);
+  kit.box([minX + 0.03, SEA.floor, (minZ + SEA.shoreZ) / 2], [0.06, h, d], 0x2fd0d6, water);
+  kit.box([maxX - 0.03, SEA.floor, (minZ + SEA.shoreZ) / 2], [0.06, h, d], 0x2fd0d6, water);
+  kit.box([0, SEA.floor, minZ + 0.03], [w, h, 0.06], 0x2fd0d6, water);
 }
 
 /**

@@ -2,6 +2,7 @@
 // foam along the seawall and around the pier, warm town reflections at night), small pools
 // (fountain basin, spa) and the fountain's falling jets.
 import * as THREE from 'three';
+import { BEACH, WATERLINE_Z } from './beach.js';
 import { PLINTH, SEA } from './terrain.js';
 
 const WATER_VERTEX_PARS = /* glsl */ `
@@ -17,6 +18,7 @@ uniform float uTtTime;
 uniform float uTtNight;
 uniform vec4 uPier;
 uniform float uShoreZ;
+uniform vec2 uBeach;
 varying vec3 vWaterWorld;
 
 float wHash( vec2 p ) { return fract( sin( dot( p, vec2( 41.3, 289.1 ) ) ) * 43758.5453 ); }
@@ -47,13 +49,16 @@ float wRectDistance( vec2 p, vec4 r ) {
 
 const SEA_COLOR = /* glsl */ `
 #include <color_fragment>
-float wDepth = clamp( ( uShoreZ - vWaterWorld.z ) / 11.0, 0.0, 1.0 );
+// West of the groyne the water ends on the beach, further out than the seawall; the two blend
+// across the groyne so no line shows in open water.
+float wShore = mix( uBeach.y, uShoreZ, smoothstep( uBeach.x - 1.5, uBeach.x + 2.5, vWaterWorld.x ) );
+float wDepth = clamp( ( wShore - vWaterWorld.z ) / 11.0, 0.0, 1.0 );
 float wPierD = wRectDistance( vWaterWorld.xz, uPier );
 wDepth = min( wDepth, clamp( wPierD / 3.0 + 0.15, 0.0, 1.0 ) );
-vec3 wShallow = vec3( 0.16, 0.62, 0.62 );
-vec3 wDeep = vec3( 0.03, 0.23, 0.42 );
+vec3 wShallow = vec3( 0.2, 0.84, 0.8 );
+vec3 wDeep = vec3( 0.02, 0.36, 0.6 );
 diffuseColor.rgb = mix( wShallow, wDeep, smoothstep( 0.0, 1.0, wDepth ) );
-float wShoreDist = min( uShoreZ - vWaterWorld.z, wPierD );
+float wShoreDist = min( wShore - vWaterWorld.z, wPierD );
 float wFoamBand = 1.0 - smoothstep( 0.05, 0.55, wShoreDist + ( wNoise( vWaterWorld.xz * 2.0 + uTtTime * 0.5 ) - 0.5 ) * 0.35 );
 float wFoamRipple = smoothstep( 0.62, 0.7, wNoise( vWaterWorld.xz * 3.5 - uTtTime * 0.6 ) ) * ( 1.0 - smoothstep( 0.3, 1.4, wShoreDist ) );
 float wFoam = clamp( wFoamBand + wFoamRipple * 0.6, 0.0, 1.0 );
@@ -69,10 +74,10 @@ normal = normalize( ( viewMatrix * vec4( wN, 0.0 ) ).xyz );
 
 const SEA_EMISSIVE = /* glsl */ `
 #include <emissivemap_fragment>
-// Shimmering reflections of the town's lights near the shore at night.
-float wNear = 1.0 - smoothstep( 0.0, 3.5, uShoreZ - vWaterWorld.z );
+// Shimmering reflections of the town's neon near the shore at night, pink and cyan.
+float wNear = 1.0 - smoothstep( 0.0, 3.5, mix( uBeach.y, uShoreZ, smoothstep( uBeach.x - 1.5, uBeach.x + 2.5, vWaterWorld.x ) ) - vWaterWorld.z );
 float wStreak = smoothstep( 0.55, 0.95, wNoise( vec2( vWaterWorld.x * 2.2, vWaterWorld.z * 9.0 + uTtTime * 0.7 ) ) );
-totalEmissiveRadiance += vec3( 1.0, 0.68, 0.32 ) * wNear * wStreak * uTtNight * 0.55;
+totalEmissiveRadiance += mix( vec3( 1.0, 0.5, 0.75 ), vec3( 0.4, 0.9, 1.0 ), step( 0.5, fract( vWaterWorld.x * 0.21 ) ) ) * wNear * wStreak * uTtNight * 0.6;
 `;
 
 /**
@@ -112,6 +117,7 @@ export function createSea(town, pier) {
     uTtNight: town.uTtNight,
     uPier: { value: new THREE.Vector4(pier.minX, pier.maxX, pier.minZ, pier.maxZ) },
     uShoreZ: { value: SEA.shoreZ },
+    uBeach: { value: new THREE.Vector2(BEACH.maxX, WATERLINE_Z) },
   }, { color: SEA_COLOR, normal: SEA_NORMAL, emissive: SEA_EMISSIVE, key: 'sea' });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'sea';
@@ -153,6 +159,7 @@ export function createPoolMaterial(town, cx, cz) {
     uTtNight: town.uTtNight,
     uPier: { value: new THREE.Vector4(cx, cz, 0, 0) },
     uShoreZ: { value: 0 },
+    uBeach: { value: new THREE.Vector2(-1e4, 0) },
   }, { color: POOL_COLOR, normal: POOL_NORMAL, emissive: POOL_EMISSIVE, key: 'pool' });
   // Each pool has its own ripple centre but shares the program.
   return material;

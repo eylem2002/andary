@@ -18,9 +18,10 @@ import { directorActive } from './cinema.js';
 
 /** @typedef {{ ctx: HudContext, ui: HudParts }} Hud */
 
-const NEXT_TIME = { auto: 'day', day: 'night', night: 'auto' };
+/** What N switches to next: the local clock, day, sunset, night, and round again. */
+export const NEXT_TIME = Object.freeze({ auto: 'day', day: 'sunset', sunset: 'night', night: 'auto' });
 const NEXT_SPEED = { 1: 2, 2: 4, 4: 1 };
-const TIME_SPOKEN = { auto: 'Time of day follows your clock.', day: 'Daytime.', night: 'Night-time.' };
+const TIME_SPOKEN = { auto: 'Time of day follows your clock.', day: 'Daytime.', sunset: 'Sunset.', night: 'Night-time.' };
 
 /** @param {Selection|null} a @param {Selection|null} b */
 export function sameSelection(a, b) {

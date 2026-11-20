@@ -36,6 +36,10 @@ export class Kit {
   constructor(batch) {
     this.batch = batch;
     this.building = 0;
+    /** Repaints colours while a building is being built (see palette.js paintMap). @type {Map<number, number>|null} */
+    this.paint = null;
+    /** The current building's neon colour, for rooflines that light up at dusk. @type {number|null} */
+    this.neon = null;
     /** @type {THREE.Matrix4[]} */
     this.stack = [new THREE.Matrix4()];
     /** @type {Map<string, THREE.BufferGeometry>} */
@@ -74,7 +78,7 @@ export class Kit {
     _local.compose(_t.set(x, y, z), _q, _s.set(sx, sy, sz));
     _m.multiplyMatrices(this.frame, _local);
     this.batch.add(geometry, _m, {
-      color,
+      color: this.paint?.get(color) ?? color,
       surface: opts.surface ?? S.matte,
       building: opts.building ?? this.building,
       glow: opts.glow,
@@ -225,7 +229,7 @@ export class Kit {
     _m.multiplyMatrices(this.frame, _local);
     const g = this.cached('box', () => new THREE.BoxGeometry(1, 1, 1));
     this.batch.add(g, _m, {
-      color,
+      color: this.paint?.get(color) ?? color,
       surface: opts.surface ?? S.matte,
       building: opts.building ?? this.building,
       glow: opts.glow,

@@ -1,6 +1,7 @@
 // Time-of-day maths: where the sun and moon are and what colour the sky, light and fog are at any
-// hour. Pure (no three.js) so it is unit-tested in Node; lighting.js and sky.js turn these numbers
-// into lights and uniforms. Colours are sRGB triplets in [0, 1].
+// hour: azure days, a long golden hour, a hot-pink dusk and violet nights. Pure (no three.js) so
+// it is unit-tested in Node; lighting.js and sky.js turn these numbers into lights and uniforms.
+// Colours are sRGB triplets in [0, 1].
 //
 // The day is stylised rather than astronomical: the sun rises at 06:00 and sets at 18:30 every day,
 // so the town looks the same in winter and summer and evenings always get a golden hour.
@@ -33,21 +34,21 @@ const MOON_RISES = 18.9;
 
 /** @type {readonly SkyKey[]} */
 export const SKY_KEYS = Object.freeze([
-  { h: 0, zenith: '#0a1430', horizon: '#22315c', bottom: '#121a33', light: '#a9bdff', lightI: 0.85, hemiSky: '#5268ab', hemiGround: '#2c2824', hemiI: 0.8, envI: 0.35, night: 1 },
-  { h: 4.6, zenith: '#0b1532', horizon: '#24325e', bottom: '#131b35', light: '#a9bdff', lightI: 0.8, hemiSky: '#5268ab', hemiGround: '#2c2824', hemiI: 0.8, envI: 0.35, night: 1 },
-  { h: 5.35, zenith: '#26315e', horizon: '#86708f', bottom: '#2a2a4a', light: '#b9b4ff', lightI: 0.06, hemiSky: '#6a72b0', hemiGround: '#3a2e2a', hemiI: 0.75, envI: 0.32, night: 0.85 },
-  { h: MOON_SETS, zenith: '#33447a', horizon: '#c48a86', bottom: '#47405e', light: '#ffb184', lightI: 0, hemiSky: '#7a82b8', hemiGround: '#4a3a30', hemiI: 0.7, envI: 0.3, night: 0.75 },
-  { h: 6.25, zenith: '#5577b8', horizon: '#ffc4a0', bottom: '#b9a6b6', light: '#ffb27c', lightI: 0.6, hemiSky: '#9cb4dd', hemiGround: '#8a6e55', hemiI: 0.5, envI: 0.26, night: 0.35 },
-  { h: 7.3, zenith: '#6c9fd8', horizon: '#f3e2d0', bottom: '#d3d2d6', light: '#ffe2c2', lightI: 1.0, hemiSky: '#b9d3f0', hemiGround: '#a58e70', hemiI: 0.36, envI: 0.26, night: 0.03 },
-  { h: 9, zenith: '#5f9ddd', horizon: '#e5eef2', bottom: '#d2dce4', light: '#fff3e2', lightI: 1.15, hemiSky: '#c2dbf5', hemiGround: '#b29c7c', hemiI: 0.38, envI: 0.3, night: 0 },
-  { h: 12.5, zenith: '#5a9ce0', horizon: '#e9f2f5', bottom: '#d4dee6', light: '#fff9f0', lightI: 1.2, hemiSky: '#c5ddf6', hemiGround: '#b8a283', hemiI: 0.38, envI: 0.3, night: 0 },
-  { h: 16, zenith: '#6098d8', horizon: '#ecebe2', bottom: '#d6dbe0', light: '#fff0da', lightI: 1.15, hemiSky: '#c2d7ef', hemiGround: '#b39a78', hemiI: 0.37, envI: 0.3, night: 0 },
-  { h: 17.4, zenith: '#6b91c8', horizon: '#ffdcb2', bottom: '#e6d2c4', light: '#ffcd8c', lightI: 1.3, hemiSky: '#c0cde6', hemiGround: '#b08e68', hemiI: 0.42, envI: 0.28, night: 0.02 },
-  { h: 18.2, zenith: '#5568a5', horizon: '#ffa178', bottom: '#c9a3a6', light: '#ff9a5c', lightI: 1.0, hemiSky: '#a6acd6', hemiGround: '#8e6a52', hemiI: 0.48, envI: 0.25, night: 0.25 },
-  { h: 18.7, zenith: '#38457a', horizon: '#d07a7c', bottom: '#6e5a78', light: '#ff7c52', lightI: 0.18, hemiSky: '#7a7fb8', hemiGround: '#5c4436', hemiI: 0.55, envI: 0.25, night: 0.6 },
-  { h: MOON_RISES, zenith: '#2c376a', horizon: '#9e6b82', bottom: '#4b4466', light: '#c4c2ff', lightI: 0, hemiSky: '#6670ad', hemiGround: '#40322c', hemiI: 0.65, envI: 0.3, night: 0.72 },
-  { h: 19.6, zenith: '#18234d', horizon: '#45497a', bottom: '#202748', light: '#a9b8ff', lightI: 0.45, hemiSky: '#5568aa', hemiGround: '#2c2622', hemiI: 0.75, envI: 0.32, night: 0.92 },
-  { h: 20.6, zenith: '#0c1736', horizon: '#24325e', bottom: '#141c38', light: '#a9bdff', lightI: 0.8, hemiSky: '#5268ab', hemiGround: '#2c2824', hemiI: 0.8, envI: 0.35, night: 1 },
+  { h: 0, zenith: '#140a35', horizon: '#3b1d5e', bottom: '#120b2b', light: '#b9b0ff', lightI: 0.85, hemiSky: '#5a4aa8', hemiGround: '#2c2030', hemiI: 0.8, envI: 0.35, night: 1 },
+  { h: 4.6, zenith: '#150b37', horizon: '#3d1f60', bottom: '#130c2d', light: '#b9b0ff', lightI: 0.8, hemiSky: '#5a4aa8', hemiGround: '#2c2030', hemiI: 0.8, envI: 0.35, night: 1 },
+  { h: 5.35, zenith: '#2a1f5e', horizon: '#8a5a9a', bottom: '#2a1f44', light: '#c4b0ff', lightI: 0.06, hemiSky: '#6a5cb0', hemiGround: '#3a2a34', hemiI: 0.75, envI: 0.32, night: 0.85 },
+  { h: MOON_SETS, zenith: '#3a3f86', horizon: '#e08a9a', bottom: '#4a3a64', light: '#ffb09a', lightI: 0, hemiSky: '#7a78bc', hemiGround: '#4a3634', hemiI: 0.7, envI: 0.3, night: 0.75 },
+  { h: 6.25, zenith: '#4f7fd0', horizon: '#ffb7a0', bottom: '#c4a2c0', light: '#ffb27c', lightI: 0.6, hemiSky: '#a4b8e8', hemiGround: '#9a7460', hemiI: 0.5, envI: 0.26, night: 0.35 },
+  { h: 7.3, zenith: '#3d9be8', horizon: '#ffe7d2', bottom: '#d8e2ec', light: '#ffe4c8', lightI: 1.0, hemiSky: '#b6d8f6', hemiGround: '#b0946e', hemiI: 0.36, envI: 0.26, night: 0.03 },
+  { h: 9, zenith: '#2f93ec', horizon: '#d9f4ff', bottom: '#d2e6f2', light: '#fff3e2', lightI: 1.15, hemiSky: '#b8e1ff', hemiGround: '#c0a684', hemiI: 0.38, envI: 0.3, night: 0 },
+  { h: 12.5, zenith: '#2a8ff0', horizon: '#dff7ff', bottom: '#d4eaf5', light: '#fff7ec', lightI: 1.25, hemiSky: '#bce3ff', hemiGround: '#c4aa88', hemiI: 0.38, envI: 0.3, night: 0 },
+  { h: 16, zenith: '#3392ea', horizon: '#eaf3ee', bottom: '#dbe6ea', light: '#ffefd6', lightI: 1.2, hemiSky: '#bcdcf8', hemiGround: '#c0a27e', hemiI: 0.37, envI: 0.3, night: 0 },
+  { h: 17.4, zenith: '#4f7fd4', horizon: '#ffc79a', bottom: '#f0cbbd', light: '#ffbd6e', lightI: 1.35, hemiSky: '#aec4ee', hemiGround: '#b08a6a', hemiI: 0.42, envI: 0.28, night: 0.02 },
+  { h: 18.2, zenith: '#5a4fb4', horizon: '#ff8f6a', bottom: '#d796a8', light: '#ff9a55', lightI: 1.1, hemiSky: '#98a8e4', hemiGround: '#86685a', hemiI: 0.46, envI: 0.25, night: 0.25 },
+  { h: 18.7, zenith: '#3b2a86', horizon: '#ff5f8f', bottom: '#7a4a86', light: '#ff6a6a', lightI: 0.18, hemiSky: '#8a6cc8', hemiGround: '#5c3c44', hemiI: 0.55, envI: 0.25, night: 0.6 },
+  { h: MOON_RISES, zenith: '#2e2370', horizon: '#c45a92', bottom: '#4f3a72', light: '#c8b8ff', lightI: 0, hemiSky: '#7462bc', hemiGround: '#40303a', hemiI: 0.65, envI: 0.3, night: 0.72 },
+  { h: 19.6, zenith: '#1c1550', horizon: '#5a2f7e', bottom: '#24194a', light: '#b0a8ff', lightI: 0.45, hemiSky: '#5c4cb0', hemiGround: '#2e2232', hemiI: 0.75, envI: 0.32, night: 0.92 },
+  { h: 20.6, zenith: '#160b38', horizon: '#3d1f60', bottom: '#140c2e', light: '#b9b0ff', lightI: 0.8, hemiSky: '#5a4aa8', hemiGround: '#2c2030', hemiI: 0.8, envI: 0.35, night: 1 },
 ]);
 
 /**

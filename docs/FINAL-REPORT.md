@@ -11,13 +11,14 @@ and has no runtime dependencies.
 ## 1. Features
 
 ### The town
-- A limestone hill town by the sea on a floating diorama plinth, inspired by Amman: golden
-  domes, rooftop water tanks, palms, a plaza with a fountain, a sandbox labelled "Sandbox" and
-  a node_modules box pile that grows with every install.
+- A sunset coast on a floating diorama plinth: pastel stucco blocks each in their own paint,
+  palms, a beach with umbrellas and a lifeguard tower, neon that comes on at dusk, a plaza with
+  a fountain, a sandbox labelled "Sandbox" and a node_modules box pile that grows with every
+  install.
 - Fifteen buildings, one per kind of work: Town Hall, Library, Workshop, Terminal Works, Search
   Bureau, Web Tower, Goal Board, Post Office, MCP Harbor, Permit Office, Memory Spa, Skill
   Academy, Café, Worktree Grove, Bus Stop. Signs show live counters ("42 reads").
-- Cars, a bus, a mail truck and boats; day and night that follow your clock; tilt-shift and
+- Cars, a bus, a mail truck and boats; day, sunset and night (or your clock); tilt-shift and
   bloom for the miniature look; a low-quality tier for phones and weak GPUs.
 
 ### The agents
@@ -188,6 +189,6 @@ Each item says what to do about it. None blocks normal use on a personal machine
 ## 6. What you need to do
 
 See [OWNER-SETUP.md](OWNER-SETUP.md): publish the code (one script, or give Claude's GitHub App
-access), merge the 12 pull requests in order, optionally turn on branch protection and
+access), merge the 13 pull requests in order, optionally turn on branch protection and
 Dependabot alerts, then `node bin/andary.mjs install && node bin/andary.mjs start`.
 

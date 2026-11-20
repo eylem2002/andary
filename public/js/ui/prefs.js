@@ -6,7 +6,7 @@
  * @typedef {object} Prefs
  * @property {boolean} sound          sound effects (off until the viewer turns them on)
  * @property {number} volume          0–1
- * @property {'auto'|'day'|'night'} timeMode
+ * @property {'auto'|'day'|'sunset'|'night'} timeMode
  * @property {'auto'|'high'|'low'} quality
  * @property {'system'|'reduce'|'full'} motion
  * @property {'auto'|'light'|'dark'} theme
@@ -42,7 +42,7 @@ export const STORAGE_KEY = 'andary:prefs';
 
 /** @type {Record<string, readonly any[]>} */
 const CHOICES = {
-  timeMode: ['auto', 'day', 'night'],
+  timeMode: ['auto', 'day', 'sunset', 'night'],
   quality: ['auto', 'high', 'low'],
   motion: ['system', 'reduce', 'full'],
   theme: ['auto', 'light', 'dark'],

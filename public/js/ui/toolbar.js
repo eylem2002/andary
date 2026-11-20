@@ -41,7 +41,7 @@ const TOOLS = [
   { id: 'help', label: 'Help and shortcuts', key: '?', keyName: 'Shift+?' },
 ];
 
-const TIME_WORDS = { auto: 'follows your clock', day: 'day', night: 'night' };
+const TIME_WORDS = { auto: 'follows your clock', day: 'day', sunset: 'sunset', night: 'night' };
 
 /** @param {HudContext} ctx */
 export function createToolbar(ctx) {
@@ -119,7 +119,7 @@ export function createToolbar(ctx) {
     setButton('zoom-in', 'zoomIn', 'Zoom in', null);
     setButton('zoom-out', 'zoomOut', 'Zoom out', null);
     setButton('reset-view', 'resetView', 'Reset view', null);
-    const timeIcon = { auto: 'clock', day: 'sun', night: 'moon' }[prefs.timeMode];
+    const timeIcon = { auto: 'clock', day: 'sun', sunset: 'sunset', night: 'moon' }[prefs.timeMode];
     setButton('cycle-time', timeIcon, `Time of day: ${TIME_WORDS[prefs.timeMode]}`, null);
     setText(/** @type {HTMLElement} */ (tips['cycle-time'].firstElementChild), `Time of day: ${TIME_WORDS[prefs.timeMode]}`);
     setButton('toggle-quality', 'quality', 'High quality graphics', prefs.quality !== 'low');

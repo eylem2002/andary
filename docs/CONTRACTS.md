@@ -19,8 +19,8 @@ WebSocket. Permission requests can be approved or denied from the town ("approva
 Without a server (for example the hosted demo), the same UI runs a built-in **simulation** that
 produces realistic hook events, so every feature can be seen without Claude Code.
 
-The town is a limestone hill town with golden domes, rooftop water tanks and palm trees (a nod to
-Amman, the owner's city), on a floating diorama plinth beside the sea.
+The town is a sunset coast of pastel stucco blocks, palms, a beach and neon that comes on at
+dusk, on a floating diorama plinth beside a turquoise sea.
 
 ## 2. Repository layout and ownership
 
