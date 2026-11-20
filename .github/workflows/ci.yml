@@ -40,10 +40,19 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npm run lint
       - name: Install config linters
-        # A throwaway virtualenv: Ubuntu runners refuse system-wide pip installs (PEP 668).
+        # Pinned by hash: actionlint's release archive (sha256 from its published checksums) and
+        # yamllint with its dependencies (pip --require-hashes). A throwaway virtualenv: Ubuntu
+        # runners refuse system-wide pip installs (PEP 668).
         run: |
+          release=https://github.com/rhysd/actionlint/releases/download/v1.7.12
+          curl -fsSL -o "$RUNNER_TEMP/actionlint.tar.gz" "$release/actionlint_1.7.12_linux_amd64.tar.gz"
+          sha=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          echo "$sha  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/lint-bin"
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP/lint-bin" actionlint
           python3 -m venv "$RUNNER_TEMP/lint-venv"
-          "$RUNNER_TEMP/lint-venv/bin/pip" install --quiet actionlint-py==1.7.12.25 yamllint==1.38.0
+          "$RUNNER_TEMP/lint-venv/bin/pip" install --quiet --require-hashes -r .github/lint-requirements.txt
+          echo "$RUNNER_TEMP/lint-bin" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/lint-venv/bin" >> "$GITHUB_PATH"
       - run: npm run lint:config
       - run: npm run typecheck

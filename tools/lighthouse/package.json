@@ -1,0 +1,9 @@
+{
+  "name": "andary-lighthouse",
+  "private": true,
+  "description": "Lighthouse for npm run perf, kept apart from the project's own dependencies (ADR 0011); every package pinned by integrity hash in package-lock.json.",
+  "license": "MIT",
+  "dependencies": {
+    "lighthouse": "13.6.0"
+  }
+}

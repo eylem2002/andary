@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Lints everything that is not JavaScript: JSON files, shell scripts, GitHub workflows and YAML.
 // External linters are optional locally (skipped with an install hint) and installed in CI:
-//   shellcheck (preinstalled on GitHub's Ubuntu runners), actionlint + yamllint (`pip install actionlint-py yamllint`).
+//   shellcheck (preinstalled on GitHub's Ubuntu runners), actionlint (its release archive) and yamllint
+//   (`pip install --require-hashes -r .github/lint-requirements.txt`); CI pins both by hash.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
