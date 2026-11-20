@@ -39,7 +39,12 @@ jobs:
       - run: npm ci --no-fund
       - run: npm audit --audit-level=high
       - run: npm run lint
-      - run: pip install --user actionlint-py==1.7.12.25 yamllint==1.38.0
+      - name: Install config linters
+        # A throwaway virtualenv: Ubuntu runners refuse system-wide pip installs (PEP 668).
+        run: |
+          python3 -m venv "$RUNNER_TEMP/lint-venv"
+          "$RUNNER_TEMP/lint-venv/bin/pip" install --quiet actionlint-py==1.7.12.25 yamllint==1.38.0
+          echo "$RUNNER_TEMP/lint-venv/bin" >> "$GITHUB_PATH"
       - run: npm run lint:config
       - run: npm run typecheck
       - run: npm test

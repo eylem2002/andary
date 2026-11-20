@@ -86,6 +86,47 @@ describe('demo mode', () => {
     assert.deepEqual(await answer, {});
   });
 
+  test('pausing the demo stops the countdown of a waiting request, and resuming restarts it', async () => {
+    const store = fakeStore();
+    const { sim, create } = fakeSimulation();
+    const demo = createDemo({ store, createSimulation: create });
+    demo.start();
+    const answer = sim.emit(permission);
+    const id = store.approvals[0].id;
+    mock.timers.tick(10_000);
+    demo.setPaused(true);
+    const frozen = store.approvals.at(-1);
+    assert.equal(frozen.status, 'pending');
+    assert.equal(frozen.expiresAt, null, 'the card shows no countdown while paused');
+    mock.timers.tick(DEMO_APPROVAL_MS * 4);
+    assert.equal(store.approvals.at(-1).status, 'pending', 'no expiry while the story stands still');
+    demo.setPaused(false);
+    const resumed = store.approvals.at(-1);
+    assert.equal(resumed.expiresAt - Date.now(), DEMO_APPROVAL_MS - 10_000, 'the time left is kept');
+    assert.equal(resumed.expiresAt - resumed.createdAt, DEMO_APPROVAL_MS, 'the countdown bar keeps its scale');
+    mock.timers.tick(DEMO_APPROVAL_MS - 10_001);
+    assert.equal(store.approvals.at(-1).status, 'pending');
+    mock.timers.tick(1);
+    assert.deepEqual(await answer, {});
+    assert.equal(store.approvals.at(-1).status, 'expired');
+    assert.equal(store.approvals.at(-1).id, id);
+  });
+
+  test('a paused demo can still be answered, and a request made while paused waits for the resume', async () => {
+    const store = fakeStore();
+    const { sim, create } = fakeSimulation();
+    const demo = createDemo({ store, createSimulation: create });
+    demo.setPaused(true);
+    const answer = sim.emit(permission);
+    assert.equal(store.approvals.at(-1).expiresAt, null);
+    mock.timers.tick(DEMO_APPROVAL_MS * 2);
+    assert.equal(store.approvals.at(-1).status, 'pending');
+    assert.equal(demo.decide(store.approvals.at(-1).id, 'allow'), true);
+    assert.deepEqual(await answer, { decision: 'allow' });
+    demo.setPaused(false);
+    assert.equal(store.approvals.at(-1).status, 'allowed', 'resuming does not bring a settled request back');
+  });
+
   test('agent ids lose their "agent-" prefix', () => {
     assert.equal(normalizeAgentId('agent-x1'), 'x1');
     assert.equal(normalizeAgentId('x1'), 'x1');

@@ -86,6 +86,23 @@ describe('CLI basics', () => {
       assert.ok(result.stderr.length > 0);
     }
   });
+
+  it('stays quiet when its reader goes away early (andary status | head -1)', async () => {
+    const { env, cwd } = sandbox('closed-pipe');
+    for (const [args, expected] of /** @type {const} */ ([[['--help'], 0], [['install', '--dry-run'], 0], [['status'], 1]])) {
+      const result = await new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, [CLI, ...args], { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+        // Closing our end before the CLI writes turns its first write into EPIPE.
+        child.stdout.destroy();
+        let stderr = '';
+        child.stderr.setEncoding('utf8').on('data', (chunk) => (stderr += chunk));
+        child.on('error', reject);
+        child.on('close', (code) => resolve({ code, stderr }));
+      });
+      assert.equal(result.code, expected, args.join(' '));
+      assert.doesNotMatch(result.stderr, /EPIPE|node:events/, args.join(' '));
+    }
+  });
 });
 
 describe('server lifecycle', () => {

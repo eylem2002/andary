@@ -95,6 +95,16 @@ function showToast(ctx, effect, state) {
   return undefined;
 }
 
+/**
+ * The second line of a new crew's toast: its number key where there is a keyboard to press it
+ * (on a phone the toast's Show button is the way there).
+ * @param {number} number  1-based crew number
+ * @param {boolean} mobile
+ */
+export function crewToastBody(number, mobile) {
+  return !mobile && number >= 1 && number <= 9 ? `Press ${number} to jump to it.` : 'A Claude Code session started.';
+}
+
 /** @param {HudContext} ctx @param {string} sessionId @param {StoreState} state */
 function crewArrived(ctx, sessionId, state) {
   const session = findSession(state, sessionId);
@@ -105,9 +115,18 @@ function crewArrived(ctx, sessionId, state) {
     number,
     color: session.color,
     title: `New crew in ${session.project}`,
-    body: number <= 9 ? `Press ${number} to jump to it.` : 'A Claude Code session started.',
+    body: crewToastBody(number, ctx.view.mobile),
+    action: { label: 'Show', run: () => showCrew(ctx, session.id) },
   });
   ctx.sound.play('whoosh');
+}
+
+/** Selects the crew's lead agent, as its number key does. @param {HudContext} ctx @param {string} sessionId */
+function showCrew(ctx, sessionId) {
+  const state = ctx.store.getState();
+  const session = findSession(state, sessionId);
+  const lead = session?.agentKeys.find((key) => state.agents[key]?.role === 'lead') ?? session?.agentKeys[0];
+  if (lead) ctx.select({ type: 'agent', id: lead }, { camera: true, focus: true });
 }
 
 /** @param {HudContext} ctx @param {import('./types.js').Approval} approval @param {StoreState} state */

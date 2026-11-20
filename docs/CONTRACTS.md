@@ -504,7 +504,7 @@ decision is treated as "answered in the terminal" and the story carries on as al
 ### 8.2 URL options
 
 `?demo=1` forces demo mode; `&speed=1|2|4` and `&seed=N` control the simulation; `&world=fake`
-swaps the 3D world for a recording no-op (for tests and browsers without WebGL); `&log=1` logs
-store changes to the console. The lab pages take their own options, listed at the top of their
+swaps the 3D world for a recording no-op (for tests and browsers without WebGL); with it,
+`&log=1` logs the stand-in world's calls to the console. The lab pages take their own options, listed at the top of their
 scripts.
 

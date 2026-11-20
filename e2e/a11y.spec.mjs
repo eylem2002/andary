@@ -57,6 +57,13 @@ for (const theme of /** @type {const} */ (['light', 'dark'])) {
   });
 }
 
+test('headings descend in order, on the phone too (where the Crews panel moves into a tab)', async ({ page }) => {
+  await openDemo(page, { world: 'fake' });
+  // heading-order is an axe best practice rather than a WCAG rule, so the scans above skip it.
+  const results = await new AxeBuilder({ page }).withRules(['heading-order']).analyze();
+  expect(results.violations.map((v) => v.nodes.map((node) => node.target.join(' ')))).toEqual([]);
+});
+
 test('agent inspector has no violations', async ({ page }) => {
   await openDemo(page);
   await page.getByTestId('agent-row').first().click();
@@ -84,6 +91,19 @@ test('settings and setup dialogs have no violations', async ({ page }) => {
   await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Use your own Claude Code' }).click();
   await expect(page.getByRole('dialog', { name: 'Run it with your own Claude Code' })).toBeVisible();
   expect(await violations(page)).toEqual([]);
+});
+
+test('every visible control is at least 24 × 24 CSS pixels (WCAG 2.5.8)', async ({ page }) => {
+  await openDemo(page, { world: 'fake' });
+  const small = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('button, input, select, a[href], [role="tab"]'))
+      .filter((el) => /** @type {HTMLElement} */ (el).offsetParent !== null)
+      // A control inside its <label> is clicked through the label, so the label is the target.
+      .map((el) => ({ el, box: (el.closest('label') ?? el).getBoundingClientRect() }))
+      .filter(({ box }) => box.width < 24 || box.height < 24)
+      .map(({ el, box }) => `${el.getAttribute('aria-label') || el.textContent?.trim() || el.id}: ${Math.round(box.width)}×${Math.round(box.height)}`),
+  );
+  expect(small).toEqual([]);
 });
 
 test('an approval card has no violations', async ({ page }) => {
