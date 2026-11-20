@@ -94,3 +94,17 @@ test('finished work grows the town: a new landmark rises with a toast', async ({
   await expect(page.locator('.hud-toast', { hasText: 'The town grew' })).toContainText('Ferris wheel', { timeout: 60_000 });
   await expect.poll(landmarks).toContain('wheel');
 });
+
+test('L opens the leaderboard: the town, records and the busiest agents', async ({ page }) => {
+  await openDemo(page);
+  await expect(page.getByTestId('agent-row').nth(2)).toBeAttached({ timeout: 45_000 });
+  await page.locator('[data-tool="leaderboard"]').click();
+  const dialog = page.getByRole('dialog', { name: 'Leaderboard' });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByTestId('growth-text')).toContainText(/points\. Next: /);
+  await expect(dialog.getByRole('progressbar')).toHaveAttribute('aria-valuenow', /\d+/);
+  await expect(dialog).toContainText('Busy 9 days in a row.');
+  await expect(page.getByTestId('leaderboard-ranks').getByRole('listitem').first()).toContainText('tool call');
+  const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
+  expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([]);
+});

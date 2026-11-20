@@ -35,6 +35,7 @@ const TOOLS = [
   { id: 'toggle-quality', label: 'High quality' },
   { id: 'toggle-sound', label: 'Sound', key: 'M', keyName: 'M', compact: true },
   { id: 'usage', label: 'Usage and cost', key: 'U', keyName: 'U' },
+  { id: 'leaderboard', label: 'Leaderboard', key: 'L', keyName: 'L', compact: true },
   '|',
   { id: 'pause', label: 'Pause demo', key: 'Space', keyName: 'Space', only: 'demo', compact: true },
   { id: 'cycle-speed', label: 'Demo speed', only: 'demo', compact: true },
@@ -130,6 +131,7 @@ export function createToolbar(ctx) {
     setText(/** @type {HTMLElement} */ (tips['cycle-speed'].firstElementChild), `Demo speed: ${prefs.speed}×`);
     setButton('help', 'help', 'Help and shortcuts', null);
     setButton('usage', 'coins', 'Usage and cost', null);
+    setButton('leaderboard', 'trophy', 'Leaderboard', null);
     // Keep the toolbar's one tab stop on a button that is actually shown in this layout.
     const current = Object.values(buttons).find((b) => b.getAttribute('tabindex') === '0');
     if (!current || current.hidden || (view.mobile && current.classList.contains('hud-tool--wide-only'))) setRoving(buttons.follow);

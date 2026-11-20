@@ -3,7 +3,7 @@
 
 /**
  * @typedef {'follow'|'escape'|'rotate-left'|'rotate-right'|'zoom-in'|'zoom-out'|'reset-view'|
- *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|'director'|'toggle-panels'|'usage'|`crew-${number}`} ShortcutAction
+ *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|'director'|'toggle-panels'|'usage'|'leaderboard'|`crew-${number}`} ShortcutAction
  */
 
 /**
@@ -21,6 +21,7 @@ export const SHORTCUT_HELP = Object.freeze([
   { keys: ['N'], label: 'Switch between day, sunset, night and the local clock' },
   { keys: ['M'], label: 'Sound on or off' },
   { keys: ['U'], label: 'Usage: tokens and estimated cost, today and the last 14 days' },
+  { keys: ['L'], label: 'Leaderboard: the town\'s growth, records and the busiest agents' },
   { keys: ['A'], label: 'Go to approvals' },
   { keys: ['1', '9'], label: 'Jump to crew 1 to 9' },
   { keys: ['Space'], label: 'Pause or resume the demo', demoOnly: true },
@@ -51,6 +52,8 @@ const KEY_ACTIONS = {
   H: 'toggle-panels',
   u: 'usage',
   U: 'usage',
+  l: 'leaderboard',
+  L: 'leaderboard',
   '?': 'help',
 };
 

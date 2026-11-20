@@ -190,7 +190,7 @@
  * @property {(sel: Selection|null, opts?: { camera?: boolean, from?: 'hud'|'world', focus?: boolean }) => void} select
  * @property {(on?: boolean) => void} setFollow
  * @property {(tab: string, opts?: { focus?: boolean }) => void} showTab
- * @property {(name: 'help'|'settings'|'setup'|'diff'|'usage') => void} openDialog
+ * @property {(name: 'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard') => void} openDialog
  * @property {(agentKey: string, changeId: string) => void} showDiff  opens a change's diff
  * @property {(action: string) => void} run   runs a toolbar/shortcut action by name
  * @property {ReturnType<typeof import('./sound.js').createSound>} sound
