@@ -1,0 +1,67 @@
+{
+  "name": "andary",
+  "version": "0.1.0",
+  "description": "A living 3D town where your Claude Code sessions, subagents and agent teams show up as tiny workers, live, through Claude Code hooks.",
+  "type": "module",
+  "license": "MIT",
+  "author": "eylem2002",
+  "keywords": [
+    "claude-code",
+    "claude",
+    "agents",
+    "multi-agent",
+    "hooks",
+    "visualization",
+    "threejs",
+    "observability",
+    "developer-tools"
+  ],
+  "bin": {
+    "andary": "bin/andary.mjs"
+  },
+  "files": [
+    "bin",
+    "server",
+    "hooks",
+    "public",
+    ".claude-plugin",
+    "commands",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node bin/andary.mjs start",
+    "demo": "node bin/andary.mjs demo",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test --test-reporter=spec \"test/**/*.test.mjs\"",
+    "test:unit": "node --test --test-reporter=spec \"test/unit/**/*.test.mjs\"",
+    "test:integration": "node --test --test-reporter=spec \"test/integration/**/*.test.mjs\"",
+    "test:e2e": "playwright test --pass-with-no-tests",
+    "perf": "node scripts/lighthouse.mjs",
+    "licenses": "node scripts/check-licenses.mjs",
+    "secrets": "node scripts/scan-secrets.mjs",
+    "vendor": "node scripts/vendor.mjs",
+    "check": "node scripts/check.mjs",
+    "check:fast": "node scripts/check.mjs --fast",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "lint:config": "node scripts/lint-config.mjs"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@eslint/js": "10.0.1",
+    "@fontsource/overpass": "5.3.0",
+    "@fontsource/overpass-mono": "5.3.0",
+    "@playwright/test": "1.65.1",
+    "@types/node": "24.19.2",
+    "@types/three": "0.187.0",
+    "eslint": "10.15.0",
+    "globals": "17.14.0",
+    "three": "0.187.0",
+    "typescript": "5.9.3"
+  }
+}
