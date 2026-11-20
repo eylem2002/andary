@@ -91,12 +91,23 @@
  * @property {LogEntry[]} log
  * @property {{ events: number, toolCalls: number, failures: number, approvals: number, subagents: number, byBuilding: Record<string, number> }} stats
  * @property {Achievement[]} achievements
+ * @property {Record<string, AgentUsage>} usage
+ * @property {{ date: string, tokens: number, costUsd: number }[]} usageDays
+ */
+
+/**
+ * @typedef {object} AgentUsage
+ * @property {{ input: number, output: number, cacheRead: number, cacheWrite: number }} tokens
+ * @property {number} costUsd
+ * @property {boolean} unpriced
+ * @property {string|null} model
  */
 
 /**
  * @typedef {{ type: 'event', event: { kind: string, ts: number, sessionId: string, agentKey: string } }
  *   | { type: 'approval', approval: Approval }
  *   | { type: 'achievement', achievement: Achievement }
+ *   | { type: 'usage', agentKey: string }
  *   | { type: 'reset' }} StoreChange
  */
 
@@ -104,6 +115,7 @@
  * @typedef {object} Store
  * @property {(envelope: object) => object[]} ingest
  * @property {(approval: Approval) => void} setApproval
+ * @property {(record: unknown, days?: unknown) => void} setUsage
  * @property {(listener: (change: StoreChange) => void) => () => void} subscribe
  * @property {() => StoreState} getState
  * @property {() => void} reset
@@ -175,7 +187,7 @@
  * @property {(sel: Selection|null, opts?: { camera?: boolean, from?: 'hud'|'world', focus?: boolean }) => void} select
  * @property {(on?: boolean) => void} setFollow
  * @property {(tab: string, opts?: { focus?: boolean }) => void} showTab
- * @property {(name: 'help'|'settings'|'setup'|'diff') => void} openDialog
+ * @property {(name: 'help'|'settings'|'setup'|'diff'|'usage') => void} openDialog
  * @property {(agentKey: string, changeId: string) => void} showDiff  opens a change's diff
  * @property {(action: string) => void} run   runs a toolbar/shortcut action by name
  * @property {ReturnType<typeof import('./sound.js').createSound>} sound

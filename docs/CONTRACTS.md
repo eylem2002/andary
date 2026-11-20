@@ -203,10 +203,11 @@ same `subagent_type` (FIFO). Normalise ids by stripping a leading `agent-`.
 Server → browser:
 
 ```js
-{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs }, history: Envelope[], approvals: Approval[] }
+{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs }, history: Envelope[], approvals: Approval[], usage: { agents: UsageRecord[], days: UsageDay[] } }
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
 { t: 'settings', settings: {...} }
+{ t: 'usage', u: UsageRecord, days: UsageDay[] }   // §4.8, when an agent's totals change
 { t: 'error', message }
 // Envelope = { id: number /* server sequence */, ts: number /* hook start, ms */, rx: number /* server receive */, event: object /* sanitized payload */ }
 // Approval = { id, status: 'pending'|'allowed'|'denied'|'expired'|'resolved', held: boolean, sessionId, agentId: string|null,
@@ -256,6 +257,28 @@ Settled during implementation; they refine §4.3–§4.5.
   `uninstall` removes only what it added and deletes a settings file it created if it ends up empty.
 - `CLAUDE_CONFIG_DIR` is honoured. `vendor/` is cached for a day; everything else is `no-cache`
   with an ETag. The server does not answer `{t:'ping'}` (the socket's own ping/pong keeps it alive).
+
+### 4.8 Token usage and cost
+
+`server/usage.mjs`. Every hook's `transcript_path` (and, for a subagent, `agent_transcript_path`
+or `<transcript without .jsonl>/subagents/agent-<id>.jsonl`) is read, 0.8 s after the last hook
+for that agent, from where the last read stopped (at most 16 MB at a time, whole lines only).
+Only `.jsonl` files whose real path is inside `<CLAUDE_CONFIG_DIR or ~/.claude>/projects` are
+read. Each `type: "assistant"` line's `message.usage` is counted once per `message.id` (Claude
+Code splits one message over several lines), priced with `public/js/core/prices.js` (API list
+prices; 5-minute cache writes 1.25× input, 1-hour 2×, Haiku 5.5's long-prompt rate over 100,000
+tokens) and added to its agent and to the local day of its `timestamp`. Day totals (last 30) and
+read offsets are kept in `<ANDARY_HOME>/usage.json` (mode 0600; numbers and transcript paths
+only) so a restart counts nothing twice; agent totals live in memory.
+
+```js
+UsageRecord { sessionId, agentId: string|null, tokens: { input, output, cacheRead, cacheWrite },
+              costUsd /* estimated */, unpriced: boolean /* a model without a known price */, model }
+UsageDay { date: 'YYYY-MM-DD', tokens, costUsd }
+```
+
+The browser store keeps `usage` (agentKey → totals) and `usageDays`; the demo makes up repeatable
+numbers (`public/js/ui/demo-usage.js`).
 
 ## 5. Browser: events, store, director
 

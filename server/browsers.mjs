@@ -146,6 +146,7 @@ function attachBrowser(ctx, connection) {
     settings: publicSettings(ctx),
     history: ctx.history.list(),
     approvals: ctx.broker.list(),
+    usage: ctx.usage.snapshot(),
   });
   const limiter = createTokenBucket({ ratePerSecond: LIMITS.wsMessagesPerSecond, burst: LIMITS.wsMessageBurst });
   connection.on('message', (text) => {

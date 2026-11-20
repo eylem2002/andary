@@ -75,7 +75,7 @@ export function socketUrl(pageUrl) {
 
 /**
  * @typedef {object} LiveOptions
- * @property {{ ingest: (e: any) => any, setApproval: (a: any) => void, reset: () => void }} store
+ * @property {{ ingest: (e: any) => any, setApproval: (a: any) => void, setUsage?: (u: unknown, days?: unknown) => void, reset: () => void }} store
  * @property {boolean} [authenticated]   false starts in "Sign in" and waits for a valid cookie
  * @property {(status: LinkStatus) => void} [onStatus]
  * @property {(settings: object) => void} [onSettings]
@@ -162,6 +162,7 @@ export function connectLive({
     else if (message.t === 'hook' && message.e) ingest(message.e);
     else if (message.t === 'approval' && message.a) store.setApproval(message.a);
     else if (message.t === 'settings') onSettings(message.settings ?? {});
+    else if (message.t === 'usage') store.setUsage?.(message.u, message.days);
     else if (message.t === 'error') onError(String(message.message ?? 'The server reported an error.'));
   }
 
@@ -171,6 +172,9 @@ export function connectLive({
     store.reset();
     for (const envelope of message.history ?? []) ingest(envelope);
     for (const approval of message.approvals ?? []) store.setApproval(approval);
+    const usage = message.usage ?? {};
+    for (const record of Array.isArray(usage.agents) ? usage.agents : []) store.setUsage?.(record);
+    if (Array.isArray(usage.days)) store.setUsage?.(null, usage.days);
     onSettings(message.settings ?? {});
     setStatus('live');
     startPing();

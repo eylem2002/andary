@@ -14,6 +14,7 @@ import { handleShortcut, openDialog, panelsHidden, runAction, select, setFollow 
 import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
 import { createInspector } from './inspector.js';
 import { createDiffDialog } from './changes.js';
+import { createUsageDialog } from './usage.js';
 import { createMasthead } from './masthead.js';
 import { createNotices } from './notices.js';
 import { savePrefs } from './prefs.js';
@@ -142,7 +143,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       view.hosted = hosted;
       ctx.refresh();
     },
-    /** @param {'help'|'settings'|'setup'|'diff'} name */
+    /** @param {'help'|'settings'|'setup'|'diff'|'usage'} name */
     openDialog: (name) => openDialog(hud, name),
     /** Points a first-time visitor to the setup steps, unless they have seen them already. */
     offerSetup() {
@@ -202,7 +203,7 @@ function createParts(ctx) {
     place: createBuildingCard(ctx),
     toolbar: createToolbar(ctx),
     notices: createNotices(ctx),
-    dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx) },
+    dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx), usage: createUsageDialog(ctx) },
   };
 }
 
@@ -244,6 +245,7 @@ function flush(hud, shell, effects) {
   applyPanels(hud, shell.measureSheets);
   ui.notices.show(noticeKind(ctx.view, state));
   ui.dialogs.settings.sync();
+  ui.dialogs.usage.render();
   playEffects(ctx, effects.take(), state);
   ui.activity.settle();
 }

@@ -7,6 +7,7 @@ const NS = 'http://www.w3.org/2000/svg';
 
 const dot = (cx, cy, r = 1.4) => /** @type {Shape} */ (['circle', { cx, cy, r, fill: 'currentColor', stroke: 'none' }]);
 const circle = (cx, cy, r) => /** @type {Shape} */ (['circle', { cx, cy, r }]);
+const ellipse = (cx, cy, rx, ry) => /** @type {Shape} */ (['ellipse', { cx, cy, rx, ry }]);
 const rect = (x, y, width, height, rx = 2) => /** @type {Shape} */ (['rect', { x, y, width, height, rx }]);
 
 /** @type {Record<string, Shape[]>} */
@@ -64,6 +65,7 @@ const ICONS = {
   users: [circle(9, 8.5, 3.4), 'M2.8 19.5a6.2 6.2 0 0 1 12.4 0', 'M15.6 5.4a3.4 3.4 0 0 1 0 6.5M18 13.9a6.2 6.2 0 0 1 3.2 5.6'],
   box: ['M3.5 7.6 12 3.2l8.5 4.4v8.8L12 20.8l-8.5-4.4z', 'M3.5 7.6 12 12l8.5-4.4M12 12v8.8'],
   stop: [rect(6.5, 6.5, 11, 11, 2)],
+  coins: [ellipse(9, 6.8, 6, 2.6), 'M3 6.8v4.4c0 1.4 2.7 2.6 6 2.6', 'M15 6.8v3', ellipse(15, 13.2, 6, 2.6), 'M9 13.2v4.4c0 1.4 2.7 2.6 6 2.6s6-1.2 6-2.6v-4.4'],
   external: ['M14 4.5h5.5V10M19.5 4.5 11 13', 'M17.5 14v4a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V8A1.5 1.5 0 0 1 6 6.5h4'],
 };
 

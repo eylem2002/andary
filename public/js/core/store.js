@@ -124,15 +124,28 @@ export { ACHIEVEMENTS };
  * @property {LogEntry[]} log              newest last
  * @property {Stats} stats
  * @property {Achievement[]} achievements
+ * @property {Record<string, AgentUsage>} usage   agentKey → tokens and estimated cost (§4.8)
+ * @property {UsageDay[]} usageDays             the last 30 days, oldest first
  */
 
-/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval}|{type: 'achievement', achievement: Achievement}|{type: 'reset'}} StoreChange */
+/**
+ * @typedef {object} AgentUsage
+ * @property {{ input: number, output: number, cacheRead: number, cacheWrite: number }} tokens
+ * @property {number} costUsd
+ * @property {boolean} unpriced
+ * @property {string|null} model
+ */
+
+/** @typedef {{ date: string, tokens: number, costUsd: number }} UsageDay */
+
+/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'reset'}} StoreChange */
 
 /**
  * @typedef {object} Store
  * @property {(envelope: Envelope|Record<string, any>) => TownEvent[]} ingest
  * @property {(event: TownEvent) => void} dispatch
  * @property {(approval: Approval) => void} setApproval
+ * @property {(record: unknown, days?: unknown) => void} setUsage  one agent's usage totals, and the day totals
  * @property {(listener: (change: StoreChange) => void) => () => void} subscribe
  * @property {() => StoreState} getState
  * @property {() => void} reset
@@ -196,7 +209,7 @@ function createModel(localHour, maxLog) {
   const model = {
     maxLog,
     /** @type {StoreState} */
-    state: { sessions: [], agents: {}, approvals: [], log: [], stats: freshStats(), achievements: [] },
+    state: { sessions: [], agents: {}, approvals: [], log: [], stats: freshStats(), achievements: [], usage: {}, usageDays: [] },
     /** @type {Map<string, Session>} */
     sessions: new Map(),
     /** @type {Map<string, Spawn[]>} recent Agent/Task calls per session, oldest first */
@@ -1162,6 +1175,14 @@ export function createStore(options = {}) {
       emit({ type: 'approval', approval: next });
       for (const achievement of unlocked) emit({ type: 'achievement', achievement });
     },
+    setUsage(record, days) {
+      const usage = readUsage(record);
+      if (usage) {
+        m.state.usage[usage.key] = usage.value;
+        emit({ type: 'usage', agentKey: usage.key });
+      }
+      if (Array.isArray(days)) m.state.usageDays = readDays(days);
+    },
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -1175,3 +1196,36 @@ export function createStore(options = {}) {
     },
   };
 }
+
+/** @param {unknown} n */
+function amount(n) {
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * A usage record from the server or the demo, read defensively (it crosses the network).
+ * @param {unknown} raw
+ * @returns {{ key: string, value: AgentUsage }|null}
+ */
+function readUsage(raw) {
+  if (!isObject(raw) || typeof raw.sessionId !== 'string' || !raw.sessionId) return null;
+  const tokens = isObject(raw.tokens) ? raw.tokens : {};
+  return {
+    key: agentKeyOf(raw.sessionId, normalizeAgentId(typeof raw.agentId === 'string' ? raw.agentId : null)),
+    value: {
+      tokens: { input: amount(tokens.input), output: amount(tokens.output), cacheRead: amount(tokens.cacheRead), cacheWrite: amount(tokens.cacheWrite) },
+      costUsd: amount(raw.costUsd),
+      unpriced: raw.unpriced === true,
+      model: typeof raw.model === 'string' ? raw.model : null,
+    },
+  };
+}
+
+/** @param {unknown[]} days @returns {UsageDay[]} */
+function readDays(days) {
+  return days
+    .filter((day) => isObject(day) && typeof day.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day.date))
+    .map((day) => ({ date: /** @type {any} */ (day).date, tokens: amount(/** @type {any} */ (day).tokens), costUsd: amount(/** @type {any} */ (day).costUsd) }))
+    .slice(-30);
+}
+

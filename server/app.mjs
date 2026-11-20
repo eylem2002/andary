@@ -1,8 +1,10 @@
 // The Andary server: composes the HTTP routes, the WebSocket hub, the approval broker and the
 // history, and owns the lifecycle (listen, server.json, shutdown).
 import { createServer } from 'node:http';
+import { join } from 'node:path';
 import { generateToken } from './auth.mjs';
 import { createApprovalBroker } from './approvals.mjs';
+import { claudeConfigDir, createUsageTracker } from './usage.mjs';
 import { createHub, handleUpgrade } from './browsers.mjs';
 import { DEFAULT_APPROVAL_TIMEOUT_MS, DEFAULT_HOST, DEFAULT_PORT, LIMITS, PUBLIC_DIR, readVersion, resolveHome } from './config.mjs';
 import { createHistory, createRecorder, recordingPath } from './history.mjs';
@@ -22,6 +24,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {string} [home]               ANDARY_HOME; server.json and recordings live here
  * @property {string} [publicDir]
  * @property {boolean} [remoteApprovals]
+ * @property {string} [claudeDir]          Claude Code's config folder, for reading token usage from transcripts
  * @property {number} [approvalTimeoutMs]
  * @property {boolean} [record]            append every envelope to <home>/recordings/*.jsonl
  * @property {boolean} [writeState]        write server.json (default true)
@@ -39,6 +42,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {Record<string, string>} headers
  * @property {ReturnType<typeof createHistory>} history
  * @property {import('./approvals.mjs').ApprovalBroker} broker
+ * @property {ReturnType<typeof createUsageTracker>} usage
  * @property {import('./browsers.mjs').Hub} hub
  * @property {import('./rate-limit.mjs').TokenBucket} hookLimiter
  * @property {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, pathname: string) => Promise<void>} serveStatic
@@ -138,7 +142,7 @@ function createHttpServer(ctx) {
 }
 
 /**
- * @param {{ home: string, publicDir: string, approvalTimeoutMs: number, log: (message: string) => void }} config
+ * @param {{ home: string, publicDir: string, approvalTimeoutMs: number, writeState: boolean, log: (message: string) => void }} config
  * @param {ServerOptions} options
  * @returns {TownContext}
  */
@@ -161,6 +165,11 @@ function createContext(config, options) {
       onChange: (approval) => hub.broadcast({ t: 'approval', a: approval }),
     }),
     hub,
+    usage: createUsageTracker({
+      claudeDir: options.claudeDir ?? claudeConfigDir(),
+      stateFile: config.writeState ? join(config.home, 'usage.json') : null,
+      onChange: (record, days) => hub.broadcast({ t: 'usage', u: record, days }),
+    }),
     hookLimiter: createTokenBucket({ ratePerSecond: LIMITS.hookRatePerSecond, burst: LIMITS.hookBurst }),
     serveStatic: createStaticHandler({ root: config.publicDir, notFound: (_req, res) => sendHtml(res, 404, NOT_FOUND_PAGE) }),
     recorder: options.record ? createRecorder(recordingPath(config.home)) : null,
@@ -216,6 +225,7 @@ function listen(server, port, host) {
 async function stopServer(ctx, server, config) {
   if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
   ctx.broker.releaseAll();
+  ctx.usage.dispose();
   ctx.hub.closeAll(CLOSE_CODE.GOING_AWAY, 'Andary is shutting down');
   const closed = new Promise((resolve) => server.close(() => resolve(undefined)));
   server.closeIdleConnections();

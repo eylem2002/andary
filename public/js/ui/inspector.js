@@ -4,6 +4,7 @@ import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.
 import { icon } from './icons.js';
 import { doingText, formatAgo, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
 import { changeSummary } from './changes.js';
+import { usageSentence } from './usage.js';
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
@@ -41,9 +42,11 @@ export function createInspector(ctx) {
   const changes = h('ul', { class: 'hud-changes', 'data-testid': 'agent-changes' });
   const recent = h('ol', { class: 'hud-recent' });
   const message = h('p', { class: 'hud-inspector__message' });
+  const usage = h('p', { class: 'hud-inspector__usage', 'data-testid': 'agent-usage' });
   const sections = {
     now: section('Now', now),
     brief: section('Brief', brief),
+    usage: section('Usage', usage),
     tools: section('Tools used', tools),
     changes: section('Changes', changes),
     files: section('Recent files', files),
@@ -110,6 +113,9 @@ export function createInspector(ctx) {
     updateStatusChip(chip, agent.status);
     const asking = state.approvals.find((approval) => approval.status === 'pending' && approvalAgentKey(approval) === agent.key);
     renderSections(agent, session?.cwd, asking);
+    const spent = state.usage?.[agent.key];
+    setText(usage, spent ? usageSentence(spent) : '');
+    setHidden(sections.usage, !spent);
     setAttr(follow, 'aria-pressed', String(ctx.view.follow));
     tick(Date.now());
   }

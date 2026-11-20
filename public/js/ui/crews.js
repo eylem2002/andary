@@ -1,6 +1,7 @@
 // The Crews panel: every Claude Code session is a line on a metro map (its colour and number),
 // and its agents are the stations along it. A station shows the agent's status, what it is doing
 // and for how long; clicking it selects the agent and points the camera at it.
+import { crewUsage, usageShort } from './usage.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from './dom.js';
 import { icon } from './icons.js';
 import { modelLabel } from '../core/catalog.js';
@@ -58,6 +59,7 @@ export function createCrewsPanel(ctx) {
     const title = h('span', { class: 'hud-line__title' });
     const name = h('h3', { class: 'hud-line__name' }, number, title);
     const model = h('span', { class: 'hud-line__model' });
+    const cost = h('button', { type: 'button', class: 'hud-line__cost', 'data-testid': 'crew-cost', on: { click: () => ctx.openDialog('usage') } });
     const goal = h('p', { class: 'hud-line__goal' });
     const stations = h('ol', { class: 'hud-stations' });
     const more = h('button', { type: 'button', class: 'hud-line__more' });
@@ -67,8 +69,8 @@ export function createCrewsPanel(ctx) {
       render(ctx.store.getState());
     });
     const line = h('li', { class: 'hud-line', 'data-testid': 'crew', 'data-session-id': session.id },
-      h('div', { class: 'hud-line__head' }, mark, name, model), goal, stations, more);
-    parts.set(line, { mark, number, title, name, model, goal, stations, more });
+      h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, model, cost)), goal, stations, more);
+    parts.set(line, { mark, number, title, name, model, cost, goal, stations, more });
     return line;
   }
 
@@ -89,6 +91,10 @@ export function createCrewsPanel(ctx) {
     setText(p.title, session.title ? truncate(session.title, 60) : session.project);
     setAttr(p.name, 'title', session.cwd);
     setText(p.model, ended ? 'Ended' : modelLabel(session.model));
+    const spent = usageShort(crewUsage(state, session.id));
+    setText(p.cost, spent);
+    setAttr(p.cost, 'aria-label', spent ? `Estimated cost ${spent}. Show usage` : null);
+    setHidden(p.cost, !spent);
     setText(p.goal, session.goal ? truncate(session.goal, 140) : '');
     setHidden(p.goal, !session.goal || ended);
     const showAll = unfolded.has(session.id);

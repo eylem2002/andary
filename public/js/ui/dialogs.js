@@ -213,7 +213,7 @@ export function createSetupDialog(ctx) {
     body: [
       h('p', { class: 'hud-dialog__lead', text: 'This is a demo town with simulated crews. On your own machine, Andary shows your real Claude Code sessions as they work. You need Node.js 20 or newer.' }),
       steps,
-      h('p', { class: 'hud-dialog__note', text: 'Everything stays on your computer: the server only listens on 127.0.0.1, and nothing is written to disk unless you ask it to record.' }),
+      h('p', { class: 'hud-dialog__note', text: 'Everything stays on your computer: the server only listens on 127.0.0.1, and your prompts and commands are never written to disk unless you ask it to record.' }),
     ],
   });
   const keepWatching = h('button', { type: 'button', class: 'hud-btn hud-btn--primary', autofocus: true }, 'Keep watching the demo');
