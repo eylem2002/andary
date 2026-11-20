@@ -1,6 +1,8 @@
 // Boot. Picks live mode (an Andary server answered /api/hello) or demo mode (the built-in
 // simulation; forced with ?demo=1), then wires store → director → 3D world, and the HUD around it.
-// The HUD is built first so the page is useful even while the world loads or if WebGL is missing.
+// The HUD and the store start first, so the crews and the log show while the 3D modules load and
+// even if WebGL is missing. The world is built once that first content has been drawn (building
+// it blocks the page for a moment); the director then plays what the store recorded meanwhile.
 //
 // URL options:
 //   demo=1        force the demo, even with a server running
@@ -8,7 +10,7 @@
 //   seed=N        demo seed, for a reproducible story
 //   world=fake    skip the 3D view (HUD work, tests); with log=1 its calls go to the console
 import { createStore } from './core/store.js';
-import { createDirector } from './core/director.js';
+import { createDirector, recordChanges } from './core/director.js';
 import { connectLive, fetchHello } from './sources/live.js';
 import { createHud } from './ui/hud.js';
 import { loadPrefs } from './ui/prefs.js';
@@ -18,6 +20,8 @@ import { resolveReducedMotion, timeOfDayFor } from './ui/appearance.js';
 const params = new URLSearchParams(location.search);
 /** How long a visitor on a static host watches the town before the setup steps are offered. */
 const SETUP_HINT_MS = 8000;
+/** After the source starts, the 3D world waits at most this long for the first crew or the live history. */
+const FIRST_CONTENT_MS = 800;
 
 /** @typedef {import('./ui/types.js').World} World */
 
@@ -32,6 +36,7 @@ async function boot() {
 
   /** The one place events come from: live or demo (sources/types.js). @type {import('./sources/types.js').TownSource|null} */
   let source = null;
+  let paused = false;
 
   const hud = createHud({
     store,
@@ -41,18 +46,24 @@ async function boot() {
       setRemoteApprovals: (on) => source?.setRemoteApprovals?.(on),
       startDemo: () => switchToDemo(),
       leaveDemo: () => location.assign(withoutParam('demo')),
-      setPaused: (paused) => {
-        source?.setPaused?.(paused);
-        app.world?.setPaused(paused);
+      setPaused: (on) => {
+        paused = on;
+        source?.setPaused?.(on);
+        app.world?.setPaused(on);
       },
       setSpeed: (speed) => source?.setSpeed?.(speed),
       notifyTest: () => source?.notifyTest?.() ?? false,
     },
   });
 
+  // The director starts with the world; until then it gets a record of what the store did.
+  const backlog = recordChanges(store);
+  // The 3D modules load from now on; the world is built once the first content is drawn.
+  /** @type {() => void} */
+  let contentDrawn = () => {};
+  const worldReady = startWorld(prefs, new Promise((resolve) => (contentDrawn = resolve)));
   // A forced demo skips the server check: on static hosting it would only log a 404.
   const forceDemo = params.get('demo') === '1';
-  const worldReady = startWorld(prefs);
   const hello = forceDemo ? null : await fetchHello();
   const live = Boolean(hello) && !forceDemo;
   // Say which mode this is right away; the 3D view may still be loading.
@@ -65,17 +76,20 @@ async function boot() {
   const hosted = !hello && !forceDemo;
   hud.setHosted(hosted);
 
-  // Events start flowing only once the director is listening, so the town misses none of them.
+  // Events flow into the store and the HUD now; the town plays them once it is built.
+  if (live) startLive(hello);
+  else await startDemo({ hosted });
+  firstContent(store).then(contentDrawn);
+
   const world = await worldReady;
   app.world = world.world;
+  if (paused) world.world.setPaused(true);
   hud.attachWorld(world.world, { failed: world.failed });
   try {
-    createDirector({ world: world.world, store });
+    createDirector({ world: world.world, store, backlog: backlog.stop() });
   } catch (error) {
     console.error('Andary: the director could not start; the HUD still works.', error);
   }
-  if (live) startLive(hello);
-  else await startDemo({ hosted });
 
   /** @param {import('./sources/live.js').Hello} info */
   function startLive(info) {
@@ -117,11 +131,13 @@ async function boot() {
 }
 
 /**
- * Creates the 3D world, or the fake one (?world=fake, or when WebGL is unavailable).
+ * Creates the 3D world, or the fake one (?world=fake, or when WebGL is unavailable). The modules
+ * load at once; the world is built only when `drawn` resolves.
  * @param {import('./ui/prefs.js').Prefs} prefs
+ * @param {Promise<void>} drawn  the HUD's first content is on screen
  * @returns {Promise<{ world: World, failed: boolean }>}
  */
-async function startWorld(prefs) {
+async function startWorld(prefs, drawn) {
   const container = /** @type {HTMLElement} */ (document.getElementById('world'));
   const options = {
     quality: prefs.quality,
@@ -131,6 +147,7 @@ async function startWorld(prefs) {
   if (params.get('world') !== 'fake') {
     try {
       const { createWorld } = await import('./world/world.js');
+      await drawn;
       return { world: await createWorld(container, options), failed: false };
     } catch (error) {
       console.warn('Andary: the 3D view could not start, continuing without it.', error);
@@ -138,8 +155,32 @@ async function startWorld(prefs) {
     }
   }
   const { createFakeWorld } = await import('./dev/fake-world.js');
+  await drawn;
   const fake = /** @type {World} */ (/** @type {unknown} */ (createFakeWorld(container, { ...options, log: params.get('log') === '1' })));
   return { world: fake, failed: params.get('world') !== 'fake' };
+}
+
+/**
+ * Resolves once the HUD has drawn the town's first content: the frame after the store's next
+ * change (the first crew, or the live history), or after FIRST_CONTENT_MS without one.
+ * @param {{ subscribe: (listener: () => void) => () => void }} store
+ * @returns {Promise<void>}
+ */
+function firstContent(store) {
+  return new Promise((resolve) => {
+    let waiting = true;
+    const seen = () => {
+      if (!waiting) return;
+      waiting = false;
+      clearTimeout(timer);
+      unsubscribe();
+      // The HUD draws on the next animation frame; a hidden tab gets none, so it does not wait.
+      requestAnimationFrame(() => setTimeout(resolve, 0));
+      setTimeout(resolve, 250);
+    };
+    const timer = setTimeout(seen, FIRST_CONTENT_MS);
+    const unsubscribe = store.subscribe(seen);
+  });
 }
 
 /** @param {1|2|4} fallback */

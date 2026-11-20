@@ -66,6 +66,27 @@ test('the toolbar is placed above the board from the first frame (no layout shif
   expect(shifts.filter((/** @type {any} */ s) => s.nodes.some((/** @type {string} */ n) => String(n).includes('hud-toolbar')))).toEqual([]);
 });
 
+test('the crews show before the 3D world is ready, and the town plays them once it is', async ({ page }) => {
+  // Hold the world's module back, as a slow device would: the HUD must not wait for it.
+  /** @type {() => void} */
+  let release = () => {};
+  const held = new Promise((resolve) => (release = () => resolve(undefined)));
+  await page.route('**/js/dev/fake-world.js', async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.goto(demoUrl('&world=fake'));
+  await expect(page.getByTestId('agent-row').first()).toBeAttached({ timeout: 45_000 });
+  await openTab(page, 'Activity');
+  await expect(page.getByTestId('log-entry').first()).toBeVisible();
+  expect(await page.evaluate(() => /** @type {any} */ (window).__andary.world)).toBeNull();
+  release();
+  // The director plays what happened meanwhile: the first crew still arrives by bus.
+  const firstArrival = () =>
+    page.evaluate(() => /** @type {any} */ (window).__andary.world?.calls.find((/** @type {any} */ c) => c.method === 'addAgent')?.args[0].entrance ?? null);
+  await expect.poll(firstArrival).toBe('bus');
+});
+
 test('an agent row opens the inspector', async ({ page }) => {
   await page.goto(demoUrl());
   const row = page.getByTestId('agent-row').first();
@@ -103,6 +124,7 @@ test('toolbar buttons drive the camera, time, sound and the demo', async ({ page
   const phone = testInfo.project.name === 'mobile';
   await page.goto(demoUrl('&world=fake'));
   await expect(page.getByTestId('agent-row').first()).toBeAttached({ timeout: 45_000 });
+  await page.waitForFunction(() => /** @type {any} */ (window).__andary?.world);
   const tool = (/** @type {string} */ id) => page.locator(`[data-tool="${id}"]`);
 
   await tool('rotate-left').click();

@@ -33,6 +33,8 @@ test.afterEach(() => {
 async function openDemo(page, extra = '') {
   await page.goto(`${site.baseUrl}/?demo=1&speed=4&seed=7&world=fake${extra}`);
   await expect(page.getByTestId('agent-row').first()).toBeAttached({ timeout: 45_000 });
+  // The crews show before the world is built; some of these tests read the world's calls.
+  await page.waitForFunction(() => /** @type {any} */ (window).__andary?.world);
 }
 
 test('an agent\'s edits open as a diff', async ({ page }) => {

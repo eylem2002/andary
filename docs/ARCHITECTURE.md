@@ -64,7 +64,8 @@ view-only role that sees the town but cannot act.
 `sources/demo.js` (the simulation, which also plays the server's part for approvals, usage and
 growth) share one `TownSource` shape; `main.js` holds exactly one. Both feed `core/store.js`,
 the single source of truth: the HUD renders it, and the director turns its changes into
-choreography for the 3D world.
+choreography for the 3D world. The store and the HUD start first, so the crews show while the 3D
+world is still being built; the director then plays the changes it missed (CONTRACTS §5.1).
 
 **Pure core.** `public/js/core/` has no DOM and no I/O, so it runs anywhere and is unit-tested in
 Node. What the page was opened with (the town look, from the address or saved preferences) is read
