@@ -135,7 +135,7 @@ notifier, and viewers get nothing of the owner's.
 
 ## 4. Test results and scores
 
-Final verification, 2026-11-20, from a fresh clone of the complete stack (12 branches) with a
+Final verification, 2026-11-20, from a fresh clone of the complete stack (23 branches) with a
 clean `npm ci` (Node 22.23, npm 10.9, Linux, Chrome 153 with software WebGL):
 
 | Check | Result |
@@ -145,29 +145,29 @@ clean `npm ci` (Node 22.23, npm 10.9, Linux, Chrome 153 with software WebGL):
 | Config lint (JSON, shellcheck, actionlint, yamllint) | pass |
 | Typecheck (`tsc --checkJs`) | 0 errors |
 | Dead code (`npm run deadcode`) | 0 dead exports |
-| Unit + integration tests (`node:test`) | **710 / 710 pass**, 120 suites |
-| End-to-end + accessibility (Playwright, desktop and mobile) | **60 pass**, 12 skipped by design (keyboard-only cases on the phone profile) |
-| axe, WCAG 2.0/2.1/2.2 A and AA (main view light and dark, inspector, help, settings, setup, approval card) | 0 violations |
+| Unit + integration tests (`node:test`) | **782 / 782 pass**, 125 suites (710 before the nine features) |
+| End-to-end + accessibility (Playwright, desktop and mobile) | **80 pass**, 12 skipped by design (keyboard-only cases on the phone profile) |
+| axe, WCAG 2.0/2.1/2.2 A and AA (main view light and dark, inspector, help, settings, setup, approval card, diff, usage and leaderboard dialogs) | 0 violations |
 | Licences (98 installed packages, vendored three.js and fonts) | all on the allow-list |
 | Secrets (working tree and full git history) | none found |
 | Build: vendored files regenerated from `node_modules` | identical |
-| Build: `npm pack` → global install → `andary install`, `start`, `doctor`, `stop`, `uninstall` | all pass; `doctor` confirms hook → server → town |
-| Publishing: `scripts/publish-github.sh` from a clone of the bundle, against a stand-in GitHub | 13 branches pushed unchanged, 12 stacked pull requests, public only after a second secrets scan |
-| Each branch checked out on its own (pre-push gate) | all 12 pass |
+| Build: `npm pack` → global install → `andary install`, `start`, `doctor`, `team invite`, `stop`, `uninstall` | all pass; `doctor` confirms hook → server → town |
+| Publishing: `scripts/publish-github.sh` from a clone of the bundle, against a stand-in GitHub | main and 23 branches pushed unchanged, 23 stacked pull requests with their prepared descriptions, public only after a second secrets scan |
+| Each branch checked out on its own (pre-push gate) | all 23 pass (24 to 782 tests as the stack grows) |
 
 **Lighthouse 13.6** (`npm run perf`, demo page):
 
 | | Performance | Accessibility | Best practices | SEO | First paint | Layout shift |
 | --- | --- | --- | --- | --- | --- | --- |
-| Desktop | 42 | **100** | **100** | **100** | 0.2 s | 0.01 |
-| Mobile | 35 | **100** | **100** | **100** | 1.1 s | 0.035 |
+| Desktop | 35 | **100** | **100** | **100** | 0.3 s | 0.01 |
+| Mobile | 35 | **100** | **100** | **100** | 1.1 s | 0.045 |
 
 The performance score is held down by the test machine, not the page: with no GPU, Chrome draws
 the 3D town on the CPU (SwiftShader), so the frame loop shows up as Total Blocking Time (31 s on
-desktop, 152 s on mobile with Lighthouse's 4× CPU throttling). First paint and layout shift,
+desktop, 144 s on mobile with Lighthouse's 4× CPU throttling). First paint and layout shift,
 which do not depend on the GPU, are good. QA rounds: mobile accessibility 98 → 100, mobile
-layout shift 0.127 → 0.034–0.06; on 2026-11-17 desktop performance was 47, within the spread of a
-CPU-drawn page.
+layout shift 0.127 → 0.034–0.06; desktop performance has measured 35–47 across runs (42 before
+the nine features, 35 after, with the same blocking time), the spread of a CPU-drawn page.
 
 **Other measurements**: a 5-minute demo at 4× speed levels off at ≈ 11 MB of JavaScript heap and
 ≈ 4,000 DOM nodes (no leak); the town draws 54–61 calls per frame on high quality and 25–29 on
