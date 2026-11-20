@@ -1,0 +1,100 @@
+// "Changes": what an agent's edits did to a file, as a line diff in a dialog. Added and removed
+// lines are marked with + and − as well as colour, and each line is read out with its kind.
+import { createDialog } from './dialogs.js';
+import { diffStats, lineDiff } from './diff.js';
+import { h, setHidden, setText } from './dom.js';
+import { formatAgo } from './format.js';
+import { icon } from './icons.js';
+
+/** @typedef {import('./types.js').HudContext} HudContext */
+/** @typedef {NonNullable<import('./types.js').AgentState['changes']>[number]} FileChange */
+
+const OPS = { add: { mark: '+', label: 'Added' }, del: { mark: '−', label: 'Removed' }, same: { mark: ' ', label: '' } };
+
+/**
+ * "+3 −1", for a change's button and the dialog's subtitle.
+ * @param {FileChange} change
+ */
+export function changeSummary(change) {
+  const { added, removed } = diffStats(change.hunks);
+  return change.whole ? `${added} lines written` : `+${added} −${removed}`;
+}
+
+/** @param {HudContext} ctx */
+export function createDiffDialog(ctx) {
+  const subtitle = h('p', { class: 'hud-dialog__lead hud-diff__subtitle' });
+  const body = h('div', { class: 'hud-diff__body' });
+  const previous = h('button', { type: 'button', class: 'hud-btn' }, icon('chevronUp', { size: 18 }), h('span', { text: 'Newer change' }));
+  const next = h('button', { type: 'button', class: 'hud-btn' }, icon('chevronDown', { size: 18 }), h('span', { text: 'Older change' }));
+  const nav = h('div', { class: 'hud-dialog__actions' }, previous, next);
+  const dialog = createDialog({ id: 'hud-diff', title: 'Changes', body: [subtitle, body, nav], wide: true });
+  const title = /** @type {HTMLElement} */ (dialog.el.querySelector('.hud-dialog__title'));
+  /** @type {{ agentKey: string, id: string }|null} */
+  let current = null;
+
+  /** @returns {FileChange[]} newest first */
+  function changesOf(/** @type {string} */ agentKey) {
+    return [...(ctx.store.getState().agents[agentKey]?.changes ?? [])].reverse();
+  }
+
+  function render() {
+    if (!current) return;
+    const agent = ctx.store.getState().agents[current.agentKey];
+    const list = changesOf(current.agentKey);
+    const index = list.findIndex((change) => change.id === current?.id);
+    const change = list[index];
+    if (!agent || !change) {
+      setText(subtitle, 'This change is no longer kept.');
+      body.replaceChildren();
+      return;
+    }
+    setText(title, `Changes to ${change.path.split('/').pop()}`);
+    setText(subtitle, `${change.path}: ${changeSummary(change)}, by ${agent.name} with ${change.tool}, ${formatAgo(change.ts, Date.now())}.`);
+    body.replaceChildren(...change.hunks.map((hunk, i) => hunkView(hunk, i, change.hunks.length)));
+    setHidden(previous, index <= 0);
+    setHidden(next, index >= list.length - 1);
+    previous.onclick = () => show(current?.agentKey ?? '', list[index - 1]?.id);
+    next.onclick = () => show(current?.agentKey ?? '', list[index + 1]?.id);
+  }
+
+  /** @param {string} agentKey @param {string|undefined} id */
+  function show(agentKey, id) {
+    if (!id) return;
+    current = { agentKey, id };
+    render();
+  }
+
+  return {
+    el: dialog.el,
+    open: dialog.open,
+    close: dialog.close,
+    // A getter, not a copy: spreading the dialog would freeze isOpen at false.
+    get isOpen() {
+      return dialog.isOpen;
+    },
+    /**
+     * @param {string} agentKey
+     * @param {string} changeId
+     */
+    show(agentKey, changeId) {
+      show(agentKey, changeId);
+      dialog.open();
+    },
+  };
+}
+
+/**
+ * @param {{ before: string, after: string }} hunk
+ * @param {number} index
+ * @param {number} count
+ */
+function hunkView(hunk, index, count) {
+  const lines = lineDiff(hunk.before, hunk.after);
+  const rows = lines.map((line) => h('div', { class: `hud-diff__line hud-diff__line--${line.op}` },
+    h('span', { class: 'hud-diff__mark', 'aria-hidden': 'true', text: OPS[line.op].mark }),
+    OPS[line.op].label ? h('span', { class: 'hud-sr', text: `${OPS[line.op].label}: ` }) : null,
+    h('span', { class: 'hud-diff__text', text: line.text || ' ' })));
+  return h('section', { class: 'hud-diff__hunk', 'aria-label': count > 1 ? `Edit ${index + 1} of ${count}` : 'Edit' },
+    count > 1 ? h('h3', { class: 'hud-diff__hunk-title', text: `Edit ${index + 1} of ${count}` }) : null,
+    h('div', { class: 'hud-diff__code hud-mono', role: 'group', tabindex: '0', 'aria-label': 'Diff' }, ...(rows.length ? rows : [h('div', { class: 'hud-diff__line', text: 'No text changed.' })])));
+}

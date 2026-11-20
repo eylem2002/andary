@@ -13,6 +13,7 @@ import { createHelpDialog, createSettingsDialog, createSetupDialog } from './dia
 import { handleShortcut, openDialog, panelsHidden, runAction, select, setFollow } from './hud-actions.js';
 import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
 import { createInspector } from './inspector.js';
+import { createDiffDialog } from './changes.js';
 import { createMasthead } from './masthead.js';
 import { createNotices } from './notices.js';
 import { savePrefs } from './prefs.js';
@@ -60,6 +61,10 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     showTab: (tab, options) => showTab(hud, shell, tab, options),
     openDialog: (name) => openDialog(hud, name),
     run: (action) => runAction(hud, action),
+    showDiff: (agentKey, changeId) => {
+      for (const dialog of Object.values(ui.dialogs)) if (dialog.isOpen) dialog.close();
+      ui.dialogs.diff.show(agentKey, changeId);
+    },
     // The director camera needs the finished context, so it is attached right below.
     cinema: /** @type {any} */ (null),
   };
@@ -137,7 +142,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       view.hosted = hosted;
       ctx.refresh();
     },
-    /** @param {'help'|'settings'|'setup'} name */
+    /** @param {'help'|'settings'|'setup'|'diff'} name */
     openDialog: (name) => openDialog(hud, name),
     /** Points a first-time visitor to the setup steps, unless they have seen them already. */
     offerSetup() {
@@ -197,7 +202,7 @@ function createParts(ctx) {
     place: createBuildingCard(ctx),
     toolbar: createToolbar(ctx),
     notices: createNotices(ctx),
-    dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx) },
+    dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx) },
   };
 }
 

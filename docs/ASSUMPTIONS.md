@@ -145,3 +145,14 @@ section.
     holds the town at 18:00 for the golden-hour look.
 41. **The HUD follows the theme.** Pink-to-violet sign, warm paper boards and a plum dark mode;
     every text colour was checked for at least 4.5:1 contrast and the axe checks still pass.
+42. **"Ask for ideas" is kept aside.** The owner meant "give me ideas here", not a feature, and
+    did not tick it in the checklist. Its branch is kept as `archive/ask-ideas` (in the bundle,
+    not in the pull request order), so it can come back without redoing it.
+43. **The owner's checklist sets the next features.** Built in this order, one branch each:
+    file diffs, cost meter, town weather, a growing town, leaderboard, notifications, ambient
+    sound, theme switcher, team town.
+44. **Diffs come from the tool call, not from git.** An Edit's old and new text (as Claude Code
+    sent it to the hook, after redaction and the 2,000-character cut) is all Andary sees; it
+    never reads your files. A Write shows the whole new content as added lines, since the old
+    file is unknown. The last 20 changes per agent are kept in memory only.
+

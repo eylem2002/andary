@@ -3,6 +3,7 @@
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { doingText, formatAgo, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
+import { changeSummary } from './changes.js';
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
@@ -12,6 +13,7 @@ import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateR
 const TOOL_BARS = 6;
 const FILES_SHOWN = 8;
 const RECENT_SHOWN = 8;
+const CHANGES_SHOWN = 8;
 
 /**
  * The most-used tools, largest first, with each count as a fraction of the largest.
@@ -36,12 +38,14 @@ export function createInspector(ctx) {
   const brief = h('p', { class: 'hud-inspector__brief' });
   const tools = h('ul', { class: 'hud-bars' });
   const files = h('ul', { class: 'hud-files' });
+  const changes = h('ul', { class: 'hud-changes', 'data-testid': 'agent-changes' });
   const recent = h('ol', { class: 'hud-recent' });
   const message = h('p', { class: 'hud-inspector__message' });
   const sections = {
     now: section('Now', now),
     brief: section('Brief', brief),
     tools: section('Tools used', tools),
+    changes: section('Changes', changes),
     files: section('Recent files', files),
     recent: section('Recent activity', recent),
     message: section('Last message', message),
@@ -127,6 +131,9 @@ export function createInspector(ctx) {
     const shownFiles = (agent.files ?? []).slice(0, FILES_SHOWN);
     setHidden(sections.files, !shownFiles.length);
     renderList(files, shownFiles, (file) => file, (file) => h('li', { class: 'hud-mono', title: file, text: shortenPath(file, { cwd, max: 46 }) }), () => {});
+    const shownChanges = [...(agent.changes ?? [])].reverse().slice(0, CHANGES_SHOWN);
+    setHidden(sections.changes, !shownChanges.length);
+    renderList(changes, shownChanges, (change) => change.id, (change) => changeItem(change, () => ctx.showDiff(agent.key, change.id)), () => {});
     const recentEntries = (agent.recent ?? []).slice(-RECENT_SHOWN).reverse();
     setHidden(sections.recent, !recentEntries.length);
     renderList(recent, recentEntries, (entry) => String(entry.id), createRecent, updateRecent);
@@ -148,6 +155,20 @@ export function createInspector(ctx) {
   }
 
   return { el, open, hide, render, tick, get agentKey() { return agentKey; } };
+}
+
+/**
+ * A change as a button that opens its diff.
+ * @param {NonNullable<AgentState['changes']>[number]} change
+ * @param {() => void} open
+ */
+function changeItem(change, open) {
+  const button = h('button', { type: 'button', class: 'hud-change', title: change.path },
+    h('span', { class: 'hud-change__path hud-mono', text: change.path.split('/').pop() ?? change.path }),
+    h('span', { class: 'hud-change__stat', text: changeSummary(change) }));
+  button.setAttribute('aria-label', `Show changes to ${change.path}, ${changeSummary(change)}`);
+  button.addEventListener('click', open);
+  return h('li', {}, button);
 }
 
 /** @param {string} title @param {HTMLElement} content */
