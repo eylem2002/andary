@@ -203,6 +203,17 @@ describe('WsConnection', () => {
     assert.deepEqual(raw.frames().find((f) => f.type === 'close'), { type: 'close', code: 1000, reason: '' });
   });
 
+  it('closes the server side when the peer half-closes without a close frame', async () => {
+    const serverSide = nextServerSide();
+    const raw = await rawClient();
+    const connection = await serverSide;
+    const closed = once(connection, 'close');
+    raw.socket.end();
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('still open 2 s after the peer sent FIN')), 2000).unref());
+    await Promise.race([closed, timeout]);
+    await raw.closed;
+  });
+
   it('drops a peer that stops answering heartbeats', async () => {
     const serverSide = nextServerSide();
     await rawClientWithHeaders({ 'x-heartbeat': '40' });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { entriesSince, iconForEntry, matchesFilter } from '../../../public/js/ui/activity.js';
 import { summarizeActivity } from '../../../public/js/ui/announcer.js';
-import { pendingCount, resultText } from '../../../public/js/ui/approvals.js';
+import { ANSWER_DELAY_MS, answerReady, pendingCount, resultText } from '../../../public/js/ui/approvals.js';
 import { visibleAgents } from '../../../public/js/ui/crews.js';
 import { busiestAgent, sameSelection } from '../../../public/js/ui/hud-actions.js';
 import { effectFor, FRESH_MS } from '../../../public/js/ui/hud-effects.js';
@@ -187,5 +187,14 @@ describe('inspector and masthead', () => {
     assert.equal(noticeKind(fixture({ mode: 'live', connection: 'live' }), fixture({ sessions: [{}] })), null);
     assert.equal(noticeKind(fixture({ mode: 'live', connection: 'connecting' }), empty), null);
     assert.equal(noticeKind(fixture({ mode: 'demo', connection: 'demo' }), empty), null);
+  });
+});
+
+describe('approval answer delay', () => {
+  test('a pointer answer needs the card to have stayed in place for ANSWER_DELAY_MS', () => {
+    assert.equal(answerReady(1000, 1000), false);
+    assert.equal(answerReady(1000, 1000 + ANSWER_DELAY_MS - 1), false);
+    assert.equal(answerReady(1000, 1000 + ANSWER_DELAY_MS), true);
+    assert.ok(ANSWER_DELAY_MS >= 500, 'long enough for a human to notice the change');
   });
 });

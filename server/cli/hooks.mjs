@@ -57,7 +57,14 @@ function changeHooks(action, values, io) {
     describePlan(plan, io);
     return 0;
   }
-  const { backupPath } = applyHooksChange(plan);
+  let backupPath;
+  try {
+    ({ backupPath } = applyHooksChange(plan));
+  } catch (error) {
+    if (error.code !== 'EUNSAFEHOME') throw error;
+    io.err(error.message);
+    return 1;
+  }
   reportResult(plan, backupPath, io);
   return 0;
 }

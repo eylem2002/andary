@@ -50,3 +50,14 @@ describe('createRecorder', () => {
     }
   });
 });
+
+describe('history size budget', () => {
+  it('drops the oldest envelopes once their JSON size passes maxBytes, keeping the newest', () => {
+    const history = createHistory({ size: 100, maxBytes: 1000 });
+    for (let id = 1; id <= 5; id += 1) history.push({ id, ts: 0, rx: 0, event: {} }, 300);
+    assert.deepEqual(history.list().map((e) => e.id), [3, 4, 5]);
+    assert.equal(history.bytes, 900);
+    history.push({ id: 6, ts: 0, rx: 0, event: {} }, 5000);
+    assert.deepEqual(history.list().map((e) => e.id), [6], 'one oversized envelope still stays');
+  });
+});

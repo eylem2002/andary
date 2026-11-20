@@ -8,6 +8,11 @@ export const REDACTED = '[redacted]';
 export const MAX_STRING_CHARS = 2000;
 export const MAX_ARRAY_ITEMS = 50;
 export const MAX_DEPTH = 8;
+/** Object keys are data too: a single key can be a megabyte long, and objects can have any width. */
+export const MAX_OBJECT_KEYS = 100;
+export const MAX_KEY_CHARS = 200;
+/** Stands in for the keys dropped past MAX_OBJECT_KEYS; its value says how many. */
+export const MORE_KEYS = '…';
 /** Stands in for containers nested deeper than MAX_DEPTH. */
 export const DEPTH_PLACEHOLDER = '[nested too deep]';
 
@@ -98,8 +103,8 @@ export function truncateString(text, max = MAX_STRING_CHARS) {
 }
 
 /**
- * Returns a sanitized deep copy: secrets redacted, strings ≤ 2,000 chars, arrays ≤ 50 items,
- * nesting ≤ 8 levels. The input is not modified.
+ * Returns a sanitized deep copy: secrets redacted (in keys too), strings ≤ 2,000 chars, keys
+ * ≤ 200 chars, arrays ≤ 50 items, objects ≤ 100 keys, nesting ≤ 8 levels. The input is not modified.
  * @param {unknown} value
  * @param {number} [depth] nesting level of `value` (0 for the payload itself)
  * @returns {any}
@@ -111,13 +116,14 @@ export function sanitize(value, depth = 0) {
   if (Array.isArray(value)) {
     return value.slice(0, MAX_ARRAY_ITEMS).map((item) => sanitize(item, depth + 1));
   }
+  const entries = Object.entries(value);
   // Object.fromEntries defines own properties, so a "__proto__" key cannot change the prototype.
-  return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [
-      key,
-      typeof item === 'string' && SECRET_KEY.test(key) ? REDACTED : sanitize(item, depth + 1),
-    ]),
-  );
+  const kept = entries.slice(0, MAX_OBJECT_KEYS).map(([key, item]) => [
+    truncateString(redactSecrets(key), MAX_KEY_CHARS),
+    typeof item === 'string' && SECRET_KEY.test(key) ? REDACTED : sanitize(item, depth + 1),
+  ]);
+  if (entries.length > MAX_OBJECT_KEYS) kept.push([MORE_KEYS, `[+${entries.length - MAX_OBJECT_KEYS} keys]`]);
+  return Object.fromEntries(kept);
 }
 
 /**

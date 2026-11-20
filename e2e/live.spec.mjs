@@ -98,3 +98,27 @@ for (const decision of /** @type {const} */ (['allow', 'deny'])) {
     expect(output.hookSpecificOutput.decision.behavior).toBe(decision);
   });
 }
+
+test('a click meant for one request cannot answer another that just slid under the pointer', async ({ page }) => {
+  await signIn(page);
+  await enableRemoteApprovals(page);
+  const first = town.sendHook(hook('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm test' } }));
+  const cards = page.getByTestId('approval-card');
+  await expect(cards).toHaveCount(1);
+  if (!(await cards.first().isVisible())) await page.getByRole('tab', { name: /Approvals/ }).click();
+  const target = cards.first().getByTestId('approve');
+  await expect(target).not.toHaveAttribute('aria-disabled', 'true');
+  const box = await target.boundingBox();
+  if (!box) throw new Error('the Allow button has no box');
+  const firstId = await cards.first().getAttribute('data-approval-id');
+  // A second request arrives and is listed first, right where the viewer is about to click.
+  const second = town.sendHook(hook('PermissionRequest', { session_id: 'e2e-other', tool_name: 'Bash', tool_input: { command: 'rm -rf build' } }));
+  await expect(cards).toHaveCount(2);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForTimeout(300);
+  for (const card of await cards.all()) await expect(card).toHaveAttribute('data-status', 'pending');
+  // Once the list has been still for a moment, a deliberate click answers the card it lands on.
+  await page.locator(`[data-testid="approval-card"]:not([data-approval-id="${firstId}"])`).getByTestId('deny').click();
+  await page.locator(`[data-testid="approval-card"][data-approval-id="${firstId}"]`).getByTestId('deny').click();
+  for (const pending of [first, second]) expect(JSON.parse((await pending).stdout).hookSpecificOutput.decision.behavior).toBe('deny');
+});

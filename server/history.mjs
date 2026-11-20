@@ -8,28 +8,31 @@ import { join } from 'node:path';
  */
 
 /**
- * Fixed-size ring buffer of envelopes, oldest first.
- * @param {{ size: number }} options
- * @returns {{ push: (envelope: Envelope) => void, list: () => Envelope[], readonly length: number }}
+ * The most recent envelopes, oldest first, bounded by count and by size: a browser that joins
+ * late gets all of them in one message, and events can be large (up to the 1 MiB hook limit), so
+ * a count alone would let history grow to gigabytes.
+ * @param {{ size: number, maxBytes?: number }} options  maxBytes counts JSON characters
+ * @returns {{ push: (envelope: Envelope, bytes?: number) => void, list: () => Envelope[], readonly length: number, readonly bytes: number }}
  */
-export function createHistory({ size }) {
-  /** @type {Envelope[]} */
+export function createHistory({ size, maxBytes = Infinity }) {
+  /** @type {Array<{ envelope: Envelope, bytes: number }>} */
   const items = [];
-  let start = 0;
+  let total = 0;
   return {
-    push(envelope) {
-      if (items.length < size) {
-        items.push(envelope);
-        return;
-      }
-      items[start] = envelope;
-      start = (start + 1) % size;
+    push(envelope, bytes = 0) {
+      items.push({ envelope, bytes });
+      total += bytes;
+      // The newest envelope always stays, even when it alone is over the budget.
+      while (items.length > size || (total > maxBytes && items.length > 1)) total -= /** @type {{ bytes: number }} */ (items.shift()).bytes;
     },
     list() {
-      return start === 0 ? items.slice() : items.slice(start).concat(items.slice(0, start));
+      return items.map((item) => item.envelope);
     },
     get length() {
       return items.length;
+    },
+    get bytes() {
+      return total;
     },
   };
 }

@@ -14,6 +14,50 @@ import { approvalAgentKey, crewNumber, findSession, kbd, roundel, updateRoundel 
 const MAX_CARDS = 30;
 
 /**
+ * New requests are listed first, so a card can slide under the pointer just as the viewer clicks
+ * the one they read (and a settled card above can move away). A click on Allow / Deny only counts
+ * once its card has stayed in place this long, like the input delay of browser permission prompts.
+ * Keyboard answers are not delayed: focus stays on the card the viewer chose.
+ */
+export const ANSWER_DELAY_MS = 1000;
+
+/**
+ * Whether a card that last appeared or moved at `armedAt` may take a pointer answer at `now`.
+ * @param {number} armedAt
+ * @param {number} now
+ */
+export function answerReady(armedAt, now) {
+  return now - armedAt >= ANSWER_DELAY_MS;
+}
+
+/**
+ * Restarts the answer delay when a card appears or changes place in the list: its buttons read as
+ * unavailable (aria-disabled, not disabled, so focus is never lost) until the delay is over.
+ * @param {any} p the card's parts
+ * @param {number} index its place in the list now
+ */
+function armCard(p, index) {
+  if (p.index === index) return;
+  p.index = index;
+  p.armedAt = performance.now();
+  for (const button of [p.allow, p.deny]) setAttr(button, 'aria-disabled', 'true');
+  clearTimeout(p.armTimer);
+  p.armTimer = setTimeout(() => {
+    for (const button of [p.allow, p.deny]) setAttr(button, 'aria-disabled', null);
+  }, ANSWER_DELAY_MS);
+}
+
+/**
+ * Whether a click on Allow / Deny counts. event.detail is 0 for Enter / Space: keyboard answers go
+ * to the focused card, so only pointer clicks wait for the delay.
+ * @param {MouseEvent} event
+ * @param {any} p the card's parts
+ */
+function clickCounts(event, p) {
+  return event.detail === 0 || answerReady(p.armedAt, performance.now());
+}
+
+/**
  * Words for a decided approval.
  * @param {Approval} approval
  * @param {'live'|'demo'} mode
@@ -85,15 +129,15 @@ export function createApprovalsPanel(ctx) {
     const allow = h('button', { type: 'button', class: 'hud-btn hud-btn--allow', 'data-testid': 'approve' }, icon('check', { size: 18 }), 'Allow', kbd('A'));
     const deny = h('button', { type: 'button', class: 'hud-btn hud-btn--deny', 'data-testid': 'deny' }, icon('cross', { size: 18 }), 'Deny', kbd('D'));
     const actions = h('div', { class: 'hud-approval__actions' }, allow, deny);
-    const terminal = h('p', { class: 'hud-approval__terminal' }, icon('terminal', { size: 16 }), 'Answer in your terminal.');
+    const terminal = h('p', { class: 'hud-approval__terminal' }, icon('terminal', { size: 16 }), h('span', { text: 'Answer in your terminal.' }));
     const result = h('p', { class: 'hud-approval__result' });
     const card = h('article', { class: 'hud-approval', 'data-testid': 'approval-card', 'data-approval-id': first.id, 'aria-labelledby': `${id}-who`, 'aria-describedby': `${id}-detail` },
       h('header', { class: 'hud-approval__head' }, mark, h('div', {}, who, h('p', { class: 'hud-approval__meta' }, crew, tool))),
       h('pre', { class: 'hud-approval__code' }, detail), timer, actions, terminal, result);
     const item = h('li', { class: 'hud-approvals__item' }, card);
-    parts.set(item, { mark, who, crew, tool, detail, timer, bar, countdown, actions, allow, deny, terminal, result, card });
-    allow.addEventListener('click', () => decide(parts.get(item).approval, 'allow'));
-    deny.addEventListener('click', () => decide(parts.get(item).approval, 'deny'));
+    parts.set(item, { mark, who, crew, tool, detail, timer, bar, countdown, actions, allow, deny, terminal, result, card, index: -1, armedAt: 0, armTimer: 0 });
+    allow.addEventListener('click', (event) => clickCounts(event, parts.get(item)) && decide(parts.get(item).approval, 'allow'));
+    deny.addEventListener('click', (event) => clickCounts(event, parts.get(item)) && decide(parts.get(item).approval, 'deny'));
     card.addEventListener('keydown', (event) => {
       const key = event.key.toLowerCase();
       if ((key !== 'a' && key !== 'd') || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -104,14 +148,15 @@ export function createApprovalsPanel(ctx) {
     return item;
   }
 
-  /** @param {HTMLElement} item @param {Approval} approval @param {StoreState} state */
-  function updateCard(item, approval, state) {
+  /** @param {HTMLElement} item @param {Approval} approval @param {StoreState} state @param {number} index */
+  function updateCard(item, approval, state, index) {
     const p = parts.get(item);
     p.approval = approval;
+    armCard(p, index);
     if (approval.status !== 'pending') sending.delete(approval.id);
     const session = findSession(state, approval.sessionId);
     const agent = state.agents[approvalAgentKey(approval)];
-    const { action, detail } = describeApproval(approval);
+    const { action, detail } = describeApproval(approval, { exact: true });
     updateRoundel(p.mark, crewNumber(state, approval.sessionId), session?.color);
     setText(p.who, `${agent?.name ?? 'An agent'} wants to ${action}`);
     setText(p.crew, session ? `in ${session.project}` : '');
@@ -128,6 +173,8 @@ export function createApprovalsPanel(ctx) {
     setHidden(p.actions, !answerable);
     setHidden(p.timer, !answerable || !approval.expiresAt);
     setHidden(p.terminal, !pending || approval.held);
+    // The server says why it left a request to the terminal (e.g. it could not be shown in full).
+    setText(p.terminal.lastElementChild, pending && approval.message ? `Answer in your terminal. ${approval.message}.` : 'Answer in your terminal.');
     p.allow.disabled = busy;
     p.deny.disabled = busy;
     setText(p.result, busy ? 'Sending your answer…' : resultText(approval, ctx.view.mode));
@@ -151,7 +198,7 @@ export function createApprovalsPanel(ctx) {
   /** @param {StoreState} state */
   function render(state) {
     const shown = state.approvals.slice(0, MAX_CARDS);
-    renderList(list, shown, (approval) => approval.id, createCard, (item, approval) => updateCard(item, approval, state));
+    renderList(list, shown, (approval) => approval.id, createCard, (item, approval, index) => updateCard(item, approval, state, index));
     setHidden(empty, shown.some((approval) => approval.status === 'pending'));
     renderNote();
   }

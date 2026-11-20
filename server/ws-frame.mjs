@@ -27,6 +27,11 @@ export const CLOSE_CODE = Object.freeze({
 /** @type {Set<number>} */
 const KNOWN_OPCODES = new Set(Object.values(OPCODE));
 const MAX_CONTROL_PAYLOAD = 125;
+/**
+ * Fragments per message. Empty continuation frames add nothing to the size limit, so without a
+ * count a peer could grow the list of parts forever. Browsers send text messages in one frame.
+ */
+export const MAX_FRAGMENTS = 1024;
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
 /** A violation of the protocol; `code` is the close code to send before dropping the connection. */
@@ -188,6 +193,7 @@ export function createFrameParser({ maxMessageBytes, expectMasked }) {
         return null;
       case OPCODE.CONTINUATION: {
         if (!fragmented) throw new WsProtocolError('Continuation frame without a message to continue');
+        if (fragmented.parts.length >= MAX_FRAGMENTS) throw new WsProtocolError('Message split into too many fragments', CLOSE_CODE.MESSAGE_TOO_BIG);
         fragmented.parts.push(payload);
         fragmented.size += payload.length;
         if (!fin) return null;

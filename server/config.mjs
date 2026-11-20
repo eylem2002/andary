@@ -35,6 +35,8 @@ export const LIMITS = Object.freeze({
   wsMessagesPerSecond: 20,
   wsMessageBurst: 60,
   historySize: 2000,
+  /** History is also capped by size (JSON characters), so the hello message stays reasonable. */
+  historyBytes: 32 * 1024 * 1024,
   pendingApprovals: 50,
   settledApprovals: 50,
   approvalMessageChars: 500,

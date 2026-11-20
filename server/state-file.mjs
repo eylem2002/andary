@@ -1,7 +1,9 @@
 // server.json in ANDARY_HOME: how the forwarder and the CLI find the running server.
 // It holds the hook secret and the UI token, so it is written with mode 0600 inside a 0700 folder.
-import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { UI_COOKIE } from './auth.mjs';
 import { APP_ID } from './config.mjs';
 import { connectHost, hostWithPort } from './security.mjs';
 
@@ -14,6 +16,7 @@ export const STATE_FILE = 'server.json';
  * @property {string} host
  * @property {string} secret      authenticates hooks
  * @property {string} uiToken     authenticates browsers
+ * @property {string} [responseKey] signs the replies to the forwarder (never sent over the wire)
  * @property {string} version
  * @property {number} startedAt
  * @property {number} approvalTimeoutMs
@@ -28,11 +31,23 @@ export function stateFilePath(home) {
 }
 
 /**
- * Creates the home folder, private to the user.
+ * Creates the home folder, private to the user, and checks one that already exists. It holds the
+ * secrets and hook.mjs, which Claude Code runs for every event: a folder someone else owns or can
+ * write to would let them swap either, so it is refused (another owner) or made private again.
+ * Windows has no uid; the user profile's permissions protect the folder there.
  * @param {string} home
+ * @param {{ uid?: number }} [owner] the expected owner (default: this process's user)
  */
-export function ensureHome(home) {
+export function ensureHome(home, { uid = process.getuid?.() } = {}) {
   mkdirSync(home, { recursive: true, mode: 0o700 });
+  if (uid === undefined) return;
+  const stat = statSync(home);
+  if (stat.uid !== uid) {
+    throw Object.assign(new Error(`${home} belongs to another user, so Andary will not keep its secrets there. Set ANDARY_HOME to a folder of your own.`), {
+      code: 'EUNSAFEHOME',
+    });
+  }
+  if ((stat.mode & 0o077) !== 0) chmodSync(home, 0o700);
 }
 
 /**
@@ -44,8 +59,9 @@ export function ensureHome(home) {
 export function writeStateFile(home, state) {
   ensureHome(home);
   const target = stateFilePath(home);
-  const temp = `${target}.${process.pid}.tmp`;
-  writeFileSync(temp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  // Random and exclusive, so nothing already in the folder (a stale file, a link) is written through.
+  const temp = `${target}.${randomBytes(8).toString('hex')}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
   // The mode passed to writeFileSync is filtered by the umask; set it explicitly.
   chmodSync(temp, 0o600);
   renameSync(temp, target);
@@ -119,29 +135,50 @@ export function loginUrl(state, params = {}) {
 }
 
 /**
- * Asks a server for /api/hello; resolves with the reply if it is an Andary server.
+ * Whether a process with this pid runs as us (signal 0 only checks; EPERM means another user's).
+ * @param {unknown} pid
+ * @returns {boolean}
+ */
+export function isProcessAlive(pid) {
+  if (!Number.isSafeInteger(pid) || /** @type {number} */ (pid) <= 0) return false;
+  try {
+    process.kill(/** @type {number} */ (pid), 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Asks a server for /api/hello; resolves with the reply if it is an Andary server. With `token`,
+ * only a server that accepts that UI token counts, i.e. the one that wrote this server.json.
  * @param {Pick<ServerState, 'host'|'port'>} state
  * @param {number} [timeoutMs]
+ * @param {{ token?: string }} [options]
  * @returns {Promise<Record<string, any>|null>}
  */
-export async function probeServer(state, timeoutMs = 1500) {
+export async function probeServer(state, timeoutMs = 1500, { token } = {}) {
   try {
-    const res = await fetch(`${serverOrigin(state)}/api/hello`, { signal: AbortSignal.timeout(timeoutMs) });
+    const headers = token ? { cookie: `${UI_COOKIE}=${token}` } : undefined;
+    const res = await fetch(`${serverOrigin(state)}/api/hello`, { headers, signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return null;
     const hello = await res.json();
-    return hello?.app === APP_ID ? hello : null;
+    if (hello?.app !== APP_ID) return null;
+    return token && hello.authenticated !== true ? null : hello;
   } catch {
     return null;
   }
 }
 
 /**
- * The state of a live server for this home, or null (no file, stale file, or not answering).
+ * The state of a live server for this home, or null (no file, stale file, or not answering). A
+ * stale file can name a pid the system has since given to another program, and its port can be
+ * taken by something else, so both are checked: `stop` sends that pid a signal.
  * @param {string} home
  * @returns {Promise<ServerState|null>}
  */
 export async function findRunningServer(home) {
   const state = readStateFile(home);
-  if (!state) return null;
-  return (await probeServer(state)) ? state : null;
+  if (!state || !isProcessAlive(state.pid)) return null;
+  return (await probeServer(state, 1500, { token: state.uiToken })) ? state : null;
 }

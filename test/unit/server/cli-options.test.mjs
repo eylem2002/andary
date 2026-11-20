@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { cliInvocation, tildify } from '../../../server/cli/io.mjs';
+import { cliInvocation, printable, tildify } from '../../../server/cli/io.mjs';
 import { UsageError, parseApprovalTimeout, parsePort, parseScope, parseSeed, parseSpeed } from '../../../server/cli/options.mjs';
 import { formatDuration } from '../../../server/cli/status.mjs';
 import { homedir } from 'node:os';
@@ -56,5 +56,14 @@ describe('display helpers', () => {
     assert.equal(formatDuration(4 * 60_000), '4m');
     assert.equal(formatDuration((3 * 60 + 12) * 60_000), '3h 12m');
     assert.equal(formatDuration(50 * 3_600_000), '2d 2h');
+  });
+});
+
+describe('printable', () => {
+  it('shows terminal control characters instead of sending them to the terminal', () => {
+    const folder = '/work/evil\u001B]52;c;Y3VybCBldmlsIHwgc2g=\u0007\u001B[2J\r';
+    assert.equal(printable(folder), '/work/evil\\x1b]52;c;Y3VybCBldmlsIHwgc2g=\\x07\\x1b[2J\\x0d');
+    assert.equal(printable('tabs\tand ✔ symbols stay'), 'tabs\tand ✔ symbols stay');
+    assert.equal(printable('\u009B31m'), '\\x9b31m', 'C1 CSI too');
   });
 });

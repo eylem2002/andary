@@ -88,13 +88,16 @@ event arrives twice; `andary doctor` warns about this.
 `hooks/hook.mjs` (copied to `<ANDARY_HOME>/hook.mjs`) uses Node built-ins only and:
 
 1. notes the time the hook started,
-2. reads `server.json`; if there is none, it exits at once,
+2. reads `server.json`; if there is none, or the server that wrote it is no longer running, it
+   exits at once (another program may hold that port by now),
 3. reads the event from stdin (anything that is not JSON is sent as an `Unknown` event with the
    first 4,000 characters),
 4. posts `{"v":1,"ts":…,"event":…}` to `http://127.0.0.1:<port>/api/hook` with the hook secret,
    waiting at most 1.5 s (or the approval timeout + 5 s for `PermissionRequest`); payloads over
    the server's 1 MiB limit are trimmed first, so big file writes still show up,
-5. prints the decision object if the town returned one, and nothing otherwise,
+5. for a permission prompt only, prints the town's allow or deny if the reply is signed with the
+   `responseKey` from `server.json` (which, unlike the hook secret, is never sent), and nothing
+   otherwise,
 6. **always exits 0**. A stopped server, a broken file or a slow network never disturb Claude.
 
 It looks for its home folder in this order: `ANDARY_HOME`, the folder it was installed into
@@ -120,16 +123,23 @@ that data as private.
 - **Hook secret.** Hooks authenticate with a second random value in the `x-andary-secret`
   header, compared in constant time. Requests without it get `401` before they can touch the
   rate limit (~300/s, bursts of 600, then `429`). Bodies over 1 MiB get `413`.
-- **Private state file.** `server.json` (port, secret, token) is written with mode `0600` inside a
-  `0700` folder and removed when the server stops.
+- **Private state file.** `server.json` (port, secret, token, response key) is written with mode
+  `0600` inside a `0700` folder and removed when the server stops. Andary refuses a home folder
+  that belongs to another user and makes an existing one private again: it holds `hook.mjs`, which
+  Claude Code runs for every event. Temporary files are created with random names and never
+  through an existing file or link.
+- **Signed answers.** The server signs each reply to the forwarder with the response key, and the
+  forwarder passes on only a signed, plain allow or deny for permission prompts, so a program that
+  takes over the port of a stopped server learns nothing it can use to steer Claude Code.
 - **Sanitizing.** Before anything is broadcast, kept or recorded: strings are cut at 2,000
   characters (`…[+N chars]`), arrays at 50 items, nesting at 8 levels, and credentials are
-  replaced by `[redacted]`: private-key blocks, `sk-…`, Stripe, GitHub (`ghp_…`, `github_pat_…`),
+  replaced by `[redacted]` (in object keys too; keys are cut at 200 characters and objects at 100
+  keys): private-key blocks, `sk-…`, Stripe, GitHub (`ghp_…`, `github_pat_…`),
   Slack (`xox?-…`), AWS (`AKIA…`), Google API, npm and JWT tokens, `Bearer …`, basic-auth headers,
   passwords in URLs, `NAME=value` where NAME mentions key/secret/token/password, the same in JSON
   text, and object fields with credential-like names.
-- **Nothing on disk by default.** Events stay in memory (the last 2,000, for browsers that join
-  late). Only `--record` writes them, to `<ANDARY_HOME>/recordings/*.jsonl` (mode `0600`),
+- **Nothing on disk by default.** Events stay in memory (the last 2,000, at most 32 Mi characters,
+  for browsers that join late). Only `--record` writes them, to `<ANDARY_HOME>/recordings/*.jsonl` (mode `0600`),
   already sanitized.
 - **Quiet logs.** The console shows lifecycle and counts only, never payloads or the secret. The
   startup banner prints the sign-in link: that is its purpose.
@@ -147,6 +157,11 @@ Off by default. Turn them on in the town (Settings → Remote approvals) or star
 - **On, with a browser connected:** a permission prompt waits for the town. Allow or Deny answers
   Claude Code directly (a deny can carry a reason, which Claude sees as
   `Denied from Andary: <reason>`). Claude Code's own deny and ask rules still apply.
+- **Only what the town can show in full.** A request whose input had to be shortened or had
+  credentials masked goes straight to the terminal (the card says why), and the card shows full
+  paths, every input field and any invisible or direction-changing characters. Allow and Deny
+  ignore clicks for a second after a card appears or moves, so a new request sliding under the
+  pointer cannot be approved by accident.
 - **No answer in time:** after `--approval-timeout` seconds (default 120, at most 140 because
   Claude Code stops waiting for the hook at 150) the hook returns nothing and the usual terminal
   prompt appears.

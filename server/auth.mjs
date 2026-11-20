@@ -1,9 +1,13 @@
 // Credentials: the hook secret (sent by the forwarder) and the UI token (held by the browser in an
 // HttpOnly cookie). Both are fresh random values on every server start.
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 export const UI_COOKIE = 'andary_ui';
 export const HOOK_SECRET_HEADER = 'x-andary-secret';
+/** The forwarder's per-request nonce, and the server's signature over nonce + reply body. */
+export const HOOK_NONCE_HEADER = 'x-andary-nonce';
+export const HOOK_SIGNATURE_HEADER = 'x-andary-signature';
+const MAX_NONCE_CHARS = 128;
 
 /**
  * 32 random bytes, base64url (43 characters, safe in URLs, cookies and headers).
@@ -87,4 +91,18 @@ export function hasUiCookie(req, uiToken) {
  */
 export function hasHookSecret(req, secret) {
   return safeEqual(req.headers[HOOK_SECRET_HEADER], secret);
+}
+
+/**
+ * Signs a /api/hook reply for the forwarder: HMAC-SHA256(responseKey, nonce + "\n" + body),
+ * base64url. The response key is only in server.json (never on the wire), so a process that took
+ * over the port of a dead server can read requests but cannot forge an answer Claude Code obeys.
+ * @param {string} responseKey
+ * @param {unknown} nonce the request's x-andary-nonce header
+ * @param {string} body the exact reply text
+ * @returns {string|null} null when the request carried no usable nonce
+ */
+export function signHookReply(responseKey, nonce, body) {
+  if (typeof nonce !== 'string' || nonce === '' || nonce.length > MAX_NONCE_CHARS) return null;
+  return createHmac('sha256', responseKey).update(`${nonce}\n${body}`).digest('base64url');
 }

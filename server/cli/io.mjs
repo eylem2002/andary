@@ -13,11 +13,26 @@ import { CLI_PATH } from '../config.mjs';
  * @property {(question: string) => Promise<string>} ask
  */
 
+const TERMINAL_CONTROLS =
+  // eslint-disable-next-line no-control-regex -- removing terminal control characters is the point
+  /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g;
+
+/**
+ * Shows control characters as \xNN. CLI output includes paths (the current folder, settings
+ * files) and error text, and a folder name from an unpacked archive can hold escape sequences that
+ * would retitle the terminal, rewrite earlier lines or set the clipboard (OSC 52).
+ * @param {unknown} text
+ * @returns {string}
+ */
+export function printable(text) {
+  return String(text).replace(TERMINAL_CONTROLS, (ch) => `\\x${ch.charCodeAt(0).toString(16).padStart(2, '0')}`);
+}
+
 /** @returns {CliIo} */
 export function processIo() {
   return {
-    out: (line = '') => process.stdout.write(`${line}\n`),
-    err: (line = '') => process.stderr.write(`${line}\n`),
+    out: (line = '') => process.stdout.write(`${printable(line)}\n`),
+    err: (line = '') => process.stderr.write(`${printable(line)}\n`),
     env: process.env,
     cwd: process.cwd(),
     interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY),

@@ -143,21 +143,28 @@ same `subagent_type` (FIFO). Normalise ids by stripping a leading `agent-`.
 ### 4.3 The forwarder (`hooks/hook.mjs`)
 
 1. Records `ts = Date.now()` first thing.
-2. Reads `<ANDARY_HOME>/server.json`; if missing or unreadable, exits 0 immediately.
+2. Reads `<ANDARY_HOME>/server.json`; if missing, unreadable, or its `pid` is not a live process of
+   the same user (a stale file whose port someone else may now hold), exits 0 immediately.
 3. Reads stdin fully, parses JSON (on failure sends `{hook_event_name: 'Unknown', raw: <first 4000 chars>}`).
-4. `POST http://127.0.0.1:<port>/api/hook` with header `x-andary-secret: <secret>` and body
-   `{"v":1,"ts":<ts>,"event":<payload>}`. Timeout 1.5 s, or `approvalTimeoutMs + 5000` for
-   `PermissionRequest`.
-5. If the response is `{"output": {...}}`, prints exactly that object as JSON on stdout.
+4. `POST http://127.0.0.1:<port>/api/hook` with headers `x-andary-secret: <secret>` and
+   `x-andary-nonce: <16 random bytes, base64url>` and body `{"v":1,"ts":<ts>,"event":<payload>}`.
+   Timeout 1.5 s, or `approvalTimeoutMs + 5000` for `PermissionRequest`.
+5. Only for `PermissionRequest`: if the reply carries a valid `x-andary-signature`
+   (`base64url(HMAC-SHA256(responseKey, nonce + "\n" + body))`) and its `output` is a plain allow
+   or deny decision, prints that decision (rebuilt: `{behavior:'allow'}` or
+   `{behavior:'deny', message}`; any other field is dropped) as JSON on stdout. Nothing else is
+   ever printed.
 6. **Always exits 0** and never prints anything else. Any error → exit 0 silently.
 
 ### 4.4 Server (`server/`)
 
 - Binds `127.0.0.1` by default; port `4747` (`--port`, `ANDARY_PORT`; `0` picks a free port).
 - Home dir `ANDARY_HOME` or `~/.andary`. On start writes `server.json` (mode 0600):
-  `{pid, port, host, secret, uiToken, version, startedAt, approvalTimeoutMs}`; removes it on exit
-  if the pid is still ours. `secret` authenticates hooks; `uiToken` authenticates browsers. Both are
-  32 random bytes, base64url.
+  `{pid, port, host, secret, uiToken, responseKey, version, startedAt, approvalTimeoutMs}`; removes
+  it on exit if the pid is still ours. `secret` authenticates hooks; `uiToken` authenticates
+  browsers; `responseKey` signs the replies to hooks and never travels over the wire. All three
+  are 32 random bytes, base64url. The home folder must belong to the user (otherwise the server
+  refuses to start) and is made 0700.
 - Every request: reject unless the `Host` header is `127.0.0.1:<port>`, `localhost:<port>` or
   `[::1]:<port>` (DNS-rebinding defence). Security headers on every response: strict CSP
   (`default-src 'self'`; `script-src 'self' 'sha256-<importmap>'`; `style-src 'self'`;
@@ -175,14 +182,17 @@ same `subagent_type` (FIFO). Normalise ids by stripping a leading `agent-`.
   - `GET /api/hello` → `{"app":"andary","version","authenticated":bool,"settings":{...}}`
     (no auth; tells the UI whether it is in live mode and logged in).
   - `POST /api/hook` → requires `x-andary-secret` (constant-time compare), JSON ≤ 1 MiB,
-    rate-limited (token bucket ~300 req/s, burst 600 → `429`). Responds `{"output": object|null}`.
+    rate-limited (token bucket ~300 req/s, burst 600 → `429`). Responds `{"output": object|null}`,
+    signed in `x-andary-signature` when the request has an `x-andary-nonce` (see §4.3).
   - `GET /ws` → WebSocket upgrade; requires the `andary_ui` cookie and an `Origin` matching the
     server's own origin (or absent). Max 16 clients; client messages ≤ 64 KiB.
 - Sanitising before anything leaves the server or is recorded: strings longer than 2,000 chars are
-  cut (`…[+N chars]`), arrays to 50 items, depth to 8; secrets are redacted to `[redacted]`
+  cut (`…[+N chars]`), arrays to 50 items, objects to 100 keys (plus `"…": "[+N keys]"`), keys to
+  200 chars, depth to 8; secrets are redacted to `[redacted]`, in keys too
   (private-key blocks, `sk-…`, `ghp_…`/`github_pat_…`, `xox?-…`, `AKIA…`, `Bearer …`, and
   `NAME=value` where NAME contains KEY, SECRET, TOKEN or PASSWORD).
-- Keeps the last 2,000 envelopes in memory for late-joining browsers. Writing them to disk happens
+- Keeps the last 2,000 envelopes (at most 32 Mi characters of JSON) in memory for late-joining
+  browsers. Writing them to disk happens
   only with `--record` (they contain prompts and commands).
 - Logs to the console only lifecycle and counts — never payload content, the secret or the token.
   The startup line prints the login URL (it contains the token: that is the point of it).
@@ -219,6 +229,10 @@ normal terminal prompt then appears). If remote approvals are off, the server an
 `null` and broadcasts the approval with `held: false` ("answer in your terminal"). A non-held
 approval becomes `resolved` (`decidedBy: 'terminal'`) when the same session + agent + tool next
 reports PostToolUse, PostToolUseFailure, PermissionDenied, Stop or SessionEnd. At most 50 pending.
+A request whose `tool_input` was changed by sanitising (a value redacted or cut) is never held,
+because the town could not show what would run: it is answered at once with `null` and its
+approval has `held: false` and `message: "The town cannot show this request in full (…)"`. In the
+browser, Allow/Deny ignore pointer clicks for 1 s after a card appears or changes place.
 
 ### 4.6 Implementation notes (server)
 

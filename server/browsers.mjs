@@ -36,7 +36,10 @@ export function createHub(maxClients) {
     /** @param {object} message serialised once for every browser */
     broadcast(message) {
       if (clients.size === 0) return;
-      const text = JSON.stringify(message);
+      this.broadcastText(JSON.stringify(message));
+    },
+    /** @param {string} text an already serialised message */
+    broadcastText(text) {
       for (const connection of clients) connection.send(text);
     },
     /**
@@ -71,6 +74,22 @@ export function publicSettings(ctx) {
  */
 export function handleUpgrade(ctx, req, socket, head) {
   socket.on('error', () => socket.destroy());
+  // This runs in the server's 'upgrade' event: anything thrown here would end the process.
+  try {
+    upgrade(ctx, req, socket, head);
+  } catch (error) {
+    ctx.log(`Could not open a browser connection (${error?.code ?? error?.name ?? 'unknown'})`);
+    socket.destroy();
+  }
+}
+
+/**
+ * @param {import('./app.mjs').TownContext} ctx
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('node:stream').Duplex} socket
+ * @param {Buffer} head
+ */
+function upgrade(ctx, req, socket, head) {
   const verdict = checkUpgrade(ctx, req);
   if (!verdict.ok) {
     rejectUpgrade(socket, verdict.status, verdict.message, verdict.headers);

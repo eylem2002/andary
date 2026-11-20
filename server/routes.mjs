@@ -1,6 +1,6 @@
 // HTTP routes (CONTRACTS §4.4). Every response carries the security headers; every request must
 // name one of our own hosts.
-import { hasHookSecret, hasUiCookie, loginCookie, safeEqual } from './auth.mjs';
+import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, hasHookSecret, hasUiCookie, loginCookie, safeEqual, signHookReply } from './auth.mjs';
 import { APP_ID, LIMITS } from './config.mjs';
 import { publicSettings } from './browsers.mjs';
 import { BAD_TOKEN_PAGE, HttpError, readBody, sendHtml, sendJson, sendText } from './http-util.mjs';
@@ -160,11 +160,32 @@ async function handleHook(ctx, req, res) {
   }
   const envelope = ctx.ingest(body);
   if (envelope.event.hook_event_name === 'PermissionRequest') {
-    await answerPermissionRequest(ctx, res, envelope.event);
+    await answerPermissionRequest(ctx, req, res, envelope.event, shownInFull(body.event.tool_input, envelope.event.tool_input));
     return;
   }
   ctx.broker.observe(envelope.event);
-  sendJson(res, 200, { output: null });
+  sendHookReply(ctx, req, res, null);
+}
+
+/**
+ * Answers the forwarder, signed with the response key so it can tell our answer from one made up
+ * by whatever listens on a stale port (CONTRACTS §4.3).
+ * @param {TownContext} ctx
+ * @param {Request} req
+ * @param {Response} res
+ * @param {object|null} output
+ */
+function sendHookReply(ctx, req, res, output) {
+  if (res.headersSent || res.destroyed) return;
+  const text = JSON.stringify({ output });
+  const signature = signHookReply(ctx.responseKey, req.headers[HOOK_NONCE_HEADER], text);
+  res.writeHead(200, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(text),
+    'Cache-Control': 'no-store',
+    ...(signature ? { [HOOK_SIGNATURE_HEADER]: signature } : {}),
+  });
+  res.end(text);
 }
 
 /**
@@ -193,21 +214,40 @@ export function parseHookBody(raw) {
   return { ts: Number.isFinite(body.ts) ? body.ts : Date.now(), event: body.event };
 }
 
+/** Why a request the town could otherwise answer goes to the terminal (Approval.message). */
+export const NOT_SHOWN_IN_FULL = 'The town cannot show this request in full (it is very long or holds credentials)';
+
+/**
+ * Whether sanitizing left a tool input exactly as Claude Code sent it. Redaction and truncation
+ * hide text, and hidden text can run: `TOKEN="$(curl … | sh)"` is shown as `TOKEN=[redacted]`, and
+ * a command padded past 2,000 characters loses its tail. Such a request must not be approved from
+ * a card that does not show it.
+ * @param {unknown} raw
+ * @param {unknown} sanitized
+ * @returns {boolean}
+ */
+export function shownInFull(raw, sanitized) {
+  return JSON.stringify(raw ?? null) === JSON.stringify(sanitized ?? null);
+}
+
 /**
  * Holds the response for the town to decide when remote approvals are on and someone is
  * watching; otherwise answers null at once and the terminal prompt appears as usual.
  * @param {TownContext} ctx
+ * @param {Request} req
  * @param {Response} res
  * @param {Record<string, any>} event
+ * @param {boolean} exact the tool input reached the town unchanged (see shownInFull)
  */
-async function answerPermissionRequest(ctx, res, event) {
-  const hold = ctx.settings.remoteApprovals && ctx.hub.size > 0;
-  const { approval, response } = ctx.broker.create(event, { hold });
+async function answerPermissionRequest(ctx, req, res, event, exact) {
+  const wanted = ctx.settings.remoteApprovals && ctx.hub.size > 0;
+  const hold = wanted && exact;
+  const { approval, response } = ctx.broker.create(event, { hold, message: wanted && !exact ? NOT_SHOWN_IN_FULL : undefined });
   if (hold) {
     // The forwarder went away (Claude Code cancelled the hook): Claude asks in the terminal now.
     res.on('close', () => {
       if (!res.writableEnded) ctx.broker.release(approval.id);
     });
   }
-  sendJson(res, 200, { output: await response });
+  sendHookReply(ctx, req, res, await response);
 }
