@@ -112,9 +112,11 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
     const t = now();
     if (t - (lastByKind.get(note.kind) ?? -Infinity) < SAME_KIND_MS) return false;
     sentTimes = sentTimes.filter((at) => t - at < 3_600_000);
-    if (sentTimes.length >= HOURLY_LIMIT) return false;
+    // Tests (at most one every 30 s) never use up the hour's budget for real notes.
+    const counted = note.kind !== 'test';
+    if (counted && sentTimes.length >= HOURLY_LIMIT) return false;
     lastByKind.set(note.kind, t);
-    sentTimes.push(t);
+    if (counted) sentTimes.push(t);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
     try {
@@ -147,6 +149,6 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
       if (note) void send(note);
     },
     /** A test note, from the town's Settings. */
-    test: () => send({ kind: `test-${now()}`, ...NOTES.test }),
+    test: () => send({ kind: 'test', ...NOTES.test }),
   };
 }

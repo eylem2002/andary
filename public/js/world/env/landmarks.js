@@ -1,4 +1,4 @@
-// Landmarks the town earns as work gets done (core/growth.js): bunting over the north avenue, an
+// Landmarks the town earns as work gets done (core/growth.js): bunting along the north avenue, an
 // ice-cream cart, a curly-brace statue, a Ferris wheel on the beach, a hot-air balloon and a
 // golden dome on the Town Hall. Each is built the first time it is unlocked and grows into place
 // (it simply appears with reduced motion); the wheel turns and the balloon drifts.
@@ -28,18 +28,21 @@ function build(draw, material, name) {
 
 const FLAGS = [NEON.pink, NEON.cyan, C.flowerYellow, NEON.violet, NEON.orange, NEON.mint];
 
-/** Strings of flags across the north avenue, between poles. */
+/**
+ * Strings of flags along the north avenue, from poles on its south kerb (the avenue's own row,
+ * not the lots beyond it: the poles stand between the cross streets, clear of every corner).
+ */
 function bunting(/** @type {Kit} */ kit) {
-  const { z } = tileToWorld(12, 9);
-  const xs = [-22, -11, 0, 11, 22];
-  for (const x of xs) kit.cyl([x, 0, z + 1.1], 0.06, 3.4, C.steel, { seg: 6, surface: S.steel });
+  const z = tileToWorld(12, 9).z + 0.85;
+  const xs = [-17, -11, -3, 3, 11, 17];
+  for (const x of xs) kit.cyl([x, 0, z], 0.06, 3.4, C.steel, { seg: 6, surface: S.steel });
   for (let i = 0; i < xs.length - 1; i++) {
     const a = xs[i];
     const b = xs[i + 1];
     for (let f = 0; f < 12; f++) {
       const t = (f + 0.5) / 12;
       const sag = Math.sin(t * Math.PI) * 0.45;
-      kit.prism([a + (b - a) * t, 3.15 - sag, z + 1.1], [0.42, 0.42, 0.04], FLAGS[(i * 12 + f) % FLAGS.length], { surface: S.fabric, rotZ: Math.PI });
+      kit.prism([a + (b - a) * t, 3.15 - sag, z], [0.42, 0.42, 0.04], FLAGS[(i * 12 + f) % FLAGS.length], { surface: S.fabric, rotZ: Math.PI });
     }
   }
 }
@@ -80,10 +83,13 @@ function wheelFrame(/** @type {Kit} */ kit) {
     kit.beam([1.8, 0, z], [0, 4.4, z * 0.4], 0.14, 0xffffff, { surface: S.steel });
   }
   kit.cyl([0, 4.4, 0], 0.16, 0.9, C.steel, { rotX: Math.PI / 2, center: true, seg: 10, surface: S.steel });
-  kit.box([0, 0.06, 0], [4.4, 0.12, 2], C.stoneTrim, { surface: S.stone });
+  // A plinth deep enough to meet the sloping sand on both sides.
+  kit.box([0, -0.07, 0], [4.2, 0.38, 1.5], C.stoneTrim, { surface: S.stone });
 }
 
 const WHEEL_RADIUS = 3.4;
+/** Turned a little towards the camera; any more and the plinth's corners reach the water. */
+const WHEEL_TURN = 0.2;
 const GONDOLAS = 10;
 
 /** The turning part: two rims, spokes and neon. */
@@ -170,7 +176,7 @@ export function createLandmarks({ scene, material, records, reducedMotion = fals
         gondolas.push(g);
       }
       root.position.set(WHEEL_SPOT.x, sandHeight(WHEEL_SPOT.z), WHEEL_SPOT.z);
-      root.rotation.y = 0.35;
+      root.rotation.y = WHEEL_TURN;
       wheel = { rim, gondolas };
       return root;
     },
@@ -187,6 +193,12 @@ export function createLandmarks({ scene, material, records, reducedMotion = fals
       return mesh;
     },
   };
+
+  /** @param {THREE.Object3D} root */
+  function remove(root) {
+    scene.remove(root);
+    root.traverse((o) => /** @type {any} */ (o).geometry?.dispose());
+  }
 
   function place() {
     if (wheel) {
@@ -210,6 +222,14 @@ export function createLandmarks({ scene, material, records, reducedMotion = fals
      * @param {{ grow?: boolean }} [options]
      */
     set(ids, { grow = false } = {}) {
+      // Ones no longer earned (the demo after a busier live town) go.
+      for (const [id, entry] of built) {
+        if (ids.includes(id)) continue;
+        remove(entry.root);
+        built.delete(id);
+        if (id === 'wheel') wheel = null;
+        if (id === 'balloon') floating = null;
+      }
       for (const id of ids) {
         if (built.has(id) || !Object.hasOwn(makers, id)) continue;
         const root = makers[id]();
@@ -240,11 +260,10 @@ export function createLandmarks({ scene, material, records, reducedMotion = fals
       return [...built.keys()];
     },
     dispose() {
-      for (const { root } of built.values()) {
-        scene.remove(root);
-        root.traverse((o) => /** @type {any} */ (o).geometry?.dispose());
-      }
+      for (const { root } of built.values()) remove(root);
       built.clear();
+      wheel = null;
+      floating = null;
     },
   };
 }

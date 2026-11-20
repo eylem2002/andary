@@ -25,3 +25,4 @@ bottom; after a merge GitHub retargets the next pull request to `main`.
 - `feat/ambient-sound` — waves, gulls, crickets, city hum and soft chords that follow the work
 - `feat/town-looks` — five town looks: coast, snowy village, neon city, desert oasis, Amman
 - `feat/team-town` — teammates' sessions in one shared town over your network, with a view-only link
+- `fix/feature-review` — fixes from the independent review of the nine features

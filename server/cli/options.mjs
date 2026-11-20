@@ -140,3 +140,18 @@ function memberFromKey(encoded) {
     return null;
   }
 }
+
+/**
+ * --team-host: names a team host is reached by (a VPN or local DNS name), without a port.
+ * @param {string[]|undefined} values
+ * @returns {string[]}
+ */
+export function parseTeamHosts(values) {
+  return (values ?? []).map((value) => {
+    const name = value.trim().toLowerCase();
+    if (!/^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?)*$/.test(name) || name.length > 253) {
+      throw new UsageError(`--team-host takes a host name without a port, such as my-laptop.tailnet.ts.net (got "${value}").`);
+    }
+    return name;
+  });
+}

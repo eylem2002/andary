@@ -12,7 +12,7 @@
 
 /** @type {ReadonlyArray<Readonly<Milestone>>} */
 export const MILESTONES = Object.freeze([
-  Object.freeze({ id: 'bunting', points: 10, name: 'Bunting', where: 'over the north avenue' }),
+  Object.freeze({ id: 'bunting', points: 10, name: 'Bunting', where: 'along the north avenue' }),
   Object.freeze({ id: 'icecream', points: 25, name: 'An ice-cream cart', where: 'on the promenade' }),
   Object.freeze({ id: 'statue', points: 50, name: 'A statue of a curly brace', where: 'by the Workshop' }),
   Object.freeze({ id: 'wheel', points: 100, name: 'A Ferris wheel', where: 'on the beach' }),

@@ -64,8 +64,11 @@ test('crews show what they cost, and U opens the usage chart', async ({ page }) 
   const dialog = page.getByRole('dialog', { name: 'Usage' });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(/Today: \$/);
-  await expect(dialog.getByRole('table')).toHaveCount(1);
   await expect(dialog.locator('.hud-usage__bar')).toHaveCount(14);
+  // The chart's numbers, for everyone, behind a disclosure.
+  await dialog.getByText('Numbers by day').click();
+  await expect(dialog.getByRole('table')).toBeVisible();
+  await expect(dialog.getByRole('row')).toHaveCount(14);
   await expect(dialog).toContainText('The demo makes these numbers up');
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
   expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([]);
@@ -143,7 +146,13 @@ test('Settings switches the town\'s look, which rebuilds the town', async ({ pag
   const look = page.getByLabel('Town look');
   await expect(look).toHaveValue('coast');
   await expect(look.locator('option')).toHaveText(['Sunset coast', 'Snowy village', 'Neon city', 'Desert oasis', 'Amman old town']);
-  await Promise.all([page.waitForEvent('load'), look.selectOption('snow')]);
+  const apply = page.getByTestId('apply-look');
+  await expect(apply).toBeDisabled();
+  // Choosing alone does not reload (arrow keys can browse the list); the button does.
+  await look.selectOption('neon');
+  await look.selectOption('snow');
+  await expect(apply).toBeEnabled();
+  await Promise.all([page.waitForEvent('load'), apply.click()]);
   await expect(page.getByTestId('agent-row').first()).toBeAttached({ timeout: 45_000 });
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('andary:prefs') ?? '{}').townLook)).toBe('snow');
   await page.getByTestId('settings-button').click();

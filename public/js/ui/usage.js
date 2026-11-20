@@ -106,13 +106,15 @@ export function createUsageDialog(ctx) {
   const chart = document.createElementNS(SVG, 'svg');
   chart.setAttribute('class', 'hud-usage__chart');
   chart.setAttribute('aria-hidden', 'true');
-  const table = h('table', { class: 'hud-sr' });
+  // The chart's numbers, for everyone: a table behind a disclosure.
+  const table = h('table', { class: 'hud-usage__table' });
+  const numbers = h('details', { class: 'hud-usage__numbers' }, h('summary', { text: 'Numbers by day' }), table);
   const crews = h('ul', { class: 'hud-usage__crews' });
   const crewsBox = h('section', { class: 'hud-usage__section' }, h('h3', { class: 'hud-usage__heading', text: 'Crews in town' }), crews);
   const dialog = createDialog({
     id: 'hud-usage',
     title: 'Usage',
-    body: [total, h('section', { class: 'hud-usage__section' }, h('h3', { class: 'hud-usage__heading', text: 'Last 14 days' }), chart, table), crewsBox, note],
+    body: [total, h('section', { class: 'hud-usage__section' }, h('h3', { class: 'hud-usage__heading', text: 'Last 14 days' }), chart, numbers), crewsBox, note],
   });
 
   function render() {
@@ -124,7 +126,7 @@ export function createUsageDialog(ctx) {
       ? 'The demo makes these numbers up. With your own Claude Code, Andary reads them from its transcripts on your computer.'
       : 'Estimated at API list prices from Claude Code\'s transcripts on this computer. On a Pro or Max plan you pay for the plan, not per token.');
     drawChart(chart, days);
-    table.replaceChildren(h('caption', { text: 'Estimated cost per day' }), h('tbody', {}, ...days.map((day) => h('tr', {}, h('th', { scope: 'row', text: day.date }), h('td', { text: `${formatCost(day.costUsd)}, ${formatTokens(day.tokens)} tokens` })))));
+    table.replaceChildren(h('caption', { class: 'hud-sr', text: 'Estimated cost per day' }), h('tbody', {}, ...days.slice().reverse().map((day) => h('tr', {}, h('th', { scope: 'row', text: day.date }), h('td', { text: `${formatCost(day.costUsd)}, ${formatTokens(day.tokens)} tokens` })))));
     const rows = state.sessions.filter((session) => session.status !== 'ended').map((session) => ({ session, usage: crewUsage(state, session.id) })).filter((row) => row.usage);
     setHidden(crewsBox, !rows.length);
     crews.replaceChildren(...rows.map(({ session, usage }) => h('li', { class: 'hud-usage__crew' },

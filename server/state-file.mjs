@@ -20,6 +20,7 @@ const STATE_FILE = 'server.json';
  * @property {string} version
  * @property {number} startedAt
  * @property {number} approvalTimeoutMs
+ * @property {boolean} [team]     hosts a team town (§4.11)
  */
 
 /**

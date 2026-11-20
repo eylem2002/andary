@@ -1,10 +1,12 @@
 // Tokens and estimated cost per agent, read from Claude Code's own transcripts (CONTRACTS §4.8).
 // Hooks carry the transcript's path; each assistant message there records its token usage. The
 // tracker reads only what was appended since its last look, counts every message once (one
-// message is often split over several lines), and prices it with the API list prices below.
-// It reads only files inside <Claude config>/projects, and keeps the day totals and how far it
-// read each file in <ANDARY_HOME>/usage.json, so a restart does not count anything twice.
-import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
+// message is often split over several lines, and a resumed session copies earlier messages into
+// its new transcript), and prices it with the API list prices in prices.js.
+// It reads only regular files inside <Claude config>/projects, and keeps the day totals, how far
+// it read each file (by its real path) and the ids of recent messages in <ANDARY_HOME>/usage.json,
+// so a restart does not count anything twice.
+import { closeSync, constants, existsSync, fstatSync, openSync, readFileSync, readSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
 import { messageCost } from '../public/js/core/prices.js';
@@ -22,7 +24,9 @@ import { messageCost } from '../public/js/core/prices.js';
  */
 
 const MAX_READ_BYTES = 16 * 1024 * 1024;
-const MAX_SEEN_IDS = 4000;
+/** Messages remembered across all transcripts (and, the newest SAVED_IDS of them, restarts). */
+const MAX_SEEN_IDS = 20_000;
+const SAVED_IDS = 4000;
 const MAX_FILES = 2000;
 const MAX_AGENTS = 1000;
 const DAYS_KEPT = 30;
@@ -51,19 +55,54 @@ export function subagentTranscript(sessionTranscript, agentId) {
 }
 
 /**
- * True when `file` is a .jsonl file inside `root` once symlinks are resolved.
+ * The real path of `file` when it is a .jsonl file inside `root` once symlinks are resolved,
+ * else null. (Whether it is a regular file is checked on the open descriptor, see readAppended.)
+ * @param {string} file
+ * @param {string} root
+ * @returns {string|null}
+ */
+export function resolveInside(file, root) {
+  if (!isAbsolute(file) || !file.endsWith('.jsonl')) return null;
+  try {
+    const real = realpathSync(file);
+    return real.startsWith(realpathSync(root) + sep) && real.endsWith('.jsonl') ? real : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when `file` is a regular .jsonl file inside `root` once symlinks are resolved.
  * @param {string} file
  * @param {string} root
  */
 export function isInside(file, root) {
-  if (!isAbsolute(file) || !file.endsWith('.jsonl')) return false;
+  const real = resolveInside(file, root);
+  if (!real) return false;
+  const fd = openTranscript(real);
+  if (fd === null) return false;
+  closeSync(fd);
+  return true;
+}
+
+/** Never follow a link swapped in after the check, and never block on a FIFO. */
+const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0);
+
+/**
+ * Opens a transcript for reading if it is (still) a regular file.
+ * @param {string} real  a real path from resolveInside
+ * @returns {number|null} a file descriptor to close
+ */
+function openTranscript(real) {
+  let fd = null;
   try {
-    const real = realpathSync(file);
-    const base = realpathSync(root);
-    return real.startsWith(base + sep) && statSync(real).isFile();
+    fd = openSync(real, OPEN_FLAGS);
+    if (fstatSync(fd).isFile()) return fd;
   } catch {
-    return false;
+    // gone, a link or unreadable
   }
+  if (fd !== null) closeSync(fd);
+  return null;
 }
 
 /**
@@ -87,7 +126,8 @@ export function readUsageLine(line) {
   if (model === '<synthetic>') return null;
   const ts = Date.parse(entry.timestamp);
   return {
-    id: String(message.id ?? entry.requestId ?? entry.uuid ?? ''),
+    // A message id with its request id: the same message, wherever it was copied, is one message.
+    id: message.id || entry.requestId ? `${message.id ?? ''}:${entry.requestId ?? ''}` : String(entry.uuid ?? ''),
     model,
     tokens: {
       input: count(usage.input_tokens),
@@ -101,27 +141,34 @@ export function readUsageLine(line) {
 }
 
 /**
- * What was appended to a file since `state.offset` (at most 16 MB), or null.
- * @param {string} file
+ * What was appended to a file since `state.offset` (at most 16 MB), or null. Only whole lines
+ * count: the offset moves past the last newline read, so a line still being written is read
+ * next time. A single line longer than 16 MB (no assistant message is) is skipped.
+ * @param {string} real  a real path from resolveInside
  * @param {{ offset: number }} state
- * @returns {string|null}
+ * @returns {string|null} complete lines, without the last newline
  */
-function readAppended(file, state) {
+export function readAppended(real, state) {
+  const fd = openTranscript(real);
+  if (fd === null) return null;
   try {
-    const size = statSync(file).size;
+    const size = fstatSync(fd).size;
     if (size < state.offset) state.offset = 0; // the file was replaced
     const length = Math.min(size - state.offset, MAX_READ_BYTES);
     if (length <= 0) return null;
     const buffer = Buffer.alloc(length);
-    const fd = openSync(file, 'r');
-    try {
-      readSync(fd, buffer, 0, length, state.offset);
-    } finally {
-      closeSync(fd);
+    const read = readSync(fd, buffer, 0, length, state.offset);
+    const end = buffer.lastIndexOf(0x0a, read - 1);
+    if (end < 0) {
+      if (read === MAX_READ_BYTES) state.offset += read;
+      return null;
     }
-    return buffer.toString('utf8');
+    state.offset += end + 1;
+    return buffer.toString('utf8', 0, end);
   } catch {
     return null;
+  } finally {
+    closeSync(fd);
   }
 }
 
@@ -130,15 +177,21 @@ function readAppended(file, state) {
  * @property {string} claudeDir     Claude Code's config folder (CLAUDE_CONFIG_DIR or ~/.claude)
  * @property {string|null} stateFile  where day totals and read offsets are kept (null: memory only)
  * @property {(record: UsageRecord, days: UsageDay[]) => void} onChange
- * @property {number} [debounceMs]
+ * @property {number} [throttleMs]  an agent's transcript is read at most this often
  * @property {() => number} [now]
  */
 
 /** @param {UsageOptions} options */
-export function createUsageTracker({ claudeDir, stateFile, onChange, debounceMs = 800, now = Date.now }) {
+export function createUsageTracker({ claudeDir, stateFile, onChange, throttleMs = 800, now = Date.now }) {
   const projects = join(claudeDir, 'projects');
-  /** @type {Map<string, { offset: number, seen: string[] }>} */
+  /** @type {Map<string, { offset: number }>} real path → how far it was read */
   const files = new Map();
+  /**
+   * Messages already counted, oldest first: their output tokens and cost so far (a message's
+   * later lines can report more output than its first).
+   * @type {Map<string, { output: number, cost: number|null }>}
+   */
+  const seenIds = new Map();
   /** @type {Map<string, UsageRecord>} agentKey → totals */
   const agents = new Map();
   /** @type {Map<string, UsageDay>} */
@@ -147,30 +200,10 @@ export function createUsageTracker({ claudeDir, stateFile, onChange, debounceMs 
   const pending = new Map();
   /** @type {NodeJS.Timeout|null} */
   let saveTimer = null;
-  load();
-
-  function load() {
-    if (!stateFile || !existsSync(stateFile)) return;
-    try {
-      const saved = JSON.parse(readFileSync(stateFile, 'utf8'));
-      for (const day of Array.isArray(saved.days) ? saved.days : []) {
-        if (typeof day?.date === 'string') days.set(day.date, { date: day.date, tokens: count(day.tokens), costUsd: count(day.costUsd) });
-      }
-      for (const [file, offset] of Object.entries(saved.offsets ?? {})) files.set(file, { offset: count(offset), seen: [] });
-    } catch {
-      // a damaged file starts over
-    }
-  }
+  loadState(stateFile, { days, files, seenIds });
 
   function writeState() {
-    if (!stateFile) return;
-    const offsets = Object.fromEntries([...files].slice(-MAX_FILES).map(([file, state]) => [file, state.offset]));
-    try {
-      writeFileSync(`${stateFile}.tmp`, JSON.stringify({ v: 1, days: dayList(), offsets }), { mode: 0o600 });
-      renameSync(`${stateFile}.tmp`, stateFile);
-    } catch {
-      // the totals stay in memory
-    }
+    if (stateFile) saveState(stateFile, { days: dayList(), files, seenIds });
   }
 
   function save() {
@@ -204,7 +237,7 @@ export function createUsageTracker({ claudeDir, stateFile, onChange, debounceMs 
     pending.set(key, setTimeout(() => {
       pending.delete(key);
       scan(file, sessionId, agentId);
-    }, debounceMs));
+    }, throttleMs));
     pending.get(key)?.unref?.();
   }
 
@@ -215,22 +248,23 @@ export function createUsageTracker({ claudeDir, stateFile, onChange, debounceMs 
    * @param {string|null} agentId
    */
   function scan(file, sessionId, agentId) {
-    if (!isInside(file, projects)) return;
-    const state = files.get(file) ?? { offset: 0, seen: [] };
-    files.delete(file);
-    files.set(file, state);
+    // Keyed by real path: two names for one transcript share one offset.
+    const real = resolveInside(file, projects);
+    if (!real) return;
+    const state = files.get(real) ?? { offset: 0 };
+    files.delete(real);
+    files.set(real, state);
     if (files.size > MAX_FILES) files.delete(files.keys().next().value ?? '');
-    const text = readAppended(file, state);
-    if (text === null) return;
-    // Only whole lines: a line still being written is read next time.
-    const end = text.lastIndexOf('\n');
-    if (end < 0) return;
-    state.offset += Buffer.byteLength(text.slice(0, end + 1));
+    const text = readAppended(real, state);
+    if (text === null) {
+      save();
+      return;
+    }
     const key = `${sessionId}:${agentId ?? 'main'}`;
     const record = agents.get(key) ?? { sessionId, agentId, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0, unpriced: false, model: null };
     let changed = false;
-    for (const line of text.slice(0, end).split('\n')) {
-      if (addLine(line, state, record)) changed = true;
+    for (const line of text.split('\n')) {
+      if (addLine(line, record)) changed = true;
     }
     if (!changed) {
       save();
@@ -244,28 +278,42 @@ export function createUsageTracker({ claudeDir, stateFile, onChange, debounceMs 
   }
 
   /**
+   * Counts a line's message once; a later line of the same message that reports more output
+   * adds only the difference.
    * @param {string} line
-   * @param {{ seen: string[] }} state
    * @param {UsageRecord} record
    * @returns {boolean} whether it counted something
    */
-  function addLine(line, state, record) {
+  function addLine(line, record) {
     const seen = readUsageLine(line);
-    if (!seen || (seen.id && state.seen.includes(seen.id))) return false;
-    if (seen.id) {
-      state.seen.push(seen.id);
-      if (state.seen.length > MAX_SEEN_IDS) state.seen.shift();
+    if (!seen) return false;
+    const before = seen.id ? seenIds.get(seen.id) : undefined;
+    /** @type {Tokens} */
+    let tokens = seen.tokens;
+    let cost = seen.cost;
+    if (before) {
+      if (seen.tokens.output <= before.output) return false;
+      tokens = { input: 0, output: seen.tokens.output - before.output, cacheRead: 0, cacheWrite: 0 };
+      cost = seen.cost !== null && before.cost !== null ? seen.cost - before.cost : seen.cost === null ? null : 0;
     }
-    for (const part of /** @type {(keyof Tokens)[]} */ (['input', 'output', 'cacheRead', 'cacheWrite'])) record.tokens[part] += seen.tokens[part];
-    if (seen.cost === null) record.unpriced = true;
-    else record.costUsd += seen.cost;
+    if (seen.id) remember(seen.id, { output: seen.tokens.output, cost: seen.cost });
+    for (const part of /** @type {(keyof Tokens)[]} */ (['input', 'output', 'cacheRead', 'cacheWrite'])) record.tokens[part] += tokens[part];
+    if (cost === null) record.unpriced = true;
+    else record.costUsd += cost;
     if (seen.model) record.model = seen.model;
     const date = dayOf(seen.ts ?? now());
     const day = days.get(date) ?? { date, tokens: 0, costUsd: 0 };
-    day.tokens += seen.tokens.input + seen.tokens.output + seen.tokens.cacheRead + seen.tokens.cacheWrite;
-    day.costUsd += seen.cost ?? 0;
+    day.tokens += tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
+    day.costUsd += cost ?? 0;
     days.set(date, day);
     return true;
+  }
+
+  /** @param {string} id @param {{ output: number, cost: number|null }} entry */
+  function remember(id, entry) {
+    seenIds.delete(id);
+    seenIds.set(id, entry);
+    if (seenIds.size > MAX_SEEN_IDS) seenIds.delete(seenIds.keys().next().value ?? '');
   }
 
   return {
@@ -293,3 +341,57 @@ export function claudeConfigDir(env = process.env) {
   return env.CLAUDE_CONFIG_DIR ? env.CLAUDE_CONFIG_DIR : join(homedir(), '.claude');
 }
 
+
+/**
+ * @typedef {object} UsageMemory
+ * @property {Map<string, UsageDay>} days
+ * @property {Map<string, { offset: number }>} files
+ * @property {Map<string, { output: number, cost: number|null }>} seenIds
+ */
+
+/**
+ * Fills the tracker's memory from usage.json; a damaged file starts over.
+ * @param {string|null} stateFile
+ * @param {UsageMemory} memory
+ */
+function loadState(stateFile, { days, files, seenIds }) {
+  if (!stateFile || !existsSync(stateFile)) return;
+  try {
+    const saved = JSON.parse(readFileSync(stateFile, 'utf8'));
+    for (const day of Array.isArray(saved.days) ? saved.days : []) {
+      if (typeof day?.date === 'string') days.set(day.date, { date: day.date, tokens: count(day.tokens), costUsd: count(day.costUsd) });
+    }
+    // Older files kept the path as the hook gave it: key it by its real path now.
+    for (const [file, offset] of Object.entries(saved.offsets ?? {})) files.set(realOrSame(file), { offset: count(offset) });
+    for (const item of Array.isArray(saved.seen) ? saved.seen : []) {
+      if (Array.isArray(item) && typeof item[0] === 'string') seenIds.set(item[0], { output: count(item[1]), cost: typeof item[2] === 'number' ? item[2] : null });
+    }
+  } catch {
+    // a damaged file starts over
+  }
+}
+
+/**
+ * Writes usage.json atomically (0600); on failure the totals stay in memory.
+ * @param {string} stateFile
+ * @param {{ days: UsageDay[], files: UsageMemory['files'], seenIds: UsageMemory['seenIds'] }} memory
+ */
+function saveState(stateFile, { days, files, seenIds }) {
+  const offsets = Object.fromEntries([...files].slice(-MAX_FILES).map(([file, state]) => [file, state.offset]));
+  const seen = [...seenIds].slice(-SAVED_IDS).map(([id, s]) => [id, s.output, s.cost]);
+  try {
+    writeFileSync(`${stateFile}.tmp`, JSON.stringify({ v: 1, days, offsets, seen }), { mode: 0o600 });
+    renameSync(`${stateFile}.tmp`, stateFile);
+  } catch {
+    // the totals stay in memory
+  }
+}
+
+/** @param {string} file */
+function realOrSame(file) {
+  try {
+    return realpathSync(file);
+  } catch {
+    return file;
+  }
+}

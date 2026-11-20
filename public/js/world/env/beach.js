@@ -95,7 +95,7 @@ export function beachSpots(rng) {
 
 const LIFEGUARD_X = -8.2;
 /** Where the Ferris wheel stands once the town earns it (landmarks.js); no umbrellas there. */
-export const WHEEL_SPOT = Object.freeze({ x: -20.5, z: -24.2 });
+export const WHEEL_SPOT = Object.freeze({ x: -20.5, z: -23.35 });
 
 /**
  * @typedef {object} Slope  a slab across the beach whose top runs from `high` down to `low`

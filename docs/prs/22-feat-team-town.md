@@ -1,6 +1,6 @@
 # Shared team town
 
-Part 22 of 22 · base: `feat/town-looks`
+Part 22 of 23 · base: `feat/town-looks`
 
 ## What changed
 

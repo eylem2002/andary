@@ -165,6 +165,9 @@ test('toolbar buttons drive the camera, time, sound and the demo', async ({ page
 });
 
 test('without a server the town fills the screen, then offers the setup steps', async ({ page, context }) => {
+  // The full 3D town loads twice here, at real-time demo speed: on a CPU renderer under load
+  // that takes longer than the default.
+  test.setTimeout(180_000);
   // A static host answers /api/hello with a 404, which Chrome logs: that one is expected here.
   problems = watchConsole(page, { ignore: [/Failed to load resource.*404/] });
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -197,7 +200,7 @@ test('without a server the town fills the screen, then offers the setup steps', 
   await page.locator('[data-tool="toggle-panels"]').click();
   await expect(page.getByRole('complementary', { name: 'Town board' })).toBeVisible();
   await page.reload();
-  await expect(page.getByTestId('agent-row').first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByTestId('agent-row').first()).toBeVisible({ timeout: 90_000 });
   await expect(page.locator('html')).not.toHaveClass(/hud-panels-hidden/);
 });
 

@@ -29,6 +29,8 @@ export function notificationFor(change, state, now) {
   if (change.type !== 'event') return null;
   const e = change.event;
   if (now - (Number(e.ts) || 0) > FRESH_MS) return null;
+  // A teammate's crew (a team town) is theirs to watch, not yours.
+  if (state.sessions.find((s) => s.id === e.sessionId)?.member) return null;
   if (e.kind === 'turn.stop' && e.agentKey?.endsWith(':main')) return { title: 'Turn finished', body: `${crew(e.sessionId)} is waiting for you.`, tag: `done-${e.sessionId}` };
   if (e.kind === 'turn.fail') return { title: 'Claude Code stopped', body: `${crew(e.sessionId)} stopped with an error.`, tag: `fail-${e.sessionId}` };
   return null;
@@ -38,6 +40,8 @@ export function notificationFor(change, state, now) {
 export function installNotifications(ctx) {
   return ctx.store.subscribe((change) => {
     if (!ctx.prefs.desktopNotify || !document.hidden || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    // Someone watching a team town with its view link: none of these crews are theirs.
+    if (ctx.view.serverSettings.team?.role === 'viewer') return;
     const note = notificationFor(change, ctx.store.getState(), Date.now());
     if (!note) return;
     try {

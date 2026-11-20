@@ -211,9 +211,10 @@ function createRainbow() {
   return { mesh, material };
 }
 
+const forward = new THREE.Vector3();
+
 /** Behind the town as seen from the camera, standing on the sea's horizon, facing the viewer. */
 function placeRainbow(/** @type {THREE.Mesh} */ mesh, /** @type {THREE.Camera} */ camera) {
-  const forward = new THREE.Vector3();
   camera.getWorldDirection(forward);
   forward.y = 0;
   if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);

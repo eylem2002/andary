@@ -181,7 +181,8 @@ export function connectLive({
     const usage = message.usage ?? {};
     for (const record of Array.isArray(usage.agents) ? usage.agents : []) store.setUsage?.(record);
     if (Array.isArray(usage.days)) store.setUsage?.(null, usage.days);
-    onSettings({ ...(message.settings ?? {}), notifyUrl: typeof message.notifyUrl === 'string' ? message.notifyUrl : null });
+    // Whole values, so nothing is left over from before a restart (a town that no longer hosts a team).
+    onSettings({ ...(message.settings ?? {}), team: message.settings?.team ?? null, notifyUrl: typeof message.notifyUrl === 'string' ? message.notifyUrl : null });
     if (message.progress) onProgress(message.progress);
     setStatus('live');
     startPing();

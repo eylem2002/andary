@@ -7,7 +7,7 @@ import { BUILDING_ICONS, icon } from './icons.js';
 import { kbd } from './parts.js';
 import { SHORTCUT_HELP } from './shortcuts.js';
 import { setDesktopNotify } from './notifications.js';
-import { LOOKS } from '../world/env/look.js';
+import { LOOK, LOOKS } from '../world/env/look.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 
@@ -98,16 +98,24 @@ export function createSettingsDialog(ctx) {
 
   const theme = choice('hud-set-theme', 'Theme', [['auto', 'Match the town and system'], ['light', 'Light'], ['dark', 'Dark']], ctx.prefs.theme, (value) => ctx.setPrefs({ theme: /** @type {any} */ (value) }));
   const motion = choice('hud-set-motion', 'Motion', [['system', 'Match system setting'], ['reduce', 'Reduce motion'], ['full', 'Full motion']], ctx.prefs.motion, (value) => ctx.setPrefs({ motion: /** @type {any} */ (value) }));
-  const look = choice('hud-set-look', 'Town look', LOOKS.map((l) => [l.id, l.name]), ctx.prefs.townLook, (value) => {
+  // Choosing only selects: browsing the list with the arrow keys must not reload the page
+  // (WCAG 3.2.2). The button applies it.
+  const look = choice('hud-set-look', 'Town look', LOOKS.map((l) => [l.id, l.name]), LOOK, (value) => {
+    applyLook.disabled = value === LOOK;
+  });
+  const applyLook = /** @type {HTMLButtonElement} */ (h('button', { type: 'button', class: 'hud-btn hud-btn--small', 'data-testid': 'apply-look', disabled: true }, 'Rebuild the town'));
+  applyLook.addEventListener('click', () => {
+    const value = look.value();
     ctx.setPrefs({ townLook: /** @type {any} */ (value) });
     lookHelp.textContent = 'Rebuilding the town with its new look…';
+    applyLook.disabled = true;
     // The town's colours are part of its geometry, so a new look means building it again.
     const url = new URL(location.href);
     url.searchParams.delete('look');
     setTimeout(() => location.replace(url.href), 250);
   });
-  const lookHelp = h('p', { class: 'hud-setting__help', role: 'status', text: 'The whole town, its sky and its sea. Changing it reloads the page.' });
-  look.el.append(lookHelp);
+  const lookHelp = h('p', { class: 'hud-setting__help', role: 'status', text: 'The whole town, its sky and its sea. Rebuilding reloads the page.' });
+  look.el.append(applyLook, lookHelp);
   const quality = choice('hud-set-quality', 'Graphics', [['auto', 'Automatic'], ['high', 'High quality'], ['low', 'Low power']], ctx.prefs.quality, (value) => ctx.setPrefs({ quality: /** @type {any} */ (value) }));
 
   const volume = /** @type {HTMLInputElement} */ (h('input', { type: 'range', class: 'hud-range', id: 'hud-set-volume', min: '0', max: '100', step: '5', value: String(Math.round(ctx.prefs.volume * 100)) }));
@@ -186,7 +194,8 @@ export function createSettingsDialog(ctx) {
       theme.set(ctx.prefs.theme);
       motion.set(ctx.prefs.motion);
       quality.set(ctx.prefs.quality);
-      look.set(ctx.prefs.townLook);
+      look.set(LOOK);
+      applyLook.disabled = true;
       weather.checked = ctx.prefs.weather;
       ambient.checked = ctx.prefs.ambient;
       notify.sync();
@@ -265,7 +274,7 @@ function choice(id, label, options, value, onChange) {
   select.value = value;
   select.addEventListener('change', () => onChange(select.value));
   const el = h('div', { class: 'hud-setting' }, settingRow(id, label, select));
-  return { el, set: (/** @type {string} */ v) => { select.value = v; } };
+  return { el, set: (/** @type {string} */ v) => { select.value = v; }, value: () => select.value };
 }
 
 /**

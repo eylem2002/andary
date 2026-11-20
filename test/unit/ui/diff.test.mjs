@@ -32,7 +32,10 @@ test('changeHunks reads Edit, MultiEdit, Write and NotebookEdit, and ignores oth
   assert.deepEqual(changeHunks('Edit', { old_string: 'a', new_string: 'b' }), { whole: false, list: [{ before: 'a', after: 'b' }] });
   assert.deepEqual(changeHunks('MultiEdit', { edits: [{ old_string: 'x', new_string: 'y' }, null] }), { whole: false, list: [{ before: 'x', after: 'y' }] });
   assert.deepEqual(changeHunks('Write', { content: 'hello' }), { whole: true, list: [{ before: '', after: 'hello' }] });
-  assert.deepEqual(changeHunks('NotebookEdit', { new_source: 'print(1)' }), { whole: false, list: [{ before: '', after: 'print(1)' }] });
+  assert.deepEqual(changeHunks('NotebookEdit', { new_source: 'print(1)' }), { whole: true, list: [{ before: '', after: 'print(1)' }] }, 'a cell is written whole');
+  const long = changeHunks('Edit', { old_string: 'a', new_string: 'b'.repeat(5000) });
+  assert.equal(long?.list[0].after.length, 4000);
+  assert.equal(long?.list[0].cut, true, 'a cut edit says so');
   assert.equal(changeHunks('Read', { file_path: 'x' }), null);
   assert.equal(changeHunks('Edit', { old_string: 5, new_string: 'b' })?.list[0].before, '');
 });

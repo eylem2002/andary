@@ -1,6 +1,6 @@
 # The town grows with you
 
-Part 17 of 22 · base: `feat/town-weather`
+Part 17 of 23 · base: `feat/town-weather`
 
 ## What changed
 
@@ -10,7 +10,7 @@ Finished work earns points and points build landmarks.
   finished turn, finished helper and completed task is a point; every day with any work is a
   busy day. Kept in `~/.andary/progress.json` (numbers and dates, 0600) and sent to browsers
   (`progress`, and in `hello`).
-- **Landmarks** (`public/js/world/env/landmarks.js`): bunting over the north avenue (10), an
+- **Landmarks** (`public/js/world/env/landmarks.js`): bunting along the north avenue (10), an
   ice-cream cart on the promenade (25), a curly-brace statue by the Workshop (50), a Ferris
   wheel on the beach that turns (100), a hot-air balloon drifting over the town (200) and a
   golden dome on the Town Hall (500). New ones rise into place with a toast and an

@@ -10,7 +10,7 @@ import { isLoopbackHost } from '../security.mjs';
 import { savedTopicUrl } from '../notify.mjs';
 import { ensureHome, findRunningServer, loginUrl, probeServer, readStateFile } from '../state-file.mjs';
 import { cliInvocation, sleep, tildify } from './io.mjs';
-import { UsageError, parseApprovalTimeout, parseNotifyUrl, parsePort, parseShareTo } from './options.mjs';
+import { UsageError, parseApprovalTimeout, parseNotifyUrl, parsePort, parseShareTo, parseTeamHosts } from './options.mjs';
 
 /** Options shared by start and demo (parseArgs format). */
 export const START_OPTIONS = Object.freeze({
@@ -21,6 +21,7 @@ export const START_OPTIONS = Object.freeze({
   notify: { type: 'boolean' },
   'notify-url': { type: 'string' },
   team: { type: 'boolean' },
+  'team-host': { type: 'string', multiple: true },
   'share-to': { type: 'string' },
   'team-key': { type: 'string' },
   'approval-timeout': { type: 'string' },
@@ -37,6 +38,7 @@ export const START_OPTIONS = Object.freeze({
  * @property {boolean} notify          --notify: a private ntfy.sh topic kept in ANDARY_HOME
  * @property {string|null} notifyUrl   --notify-url or ANDARY_NOTIFY_URL
  * @property {boolean} team            --team: host a team town
+ * @property {string[]} teamHosts      --team-host: other names teammates reach it by
  * @property {{ url: string, key: string, member: string }|null} shareTo  --share-to and --team-key
  * @property {number|undefined} approvalTimeoutMs
  * @property {boolean} record
@@ -54,11 +56,13 @@ function startSettings(values, io, demo) {
   const team = Boolean(values.team);
   const shareTo = parseShareTo(values['share-to'] ?? io.env.ANDARY_SHARE_TO, values['team-key'] ?? io.env.ANDARY_TEAM_KEY);
   if (team && shareTo) throw new UsageError('A town either hosts the team (--team) or shares with one (--share-to), not both.');
+  if (values['team-host'] && !team) throw new UsageError('--team-host only matters with --team.');
   return {
     port: parsePort(values.port, io.env),
     // Teammates must be able to reach a team host, so --team listens on the network unless --host says where.
     host: values.host ?? (team ? '0.0.0.0' : DEFAULT_HOST),
     team,
+    teamHosts: parseTeamHosts(values['team-host']),
     shareTo,
     open: !values['no-open'],
     remoteApprovals: Boolean(values['remote-approvals']),
@@ -97,7 +101,7 @@ function linkFor(state, settings) {
 }
 
 /** Flags that only matter when a new server starts. */
-const SERVER_SHAPING = new Set(['port', 'host', 'remote-approvals', 'notify', 'notify-url', 'team', 'share-to', 'team-key', 'approval-timeout', 'record']);
+const SERVER_SHAPING = new Set(['port', 'host', 'remote-approvals', 'notify', 'notify-url', 'team', 'team-host', 'share-to', 'team-key', 'approval-timeout', 'record']);
 
 /**
  * @param {import('../state-file.mjs').ServerState} state
@@ -133,6 +137,7 @@ async function runForeground(settings, home, io) {
       remoteApprovals: settings.remoteApprovals,
       notifyUrl: settings.notifyUrl ?? (settings.notify ? savedTopicUrl(home) : null),
       team: settings.team,
+      teamHosts: settings.teamHosts,
       shareTo: settings.shareTo,
       approvalTimeoutMs: settings.approvalTimeoutMs,
       record: settings.record,
@@ -205,7 +210,10 @@ function printBanner(server, settings, io) {
     io.out(`  Team town: on. Invite a teammate with: ${cliInvocation()} team invite <name>`);
     io.out(`  Teammates watch (view only) at ${server.viewUrl}`);
   }
-  if (settings.shareTo) io.out(`  Sharing your sessions with the team town at ${settings.shareTo.url} as ${settings.shareTo.member}`);
+  if (settings.shareTo) {
+    io.out(`  Sharing your sessions with the team town at ${settings.shareTo.url} as ${settings.shareTo.member}.`);
+    io.out('  Everyone with the team\'s view link sees their prompts, commands and file paths, over plain HTTP.');
+  }
   if (server.recordingPath) {
     io.out(`  Recording to ${tildify(server.recordingPath)} (it will contain your prompts and commands)`);
   }
@@ -269,8 +277,7 @@ async function startDetached(settings, home, io) {
     child = spawn(process.execPath, [CLI_PATH, 'start', '--no-open', ...forwardedFlags(settings)], {
       detached: true,
       stdio: ['ignore', logFd, logFd],
-      // The team key goes by environment, not argv, where other users could read it in ps.
-      env: settings.shareTo ? { ...io.env, ANDARY_SHARE_TO: settings.shareTo.url, ANDARY_TEAM_KEY: settings.shareTo.key } : io.env,
+      env: childEnv(settings, io.env),
       cwd: io.cwd,
       windowsHide: true,
     });
@@ -292,6 +299,20 @@ async function startDetached(settings, home, io) {
 }
 
 /**
+ * The background server's environment. The team key and the ntfy topic go this way, not as
+ * arguments, which other users of the computer could read in ps.
+ * @param {StartSettings} settings
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {NodeJS.ProcessEnv}
+ */
+function childEnv(settings, env) {
+  const out = { ...env };
+  if (settings.shareTo) Object.assign(out, { ANDARY_SHARE_TO: settings.shareTo.url, ANDARY_TEAM_KEY: settings.shareTo.key });
+  if (settings.notifyUrl) out.ANDARY_NOTIFY_URL = settings.notifyUrl;
+  return out;
+}
+
+/**
  * @param {StartSettings} settings
  * @returns {string[]}
  */
@@ -299,8 +320,8 @@ function forwardedFlags(settings) {
   const flags = ['--port', String(settings.port), '--host', settings.host];
   if (settings.remoteApprovals) flags.push('--remote-approvals');
   if (settings.notify) flags.push('--notify');
-  if (settings.notifyUrl) flags.push('--notify-url', settings.notifyUrl);
   if (settings.team) flags.push('--team');
+  for (const name of settings.teamHosts) flags.push('--team-host', name);
   if (settings.approvalTimeoutMs !== undefined) flags.push('--approval-timeout', String(settings.approvalTimeoutMs / 1000));
   if (settings.record) flags.push('--record');
   return flags;

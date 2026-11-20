@@ -15,6 +15,8 @@
   --switch-on: #B5176B;
   --sign-hover: #96115A;
   --sign-soft: #FBE2EF;
+  /** Bars and meters in charts: at least 3:1 against the dialog in both themes. */
+  --chart: #B5176B;
   --sign-board: linear-gradient(100deg, #C2185B 0%, #A31C86 55%, #7B2CBF 100%);
   --sign-glow: 0 0 26px -8px rgb(255 63 164 / 0.6);
   --paper: #FFFBF7;
@@ -88,6 +90,7 @@
     --switch-on: #E0438F;
     --diff-add: #173A27;
     --diff-del: #43202A;
+    --chart: #F06AAE;
   }
 }
 
@@ -119,6 +122,7 @@
   --diff-add: #173A27;
   --diff-del: #43202A;
   --switch-on: #E0438F;
+  --chart: #F06AAE;
   color-scheme: dark;
 }
 
@@ -2538,7 +2542,37 @@ body {
 }
 
 .hud-usage__bar--today {
-  fill: var(--sign);
+  fill: var(--chart);
+}
+
+.hud-usage__numbers {
+  margin-top: 6px;
+  font-size: 14px;
+}
+
+.hud-usage__numbers summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--ink-2);
+  font-weight: 700;
+}
+
+.hud-usage__table {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-usage__table th,
+.hud-usage__table td {
+  padding: 3px 0;
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+}
+
+.hud-usage__table td {
+  text-align: right;
 }
 
 .hud-usage__day {
@@ -2604,7 +2638,7 @@ body {
 .hud-board__fill {
   display: block;
   height: 100%;
-  background-image: var(--sign-board);
+  background: var(--chart);
   transform-origin: left center;
 }
 

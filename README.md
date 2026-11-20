@@ -75,7 +75,7 @@ neon city whose lights never quite go out, a desert oasis, or the limestone of A
 ### The town grows with you
 
 Every finished turn, finished helper and completed task is a point, and points unlock
-landmarks: bunting over the avenue at 10, an ice-cream cart at 25, a curly-brace statue at 50, a
+landmarks: bunting along the north avenue at 10, an ice-cream cart at 25, a curly-brace statue at 50, a
 Ferris wheel on the beach at 100, a hot-air balloon at 200 and a golden dome on the Town Hall at
 500. The count is kept across restarts. `L` (or the trophy) opens the **Leaderboard**: how far
 the town has grown, your busy-day streak, the fastest fix and who turned the most test runs
@@ -95,8 +95,10 @@ at your own ntfy server instead; Settings has a test button.
 
 Several people's sessions in one town. One of you hosts with `andary start --team`; for each
 teammate, run `andary team invite <name>` on that computer and send them the two lines it
-prints: an `andary start --share-to … --team-key …` command that shares their sessions, and a
-view-only link to watch the shared town. Teammates' crews arrive with their name on the foreman
+prints: an `ANDARY_TEAM_KEY=… andary start --share-to …` command that shares their sessions,
+and a view-only link to watch the shared town. Whoever has the link sees every crew's prompts,
+commands and edits, so keep it within the team. Over a VPN, start the host with
+`--team-host <name>` so the link works at that name. Teammates' crews arrive with their name on the foreman
 and a badge on the crews board. Only events travel: costs stay on each computer, and each person
 answers their own permission prompts. It is plain HTTP for a network you trust (across the
 internet, use a private network such as Tailscale); `andary team reset` revokes every key and
@@ -183,7 +185,9 @@ Andary sees what your agents see (prompts, commands, file paths), so it is locke
 - strict Content-Security-Policy, no third-party requests (fonts and three.js are bundled), and
   event text is never rendered as HTML;
 - secrets that look like API keys, tokens or passwords are redacted before anything leaves the
-  server; nothing you or Claude wrote is logged or written to disk by default;
+  server; nothing you or Claude wrote is logged or written to disk by default (small state files
+  in `~/.andary` keep usage totals with the transcript paths they came from, and the town's
+  points);
 - the hook forwarder only talks to a live server of yours, and only obeys replies signed with a
   per-start key that never leaves `~/.andary` (a stale state file cannot hand your prompts, or
   control of Claude Code, to whoever grabs the old port);
@@ -202,7 +206,8 @@ andary [command] [options]
 
   start                 start the town and open it (default). --port, --host, --no-open,
                         --remote-approvals, --approval-timeout <s>, --notify, --notify-url <url>,
-                        --team, --share-to <address> --team-key <key>, --record, --detach
+                        --team [--team-host <name>], --share-to <address> (key in
+                        ANDARY_TEAM_KEY or --team-key), --record, --detach
   demo                  start the town in demo mode
   stop                  stop the running town
   install / uninstall   add or remove the hooks. --scope user|project|local, --dir, --dry-run, --print

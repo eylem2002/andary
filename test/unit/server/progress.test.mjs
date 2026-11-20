@@ -1,6 +1,6 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProgress } from '../../../server/progress.mjs';
@@ -23,7 +23,9 @@ test('milestones are in order, and points unlock them', () => {
 });
 
 test('progress counts points and busy days, and survives a restart', async () => {
-  const file = join(mkdtempSync(join(tmpdir(), 'progress-')), 'progress.json');
+  const dir = mkdtempSync(join(tmpdir(), 'progress-'));
+  after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, 'progress.json');
   let now = new Date('2026-11-19T10:00:00').getTime();
   /** @type {any[]} */
   const changes = [];

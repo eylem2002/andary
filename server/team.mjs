@@ -93,19 +93,34 @@ export function viewToken(secret) {
   return mac(secret, 'view');
 }
 
+/** Interfaces that are not the network teammates are on (containers, bridges, tunnels). */
+const VIRTUAL_INTERFACE = /^(docker|br-|veth|virbr|vmnet|vboxnet|cni|flannel|podman|lxc|zt|wg|tun|tap|utun)/i;
+
+/** @param {string} address @returns {number} lower is a likelier home or office network */
+function lanRank(address) {
+  if (address.startsWith('192.168.')) return 0;
+  if (address.startsWith('10.')) return 1;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(address)) return 2;
+  if (address.startsWith('100.')) return 3; // a VPN such as Tailscale (100.64.0.0/10)
+  return 4;
+}
+
 /**
- * This computer's addresses on its local networks (IPv4, not loopback), for the invite and for
- * the Host check when the server listens on every interface.
+ * This computer's addresses on its local networks (IPv4, not loopback), likeliest first, for
+ * the invite and for the Host check when the server listens on every interface.
+ * @param {ReturnType<typeof networkInterfaces>} [interfaces]
  * @returns {string[]}
  */
-export function lanAddresses() {
+export function lanAddresses(interfaces = networkInterfaces()) {
+  /** @type {{ address: string, rank: number }[]} */
   const out = [];
-  for (const list of Object.values(networkInterfaces())) {
+  for (const [name, list] of Object.entries(interfaces)) {
     for (const item of list ?? []) {
-      if (item.family === 'IPv4' && !item.internal) out.push(item.address);
+      if (item.family !== 'IPv4' || item.internal) continue;
+      out.push({ address: item.address, rank: lanRank(item.address) + (VIRTUAL_INTERFACE.test(name) ? 10 : 0) });
     }
   }
-  return out;
+  return out.sort((a, b) => a.rank - b.rank).map((item) => item.address);
 }
 
 /**
@@ -128,6 +143,8 @@ export function createTeamHost({ secret, onMember = () => {}, ratePerSecond = 30
   return {
     secret,
     view: viewToken(secret),
+    /** Team requests whose body is being read now (routes.mjs keeps it below a few). */
+    uploads: 0,
     /** @param {string} member */
     limiter(member) {
       let bucket = buckets.get(member);
@@ -159,24 +176,28 @@ export function createTeamHost({ secret, onMember = () => {}, ratePerSecond = 30
 
 const MAX_QUEUE = 1000;
 const MAX_BATCH = 100;
+/** Well under the host's 2 MB limit for one request (LIMITS.teamBodyBytes). */
+const MAX_BATCH_BYTES = 1_500_000;
 
 /**
  * Sends this computer's (sanitized) hook events to the team's host, in small batches. If the host
- * is away the queue keeps the latest 1,000 and retries with a growing pause (up to 30 s).
+ * is away the queue keeps the latest 1,000 and retries with a growing pause (up to 30 s). Events
+ * from `andary doctor`'s probes stay home, and so does an event too big to send.
  * @param {RelayOptions} options
  */
 export function createTeamRelay({ url, key, fetchImpl = globalThis.fetch, log = () => {}, flushMs = 500 }) {
   const endpoint = new URL('/api/team', url).href;
-  /** @type {{ ts: number, event: object }[]} */
+  /** @type {{ text: string, bytes: number }[]} each event, serialised once */
   let queue = [];
   let backoff = 0;
   let sending = false;
   let failing = false;
+  let disposed = false;
   /** @type {NodeJS.Timeout|null} */
   let timer = null;
 
   function schedule(ms = flushMs) {
-    if (timer) return;
+    if (timer || disposed) return;
     timer = setTimeout(() => {
       timer = null;
       void flush();
@@ -184,19 +205,36 @@ export function createTeamRelay({ url, key, fetchImpl = globalThis.fetch, log = 
     timer.unref?.();
   }
 
+  /** The oldest events that fit in one request. */
+  function nextBatch() {
+    const batch = [];
+    let bytes = 0;
+    for (const item of queue) {
+      if (batch.length >= MAX_BATCH || (batch.length && bytes + item.bytes > MAX_BATCH_BYTES)) break;
+      batch.push(item);
+      bytes += item.bytes + 1;
+    }
+    return batch;
+  }
+
   async function flush() {
-    if (sending || queue.length === 0) return;
+    if (sending || disposed || queue.length === 0) return;
     sending = true;
-    const batch = queue.slice(0, MAX_BATCH);
+    const batch = nextBatch();
     try {
       const response = await fetchImpl(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json', [TEAM_HEADER]: key },
-        body: JSON.stringify({ v: 1, events: batch }),
+        body: `{"v":1,"events":[${batch.map((item) => item.text).join(',')}]}`,
+        // A redirect would carry the key to another address: never follow one.
+        redirect: 'error',
         signal: AbortSignal.timeout(8000),
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      queue = queue.slice(batch.length);
+      const answer = response.ok ? await response.json().catch(() => null) : null;
+      if (answer?.ok !== true) throw new Error(`HTTP ${response.status}`);
+      // Remove exactly what was sent: the queue may have been trimmed meanwhile.
+      const sent = new Set(batch);
+      queue = queue.filter((item) => !sent.has(item));
       backoff = 0;
       if (failing) log('Sharing with the team town again');
       failing = false;
@@ -211,9 +249,16 @@ export function createTeamRelay({ url, key, fetchImpl = globalThis.fetch, log = 
   }
 
   return {
-    /** @param {{ ts: number, event: object }} envelope  sanitized */
+    /** @param {{ ts: number, event: Record<string, any> }} envelope  sanitized */
     send(envelope) {
-      queue.push({ ts: envelope.ts, event: envelope.event });
+      if (disposed || String(envelope.event?.session_id ?? '').startsWith('andary-doctor-')) return;
+      const text = JSON.stringify({ ts: envelope.ts, event: envelope.event });
+      const bytes = Buffer.byteLength(text);
+      if (bytes > MAX_BATCH_BYTES) {
+        log('An event was too big to share with the team town');
+        return;
+      }
+      queue.push({ text, bytes });
       if (queue.length > MAX_QUEUE) queue = queue.slice(-MAX_QUEUE);
       schedule(backoff || flushMs);
     },
@@ -222,6 +267,7 @@ export function createTeamRelay({ url, key, fetchImpl = globalThis.fetch, log = 
     },
     flush,
     dispose() {
+      disposed = true;
       if (timer) clearTimeout(timer);
       timer = null;
     },

@@ -18,7 +18,7 @@ scripts/publish-github.sh              # secrets scan → push all branches → 
 ```
 
 The script stops before pushing anything if it finds a possible secret. It pushes `main` (an
-empty first commit) and the 13 feature branches, opens the 13 pull requests in merge order, scans
+empty first commit) and the 23 branches, opens the 23 pull requests in merge order, scans
 again, and only then makes the repository public. `KEEP_PRIVATE=1 scripts/publish-github.sh`
 keeps it private. It never merges anything.
 
@@ -31,8 +31,9 @@ push the branches and open the pull requests.
 ## 2. Review and merge the pull requests, in order
 
 They are stacked: each targets the one before it (order in `docs/prs/ORDER.md`). Merge from part
-1 to part 12. After each merge GitHub retargets the next pull request to `main`. Nothing is merged
-until you decide.
+1 to part 23. Parts 14–22 are the nine features you picked (one each) and part 23 holds the
+fixes from their independent review, so merge it too. After each merge GitHub retargets the
+next pull request to `main`. Nothing is merged until you decide.
 
 ## 3. Optional repository settings (free)
 
@@ -56,6 +57,10 @@ Once the pull requests are merged into `main`, anyone can install the command di
 `npm install -g github:eylem2002/andary`, then `andary install` and `andary start`.
 `andary uninstall` removes exactly the hooks Andary added. To see agent-team teammates, enable
 Claude Code's experimental teams: `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
+
+Optional, all free: `andary start --notify` for phone notifications through the ntfy app (no
+account), and `andary start --team` to host a town your teammates share into (see the README's
+"Team town"; plain HTTP, for a network you trust).
 
 Before relying on remote approvals, read "Remaining risks" in `docs/FINAL-REPORT.md`.
 

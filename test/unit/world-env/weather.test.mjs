@@ -62,6 +62,11 @@ test('long thinking without tools brings fog; a tool or a stop clears it', () =>
   w.observe(ev('prompt', 300_000));
   w.observe(ev('turn.stop', 301_000));
   assert.equal(w.at(400_000).fog, 0);
+  // An interrupt (Esc sends no hook) or an old replay: after eight minutes the fog gives up.
+  w.observe(ev('prompt', 500_000));
+  assert.equal(w.at(500_000 + 7 * 60_000).fog, 0.8);
+  assert.equal(w.at(500_000 + 9 * 60_000).fog, 0);
+  assert.equal(w.at(500_000 + 7 * 60_000).fog, 0, 'and it does not come back');
 });
 
 test('the driver tells the world only about changes, and stays clear when turned off', () => {
@@ -102,4 +107,28 @@ test('weatherSky greys and dims the sky and pulls the fog in', () => {
   const foggy = weatherSky(day, { overcast: 0, fog: 1 });
   assert.ok(foggy.fogScale < 0.3);
   assert.equal(weatherSky(skyState(23), { overcast: 1, fog: 0 }).stars, 0, 'no stars behind clouds');
+});
+
+test('landmarks: earned ones are built once, ones no longer earned go, and the wheel stays on dry sand', async () => {
+  const THREE = await import('three');
+  const { createLandmarks } = await import('../../../public/js/world/env/landmarks.js');
+  const { BEACH, WATERLINE_Z } = await import('../../../public/js/world/env/beach.js');
+  const scene = new THREE.Scene();
+  const landmarks = createLandmarks({ scene, material: new THREE.MeshBasicMaterial(), records: {} });
+  landmarks.set(['bunting', 'wheel', 'balloon']);
+  assert.deepEqual(landmarks.built.sort(), ['balloon', 'bunting', 'wheel']);
+  landmarks.update(0.5);
+  // The demo after a busier live town: only what it has earned stays.
+  landmarks.set(['bunting']);
+  assert.deepEqual(landmarks.built, ['bunting']);
+  assert.equal(scene.getObjectByName('landmark-wheel'), undefined);
+  landmarks.update(0.5);
+  landmarks.set(['bunting', 'wheel']);
+  const wheel = /** @type {import('three').Object3D} */ (scene.getObjectByName('landmark-wheel'));
+  wheel.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(/** @type {import('three').Object3D} */ (wheel.getObjectByName('wheel-frame')), true);
+  assert.ok(box.min.z > WATERLINE_Z, `the wheel's plinth (${box.min.z.toFixed(2)}) stays out of the sea (${WATERLINE_Z.toFixed(2)})`);
+  assert.ok(box.max.z < BEACH.top.z, `and clear of the seawall (${box.max.z.toFixed(2)})`);
+  landmarks.dispose();
+  assert.equal(scene.children.length, 0);
 });
