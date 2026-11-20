@@ -13,7 +13,16 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Core modules the server may import: pure, no DOM, no browser globals. */
-export const SERVER_CORE = Object.freeze(['public/js/core/prices.js', 'public/js/core/growth.js', 'public/js/core/ids.js', 'public/js/core/dates.js', 'public/js/core/text.js', 'public/js/core/dialogs.js', 'public/js/core/card-fields.js']);
+export const SERVER_CORE = Object.freeze([
+  'public/js/core/prices.js',
+  'public/js/core/growth.js',
+  'public/js/core/ids.js',
+  'public/js/core/dates.js',
+  'public/js/core/text.js',
+  'public/js/core/dialogs.js',
+  'public/js/core/card-fields.js',
+  'public/js/core/permission-rules.js',
+]);
 
 /**
  * Areas, most specific first: the first matching prefix wins.

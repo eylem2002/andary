@@ -6,7 +6,8 @@
 /**
  * @typedef {object} TownSource
  * @property {'live'|'demo'} mode
- * @property {(id: string, decision: 'allow'|'deny', message?: string) => boolean} decide  answer a held permission request (a denial may say why)
+ * @property {(id: string, decision: 'allow'|'deny', message?: string, always?: number) => boolean} decide  answer a held
+ *   permission request: a denial may say why; an allow may save one of its suggestions (`always`, its index, CONTRACTS §4.5)
  * @property {(on: boolean) => unknown} [setRemoteApprovals]  live: the server's switch
  * @property {() => boolean} [notifyTest]                    live: a test phone notification
  * @property {(paused: boolean) => void} [setPaused]         demo: pause the story

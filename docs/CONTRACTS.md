@@ -43,7 +43,8 @@ public/js/page.js            What the page was opened with (the town look), read
 public/js/core/              Pure logic, no DOM, no I/O: events (normalize), store (+ crews, changes,
                              store-model), director (+ director-queue), catalog, text, summaries,
                              ids, dates, looks, prices, growth, records, town-weather, humor,
-                             dialogs (open dialogs), card-fields (what an approval card shows)
+                             dialogs (open dialogs), card-fields (what an approval card shows),
+                             permission-rules (what "Allow always" may save)
 public/js/sources/           Where events come from: live.js (WebSocket) and demo.js (simulation),
                              one TownSource shape (types.js)
 public/js/world/layout.js    Town plan (shared, pure data)
@@ -207,10 +208,15 @@ shows up as a crew of its own.
    Codex reads the same PermissionRequest decision format, so step 5 is the same for both.
    Timeout 1.5 s, or `approvalTimeoutMs + 5000` for `PermissionRequest`.
 5. Only for `PermissionRequest`: if the reply carries a valid `x-andary-signature`
-   (`base64url(HMAC-SHA256(responseKey, nonce + "\n" + body))`) and its `output` is a plain allow
-   or deny decision, prints that decision (rebuilt: `{behavior:'allow'}` or
-   `{behavior:'deny', message}`; any other field is dropped) as JSON on stdout. Nothing else is
-   ever printed.
+   (`base64url(HMAC-SHA256(responseKey, nonce + "\n" + body))`) and its `output` is an allow or
+   deny decision, prints that decision as JSON on stdout, rebuilt: `{behavior:'allow'}`,
+   `{behavior:'deny', message}`, or an allow that saves one rule ("Allow always", §4.5):
+   `{behavior:'allow', updatedPermissions:[s]}`. That last one only when the reply's
+   `updatedPermissions` is an array of exactly one element that equals, whatever the order of
+   keys, an element `s` of the hook's own stdin `permission_suggestions`, and `s` is `addRules`
+   with `behavior: 'allow'` and `destination` `localSettings` or `session`; `s` is printed from the
+   hook's own input, never from the reply. Any other `updatedPermissions` gives a plain allow; any
+   other field is dropped. Nothing else is ever printed.
 6. **Always exits 0** and never prints anything else. Any error → exit 0 silently.
 
 ### 4.4 Server (`server/`)
@@ -275,13 +281,15 @@ Server → browser:
 // Envelope = { id: number /* server sequence */, ts: number /* hook start, ms, never after rx nor more than an hour before it (a teammate's: §7) */, rx: number /* server receive */, event: object /* sanitized payload */ }
 // Approval = { id, status: 'pending'|'allowed'|'denied'|'expired'|'resolved', held: boolean, sessionId, agentId: string|null,
 //              toolName, toolInput, callKey: string|null /* the request's andary_key, §4.6 */, source: 'claude'|'codex',
-//              cwd, createdAt, expiresAt: number|null, decidedBy?: 'town'|'terminal'|'timeout', proof?: 'ran'|'denied'|'stopped', message? }
+//              cwd, createdAt, expiresAt: number|null, decidedBy?: 'town'|'terminal'|'timeout', proof?: 'ran'|'denied'|'stopped', message?,
+//              suggestions: { index, rules: { toolName, ruleContent? }[], destination: 'localSettings'|'session' }[],
+//              always?: { rules, destination, at } /* what an "Allow always" saved, and when (server time) */ }
 ```
 
 Browser → server:
 
 ```js
-{ t: 'decide', id, decision: 'allow'|'deny', message?: string /* ≤ 500 chars */ }
+{ t: 'decide', id, decision: 'allow'|'deny', message?: string /* ≤ 500 chars */, always?: number /* allow only: a suggestion's index */ }
 { t: 'settings', settings: { remoteApprovals: boolean } }
 { t: 'notify-test' }   // sends a test phone notification (rate limits apply)
 { t: 'ping' }
@@ -345,6 +353,23 @@ carriage return in file content is shown as `⟨U+000D⟩`, and a run of blank-l
 collapsed whatever its rows' kinds; a run of more than one kind counts each
 (`⟨120 blank lines: 80 added, 40 removed⟩`). In the browser, Allow/Deny ignore pointer clicks for
 1 s after a card appears or changes place.
+
+**Allow always.** `Approval.suggestions` lists the request's `permission_suggestions` the town
+offers to save, each with its `index` in that list: `addRules` with `behavior: 'allow'`,
+`destination` `localSettings` (this project, only you) or `session` (until the session ends), and
+a non-empty `rules` of `{toolName, ruleContent?}` objects, with no field the town does not know on
+the suggestion or its rules; only those sanitising left unchanged, and none for Codex,
+`ExitPlanMode` or `AskUserQuestion` (`public/js/core/permission-rules.js`, `offeredSuggestions` in
+`server/approvals.mjs`). The suggestions themselves stay on the server. `decide` with `always` is
+accepted only for a held, pending approval, with `decision: 'allow'` and the `index` of one of its
+suggestions; anything else answers `{t:'error'}` and changes nothing. The hook then gets
+`{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[<that suggestion, exactly as it arrived>]}}}`,
+which the forwarder checks again against its own input (§4.3), and the approval records
+`always: { rules, destination, at }`. The card offers one suggestion (the first `localSettings`
+one, else the first `session` one) with an **Allow always** button under Allow and Deny, the rule
+written out (`Bash(npm test:*)`) and where it is kept; it has no key of its own. A short hint says
+how often the same rule was allowed today, or that it came back after an "Allow always"
+(`public/js/ui/approval-rules.js`). The demo does the same (`sources/demo.js`).
 
 ### 4.6 Implementation notes (server)
 
@@ -921,13 +946,14 @@ Pure ESM, no DOM, deterministic with a seed. Used by the UI's demo mode and by
 
 ```js
 export function createSimulation({ seed?: number, speed?: number,
-  emit: (payload: object /* raw hook payload */) => void | Promise<{decision?: 'allow'|'deny'} | void>
+  emit: (payload: object /* raw hook payload */) => void | Promise<{decision?: 'allow'|'deny', updatedPermissions?: object[]} | void>
 }): { start(): void, stop(): void, setSpeed(n: number): void, running: boolean }
 ```
 
 `emit` receives raw hook payloads exactly as Claude Code would send them (§4.2). For
 `PermissionRequest` the simulation awaits the promise and continues according to the decision
-(no decision within 25 s at speed 1 → treated as allow).
+(no decision within 25 s at speed 1 → treated as allow). An allow with `updatedPermissions` saved
+the request's suggested rule: like Claude Code, the project's crews do not ask for it again.
 
 ### 7.1 Implementation notes (simulation)
 
@@ -972,7 +998,7 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn or a stop aside |
 | `[data-testid="activity-log"]` | log; children `[data-testid="log-entry"]` |
 | `[data-testid="tasks-panel"]` | goals/tasks; children `[data-testid="task-item"]` |
-| `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]` |
+| `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]`, and, when a rule can be saved, `[data-testid="approve-always"]` with the rule in `[data-testid="approve-always-rule"]`; a hint in `[data-testid="approval-hint"]` |
 | `[data-testid="remote-approvals-toggle"]` | checkbox/switch for remote approvals (live mode) |
 | `[data-testid="settings-button"]` | opens the settings dialog (holds the remote approvals switch) |
 | `[data-testid="director-caption"]` | the director camera's caption (plain text, not a live region); shown while it has a shot, hidden while you hold the camera or an agent is selected |

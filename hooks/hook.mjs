@@ -10,6 +10,11 @@
 // took over the port of a server that is gone receives nothing. Self-contained (Node built-ins only),
 // because `andary install` copies it to <ANDARY_HOME>/hook.mjs and the plugin runs it in
 // place from its own folder.
+//
+// The decision is rebuilt, never copied: an allow, or a deny with a message. An allow may also
+// save one permission rule ("Allow always"), but only a rule Claude Code itself suggested in this
+// very hook's input, only an allow rule for this project (only you) or this session, and it is
+// printed from that input, never from the server's reply.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { request } from 'node:http';
@@ -37,6 +42,8 @@ const MAX_DENY_MESSAGE_CHARS = 1000;
  * shortened (a server holds a request for the town only from a forwarder that does).
  */
 const CAPS = Object.freeze(['truncated']);
+/** Where an allow may save a rule: `.claude/settings.local.json` (this project, only you) or the session. */
+const LOCAL_DESTINATIONS = new Set(['localSettings', 'session']);
 
 /**
  * Exits 0, after flushing `text` to stdout if there is any.
@@ -271,16 +278,62 @@ function signedByServer(state, nonce, reply) {
 }
 
 /**
- * The PermissionRequest decision from a signed reply, rebuilt from the two shapes the town sends
- * (allow, or deny with a message), as JSON; '' for anything else. Fields such as updatedInput,
- * updatedPermissions or additionalContext are never passed on: the town does not send them, so
- * their presence means the answer did not come from it.
+ * A value as JSON text with the keys of every object in sorted order, so two values that differ
+ * only in the order of their keys give the same text.
+ * @param {unknown} value  parsed JSON
+ * @returns {string}
+ */
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  const object = /** @type {Record<string, unknown>} */ (value);
+  return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(',')}}`;
+}
+
+/**
+ * Whether a permission update adds allow rules for this project (only you) or this session.
+ * Rules for the shared project settings or every project, modes and folders are never saved.
+ * @param {any} update
+ * @returns {boolean}
+ */
+function isLocalAllowRule(update) {
+  return update?.type === 'addRules' && update.behavior === 'allow' && LOCAL_DESTINATIONS.has(update.destination);
+}
+
+/**
+ * The permission rule an allow may save: the reply's updatedPermissions must hold exactly one
+ * update, equal (whatever the order of keys) to one of the suggestions in this hook's own input,
+ * and that suggestion must be a local allow rule. Returns that suggestion from the input, never
+ * the reply's copy; null for anything else, which saves nothing.
+ * @param {unknown} updates      the reply's decision.updatedPermissions
+ * @param {unknown} suggestions  this hook's own permission_suggestions
+ * @returns {object|null}
+ */
+function savedRule(updates, suggestions) {
+  if (!Array.isArray(updates) || updates.length !== 1 || !Array.isArray(suggestions)) return null;
+  try {
+    const wanted = canonicalJson(updates[0]);
+    const own = suggestions.find((suggestion) => canonicalJson(suggestion) === wanted);
+    return own !== undefined && isLocalAllowRule(own) ? own : null;
+  } catch {
+    // Nested too deeply to compare (the stack ran out): save nothing.
+    return null;
+  }
+}
+
+/**
+ * The PermissionRequest decision from a signed reply, rebuilt from the shapes the town sends
+ * (allow, allow that saves one rule, or deny with a message), as JSON; '' for anything else.
+ * Fields such as updatedInput or additionalContext are never passed on: the town does not send
+ * them, so their presence means the answer did not come from it. updatedPermissions passes only
+ * as one of this hook's own suggestions (savedRule); any other value gives a plain allow.
  * @param {State} state
  * @param {string} nonce
  * @param {{ text: string, signature: string } | null} reply
+ * @param {Record<string, any>} event  this hook's own input
  * @returns {string}
  */
-function decisionFrom(state, nonce, reply) {
+function decisionFrom(state, nonce, reply, event) {
   if (!reply || !signedByServer(state, nonce, reply)) return '';
   let output;
   try {
@@ -291,7 +344,11 @@ function decisionFrom(state, nonce, reply) {
   const specific = output?.hookSpecificOutput;
   const decision = specific?.decision;
   if (specific?.hookEventName !== 'PermissionRequest') return '';
-  if (decision?.behavior === 'allow') return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
+  if (decision?.behavior === 'allow') {
+    const rule = savedRule(decision.updatedPermissions, event.permission_suggestions);
+    const allow = rule ? { behavior: 'allow', updatedPermissions: [rule] } : { behavior: 'allow' };
+    return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: allow } });
+  }
   if (decision?.behavior !== 'deny' || typeof decision.message !== 'string') return '';
   const message = decision.message.slice(0, MAX_DENY_MESSAGE_CHARS);
   return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message } } });
@@ -310,7 +367,7 @@ async function main() {
   const nonce = randomBytes(16).toString('base64url');
   const reply = await post(state, buildBody(event), nonce, timeoutMs);
   // Only a permission prompt takes an answer from the town; other events print nothing.
-  return isPermission ? decisionFrom(state, nonce, reply) : '';
+  return isPermission ? decisionFrom(state, nonce, reply, event) : '';
 }
 
 process.on('uncaughtException', () => finish());

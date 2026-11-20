@@ -2,6 +2,7 @@
 // name one of our own hosts.
 import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, PROOF_HEADER, browserRole, hasHookSecret, proveServer, safeEqual, signHookReply } from './auth.mjs';
 import { TEAM_HEADER, verifyMemberKey } from './team.mjs';
+import { offeredSuggestions } from './approvals.mjs';
 import { sourceOf } from './adapters/index.mjs';
 import { ingestHook, ingestTeam } from './ingest.mjs';
 import { APP_ID, LIMITS } from './config.mjs';
@@ -288,7 +289,7 @@ async function handleHook(ctx, req, res) {
   }
   const request = ingestHook(ctx, body).find((envelope) => envelope.event.hook_event_name === 'PermissionRequest');
   if (request) {
-    await answerPermissionRequest(ctx, req, res, request.event, { exact: shownInFull(body.event, request.event), caps: body.caps, at: request.ts });
+    await answerPermissionRequest(ctx, req, res, request.event, { ...body, at: request.ts });
     return;
   }
   sendHookReply(ctx, req, res, null);
@@ -385,19 +386,24 @@ function whyNotHeld(current, exact) {
  * @param {TownContext} ctx
  * @param {Request} req
  * @param {Response} res
- * @param {Record<string, any>} event
- * @param {{ exact: boolean, caps: string[], at: number }} sent  exact: the tool input reached the
- *   town unchanged and whole (see shownInFull); caps: what the forwarder declared it does; at: when
- *   the agent sent the request (its envelope's `ts`)
+ * @param {Record<string, any>} event  the request as the town sees it (sanitized)
+ * @param {{ caps: string[], event: Record<string, any>, at: number }} body  as the forwarder sent
+ *   it; caps: what the forwarder declared it does; at: when the agent sent the request (its
+ *   envelope's `ts`)
  */
-async function answerPermissionRequest(ctx, req, res, event, { exact, caps, at }) {
+async function answerPermissionRequest(ctx, req, res, event, body) {
+  const raw = body.event;
+  // The tool input reached the town unchanged and whole (see shownInFull).
+  const exact = shownInFull(raw, event);
   const wanted = ctx.settings.remoteApprovals && ctx.hub.owners > 0;
   const terminalOnly = TERMINAL_ONLY.get(String(event.tool_name));
   // Only a forwarder that marks a body it shortened can be trusted to have sent it whole.
-  const current = caps.includes('truncated');
+  const current = body.caps.includes('truncated');
   const hold = wanted && exact && current && !terminalOnly;
   const why = terminalOnly ?? (wanted ? whyNotHeld(current, exact) : undefined);
-  const { approval, response } = ctx.broker.create(event, { hold, message: why, at });
+  // A plan or a question is answered in the terminal, so no allow from the town can save a rule.
+  const offers = terminalOnly ? [] : offeredSuggestions(raw, event);
+  const { approval, response } = ctx.broker.create(event, { hold, message: why, at: body.at, offers });
   if (hold) {
     // The forwarder went away (Claude Code cancelled the hook): Claude asks in the terminal now.
     res.on('close', () => {

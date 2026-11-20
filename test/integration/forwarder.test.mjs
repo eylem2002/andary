@@ -317,3 +317,106 @@ describe('forwarder capabilities', () => {
     }
   });
 });
+
+/** A rule Claude Code suggests saving for this project, only you (CONTRACTS §4.2). */
+const SUGGESTION = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'localSettings' };
+const PLAIN_ALLOW = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
+
+/** @param {unknown} updatedPermissions */
+function allowSaving(updatedPermissions) {
+  return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', updatedPermissions } } };
+}
+
+/** @param {unknown} rule */
+function allowWith(rule) {
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', updatedPermissions: [rule] } } });
+}
+
+describe('forwarder: an allow that saves a rule (Allow always)', () => {
+  /** @type {Awaited<ReturnType<typeof impostor>>} */
+  let fake;
+  /** What the signed server answers to the request it was sent. @type {(event: any) => object} */
+  let answer = () => ({});
+  /** @type {string} */
+  let home;
+
+  before(async () => {
+    // Signed with the key in server.json: the forwarder trusts the reply, and only its own rules
+    // decide what it prints.
+    fake = await impostor((event) => answer(event), 'signing-key');
+    home = homeWith('allow-always', { pid: process.pid, port: fake.port, responseKey: 'signing-key' });
+  });
+
+  after(() => fake?.close());
+
+  /**
+   * Runs the forwarder on a permission request with these suggestions; the server answers with
+   * `reply(event)`. Returns what it printed.
+   * @param {unknown} suggestions
+   * @param {(event: any) => object} reply
+   */
+  async function printed(suggestions, reply) {
+    answer = reply;
+    const payload = hookPayload('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm test' }, ...(suggestions === undefined ? {} : { permission_suggestions: suggestions }) });
+    const result = await runHookScript({ payload, env: isolatedEnv({ ANDARY_HOME: home }) });
+    assert.equal(result.code, 0);
+    assert.equal(result.stderr, '');
+    return result.stdout;
+  }
+
+  it('passes on a suggestion from its own input', async () => {
+    const shared = { ...SUGGESTION, destination: 'projectSettings' };
+    const stdout = await printed([shared, SUGGESTION], (event) => allowSaving([event.permission_suggestions[1]]));
+    assert.equal(stdout, allowWith(SUGGESTION));
+  });
+
+  it('compares without regard to key order, and prints the suggestion as its own input has it', async () => {
+    const reordered = { destination: 'localSettings', behavior: 'allow', rules: [{ ruleContent: 'npm test:*', toolName: 'Bash' }], type: 'addRules' };
+    const stdout = await printed([SUGGESTION], () => allowSaving([reordered]));
+    assert.equal(stdout, allowWith(SUGGESTION), 'the input\'s key order, byte for byte');
+  });
+
+  it('gives a plain allow for any other updatedPermissions', async () => {
+    const second = { ...SUGGESTION, rules: [{ toolName: 'Bash', ruleContent: 'npm run lint' }] };
+    /** @type {[string, unknown][]} */
+    const cases = [
+      ['a rule its input did not suggest', [{ ...SUGGESTION, rules: [{ toolName: 'Bash', ruleContent: 'npm:*' }] }]],
+      ['its suggestion with an extra field', [{ ...SUGGESTION, extra: true }]],
+      ['its suggestion with a rule added', [{ ...SUGGESTION, rules: [...SUGGESTION.rules, { toolName: 'Bash' }] }]],
+      ['two of its suggestions', [SUGGESTION, second]],
+      ['the same suggestion twice', [SUGGESTION, SUGGESTION]],
+      ['an empty list', []],
+      ['one update that is not in a list', SUGGESTION],
+      ['its suggestion inside another list', [[SUGGESTION]]],
+    ];
+    for (const [what, updates] of cases) {
+      assert.equal(await printed([SUGGESTION, second], () => allowSaving(updates)), PLAIN_ALLOW, what);
+    }
+  });
+
+  it('saves nothing when its input suggested nothing', async () => {
+    assert.equal(await printed(undefined, () => allowSaving([SUGGESTION])), PLAIN_ALLOW);
+    assert.equal(await printed('addRules', () => allowSaving([SUGGESTION])), PLAIN_ALLOW);
+  });
+
+  it('never saves beyond this project or session, nor modes or folders, even when Claude Code suggested them', async () => {
+    /** @type {[string, object][]} */
+    const cases = [
+      ['committed project settings', { ...SUGGESTION, destination: 'projectSettings' }],
+      ['every project', { ...SUGGESTION, destination: 'userSettings' }],
+      ['a deny rule', { ...SUGGESTION, behavior: 'deny' }],
+      ['replaced rules', { ...SUGGESTION, type: 'replaceRules' }],
+      ['a mode', { type: 'setMode', mode: 'bypassPermissions', destination: 'session' }],
+      ['folders', { type: 'addDirectories', directories: ['/'], destination: 'session' }],
+    ];
+    for (const [what, suggestion] of cases) {
+      assert.equal(await printed([suggestion], (event) => allowSaving([event.permission_suggestions[0]])), PLAIN_ALLOW, what);
+    }
+  });
+
+  it('a denial carries no rule', async () => {
+    const deny = { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: 'Denied from Andary', updatedPermissions: [SUGGESTION] } } };
+    const stdout = await printed([SUGGESTION], () => deny);
+    assert.deepEqual(JSON.parse(stdout), { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: 'Denied from Andary' } } });
+  });
+});

@@ -21,6 +21,7 @@ function fakeSimulation() {
 }
 
 const permission = { hook_event_name: 'PermissionRequest', session_id: 's1', agent_id: 'agent-abc', tool_name: 'Bash', tool_input: { command: 'npm publish' }, cwd: '/w/app' };
+const SUGGESTION = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm publish' }], behavior: 'allow', destination: 'localSettings' };
 
 describe('demo mode', () => {
   beforeEach(() => mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 }));
@@ -110,6 +111,44 @@ describe('demo mode', () => {
     assert.deepEqual(await answer, {});
     assert.equal(store.approvals.at(-1).status, 'expired');
     assert.equal(store.approvals.at(-1).id, id);
+  });
+
+  test('a permission request offers the rules the server would offer', () => {
+    const store = fakeStore();
+    const { sim, create } = fakeSimulation();
+    createDemo({ store, createSimulation: create });
+    sim.emit({ ...permission, permission_suggestions: [{ ...SUGGESTION, destination: 'userSettings' }, SUGGESTION] });
+    assert.deepEqual(store.approvals[0].suggestions, [{ index: 1, rules: SUGGESTION.rules, destination: 'localSettings' }]);
+    sim.emit(permission);
+    assert.deepEqual(store.approvals[1].suggestions, [], 'none suggested, none offered');
+  });
+
+  test('"Allow always" allows, records the rule, and hands it back to the story like a hook decision', async () => {
+    const store = fakeStore();
+    const { sim, create } = fakeSimulation();
+    const demo = createDemo({ store, createSimulation: create });
+    const answer = sim.emit({ ...permission, permission_suggestions: [SUGGESTION] });
+    const { id } = store.approvals[0];
+    assert.equal(demo.decide(id, 'allow', undefined, 0), true);
+    assert.deepEqual(await answer, { decision: 'allow', updatedPermissions: [SUGGESTION] });
+    const decided = store.approvals.at(-1);
+    assert.deepEqual([decided.status, decided.decidedBy], ['allowed', 'town']);
+    assert.deepEqual(decided.always, { rules: SUGGESTION.rules, destination: 'localSettings', at: 1_000_000 });
+  });
+
+  test('"Allow always" is refused like the server: only with an allow and an offered rule', async () => {
+    const store = fakeStore();
+    const { sim, create } = fakeSimulation();
+    const demo = createDemo({ store, createSimulation: create });
+    const answer = sim.emit({ ...permission, permission_suggestions: [{ ...SUGGESTION, destination: 'projectSettings' }, SUGGESTION] });
+    const { id } = store.approvals[0];
+    assert.equal(demo.decide(id, 'deny', undefined, 1), false);
+    assert.equal(demo.decide(id, 'allow', undefined, 0), false, 'a suggestion the town does not offer');
+    assert.equal(demo.decide(id, 'allow', undefined, 2), false, 'no such suggestion');
+    assert.equal(store.approvals.length, 1, 'nothing changed');
+    assert.equal(demo.decide(id, 'allow'), true);
+    assert.deepEqual(await answer, { decision: 'allow' });
+    assert.equal(store.approvals.at(-1).always, undefined);
   });
 
   test('a paused demo can still be answered, and a request made while paused waits for the resume', async () => {

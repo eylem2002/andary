@@ -248,7 +248,7 @@ function handleBrowserMessage(ctx, connection, text) {
   }
   switch (message?.t) {
     case 'decide': {
-      const result = ctx.broker.decide(message.id, message.decision, message.message);
+      const result = ctx.broker.decide(message.id, message.decision, message.message, message.always);
       if (!result.ok) sendError(ctx, connection, result.error);
       return;
     }

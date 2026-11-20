@@ -2,6 +2,9 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSimulation, MAX_SESSIONS, PERMISSION_TIMEOUT_MS } from '../../../public/js/sim/simulation.js';
 import { MAX_HELPERS } from '../../../public/js/sim/procedural.js';
+import { Crew } from '../../../public/js/sim/crew.js';
+import { PROJECTS } from '../../../public/js/sim/corpus.js';
+import { createRandom } from '../../../public/js/sim/random.js';
 import { createStore } from '../../../public/js/core/store.js';
 import { createDirector } from '../../../public/js/core/director.js';
 import { createFakeClock, createRecordingWorld } from '../core/helpers.mjs';
@@ -285,6 +288,43 @@ describe('simulation: permission round-trip', () => {
     const next = docs[at + 1];
     assert.equal(next.p.hook_event_name, 'Notification');
     assert.ok(next.at - docs[at].at < 1000, 'no need to wait for the timeout');
+  });
+
+  it('every request suggests saving its own rule for the project, as Claude Code does', async () => {
+    const { docs, at } = await docsRun(() => Promise.resolve({ decision: 'allow' }));
+    assert.deepEqual(docs[at].p.permission_suggestions, [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'rm -rf dist' }], behavior: 'allow', destination: 'localSettings' }]);
+  });
+
+  it('allow always: the deletion runs as for an allow', async () => {
+    const { docs, at } = await docsRun((payload) => Promise.resolve({ decision: 'allow', updatedPermissions: [payload.permission_suggestions[0]] }));
+    const before = docs[at - 1].p;
+    assert.ok(docs.slice(at + 1).some((x) => x.p.tool_use_id === before.tool_use_id && x.p.hook_event_name === 'PostToolUse'));
+    assert.ok(!docs.slice(at + 1).some((x) => x.p.notification_type === 'permission_prompt'), 'the terminal is not asked');
+  });
+
+  it('allow always: the project keeps the rule, and is not asked for it again', async () => {
+    /** @type {Record<string, any>[]} */
+    const asked = [];
+    const runtime = {
+      rng: createRandom(1),
+      sleep: async () => {},
+      send: async () => undefined,
+      census: { helpers: 0 },
+      savedRules: new Set(),
+      ask: async (/** @type {Record<string, any>} */ payload) => {
+        asked.push(payload);
+        return /** @type {const} */ ('always');
+      },
+    };
+    const crew = new Crew(runtime, PROJECTS['docs-site'], { model: 'claude-opus-5-5' });
+    assert.equal((await crew.bash(null, 'rm -rf dist', { permission: true })).ok, true);
+    assert.equal((await crew.bash(null, 'rm -rf dist', { permission: true })).ok, true);
+    assert.equal(asked.length, 1, 'asked once');
+    await new Crew(runtime, PROJECTS['docs-site'], { model: 'claude-opus-5-5' }).bash(null, 'rm -rf dist', { permission: true });
+    assert.equal(asked.length, 1, 'nor in a later session of the same project (localSettings)');
+    await new Crew(runtime, PROJECTS['api-server'], { model: 'claude-opus-5-5' }).bash(null, 'rm -rf dist', { permission: true });
+    await crew.bash(null, 'rm -rf build', { permission: true });
+    assert.equal(asked.length, 3, 'another project, or another rule, is asked');
   });
 });
 

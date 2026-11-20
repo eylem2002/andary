@@ -458,3 +458,27 @@ section.
     `PreToolUse` of a finished turn does not end its wait, and a `Stop` that arrives after the
     prompt you queued behind it starts none. The town goes by each hook's own time, as the phone
     notes and the broker do; the clock is the agent's machine, the same one for all its hooks.
+101. **"Allow always" saves only rules that stay with you.** The town offers an allow rule for this
+    project and only you (`.claude/settings.local.json`) or until the session ends; never one for
+    the committed project settings (it would change your teammates' prompts) or for every project,
+    and never a mode or folders. The forwarder enforces the same list on its own.
+102. **A suggestion the town cannot show exactly is not offered.** One with a field the town does not
+    know, on the suggestion or on a rule, or one that sanitising changed (a secret masked, a long
+    value cut) gets no "Allow always": the card must show the very rule it saves.
+103. **One rule per card, and no key for it.** The card offers the first suggestion kept for this
+    project, else the first kept for the session. `A` stays a plain allow, so saving a rule always
+    takes its own button, with the same one-second click delay as Allow and Deny.
+104. **"You allowed this N times today" counts what this town saw.** Earlier requests for the same
+    rule, allowed in the town or answered in the terminal on the viewer's calendar day, among the
+    requests the page knows (the last 100; a new tab gets the server's last 50 settled ones). One
+    answered in the terminal counts as allowed: the town only sees the agent carry on, so a denial
+    there may be counted now and then.
+105. **"Claude Code asked again" is judged within one session.** Claude Code applies a saved rule to
+    the session that saved it at once, so a request for that rule there, made after the choice,
+    means the rule did not take. Another session may have started before the rule was saved, so it
+    is not judged.
+106. **The forwarder compares suggestions as JSON with sorted keys.** Key order means nothing in
+    JSON. A value it cannot compare (nested too deeply) saves nothing: the answer is a plain allow.
+107. **The demo keeps a rule allowed always for its project.** Its suggestions are for this project
+    (`localSettings`), so later demo sessions of the same project do not ask for it either, as
+    Claude Code would not.

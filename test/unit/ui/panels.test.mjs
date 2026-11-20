@@ -84,6 +84,12 @@ describe('approvals', () => {
     assert.equal(resultText(fixture({ status: 'pending' }), 'live'), '');
   });
 
+  test('result wording for "Allow always" names the rule it saved and where', () => {
+    const always = { rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], destination: 'localSettings', at: 1 };
+    assert.equal(resultText(fixture({ status: 'allowed', decidedBy: 'town', always }), 'live'), 'Allowed always from the town: Bash(npm test:*) for this project, only you');
+    assert.equal(resultText(fixture({ status: 'allowed', decidedBy: 'town', always: { ...always, destination: 'session' } }), 'demo'), 'Allowed always from the town: Bash(npm test:*) until this session ends');
+  });
+
   test('pending count', () => {
     assert.equal(pendingCount(fixture({ approvals: [{ status: 'pending' }, { status: 'allowed' }, { status: 'pending' }] })), 2);
   });

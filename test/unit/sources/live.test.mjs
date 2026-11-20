@@ -103,9 +103,11 @@ describe('connectLive', () => {
     assert.equal(link.decide('a1', 'allow'), true);
     assert.equal(link.decide('a2', 'deny', 'x'.repeat(600)), true);
     assert.equal(link.setRemoteApprovals(true), true);
+    assert.equal(link.decide('a3', 'allow', undefined, 0), true);
     assert.deepEqual(socket.sent[0], { t: 'decide', id: 'a1', decision: 'allow' });
     assert.equal(socket.sent[1].message.length, 500);
     assert.deepEqual(socket.sent[2], { t: 'settings', settings: { remoteApprovals: true } });
+    assert.deepEqual(socket.sent[3], { t: 'decide', id: 'a3', decision: 'allow', always: 0 }, '"Allow always" names the suggestion by its index');
   });
 
   test('pings while live', () => {

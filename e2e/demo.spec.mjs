@@ -144,6 +144,28 @@ test('a demo permission request can be allowed from the town', async ({ page }) 
   await expect(card.getByTestId('approve')).toBeHidden();
 });
 
+test('a demo permission request can be allowed always, and the card names the rule first', async ({ page }) => {
+  await page.goto(demoUrl('&world=fake'));
+  const pending = page.locator('[data-testid="approval-card"][data-status="pending"]').first();
+  await expect(pending).toBeAttached({ timeout: 60_000 });
+  const id = await pending.getAttribute('data-approval-id');
+  const card = page.locator(`[data-testid="approval-card"][data-approval-id="${id}"]`);
+  await page.getByTestId('waiting-for-you').click();
+  const always = card.getByTestId('approve-always');
+  await expect(always).toBeVisible();
+  // The literal rule and where it is kept, written out beside the button and read as its description.
+  const saves = /^Adds the rule Bash\(.+\) for this project, only you\.$/;
+  await expect(card.getByTestId('approve-always-rule')).toHaveText(saves);
+  await expect(always).toHaveAccessibleDescription(saves);
+  const rule = (await card.getByTestId('approve-always-rule').locator('code').textContent()) ?? '';
+  await always.click();
+  await expect(card).toHaveAttribute('data-status', 'allowed');
+  await expect(card).toContainText(`Allowed always from the town: ${rule} for this project, only you`);
+  await expect(always).toBeHidden();
+  await openTab(page, 'Activity');
+  await expect(page.getByTestId('activity-log')).toContainText(`Allowed always: ${rule}`);
+});
+
 test.describe('on a smaller laptop', () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DENY_MESSAGE, createApprovalBroker, decisionOutput } from '../../../server/approvals.mjs';
+import { DENY_MESSAGE, createApprovalBroker, decisionOutput, offeredSuggestions } from '../../../server/approvals.mjs';
 import { withCallKey } from '../../../server/hook-steps.mjs';
+import { sanitize } from '../../../server/sanitize.mjs';
 import { ORDER_SLACK_MS, inputKey } from '../../../public/js/core/dialogs.js';
 import { normalizeAgentId } from '../../../public/js/core/ids.js';
 
@@ -477,5 +478,116 @@ describe('limits and listing', () => {
     broker.list()[0].held = false;
     assert.equal(broker.list()[0].status, 'pending');
     assert.equal(broker.list()[0].held, true);
+  });
+});
+
+/** A permission rule suggestion as Claude Code sends one. @param {Record<string, unknown>} [extra] */
+const rule = (extra = {}) => ({ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'localSettings', ...extra });
+
+/** A request with suggestions, raw and as the town sees it, and its offers. @param {unknown[]} suggestions @param {Record<string, any>} [extra] */
+function suggesting(suggestions, extra = {}) {
+  const raw = request({ tool_input: { command: 'npm test' }, permission_suggestions: suggestions, ...extra });
+  const sanitized = sanitize(raw);
+  return { raw, sanitized, offers: offeredSuggestions(raw, sanitized) };
+}
+
+describe('allow always: what a request offers', () => {
+  it('offers local allow rules at their place in the list, keeping the suggestion as it arrived', () => {
+    const suggestions = [rule({ destination: 'userSettings' }), rule(), { type: 'setMode', mode: 'acceptEdits', destination: 'session' }, rule({ destination: 'session' })];
+    const { offers } = suggesting(suggestions);
+    assert.deepEqual(offers.map(({ index, destination }) => [index, destination]), [[1, 'localSettings'], [3, 'session']]);
+    assert.equal(offers[0].saved, suggestions[1], 'the very object Claude Code sent');
+    assert.deepEqual(offers[0].rules, [{ toolName: 'Bash', ruleContent: 'npm test:*' }]);
+  });
+
+  it('offers nothing that sanitizing changed: the card must show the rule it saves', () => {
+    const secret = rule({ rules: [{ toolName: 'Bash', ruleContent: 'curl -H "Authorization: Bearer abcdefghijklmnop" https://api.example.com:*' }] });
+    const long = rule({ rules: [{ toolName: 'Bash', ruleContent: `echo ${'a'.repeat(2100)}` }] });
+    const { sanitized, offers } = suggesting([secret, long, rule()]);
+    assert.notDeepEqual(sanitized.permission_suggestions[0], secret, 'redacted');
+    assert.deepEqual(offers.map((offer) => offer.index), [2]);
+  });
+
+  it('offers nothing past what sanitizing keeps of a long list', () => {
+    const many = Array.from({ length: 60 }, (_, i) => rule({ rules: [{ toolName: 'Bash', ruleContent: `step-${i}` }] }));
+    const { offers } = suggesting(many);
+    assert.equal(offers.length, 50);
+    assert.ok(offers.every((offer) => offer.index < 50));
+  });
+
+  it('offers nothing for Codex, which sends no suggestions of its own', () => {
+    const raw = request({ permission_suggestions: [rule()] });
+    assert.deepEqual(offeredSuggestions(raw, sanitize({ ...raw, andary_source: 'codex' })), []);
+  });
+
+  it('sends browsers the offers, never the suggestions themselves', () => {
+    const { broker, changes } = setup();
+    const { offers, sanitized } = suggesting([rule({ destination: 'projectSettings' }), rule()]);
+    const { approval } = broker.create(sanitized, { hold: true, offers });
+    const expected = [{ index: 1, rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], destination: 'localSettings' }];
+    assert.deepEqual(approval.suggestions, expected);
+    assert.deepEqual(changes[0].suggestions, expected);
+    assert.deepEqual(broker.list()[0].suggestions, expected);
+    assert.equal(JSON.stringify(broker.list()).includes('addRules'), false);
+  });
+
+  it('lists no suggestions for a request that offers none', () => {
+    const { broker } = setup();
+    assert.deepEqual(broker.create(request(), { hold: true }).approval.suggestions, []);
+  });
+});
+
+describe('allow always: the decision', () => {
+  it('saves the chosen suggestion, as it arrived, with the allow', async () => {
+    const { broker, changes } = setup();
+    const suggestions = [rule({ destination: 'userSettings' }), rule()];
+    const { offers, sanitized } = suggesting(suggestions);
+    const { approval, response } = broker.create(sanitized, { hold: true, offers });
+    assert.deepEqual(broker.decide(approval.id, 'allow', undefined, 1), { ok: true });
+    const output = /** @type {any} */ (await response);
+    assert.deepEqual(output, decisionOutput('allow', '', suggestions[1]));
+    assert.equal(output.hookSpecificOutput.decision.updatedPermissions[0], suggestions[1]);
+    const decided = changes.at(-1);
+    assert.deepEqual([decided.status, decided.decidedBy], ['allowed', 'town']);
+    assert.deepEqual(decided.always, { rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], destination: 'localSettings', at: 1_000 });
+  });
+
+  it('refuses anything but an allow with an offered place, and changes nothing', async () => {
+    const { broker, changes } = setup();
+    const { offers, sanitized } = suggesting([rule({ destination: 'userSettings' }), rule()]);
+    const { approval, response } = broker.create(sanitized, { hold: true, offers });
+    for (const [why, decision, always] of /** @type {[string, string, unknown][]} */ ([
+      ['with a denial', 'deny', 1],
+      ['a suggestion the town does not offer', 'allow', 0],
+      ['past the end of the list', 'allow', 2],
+      ['a place given as text', 'allow', '1'],
+      ['no place at all', 'allow', null],
+      ['a fraction', 'allow', 1.5],
+    ])) {
+      const result = broker.decide(approval.id, decision, undefined, always);
+      assert.equal(result.ok, false, why);
+      assert.match(result.error ?? '', /Allow always/, why);
+    }
+    assert.equal(await peek(response), 'pending', 'the hook still waits');
+    assert.equal(changes.length, 1, 'no change was published');
+    assert.equal(broker.list()[0].status, 'pending');
+    assert.deepEqual(broker.decide(approval.id, 'allow'), { ok: true }, 'a plain allow works as before');
+    assert.deepEqual(await response, decisionOutput('allow'));
+    assert.equal(changes.at(-1).always, undefined);
+  });
+
+  it('refuses allow always where a plain answer is refused too', () => {
+    const { broker } = setup();
+    const { offers, sanitized } = suggesting([rule()]);
+    const free = broker.create(sanitized, { hold: false, offers }).approval;
+    assert.match(broker.decide(free.id, 'allow', undefined, 0).error ?? '', /terminal/);
+    const held = broker.create(sanitized, { hold: true, offers }).approval;
+    broker.decide(held.id, 'deny');
+    assert.match(broker.decide(held.id, 'allow', undefined, 0).error ?? '', /already denied/);
+  });
+
+  it('a denial never saves a rule', () => {
+    assert.deepEqual(decisionOutput('deny', 'no', rule()), { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: `${DENY_MESSAGE}: no` } } });
+    assert.deepEqual(decisionOutput('allow', '', rule()).hookSpecificOutput.decision, { behavior: 'allow', updatedPermissions: [rule()] });
   });
 });

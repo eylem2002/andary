@@ -249,6 +249,20 @@ test.describe('keyboard', () => {
     await expect(card).toHaveAttribute('data-status', 'denied');
     await expect(card).toContainText('Denied from the town');
   });
+
+  test('Allow always works from the keyboard, and focus stays on the card once it is answered', async ({ page }) => {
+    await openDemo(page);
+    const pending = page.locator('[data-testid="approval-card"][data-status="pending"]').first();
+    await expect(pending).toBeAttached({ timeout: 60_000 });
+    const id = await pending.getAttribute('data-approval-id');
+    await page.keyboard.press('a');
+    const card = page.locator(`[data-approval-id="${id}"]`);
+    await card.getByTestId('approve-always').focus();
+    await page.keyboard.press('Enter');
+    await expect(card).toHaveAttribute('data-status', 'allowed');
+    await expect(card).toContainText('Allowed always from the town');
+    await expect(card).toBeFocused();
+  });
 });
 
 test('a building picked in the town shows its card, and its agents can be selected', async ({ page }) => {
