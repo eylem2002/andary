@@ -100,7 +100,8 @@ function readStdin() {
     const done = () => resolveText(Buffer.concat(chunks).toString('utf8'));
     const timer = setTimeout(done, STDIN_TIMEOUT_MS);
     timer.unref();
-    process.stdin.on('data', (chunk) => {
+    // No encoding is set, so stdin delivers Buffers.
+    process.stdin.on('data', (/** @type {Buffer} */ chunk) => {
       size += chunk.length;
       if (size <= MAX_STDIN_BYTES) chunks.push(chunk);
     });

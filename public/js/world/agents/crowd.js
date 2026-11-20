@@ -153,7 +153,7 @@ export class Crowd {
     if (this.selected === id) this.select(null);
     if (this.hovered === id) this.hovered = null;
     const exit = ['portal', 'bus', 'poof'].includes(opts?.exit) ? opts.exit : 'poof';
-    return new Promise((resolve) => {
+    return /** @type {Promise<void>} */ (new Promise((resolve) => {
       this.exits.add(resolve);
       leave(this, agent, exit, () => {
         this.live.splice(this.live.indexOf(agent), 1);
@@ -161,7 +161,7 @@ export class Crowd {
         this.exits.delete(resolve);
         resolve();
       });
-    });
+    }));
   }
 
   /** @param {string} id */

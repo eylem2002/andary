@@ -62,7 +62,8 @@ export function createListener(onRequest, onUpgrade, tls) {
     socket.on('close', () => sockets.delete(socket));
     socket.on('error', () => socket.destroy());
     socket.setTimeout(FIRST_BYTE_MS, () => socket.destroy());
-    socket.once('data', (chunk) => {
+    // No encoding is set, so the socket delivers Buffers.
+    socket.once('data', (/** @type {Buffer} */ chunk) => {
       socket.setTimeout(0);
       socket.pause();
       if (chunk[0] === TLS_HANDSHAKE) {
