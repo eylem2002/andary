@@ -334,6 +334,14 @@ export function parseHookBody(raw) {
 
 /** Why a request the town could otherwise answer goes to the terminal (Approval.message). */
 const NOT_SHOWN_IN_FULL = 'The town cannot show this request in full (it is very long or holds credentials)';
+/**
+ * Requests that a plain allow or deny cannot answer: a plan to approve, a question to answer. They
+ * wait in the terminal, never in the town.
+ */
+const TERMINAL_ONLY = new Map([
+  ['ExitPlanMode', 'Plans are approved in the terminal'],
+  ['AskUserQuestion', 'Questions are answered in the terminal'],
+]);
 
 /**
  * Whether sanitizing left a tool input exactly as Claude Code sent it. Redaction and truncation
@@ -359,8 +367,10 @@ function shownInFull(raw, sanitized) {
  */
 async function answerPermissionRequest(ctx, req, res, event, exact) {
   const wanted = ctx.settings.remoteApprovals && ctx.hub.owners > 0;
-  const hold = wanted && exact;
-  const { approval, response } = ctx.broker.create(event, { hold, message: wanted && !exact ? NOT_SHOWN_IN_FULL : undefined });
+  const terminalOnly = TERMINAL_ONLY.get(String(event.tool_name));
+  const hold = wanted && exact && !terminalOnly;
+  const why = wanted ? (terminalOnly ?? (exact ? undefined : NOT_SHOWN_IN_FULL)) : undefined;
+  const { approval, response } = ctx.broker.create(event, { hold, message: why });
   if (hold) {
     // The forwarder went away (Claude Code cancelled the hook): Claude asks in the terminal now.
     res.on('close', () => {

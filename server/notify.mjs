@@ -3,12 +3,18 @@
 // <ANDARY_HOME>/notify.json) or `--notify-url <url>` (your own ntfy server or topic). Messages
 // say only what happened ("A crew needs your permission"), never a project, a file or a command,
 // because anyone who knows the topic can read them. At most one of a kind every 30 seconds and
-// 30 an hour (CONTRACTS §4.10).
+// 30 an hour (CONTRACTS §4.10). They follow the town's attention rules (docs/design/agent-health.md):
+// a permission note waits a few seconds and is dropped if the request was answered meanwhile,
+// requests from several crews become one note, and a finished turn is no news by itself (Claude
+// Code's own idle_prompt says so a minute later if nobody answered).
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { normalizeAgentId } from '../public/js/core/ids.js';
 
 export const NTFY_SERVER = 'https://ntfy.sh';
+/** A permission note waits this long; a request answered meanwhile (often within seconds) needs none. */
+export const PERMISSION_DELAY_MS = 10_000;
 const SAME_KIND_MS = 30_000;
 const HOURLY_LIMIT = 30;
 const SEND_TIMEOUT_MS = 5000;
@@ -26,14 +32,13 @@ const SEND_TIMEOUT_MS = 5000;
 const NOTES = Object.freeze({
   permission: { title: 'Andary', body: 'A crew needs your permission.', priority: 'high', tags: 'raised_hand' },
   waiting: { title: 'Andary', body: 'Claude is waiting for your next prompt.', priority: 'default', tags: 'hourglass' },
-  finished: { title: 'Andary', body: 'A crew finished its turn.', priority: 'default', tags: 'white_check_mark' },
   limit: { title: 'Andary', body: 'Claude Code stopped: it hit a usage or rate limit.', priority: 'high', tags: 'warning' },
   stopped: { title: 'Andary', body: 'Claude Code stopped with an error.', priority: 'high', tags: 'warning' },
   test: { title: 'Andary', body: 'This is a test notification from your town.', priority: 'default', tags: 'tada' },
 });
 
 /**
- * The note a hook event deserves, or null. Only the main agent's turn ending counts as finished.
+ * The note a hook event deserves, or null.
  * @param {Record<string, any>} event  a raw hook payload
  * @returns {Note|null}
  */
@@ -47,7 +52,6 @@ export function noteFor(event) {
     if (event.notification_type === 'idle_prompt') return note('waiting');
     return null;
   }
-  if (name === 'Stop' && !event.agent_id) return note('finished');
   if (name === 'StopFailure') return note(/rate|limit|quota|overload/i.test(String(event.error ?? '')) ? 'limit' : 'stopped');
   return null;
 }
@@ -92,15 +96,54 @@ export function checkNotifyUrl(raw) {
  * @property {typeof fetch} [fetchImpl]
  * @property {() => number} [now]
  * @property {(message: string) => void} [log]
+ * @property {(sessionId: unknown, agentId: unknown) => boolean} [stillWaiting]
+ *   whether an agent's permission request is still unanswered (the approval broker knows)
+ * @property {number} [delayMs]  how long a permission note waits (PERMISSION_DELAY_MS)
+ * @property {(fn: () => void, ms: number) => any} [setTimer]
+ * @property {(timer: any) => void} [clearTimer]
  */
 
 /** @param {NotifierOptions} options */
-export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.now, log = () => {} }) {
+export function createNotifier({
+  url,
+  fetchImpl = globalThis.fetch,
+  now = Date.now,
+  log = () => {},
+  stillWaiting = () => true,
+  delayMs = PERMISSION_DELAY_MS,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+}) {
   /** @type {Map<string, number>} */
   const lastByKind = new Map();
   /** @type {number[]} */
   let sentTimes = [];
   let warned = false;
+  /** Permission requests waiting for their note, one per agent ("session\0agent"). @type {Map<string, Record<string, any>>} */
+  const asking = new Map();
+  /** @type {any} */
+  let askTimer = null;
+
+  /** Sends one note for the requests still unanswered after the delay: one crew, or "N crews". */
+  function flushAsking() {
+    askTimer = null;
+    const crews = new Set();
+    for (const event of asking.values()) {
+      if (stillWaiting(event.session_id, event.agent_id)) crews.add(String(event.session_id ?? ''));
+    }
+    asking.clear();
+    if (crews.size === 0) return;
+    const one = { kind: 'permission', ...NOTES.permission };
+    void send(crews.size === 1 ? one : { ...one, body: `${crews.size} crews need your permission.` });
+  }
+
+  /** @param {Record<string, any>} event */
+  function holdBack(event) {
+    asking.set(`${event.session_id}\0${normalizeAgentId(event.agent_id) ?? 'main'}`, event);
+    if (askTimer) return;
+    askTimer = setTimer(flushAsking, delayMs);
+    askTimer?.unref?.();
+  }
 
   /**
    * Sends a note unless it is too soon after the same kind, or the hour's limit is reached.
@@ -146,9 +189,17 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
     /** @param {Record<string, any>} event */
     observe(event) {
       const note = noteFor(event);
-      if (note) void send(note);
+      if (!note) return;
+      if (note.kind === 'permission') holdBack(event);
+      else void send(note);
     },
     /** A test note, from the town's Settings. */
     test: () => send({ kind: 'test', ...NOTES.test }),
+    /** Drops the notes still waiting (server shutdown). */
+    dispose() {
+      if (askTimer) clearTimer(askTimer);
+      askTimer = null;
+      asking.clear();
+    },
   };
 }

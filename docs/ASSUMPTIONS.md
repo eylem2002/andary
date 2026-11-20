@@ -320,3 +320,11 @@ section.
     oldest without a button goes first, then a crew arrival, and an approval's toast last.
 86. **The page title counts approvals only.** "(2) Andary" is for things that block an agent
     until you answer; failures and finished work do not change the title.
+87. **A phone note for a permission request waits ten seconds.** Most prompts are answered within
+    a few seconds by someone at the computer; a note that arrives after you answered is noise.
+    Claude Code's own desktop notice waits about six seconds for the same reason. Requests from
+    several crews in those seconds become one note, and a finished turn sends nothing by itself:
+    Claude Code's `idle_prompt`, a minute later, covers a turn nobody came back to.
+88. **Plans and questions are never held in the town.** A plain allow cannot approve a plan
+    (`ExitPlanMode`) or answer a question (`AskUserQuestion`); both wait in the terminal, and the card
+    says so.

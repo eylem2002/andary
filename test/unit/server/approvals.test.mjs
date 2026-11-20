@@ -207,6 +207,23 @@ describe('terminal resolution of non-held approvals', () => {
   });
 });
 
+describe('who is still waiting', () => {
+  it('knows an agent with an unanswered request, held or not, until it is settled', async () => {
+    const { broker } = setup();
+    assert.equal(broker.isWaiting('s1', undefined), false);
+    const held = broker.create(request(), { hold: true }).approval;
+    broker.create(request({ agent_id: 'agent-7', tool_name: 'Write' }), { hold: false });
+    assert.equal(broker.isWaiting('s1', undefined), true);
+    assert.equal(broker.isWaiting('s1', 'agent-7'), true, 'with the prefix');
+    assert.equal(broker.isWaiting('s1', '7'), true, 'or without');
+    assert.equal(broker.isWaiting('s2', undefined), false);
+    broker.decide(held.id, 'allow');
+    broker.observe({ hook_event_name: 'PostToolUse', session_id: 's1', agent_id: '7', tool_name: 'Write' });
+    assert.equal(broker.isWaiting('s1', undefined), false);
+    assert.equal(broker.isWaiting('s1', '7'), false);
+  });
+});
+
 describe('limits and listing', () => {
   it('keeps at most maxPending pending approvals by expiring the oldest', async () => {
     const { broker } = setup({ maxPending: 3 });

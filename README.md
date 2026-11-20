@@ -177,7 +177,7 @@ browser tab reads **(1) Andary**, so you notice it from another tab or with the 
 - **Notifications:** on this computer (Settings, while the tab is in the background), or on your
   phone with `andary start --notify` through the free [ntfy](https://ntfy.sh) app, no account.
   Phone messages say only what happened ("A crew needs your permission"), never your project,
-  files or commands.
+  files or commands, and a permission request you answer within ten seconds sends none.
 
 ![The town's five looks](docs/media/andary-looks.webp)
 

@@ -86,6 +86,22 @@ describe('remote approvals', () => {
     await closeBrowser(browser);
   });
 
+  it('never holds a plan or a question: a plain allow cannot answer them', async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    /** @type {[string, RegExp][]} */
+    const cases = [['ExitPlanMode', /Plans are approved in the terminal/], ['AskUserQuestion', /Questions are answered in the terminal/]];
+    for (const [tool, words] of cases) {
+      const payload = permissionRequest({ tool_name: tool, tool_input: { plan: 'Refactor the auth module' } });
+      const result = await town.sendHook(payload);
+      assert.deepEqual(result, { code: 0, stdout: '', stderr: '' }, `${tool} is answered at once, with nothing`);
+      const approval = await approvalFor(browser, payload.session_id);
+      assert.deepEqual([approval.a.status, approval.a.held], ['pending', false]);
+      assert.match(approval.a.message, words);
+    }
+    await closeBrowser(browser);
+  });
+
   it('does not hold when no browser is watching', async () => {
     const payload = permissionRequest();
     const result = await town.sendHook(payload);

@@ -289,7 +289,10 @@ normal terminal prompt then appears). If remote approvals are off, the server an
 approval becomes `resolved` (`decidedBy: 'terminal'`) when the same session + agent + tool next
 reports PostToolUse, PostToolUseFailure, PermissionDenied, Stop or SessionEnd (the tool matches
 by `tool_name` or, for a call an adapter renamed, `andary_tool`, §4.12). At most 50 pending.
-A request whose `tool_input` was changed by sanitising (a value redacted or cut) is never held,
+`ExitPlanMode` and `AskUserQuestion` requests are never held: a plain allow or deny cannot approve
+a plan or answer a question, so they are answered with `null` at once (`held: false`) and their
+`message` says they are answered in the terminal. A request whose `tool_input` was changed by
+sanitising (a value redacted or cut) is never held,
 because the town could not show what would run: it is answered at once with `null` and its
 approval has `held: false` and `message: "The town cannot show this request in full (…)"`. In the
 browser, Allow/Deny ignore pointer clicks for 1 s after a card appears or changes place.
@@ -367,10 +370,13 @@ demo keeps its points in `localStorage['andary:demo-progress']`, starting at 92.
 Phone (`server/notify.mjs`), opt-in: `--notify` uses a random ntfy.sh topic kept in
 `<ANDARY_HOME>/notify.json` (0600); `--notify-url <url>` or `ANDARY_NOTIFY_URL` names any http(s)
 ntfy topic (no credentials in the URL). A `PermissionRequest` or `Notification`
-(`permission_prompt`) hook posts "A crew needs your permission." (priority high), `idle_prompt`
-"Claude is waiting for your next prompt.", the main agent's `Stop` "A crew finished its turn.",
-`StopFailure` a limit or error note. The body never names a project, file or command. At most
-one of a kind per 30 s and 30 an hour; a failed post is logged once. `settings.notify` (also in the
+(`permission_prompt`) hook holds back "A crew needs your permission." (priority high) for 10 s
+and drops it if the approval broker no longer has a request pending for that agent (answered
+meanwhile); requests from several crews in that window become one note ("2 crews need your
+permission."). `idle_prompt` posts "Claude is waiting for your next prompt.", `StopFailure` a limit
+or error note. A finished turn posts nothing by itself (`idle_prompt` follows a minute later if
+nobody answered). The body never names a project, file or command. At most one of a kind per 30 s
+and 30 an hour; a failed post is logged once. `settings.notify` (also in the
 unauthenticated `/api/hello`) is a boolean; the topic URL is only in the WebSocket `hello`.
 
 This computer (`public/js/ui/notifications.js`), opt-in in Settings (`prefs.desktopNotify`, after

@@ -12,8 +12,9 @@ test('noteFor picks what deserves a phone notification, and never says more than
   assert.equal(noteFor({ hook_event_name: 'Notification', notification_type: 'permission_prompt' })?.kind, 'permission');
   assert.equal(noteFor({ hook_event_name: 'Notification', notification_type: 'idle_prompt' })?.kind, 'waiting');
   assert.equal(noteFor({ hook_event_name: 'Notification', notification_type: 'auth_success' }), null);
-  assert.equal(noteFor({ hook_event_name: 'Stop' })?.kind, 'finished');
-  assert.equal(noteFor({ hook_event_name: 'Stop', agent_id: 'a1' }), null, 'a helper finishing is not news');
+  // A finished turn is no news by itself: idle_prompt says so a minute later if nobody answered.
+  assert.equal(noteFor({ hook_event_name: 'Stop' }), null);
+  assert.equal(noteFor({ hook_event_name: 'Stop', agent_id: 'a1' }), null);
   assert.equal(noteFor({ hook_event_name: 'StopFailure', error: 'rate_limit' })?.kind, 'limit');
   assert.equal(noteFor({ hook_event_name: 'StopFailure', error: 'server_error' })?.kind, 'stopped');
   assert.equal(noteFor({ hook_event_name: 'PreToolUse' }), null);
@@ -21,38 +22,98 @@ test('noteFor picks what deserves a phone notification, and never says more than
   assert.ok(!JSON.stringify(permission).includes('secret'));
 });
 
-test('notifications are posted to ntfy with a title, priority and tags, and rate-limited', async () => {
+/**
+ * A notifier whose held-back permission notes fire when the test says so.
+ * @param {Partial<import('../../../server/notify.mjs').NotifierOptions>} [options]
+ */
+function testNotifier(options = {}) {
   let now = 0;
   /** @type {any[]} */
   const posts = [];
-  const fetchImpl = /** @type {any} */ (async (url, init) => {
-    posts.push({ url, ...init });
-    return { ok: true, status: 200 };
+  /** @type {(() => void)[]} */
+  const due = [];
+  const notifier = createNotifier({
+    url: 'https://ntfy.example/topic',
+    fetchImpl: /** @type {any} */ (async (url, init) => {
+      posts.push({ url, ...init });
+      return { ok: true, status: 200 };
+    }),
+    now: () => now,
+    setTimer: (fn) => due.push(fn),
+    clearTimer: () => due.splice(0),
+    ...options,
   });
-  const notifier = createNotifier({ url: 'https://ntfy.example/topic', fetchImpl, now: () => now });
-  assert.equal(notifier.on, true);
-  notifier.observe({ hook_event_name: 'PermissionRequest' });
-  notifier.observe({ hook_event_name: 'PermissionRequest' });
+  return {
+    notifier,
+    posts,
+    /** Runs the held-back notes, then lets the posts settle. */
+    async fire() {
+      for (const fn of due.splice(0)) fn();
+      await new Promise((r) => setTimeout(r, 10));
+    },
+    /** @param {number} t */
+    at(t) {
+      now = t;
+    },
+  };
+}
+
+test('a permission note waits, and is dropped if the request was answered meanwhile', async () => {
+  const answered = new Set();
+  const { notifier, posts, fire } = testNotifier({ stillWaiting: (session, agent) => !answered.has(`${session}/${agent ?? 'main'}`) });
+  notifier.observe({ hook_event_name: 'PermissionRequest', session_id: 's1' });
   await new Promise((r) => setTimeout(r, 10));
+  assert.equal(posts.length, 0, 'nothing is sent at once');
+  answered.add('s1/main');
+  await fire();
+  assert.equal(posts.length, 0, 'answered within the delay: no note');
+  answered.clear();
+  notifier.observe({ hook_event_name: 'PermissionRequest', session_id: 's1' });
+  await fire();
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].body, 'A crew needs your permission.');
+});
+
+test('requests from several crews within the delay become one note', async () => {
+  const { notifier, posts, fire } = testNotifier();
+  notifier.observe({ hook_event_name: 'PermissionRequest', session_id: 's1' });
+  notifier.observe({ hook_event_name: 'Notification', notification_type: 'permission_prompt', session_id: 's1' });
+  notifier.observe({ hook_event_name: 'PermissionRequest', session_id: 's2', agent_id: 'agent-h1' });
+  await fire();
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].body, '2 crews need your permission.');
+  notifier.dispose();
+});
+
+test('notifications are posted to ntfy with a title, priority and tags, and rate-limited', async () => {
+  const { notifier, posts, fire, at } = testNotifier();
+  assert.equal(notifier.on, true);
+  notifier.observe({ hook_event_name: 'PermissionRequest', session_id: 's1' });
+  await fire();
+  notifier.observe({ hook_event_name: 'PermissionRequest', session_id: 's1' });
+  await fire();
   assert.equal(posts.length, 1, 'the same kind at most every 30 s');
   assert.equal(posts[0].method, 'POST');
   assert.equal(posts[0].body, 'A crew needs your permission.');
   assert.equal(posts[0].headers.Priority, 'high');
-  now = 31_000;
-  notifier.observe({ hook_event_name: 'PermissionRequest' });
-  await new Promise((r) => setTimeout(r, 10));
+  at(31_000);
+  notifier.observe({ hook_event_name: 'PermissionRequest', session_id: 's1' });
+  await fire();
   assert.equal(posts.length, 2);
+  let now = 31_000;
   // Test notes: one every 30 s at most, and they never use up the hour's budget.
   assert.equal(await notifier.test(), true);
   assert.equal(await notifier.test(), false, 'a second test right away is not sent');
   for (let i = 0; i < 40; i += 1) {
     now += 31_000;
+    at(now);
     await notifier.test();
   }
   assert.equal(posts.length, 43);
   for (let i = 0; i < 40; i += 1) {
     now += 31_000;
-    notifier.observe({ hook_event_name: 'PermissionRequest' });
+    at(now);
+    notifier.observe({ hook_event_name: 'StopFailure', error: 'server_error' });
   }
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(posts.length, 43 + 28, 'at most 30 real notes an hour, tests aside');

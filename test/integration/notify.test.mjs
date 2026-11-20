@@ -28,11 +28,12 @@ describe('Phone notifications', () => {
     ntfy?.close();
   });
 
-  it('posts a short note for a permission request, offers a test, and keeps the topic from signed-out pages', async () => {
-    await postHook(town, hookPayload('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'deploy --prod' } }));
+  it('posts a short note when Claude waits for you, offers a test, and keeps the topic from signed-out pages', async () => {
+    // (A permission note is held back for ten seconds: its rules are unit-tested in notify.test.mjs.)
+    await postHook(town, hookPayload('Notification', { notification_type: 'idle_prompt', message: 'Claude is waiting for your input in deploy-prod' }));
     for (let i = 0; i < 50 && received.length === 0; i += 1) await new Promise((r) => setTimeout(r, 50));
-    assert.equal(received[0].body, 'A crew needs your permission.');
-    assert.equal(received[0].headers.priority, 'high');
+    assert.equal(received[0].body, 'Claude is waiting for your next prompt.');
+    assert.ok(!JSON.stringify(received[0]).includes('deploy-prod'), 'the note never names the project');
     const hello = JSON.parse((await rawRequest(town.port, { path: '/api/hello' })).text);
     assert.equal(hello.settings.notify, true);
     assert.ok(!JSON.stringify(hello).includes('my-topic'));

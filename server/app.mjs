@@ -211,7 +211,12 @@ function createContext(config, options) {
       stateFile: config.writeState ? join(config.home, 'usage.json') : null,
       onChange: (record, days) => hub.broadcastOwners({ t: 'usage', u: record, days }),
     }),
-    notifier: createNotifier({ url: options.notifyUrl ?? null, log: config.log }),
+    notifier: createNotifier({
+      url: options.notifyUrl ?? null,
+      log: config.log,
+      // Read when a held-back permission note is due, long after the context exists.
+      stillWaiting: (sessionId, agentId) => ctx.broker.isWaiting(sessionId, agentId),
+    }),
     progress: createProgress({
       stateFile: config.writeState ? join(config.home, 'progress.json') : null,
       onChange: (progress) => hub.broadcast({ t: 'progress', p: progress }),
@@ -257,6 +262,7 @@ async function stopServer(ctx, listener, config) {
   if (ctx.relay) await Promise.race([ctx.relay.flush(), new Promise((resolve) => setTimeout(resolve, 1500).unref())]);
   ctx.relay?.dispose();
   ctx.usage.dispose();
+  ctx.notifier.dispose();
   ctx.progress.dispose();
   ctx.hub.closeAll(CLOSE_CODE.GOING_AWAY, 'Andary is shutting down');
   const closed = new Promise((resolve) => listener.front.close(() => resolve(undefined)));
