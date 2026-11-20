@@ -1,0 +1,12 @@
+{
+  "name": "andary",
+  "displayName": "Andary",
+  "version": "0.1.0",
+  "description": "A living 3D town where your Claude Code sessions, subagents and agent teams show up as tiny workers, live, through Claude Code hooks. Run /andary:town to open it.",
+  "author": {
+    "name": "eylem2002"
+  },
+  "repository": "https://github.com/eylem2002/andary",
+  "license": "MIT",
+  "keywords": ["visualization", "agents", "multi-agent", "hooks", "observability", "threejs"]
+}

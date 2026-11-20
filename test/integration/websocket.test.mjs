@@ -1,0 +1,113 @@
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import { closeBrowser, connectBrowser, hookPayload, postHook, startTown, waitForMessage } from './helpers.mjs';
+
+/** @type {Awaited<ReturnType<typeof startTown>>} */
+let town;
+
+before(async () => {
+  town = await startTown();
+});
+
+after(async () => {
+  await town?.stop();
+});
+
+/** @param {Promise<unknown>} attempt */
+async function refusalStatus(attempt) {
+  try {
+    const connection = /** @type {any} */ (await attempt);
+    connection.close();
+    return 101;
+  } catch (error) {
+    return error.status;
+  }
+}
+
+describe('WebSocket access control', () => {
+  it('needs the andary_ui cookie', async () => {
+    assert.equal(await refusalStatus(connectBrowser(town, { cookie: null })), 401);
+    assert.equal(await refusalStatus(connectBrowser(town, { cookie: 'andary_ui=guess' })), 401);
+  });
+
+  it('needs our own Origin (or none)', async () => {
+    assert.equal(await refusalStatus(connectBrowser(town, { origin: 'http://evil.example' })), 403);
+    assert.equal(await refusalStatus(connectBrowser(town, { origin: 'null' })), 403);
+    assert.equal(await refusalStatus(connectBrowser(town, { origin: `http://localhost:${town.port}` })), 101);
+    assert.equal(await refusalStatus(connectBrowser(town, { origin: null })), 101);
+  });
+});
+
+describe('WebSocket protocol', () => {
+  it('replays history and pending approvals in hello, then streams sanitized envelopes', async () => {
+    const secretKey = `sk-ant-${'Q'.repeat(30)}`;
+    await postHook(town, hookPayload('SessionStart', { source: 'startup', model: 'claude-opus-5-5' }));
+    await postHook(town, hookPayload('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'rm -rf dist' } }));
+    const browser = await connectBrowser(town);
+    const hello = await waitForMessage(browser, (m) => m?.t === 'hello');
+    assert.equal(hello.version.length > 0, true);
+    assert.ok(Math.abs(hello.serverTime - Date.now()) < 5000);
+    assert.deepEqual(hello.settings, { remoteApprovals: false, approvalTimeoutMs: 120000 });
+    const names = hello.history.map((/** @type {any} */ e) => e.event.hook_event_name);
+    assert.deepEqual(names.slice(0, 2), ['SessionStart', 'PermissionRequest']);
+    for (const envelope of hello.history) {
+      assert.equal(typeof envelope.id, 'number');
+      assert.equal(typeof envelope.ts, 'number');
+      assert.equal(typeof envelope.rx, 'number');
+    }
+    assert.equal(hello.approvals[0].status, 'pending');
+    assert.equal(hello.approvals[0].held, false);
+
+    await postHook(town, hookPayload('PreToolUse', { tool_name: 'Bash', tool_use_id: 't1', tool_input: { command: `curl -H "x-api-key: ${secretKey}" ${'a'.repeat(3000)}` } }));
+    const live = await waitForMessage(browser, (m) => m?.t === 'hook' && m.e.event.hook_event_name === 'PreToolUse');
+    assert.ok(live.e.id > hello.history.at(-1).id);
+    const command = live.e.event.tool_input.command;
+    assert.ok(!command.includes(secretKey), 'secrets are redacted before broadcast');
+    assert.ok(command.includes('[redacted]'));
+    assert.match(command, /…\[\+\d+ chars\]$/);
+    await closeBrowser(browser);
+  });
+
+  it('broadcasts settings changes to every browser', async () => {
+    const first = await connectBrowser(town);
+    const second = await connectBrowser(town);
+    await waitForMessage(second, (m) => m?.t === 'hello');
+    first.send(JSON.stringify({ t: 'settings', settings: { remoteApprovals: true } }));
+    const update = await waitForMessage(second, (m) => m?.t === 'settings');
+    assert.deepEqual(update.settings, { remoteApprovals: true, approvalTimeoutMs: 120000 });
+    first.send(JSON.stringify({ t: 'settings', settings: { remoteApprovals: false } }));
+    await waitForMessage(second, (m) => m?.t === 'settings' && m.settings.remoteApprovals === false);
+    await Promise.all([closeBrowser(first), closeBrowser(second)]);
+  });
+
+  it('answers bad messages with an error and keeps the connection', async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    browser.send('not json');
+    browser.send(JSON.stringify({ t: 'launch-rockets' }));
+    browser.send(JSON.stringify({ t: 'settings', settings: { remoteApprovals: 'yes' } }));
+    browser.send(JSON.stringify({ t: 'decide', id: 'no-such-id', decision: 'allow' }));
+    browser.send(JSON.stringify({ t: 'ping' }));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const errors = browser.messages.filter((m) => m?.t === 'error').map((m) => m.message);
+    assert.deepEqual(errors, ['Messages must be JSON', 'Unknown message type', 'settings.remoteApprovals must be true or false', 'Unknown approval']);
+    assert.ok(browser.isOpen);
+    await closeBrowser(browser);
+  });
+
+  it('closes a browser that floods it with messages (1008)', async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    const closed = new Promise((resolve) => browser.once('close', resolve));
+    for (let i = 0; i < 200; i += 1) browser.send(JSON.stringify({ t: 'ping' }));
+    const event = /** @type {any} */ (await closed);
+    assert.equal(event.code, 1008);
+  });
+
+  it('accepts at most 16 browsers', async () => {
+    const browsers = [];
+    for (let i = 0; i < 16; i += 1) browsers.push(await connectBrowser(town));
+    assert.equal(await refusalStatus(connectBrowser(town)), 503);
+    await Promise.all(browsers.map((browser) => closeBrowser(browser)));
+  });
+});
