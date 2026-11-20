@@ -9,10 +9,10 @@
 //   world=fake    skip the 3D view (HUD work, tests); with log=1 its calls go to the console
 import { createStore } from './core/store.js';
 import { createDirector } from './core/director.js';
-import { connectLive, fetchHello } from './core/connection.js';
+import { connectLive, fetchHello } from './sources/live.js';
 import { createHud } from './ui/hud.js';
 import { loadPrefs } from './ui/prefs.js';
-import { createDemo } from './ui/demo-mode.js';
+import { createDemo } from './sources/demo.js';
 import { resolveReducedMotion, timeOfDayFor } from './ui/appearance.js';
 
 const params = new URLSearchParams(location.search);
@@ -30,25 +30,23 @@ async function boot() {
   const app = { mode: 'demo', store, world: null };
   /** @type {any} */ (window).__andary = app;
 
-  /** @type {ReturnType<typeof connectLive>|null} */
-  let link = null;
-  /** @type {ReturnType<typeof createDemo>|null} */
-  let demo = null;
+  /** The one place events come from: live or demo (sources/types.js). @type {import('./sources/types.js').EventSource|null} */
+  let source = null;
 
   const hud = createHud({
     store,
     prefs,
     controls: {
-      decide: (id, decision) => (demo ? demo.decide(id, decision) : link?.decide(id, decision) ?? false),
-      setRemoteApprovals: (on) => link?.setRemoteApprovals(on),
+      decide: (id, decision) => source?.decide(id, decision) ?? false,
+      setRemoteApprovals: (on) => source?.setRemoteApprovals?.(on),
       startDemo: () => switchToDemo(),
       leaveDemo: () => location.assign(withoutParam('demo')),
       setPaused: (paused) => {
-        demo?.setPaused(paused);
+        source?.setPaused?.(paused);
         app.world?.setPaused(paused);
       },
-      setSpeed: (speed) => demo?.setSpeed(speed),
-      notifyTest: () => link?.notifyTest() ?? false,
+      setSpeed: (speed) => source?.setSpeed?.(speed),
+      notifyTest: () => source?.notifyTest?.() ?? false,
     },
   });
 
@@ -79,11 +77,11 @@ async function boot() {
   if (live) startLive(hello);
   else await startDemo({ hosted });
 
-  /** @param {import('./core/connection.js').Hello} info */
+  /** @param {import('./sources/live.js').Hello} info */
   function startLive(info) {
     app.mode = 'live';
     hud.setServerSettings(info.settings ?? {});
-    link = connectLive({
+    source = connectLive({
       store,
       authenticated: info.authenticated,
       onStatus: (status) => hud.setConnection(status),
@@ -97,7 +95,8 @@ async function boot() {
   /** @param {{ hosted: boolean }} options  hosted: no server at all, so offer the setup steps */
   async function startDemo({ hosted }) {
     const { createSimulation } = await import('./sim/simulation.js');
-    demo = createDemo({ store, createSimulation, speed: prefs.speed, seed: seedParam(), onProgress: (progress) => hud.setProgress(progress) });
+    const demo = createDemo({ store, createSimulation, speed: prefs.speed, seed: seedParam(), onProgress: (progress) => hud.setProgress(progress) });
+    source = demo;
     app.mode = 'demo';
     hud.setMode('demo');
     hud.setConnection('demo');
@@ -109,8 +108,8 @@ async function boot() {
 
   /** The "Watch the demo" button: leave live mode in place, without a reload. */
   async function switchToDemo() {
-    link?.close();
-    link = null;
+    source?.close();
+    source = null;
     store.reset();
     history.replaceState(null, '', withParam('demo', '1'));
     await startDemo({ hosted: false });

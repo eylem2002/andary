@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LOOKS, readLook } from '../../../public/js/core/looks.js';
-import { COAST_STYLE, LOOK_PALETTES } from '../../../public/js/world/env/look-palettes.js';
-import { C } from '../../../public/js/world/env/palette.js';
-import { skyKeysFor } from '../../../public/js/world/env/daynight.js';
-import { BUILDING_KEYS } from '../../../public/js/core/catalog.js';
+import { LOOKS, readLook } from '../../../../public/js/core/looks.js';
+import { COAST_STYLE, LOOK_PALETTES } from '../../../../public/js/world/env/look-palettes.js';
+import { C } from '../../../../public/js/world/env/palette.js';
+import { skyKeysFor } from '../../../../public/js/world/env/daynight.js';
+import { BUILDING_KEYS } from '../../../../public/js/core/catalog.js';
 
 test('readLook: ?look= first, then the saved preference, else the coast', () => {
   const storage = (value) => ({ getItem: () => value });

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { crewUsage, formatCost, formatTokens, lastDays, usageSentence, usageShort } from '../../../public/js/ui/usage.js';
-import { createDemoUsage } from '../../../public/js/ui/demo-usage.js';
+import { createDemoUsage } from '../../../public/js/sources/demo-usage.js';
 import { createStore } from '../../../public/js/core/store.js';
 
 test('formatCost and formatTokens read naturally', () => {

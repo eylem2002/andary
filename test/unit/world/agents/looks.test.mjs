@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CREW_COLORS } from '../../../public/js/core/catalog.js';
-import { contrastRatio, ensureContrastWithWhite, mix, parseHex, safeColor } from '../../../public/js/world/agents/color.js';
-import { kitFor, normalizeHat, resolveLook, wearableFor } from '../../../public/js/world/agents/looks.js';
-import { pickQuality } from '../../../public/js/world/agents/quality.js';
+import { CREW_COLORS } from '../../../../public/js/core/catalog.js';
+import { contrastRatio, ensureContrastWithWhite, mix, parseHex, safeColor } from '../../../../public/js/world/agents/color.js';
+import { kitFor, normalizeHat, resolveLook, wearableFor } from '../../../../public/js/world/agents/looks.js';
+import { pickQuality } from '../../../../public/js/world/agents/quality.js';
 
 test('agent types carry fitting tools', () => {
   assert.equal(kitFor('subagent', 'Explore'), 'magnifier');

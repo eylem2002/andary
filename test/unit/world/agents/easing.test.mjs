@@ -12,7 +12,7 @@ import {
   turnToward,
   windowed,
   wrapAngle,
-} from '../../../public/js/world/agents/easing.js';
+} from '../../../../public/js/world/agents/easing.js';
 
 const close = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
 

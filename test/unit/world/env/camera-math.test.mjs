@@ -13,7 +13,7 @@ import {
   projectedTownSize,
   screenPanToWorld,
   yawForStep,
-} from '../../../public/js/world/env/camera-math.js';
+} from '../../../../public/js/world/env/camera-math.js';
 
 const near = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps;
 

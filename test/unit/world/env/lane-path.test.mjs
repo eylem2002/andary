@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createPath, offsetPolyline, rightOf, roundCorners } from '../../../public/js/world/env/lane-path.js';
-import { ringRoadCorners } from '../../../public/js/world/layout.js';
+import { createPath, offsetPolyline, rightOf, roundCorners } from '../../../../public/js/world/env/lane-path.js';
+import { ringRoadCorners } from '../../../../public/js/world/layout.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
 

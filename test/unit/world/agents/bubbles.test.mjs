@@ -10,7 +10,7 @@ import {
   offerBubble,
   tickBubble,
   truncateText,
-} from '../../../public/js/world/agents/bubbles.js';
+} from '../../../../public/js/world/agents/bubbles.js';
 
 test('short text is only tidied', () => {
   assert.equal(truncateText('  Reading   src/app.ts\n now '), 'Reading src/app.ts now');

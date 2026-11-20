@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { C, NEON, PAINT, paintMap, shade } from '../../../public/js/world/env/palette.js';
-import { BEACH, WATERLINE_Z, beachSpots, sandHeight } from '../../../public/js/world/env/beach.js';
-import { createRng } from '../../../public/js/world/env/rand.js';
-import { SEA } from '../../../public/js/world/env/terrain.js';
-import { GRADE, gradeAt } from '../../../public/js/world/env/grade.js';
-import { BUILDING_KEYS } from '../../../public/js/core/catalog.js';
+import { C, NEON, PAINT, paintMap, shade } from '../../../../public/js/world/env/palette.js';
+import { BEACH, WATERLINE_Z, beachSpots, sandHeight } from '../../../../public/js/world/env/beach.js';
+import { createRng } from '../../../../public/js/world/env/rand.js';
+import { SEA } from '../../../../public/js/world/env/terrain.js';
+import { GRADE, gradeAt } from '../../../../public/js/world/env/grade.js';
+import { BUILDING_KEYS } from '../../../../public/js/core/catalog.js';
 
 test('shade mixes towards white or black and leaves 0 alone', () => {
   assert.equal(shade(0x808080, 0), 0x808080);

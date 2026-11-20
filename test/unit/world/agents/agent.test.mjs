@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Agent } from '../../../public/js/world/agents/agent.js';
-import { enter, leave } from '../../../public/js/world/agents/arrivals.js';
-import { RUN_SPEED, WALK_SPEED } from '../../../public/js/world/agents/animator.js';
-import { resolveLook } from '../../../public/js/world/agents/looks.js';
-import { planRoute, standingSpots } from '../../../public/js/world/agents/routes.js';
+import { Agent } from '../../../../public/js/world/agents/agent.js';
+import { enter, leave } from '../../../../public/js/world/agents/arrivals.js';
+import { RUN_SPEED, WALK_SPEED } from '../../../../public/js/world/agents/animator.js';
+import { resolveLook } from '../../../../public/js/world/agents/looks.js';
+import { planRoute, standingSpots } from '../../../../public/js/world/agents/routes.js';
 
 /** Stands in for the DOM tag: the Agent only calls a few methods on it. */
 const fakeTag = () => /** @type {any} */ ({ remove() {}, setSelected() {}, setHovered() {} });

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSpotAllocator } from '../../../public/js/world/agents/spots.js';
+import { createSpotAllocator } from '../../../../public/js/world/agents/spots.js';
 
 const allocator = (spots = 3) => createSpotAllocator(() => spots);
 

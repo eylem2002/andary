@@ -1,5 +1,5 @@
-// Demo mode: runs the built-in simulation and feeds its hook payloads to the store exactly as the
-// server would (wrapped as envelopes). A PermissionRequest becomes a held approval that the HUD
+// The demo event source (sources/types.js): runs the built-in simulation and feeds its hook
+// payloads to the store exactly as the server would (wrapped as envelopes). A PermissionRequest becomes a held approval that the HUD
 // can answer; the simulation waits on it and continues with the decision, or after 25 seconds of
 // story time without one (so the card's countdown runs faster at 2× and 4×, like the story, and
 // stands still while the demo is paused).
@@ -8,7 +8,7 @@ import { normalizeAgentId } from '../core/ids.js';
 import { createDemoUsage } from './demo-usage.js';
 import { createDemoProgress } from './demo-progress.js';
 
-/** @typedef {import('./types.js').Approval} Approval */
+/** @typedef {import('../core/store.js').Approval} Approval */
 
 export const DEMO_APPROVAL_MS = 25_000;
 
@@ -117,7 +117,9 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
 
   const simulation = createSimulation({ seed, speed, emit });
 
-  return {
+  /** @type {import('./types.js').EventSource & { start(): void }} */
+  const source = {
+    mode: 'demo',
     start: () => simulation.start(),
     /** @param {boolean} on */
     setPaused(on) {
@@ -141,9 +143,10 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
      */
     decide: (id, decision) => settle(id, decision === 'allow' ? 'allowed' : 'denied', 'town'),
     /** Stops the simulation and lets anything still waiting carry on. */
-    dispose() {
+    close() {
       simulation.stop();
       for (const id of Array.from(waiting.keys())) settle(id, 'expired', 'timeout');
     },
   };
+  return source;
 }

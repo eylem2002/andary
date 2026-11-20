@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, mock, test } from 'node:test';
-import { DEMO_APPROVAL_MS, createDemo } from '../../../public/js/ui/demo-mode.js';
+import { DEMO_APPROVAL_MS, createDemo } from '../../../public/js/sources/demo.js';
 
 function fakeStore() {
   /** @type {any[]} */
@@ -81,7 +81,7 @@ describe('demo mode', () => {
     demo.setSpeed(4);
     assert.equal(sim.speed, 4);
     const answer = sim.emit(permission);
-    demo.dispose();
+    demo.close();
     assert.equal(sim.running, false);
     assert.deepEqual(await answer, {});
   });

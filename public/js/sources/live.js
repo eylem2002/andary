@@ -1,4 +1,5 @@
-// Live mode: the WebSocket link to the local Andary server (CONTRACTS §4.5).
+// The live event source (sources/types.js): the WebSocket link to the local Andary server
+// (CONTRACTS §4.5).
 // On `hello` the store is rebuilt from the server's history; afterwards every hook envelope and
 // approval update is applied as it arrives. A dropped connection is retried with exponential
 // backoff; before each retry `/api/hello` tells apart "server down" (Offline) from "this browser's
@@ -218,6 +219,8 @@ export function connectLive({
   else retryTimer = setTimeout(probe, SIGNIN_POLL_MS);
 
   return {
+    /** @type {'live'} */
+    mode: 'live',
     get status() {
       return status;
     },

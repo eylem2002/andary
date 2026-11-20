@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compactSigns, formatStat, signLabel, signScale } from '../../../public/js/world/env/sign-format.js';
-import { MAX_BOXES, PILE_COUNTS, clampLevel, pileLayout } from '../../../public/js/world/env/pile-layout.js';
-import { GROVE_SLOTS, nextFreeSlot, worktreeLabel } from '../../../public/js/world/env/grove-slots.js';
-import { createRng, hashString, range } from '../../../public/js/world/env/rand.js';
-import { boxCorners, fitLightFrame } from '../../../public/js/world/env/shadow-fit.js';
+import { compactSigns, formatStat, signLabel, signScale } from '../../../../public/js/world/env/sign-format.js';
+import { MAX_BOXES, PILE_COUNTS, clampLevel, pileLayout } from '../../../../public/js/world/env/pile-layout.js';
+import { GROVE_SLOTS, nextFreeSlot, worktreeLabel } from '../../../../public/js/world/env/grove-slots.js';
+import { createRng, hashString, range } from '../../../../public/js/world/env/rand.js';
+import { boxCorners, fitLightFrame } from '../../../../public/js/world/env/shadow-fit.js';
 
 test('formatStat trims, strips control characters and caps the length', () => {
   assert.equal(formatStat('  42   reads '), '42 reads');

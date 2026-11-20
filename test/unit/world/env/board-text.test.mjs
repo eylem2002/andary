@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { clampLines, cleanText, layoutBoard, wrapText } from '../../../public/js/world/env/board-text.js';
+import { clampLines, cleanText, layoutBoard, wrapText } from '../../../../public/js/world/env/board-text.js';
 
 // One unit per character keeps the expectations readable.
 const measure = (s) => Array.from(s).length;

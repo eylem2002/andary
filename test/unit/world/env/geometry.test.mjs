@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { GeometryBatch } from '../../../public/js/world/env/batch.js';
-import { Kit } from '../../../public/js/world/env/kit.js';
-import { S } from '../../../public/js/world/env/palette.js';
-import { bounceAt } from '../../../public/js/world/env/building-fx.js';
+import { GeometryBatch } from '../../../../public/js/world/env/batch.js';
+import { Kit } from '../../../../public/js/world/env/kit.js';
+import { S } from '../../../../public/js/world/env/palette.js';
+import { bounceAt } from '../../../../public/js/world/env/building-fx.js';
 
 const near = (a, b, eps = 1e-5) => Math.abs(a - b) <= eps;
 

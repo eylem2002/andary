@@ -1,7 +1,7 @@
 // The live-mode WebSocket client, driven with a fake socket, a fake /api/hello and mock timers.
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, mock, test } from 'node:test';
-import { backoffDelay, connectLive, fetchHello, parseMessage, socketUrl } from '../../../public/js/core/connection.js';
+import { backoffDelay, connectLive, fetchHello, parseMessage, socketUrl } from '../../../public/js/sources/live.js';
 
 class FakeSocket {
   /** @type {FakeSocket[]} */

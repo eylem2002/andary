@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { CURVE, ParticleField, curveScale, spawnSpec } from '../../../public/js/world/agents/particles.js';
+import { CURVE, ParticleField, curveScale, spawnSpec } from '../../../../public/js/world/agents/particles.js';
 
 const field = (capacity = 8, orient = undefined) =>
   new ParticleField({ geometry: new THREE.BoxGeometry(1, 1, 1), material: new THREE.MeshBasicMaterial(), capacity, orient });

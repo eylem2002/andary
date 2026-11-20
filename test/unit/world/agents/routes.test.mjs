@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BUILDING_KEYS } from '../../../public/js/core/catalog.js';
-import { LOTS, WORK_FACING, isWalkable, tileToWorld, worldToTile } from '../../../public/js/world/layout.js';
+import { BUILDING_KEYS } from '../../../../public/js/core/catalog.js';
+import { LOTS, WORK_FACING, isWalkable, tileToWorld, worldToTile } from '../../../../public/js/world/layout.js';
 import {
   laneOffset,
   offsetPolyline,
@@ -10,7 +10,7 @@ import {
   slotEntry,
   slotPosition,
   standingSpots,
-} from '../../../public/js/world/agents/routes.js';
+} from '../../../../public/js/world/agents/routes.js';
 
 const walkable = (p) => {
   const [c, r] = worldToTile(p.x, p.z);

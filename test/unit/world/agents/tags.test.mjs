@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pickCompactPills } from '../../../public/js/world/agents/tags.js';
+import { pickCompactPills } from '../../../../public/js/world/agents/tags.js';
 
 /** @param {Partial<{x:number,y:number,w:number,h:number,priority:number,compact:boolean}>} p */
 const pill = (p) => ({ x: 0, y: 0, w: 80, h: 22, priority: 0, compact: false, agent: null, ...p });

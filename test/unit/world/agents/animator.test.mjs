@@ -9,9 +9,9 @@ import {
   hammerRaise,
   impatience,
   rampPhase,
-} from '../../../public/js/world/agents/activities.js';
-import { Animator, BLEND_SECONDS, PROP_SECONDS } from '../../../public/js/world/agents/animator.js';
-import { P, POSE_SIZE, createPose } from '../../../public/js/world/agents/pose.js';
+} from '../../../../public/js/world/agents/activities.js';
+import { Animator, BLEND_SECONDS, PROP_SECONDS } from '../../../../public/js/world/agents/animator.js';
+import { P, POSE_SIZE, createPose } from '../../../../public/js/world/agents/pose.js';
 
 const DT = 1 / 60;
 const run = (anim, seconds, moving = false) => {
@@ -20,10 +20,10 @@ const run = (anim, seconds, moving = false) => {
 const prop = (anim, name) => anim.propScale[PROP_NAMES.indexOf(name)];
 
 test('every catalog activity has a pose that stays finite and in a sane range', async () => {
-  const { BUILDING_ACTIVITY } = await import('../../../public/js/core/catalog.js');
+  const { BUILDING_ACTIVITY } = await import('../../../../public/js/core/catalog.js');
   for (const activity of new Set(Object.values(BUILDING_ACTIVITY))) assert.ok(ACTIVITY_DEFS[activity], activity);
   const pose = createPose();
-  /** @type {import('../../../public/js/world/agents/activities.js').AnimContext} */
+  /** @type {import('../../../../public/js/world/agents/activities.js').AnimContext} */
   const ctx = { seed: 0.37, seedInt: 12345, gait: 0, variant: 'box' };
   for (const name of ACTIVITY_NAMES) {
     for (let t = 0; t < 40; t += 0.37) {
@@ -143,7 +143,7 @@ test('waiting grows impatient: faster foot taps and more watch checks', () => {
   assert.equal(impatience(1e6), 1);
   const countLooks = (from, to) => {
     const pose = createPose();
-    /** @type {import('../../../public/js/world/agents/activities.js').AnimContext} */
+    /** @type {import('../../../../public/js/world/agents/activities.js').AnimContext} */
     const ctx = { seed: 0.5, seedInt: 99, gait: 0, variant: 'box' };
     let looks = 0;
     let looking = false;

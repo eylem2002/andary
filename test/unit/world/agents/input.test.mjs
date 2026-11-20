@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isClick, keyAction, raySegmentDistance } from '../../../public/js/world/agents/input.js';
+import { isClick, keyAction, raySegmentDistance } from '../../../../public/js/world/agents/input.js';
 
 const v = (x, y, z) => ({ x, y, z });
 

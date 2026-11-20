@@ -12,7 +12,7 @@ import {
   normalizeHour,
   skyState,
   sunPosition,
-} from '../../../public/js/world/env/daynight.js';
+} from '../../../../public/js/world/env/daynight.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
 
