@@ -1,0 +1,215 @@
+# Andary
+
+**Watch your Claude Code agents work in a living 3D town.**
+
+Every Claude Code session on your machine moves into Andary as a crew: a Foreman (the main
+agent), plus every subagent and agent-team teammate it spawns. When an agent reads a file it
+walks to the Library; when it runs `npm test` it heads to Terminal Works; when it needs your
+permission it queues at the Permit Office, and you can approve it right there. Speech bubbles
+tell you what each one is doing (with jokes, but mostly with real file names and commands).
+
+![Andary by day: crews on the left, the town in the middle, live activity on the right](docs/media/andary-day.webp)
+
+![Andary at night, with the agent inspector open](docs/media/andary-night.webp)
+
+<img src="docs/media/andary-mobile.webp" width="260" alt="Andary on a phone: the town on top, crews in a bottom sheet">
+
+It runs entirely on your machine: no account, no cloud, no telemetry, no runtime dependencies.
+
+## Quick start
+
+You need **Node.js 20+** (22 LTS recommended), **Claude Code**, and a browser with WebGL 2.
+
+```sh
+npm install -g github:eylem2002/andary   # installs the `andary` command straight from GitHub
+andary install                           # adds hooks to ~/.claude/settings.json (backup made)
+andary start                             # starts the town and opens it in your browser
+```
+
+Now use `claude` as usual, in any project. The town fills up as your agents work.
+
+- No Claude session handy? `andary demo` plays a built-in simulation of three projects.
+- Changed your mind? `andary uninstall` removes exactly the hooks it added.
+- Prefer a clone? `git clone https://github.com/eylem2002/andary && cd andary`, then use
+  `node bin/andary.mjs <command>` instead of `andary <command>`.
+- As a Claude Code plugin: `/plugin marketplace add eylem2002/andary`, then
+  `/plugin install andary@andary`; the plugin brings its own hooks, and `/andary:town` starts
+  and opens the town (see [docs/INTEGRATION.md](docs/INTEGRATION.md)).
+
+## What you'll see
+
+| Building | Agents go there to… | Tools |
+| --- | --- | --- |
+| Town Hall | start a crew, spawn subagents (through a glowing portal) | `Agent` (`Task`) |
+| Library | read files | `Read` |
+| Workshop | edit and write files | `Edit`, `Write`, `NotebookEdit` |
+| Terminal Works | run shell commands; `npm install` grows the node_modules pile | `Bash`, `PowerShell` |
+| Search Bureau | grep and glob through code | `Grep`, `Glob` |
+| Web Tower | search and fetch the web | `WebSearch`, `WebFetch`, `curl` |
+| Goal Board | update todo lists and team tasks (shown live on the billboard) | `TodoWrite`, `Task*` |
+| Post Office | send messages to teammates, commit and push (the mail truck leaves) | `SendMessage`, `git commit/push` |
+| MCP Harbor | use tools from MCP servers (boats come in) | `mcp__*` |
+| Permit Office | wait for your approval | permission prompts, `AskUserQuestion` |
+| Memory Spa | relax while their context is compacted | compaction |
+| Skill Academy | load skills | `Skill` |
+| Café | wait for your next prompt (and fall asleep if you take too long) | idle |
+| Worktree Grove | grow a tree per git worktree | worktrees |
+| Bus Stop | arrive and leave | session start and end |
+
+Also: hats show the model (crown for Opus, beret for Sonnet, sun hat for Haiku), failing tests
+bring a personal rain cloud, rate limits a thunderstorm, passing tests fireworks, and there are
+achievements to unlock ("Red to Green", "node_modules Black Hole", "Night Shift"…). Day and
+night follow your clock. Click any agent for its details, or any building for who is inside.
+
+## Approve permission prompts from the town
+
+Off by default. Turn on **Remote approvals** in Settings (or start with
+`andary start --remote-approvals`). When Claude Code asks for permission, the card in the
+Approvals tab gets **Allow** and **Deny** buttons and a countdown; if nobody answers within
+two minutes the normal terminal prompt appears. With it off, the town still shows each request
+so you know who is waiting.
+
+Approval cards show the exact request (the full path, every MCP argument, and any invisible or
+text-reversing characters made visible). A request the town cannot show in full, because a
+secret was masked or a long value was cut, is never held: it goes straight to your terminal.
+Allow and Deny ignore clicks for a second after a card appears or moves, so a new request
+cannot catch a click meant for another; the keyboard is never delayed.
+
+## How it works
+
+```mermaid
+flowchart LR
+  CC["Claude Code<br/>(every session, subagent, teammate)"] -- "hook JSON on stdin" --> F["hook.mjs forwarder<br/>(async, always exits 0)"]
+  F -- "POST /api/hook + secret" --> S["andary server<br/>127.0.0.1 only"]
+  S -- "WebSocket (cookie + origin check)" --> B["Browser: 3D town + HUD"]
+  B -- "Allow / Deny" --> S
+  S -- "decision (PermissionRequest only)" --> F
+```
+
+- **Hooks**: `andary install` registers a tiny forwarder for 19 hook events. Observation hooks
+  run with `"async": true`, so they never slow Claude down; only `PermissionRequest` waits, and
+  only when remote approvals are on.
+- **Server**: Node built-ins only. Sanitises and redacts every payload, keeps the last 2,000
+  events in memory for newly opened tabs, writes nothing to disk unless you pass `--record`.
+- **Browser**: plain ES modules and three.js, no build step. The same pipeline runs the demo.
+
+Design notes and interfaces: [docs/CONTRACTS.md](docs/CONTRACTS.md) and
+[architecture decision records](docs/adr/README.md).
+
+## Security and privacy
+
+Andary sees what your agents see (prompts, commands, file paths), so it is locked down:
+
+- listens on `127.0.0.1` only, and checks the `Host` header (DNS rebinding) and the WebSocket
+  `Origin` (cross-site hijacking);
+- the browser signs in with a random per-start token, exchanged for an `HttpOnly`,
+  `SameSite=Strict` cookie; hooks authenticate with a separate secret; both live in
+  `~/.andary/server.json`, readable only by you;
+- strict Content-Security-Policy, no third-party requests (fonts and three.js are bundled), and
+  event text is never rendered as HTML;
+- secrets that look like API keys, tokens or passwords are redacted before anything leaves the
+  server; nothing is logged or written to disk by default;
+- the hook forwarder only talks to a live server of yours, and only obeys replies signed with a
+  per-start key that never leaves `~/.andary` (a stale state file cannot hand your prompts, or
+  control of Claude Code, to whoever grabs the old port);
+- the installer refuses symlinked settings files, and the state folder must belong to you.
+
+Known limits, with what to do about them, are in the
+[final report](docs/FINAL-REPORT.md#5-remaining-risks).
+
+Details: [docs/INTEGRATION.md](docs/INTEGRATION.md) and the
+[security review](docs/reviews/security-review-2026-11-17.md).
+
+## CLI
+
+```
+andary [command] [options]
+
+  start                 start the town and open it (default). --port, --host, --no-open,
+                        --remote-approvals, --approval-timeout <s>, --record, --detach
+  demo                  start the town in demo mode
+  stop                  stop the running town
+  install / uninstall   add or remove the hooks. --scope user|project|local, --dir, --dry-run, --print
+  status                server, sign-in link, hooks per scope
+  doctor                check the whole pipeline end to end
+  simulate              send simulated sessions to the running town (--speed, --seed)
+  replay <file.jsonl>   replay a recording made with --record (--speed)
+```
+
+Environment: `ANDARY_HOME` (default `~/.andary`), `ANDARY_PORT` (default 4747),
+`CLAUDE_CONFIG_DIR` (default `~/.claude`). Agent teams need
+`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in Claude Code.
+
+## Development
+
+```sh
+npm ci                                 # dev tools only
+npx playwright install chromium        # browser for the end-to-end tests
+npm run hooks:install                  # fast checks before every git push
+npm run demo                           # or: npm start
+```
+
+| Command | What it runs |
+| --- | --- |
+| `npm run lint` | ESLint, zero warnings allowed |
+| `npm run lint:config` | JSON, shellcheck, actionlint, yamllint |
+| `npm run deadcode` | exports that nothing imports (`scripts/find-unused-exports.mjs`) |
+| `npm run typecheck` | `tsc --checkJs` over all sources |
+| `npm test` | unit + integration tests (`node:test`) |
+| `npm run test:e2e` | Playwright end-to-end and axe accessibility suites, desktop + mobile |
+| `npm run perf` | Lighthouse, desktop + mobile |
+| `npm run licenses` | licence allow-list over every installed package and vendored asset |
+| `npm run secrets` | secret scan of the working tree and the full git history |
+| `npm run check` | **everything above** (the full local check) |
+| `npm run check:fast` | lint, config lint, typecheck, dead code, tests, licences, secrets (the pre-push hook) |
+
+Containers without Playwright's browser can use an installed Chrome:
+`CHROME_PATH=/usr/bin/google-chrome npm run check`.
+
+Handy pages while hacking: `/world-lab.html` (characters and effects) and
+`/world-env-lab.html` (the town itself); `?demo=1&speed=4&world=fake` for HUD-only work.
+
+### Continuous integration
+
+GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every pull request
+and on `main`: audit, lint, config lint, typecheck, dead code, tests, licences and a
+full-history secrets scan on Node 22 and 24, then the end-to-end and accessibility suites. It is
+free on public repositories (and about 10 of the 2,000 free minutes per push on private ones).
+Dependabot keeps dependencies and pinned actions current.
+
+Before every push, the pre-push hook (`npm run hooks:install`, once per clone) runs the same fast
+checks locally; `npm run check` runs everything, end-to-end and accessibility included.
+
+### Deploying
+
+Andary is a local tool, so there is nothing to deploy for normal use. To host the demo, serve the
+`public/` folder from any static host: without a server it runs the simulation automatically.
+
+## Project layout
+
+```
+bin/andary.mjs        CLI
+server/               HTTP + WebSocket server, auth, approvals, sanitising, installer
+hooks/                hook forwarder and plugin hook config
+public/js/core/       hook normalisation, store, director, humour
+public/js/world/      3D town (env/), characters (agents/), world facade
+public/js/ui/         HUD
+public/js/sim/        simulation (demo mode and `andary simulate`)
+test/, e2e/           node:test and Playwright suites
+docs/                 contracts, ADRs, QA and security reports, owner setup
+```
+
+## Documentation
+
+- [Owner setup](docs/OWNER-SETUP.md): the few things that need you
+- [Integration and security model](docs/INTEGRATION.md)
+- [Architecture contracts](docs/CONTRACTS.md) and [ADRs](docs/adr/README.md)
+- [Assumptions](docs/ASSUMPTIONS.md)
+- [QA checks](docs/qa/checks-2026-11-17.md), [security review](docs/reviews/security-review-2026-11-17.md),
+  [code-quality review](docs/reviews/code-quality-review-2026-11-17.md)
+- [Final report](docs/FINAL-REPORT.md)
+
+## License
+
+[MIT](LICENSE). three.js (MIT) and the Overpass fonts (SIL OFL 1.1) are bundled; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
