@@ -13,6 +13,7 @@ import { createHelpDialog, createSettingsDialog, createSetupDialog } from './dia
 import { handleShortcut, openDialog, panelsHidden, runAction, select, setFollow } from './hud-actions.js';
 import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
 import { createInspector } from './inspector.js';
+import { createWeatherDriver } from '../core/town-weather.js';
 import { createDiffDialog } from './changes.js';
 import { createUsageDialog } from './usage.js';
 import { createMasthead } from './masthead.js';
@@ -107,6 +108,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
         ui.notices.showWorldFallback();
       } else {
         ctx.cinema.start(/** @type {HTMLElement} */ (document.getElementById('world')));
+        createWeatherDriver({ store, world: () => shell.world, enabled: () => ctx.prefs.weather, onChange: (w) => sayWeather(ctx, w) });
       }
       ctx.refresh();
       // Panel slides animate from now on; two frames later, so a layout settled at boot never does.
@@ -165,6 +167,18 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       ctx.cinema.dispose();
     },
   };
+}
+
+/** What screen readers hear when the town's weather turns. */
+const WEATHER_WORDS = Object.freeze({
+  storm: 'A storm over the town: something keeps failing.',
+  rainbow: 'A rainbow over the town: the tests pass again.',
+});
+
+/** @param {HudContext} ctx @param {import('../core/town-weather.js').TownWeather} w */
+function sayWeather(ctx, w) {
+  const words = WEATHER_WORDS[/** @type {keyof typeof WEATHER_WORDS} */ (w.kind)];
+  if (words && ctx.prefs.announce) ctx.announcer.polite(words);
 }
 
 /** @param {Prefs} prefs @returns {ViewState} */

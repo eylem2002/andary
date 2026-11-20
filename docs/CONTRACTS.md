@@ -378,6 +378,9 @@ World {
   setReducedMotion(on: boolean): void
 
   focusAgent(id, opts?: { follow?: boolean, zoom?: number }): void  // zoom: eases there (1 = whole town)
+  setTownWeather(w: { kind: 'clear'|'rain'|'storm'|'fog'|'rainbow', rain, overcast, fog, rainbow /* 0–1 */, storm: boolean }): void
+    // core/town-weather.js decides it from the store's events (rules in that file); the HUD's
+    // driver sends it at most once a second, only when it changed, and clear when Settings turns it off
   focusBuilding(key: BuildingKey): void
   stopFollow(): void
   resetCamera(): void

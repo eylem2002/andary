@@ -18,3 +18,4 @@ bottom; after a merge GitHub retargets the next pull request to `main`.
 - `feat/sunset-coast-theme` — the sunset-coast look: paint, neon, beach, sky, grade and HUD
 - `feat/file-diffs` — click a file in the agent inspector to see its diff
 - `feat/cost-meter` — tokens and estimated cost per crew and agent, and a 14-day usage chart
+- `feat/town-weather` — rain, storms, fog and rainbows from what the crews go through

@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { hourFromDate, normalizeHour, skyState } from './daynight.js';
 import { CAMERA_DISTANCE } from './camera-rig.js';
+import { weatherSky } from './weather-sky.js';
 
 /** Re-render the reflection environment at most this often, and only after real sky changes. */
 const ENV_MIN_INTERVAL_MS = 400;
@@ -31,7 +32,12 @@ function toColor(rgb, out) {
  */
 export function createAtmosphere(deps, initial = 'auto') {
   const { scene, lighting, backdrop, skyEnv, town, post } = deps;
-  const fog = new THREE.Fog(0xffffff, CAMERA_DISTANCE + 25, CAMERA_DISTANCE + 230);
+  const FOG_NEAR = CAMERA_DISTANCE + 25;
+  const FOG_FAR = CAMERA_DISTANCE + 230;
+  const fog = new THREE.Fog(0xffffff, FOG_NEAR, FOG_FAR);
+  /** Town weather, eased towards `target` so the sky never jumps. */
+  const weather = { overcast: 0, fog: 0 };
+  const target = { overcast: 0, fog: 0 };
   scene.fog = fog;
   /** @type {number|'auto'} */
   let mode = initial;
@@ -46,7 +52,9 @@ export function createAtmosphere(deps, initial = 'auto') {
   /** @param {number} h */
   function apply(h) {
     hour = normalizeHour(h);
-    const state = skyState(hour);
+    const state = weatherSky(skyState(hour), weather);
+    fog.near = FOG_NEAR * Math.max(0.15, state.fogScale);
+    fog.far = FOG_NEAR + (FOG_FAR - FOG_NEAR) * Math.max(0.12, state.fogScale);
     lighting.apply(state, toColor);
     toColor(state.zenith, uniforms.uZenith.value);
     toColor(state.horizon, uniforms.uHorizon.value);
@@ -76,6 +84,20 @@ export function createAtmosphere(deps, initial = 'auto') {
     scene.environment = skyEnv.update();
   }
 
+  /** Moves the weather a little towards its target each frame; re-applies the sky when it moved. @param {number} dt */
+  function easeWeather(dt) {
+    const step = Math.min(1, dt * 0.6);
+    let moved = false;
+    for (const k of /** @type {const} */ (['overcast', 'fog'])) {
+      const next = Math.abs(target[k] - weather[k]) < 0.004 ? target[k] : weather[k] + (target[k] - weather[k]) * step;
+      if (next !== weather[k]) {
+        weather[k] = next;
+        moved = true;
+      }
+    }
+    if (moved) apply(hour);
+  }
+
   apply(mode === 'auto' ? hourFromDate(new Date()) : mode);
 
   return {
@@ -86,6 +108,11 @@ export function createAtmosphere(deps, initial = 'auto') {
     },
     get hour() {
       return hour;
+    },
+    /** @param {{ overcast: number, fog: number }} w */
+    setWeather(w) {
+      target.overcast = w.overcast;
+      target.fog = w.fog;
     },
     get mode() {
       return mode;
@@ -100,6 +127,7 @@ export function createAtmosphere(deps, initial = 'auto') {
           if (Math.abs(hourDelta(hour, now)) >= 1 / 60) apply(now);
         }
       }
+      easeWeather(dt);
       refreshEnvironment();
     },
     dispose() {

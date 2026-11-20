@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { BUILDING_KEYS } from '../../core/catalog.js';
 import { createAmbient } from './ambient.js';
 import { createAtmosphere } from './atmosphere.js';
+import { createTownWeatherFx } from './town-weather-fx.js';
 import { GeometryBatch } from './batch.js';
 import { createBoard } from './board.js';
 import { createBuildingFx } from './building-fx.js';
@@ -122,7 +123,13 @@ function createFeatures(core, options) {
   const board = createBoard({ record: world.records.board, scene });
   core.skyListeners.push((state) => board.setNight(state.night));
   board.setNight(town.uTtNight.value);
+  const flash = { level: 0 };
+  const weather = createTownWeatherFx({ scene, camera: core.rig.camera, reducedMotion: reduced, flash: (strength) => (flash.level = Math.max(flash.level, strength)) });
+  core.skyListeners.push((state) => weather.setNight(state.night));
+  weather.setNight(town.uTtNight.value);
   return {
+    weather,
+    flash,
     signs,
     board,
     fx: createBuildingFx({ scene, town, records: world.records, reducedMotion: reduced }),
@@ -142,7 +149,7 @@ function createApi(core, f) {
   const { renderer, scene, town, world, rig, post, atmosphere, view } = core;
   /** @param {unknown} key */
   const record = (key) => (BUILDING_KEYS.includes(/** @type {BuildingKey} */ (key)) ? world.records[/** @type {BuildingKey} */ (key)] : null);
-  const movers = [f.fx, f.pile, f.grove, f.vehicles, f.ambient, f.signs];
+  const movers = [f.fx, f.pile, f.grove, f.vehicles, f.ambient, f.signs, f.weather];
   return {
     scene,
     camera: rig.camera,
@@ -163,6 +170,10 @@ function createApi(core, f) {
       f.ambient.update(step, elapsed);
       f.board.update();
       f.signs.update(rig.camera, view.width, view.height, rig.zoom);
+      f.weather.update(step);
+      // A lightning flash brightens the whole picture for a moment.
+      f.flash.level = Math.max(0, f.flash.level - step * 7);
+      renderer.toneMappingExposure = 1.1 + f.flash.level * 1.4;
     },
     /** Renders the scene; renderer.info then holds this frame's totals (shadow and post passes included). */
     render() {
@@ -178,7 +189,15 @@ function createApi(core, f) {
       post.resize(view.width, view.height);
     },
     /** @param {'auto'|'high'|'low'} q */
-    setQuality: (q) => core.applyQuality(resolveQuality(q)),
+    setQuality: (q) => {
+      core.applyQuality(resolveQuality(q));
+      f.weather.setQuality(view.quality);
+    },
+    /** @param {import('../../core/town-weather.js').TownWeather} w */
+    setWeather(w) {
+      atmosphere.setWeather(w);
+      f.weather.set(w);
+    },
     /** @param {boolean} on */
     setReducedMotion(on) {
       view.reduced = !!on;

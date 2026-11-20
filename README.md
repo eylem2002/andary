@@ -63,6 +63,12 @@ is a sunset coast (pastel stucco, palms, a beach, neon at dusk) that follows you
 `N` for day, sunset or night. Click any agent for its details, including a diff of every file
 it changed, or any building for who is inside.
 
+### Weather
+
+The town's weather follows the work: rain when commands fail, a storm with lightning when they
+keep failing or a turn fails, a rainbow when tests pass again, fog while a crew has been
+thinking for a long time. Turn it off in Settings.
+
 ### Cost and tokens
 
 Each crew shows what it has cost so far, and `U` (or a crew's cost) opens **Usage**: today's
