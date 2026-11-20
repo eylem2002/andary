@@ -20,10 +20,17 @@ traffic never leaves the computer, and a certificate issued for a network name w
   serves HTTPS with that certificate (TLS 1.2 or newer). The files are read and checked at start
   (a key that does not fit fails at once).
 - One port takes both: the first byte of a connection decides. `0x16` (a TLS handshake) goes to
-  the HTTPS server; anything else is plain HTTP, accepted only from a loopback peer and answered
-  `400` ("only answers over https://") from anywhere else. Nothing reaches the network in clear.
-- Local clients are unchanged (`http://127.0.0.1:<port>`). `server.json` records `tls: true` and a
-  team host's `--team-host` names, so `andary team invite` prints `https://<first name>:<port>`.
+  the HTTPS server; anything else is plain HTTP, accepted only from this computer (a loopback
+  peer, or one connecting from the very address it connected to, which is how a local client of
+  `--host <address>` arrives) and answered `400` ("only answers over https://") from anywhere
+  else, then closed. Nothing reaches the network in clear.
+- Local clients are unchanged: they use plain HTTP at the address the server listens on
+  (`127.0.0.1` for a wildcard bind). `server.json` records `tls: true` and a team host's
+  `--team-host` names, so `andary team invite` prints `https://<first name>:<port>`; `start`
+  prints an `https://` sign-in link for other computers.
+- The inner HTTP and HTTPS servers never listen themselves, so the listener tells them they are
+  listening (which starts Node's request time limits and connection tracking), sets a 10 s TLS
+  handshake limit, and tracks every raw socket so stopping the server ends all of them.
 - WebSocket `Origin` checks accept `https://` origins with an allowed host.
 - Without a certificate nothing changes, and the CLI's warning now says how to add one.
 

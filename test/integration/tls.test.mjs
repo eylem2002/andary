@@ -71,17 +71,29 @@ describe('HTTPS for other computers', { skip: !hasOpenssl || !lan ? 'needs opens
     socket.close();
   });
 
-  it('refuses plain HTTP from the network, so nothing crosses it in clear', async () => {
-    const plain = await get('http', /** @type {string} */ (lan), town.port, '/api/hello');
-    assert.equal(plain.status, 400);
-    assert.match(plain.text, /only answers over https/);
-  });
+  // Refusing plain HTTP from another computer is tested in test/unit/server/listener.test.mjs,
+  // where a connection can pretend to come from elsewhere.
 
   it('keeps plain HTTP on this computer for the forwarder, the CLI and a local browser', async () => {
     const local = await get('http', '127.0.0.1', town.port, '/api/hello');
     assert.equal(local.status, 200);
     const result = await town.sendHook({ session_id: 'tls', cwd: '/w', hook_event_name: 'Stop' });
     assert.deepEqual(result, { code: 0, stdout: '', stderr: '' });
+    await town.waitForOutput(/Receiving hook events/, 5000);
+  });
+
+  it('with --host <network address>, this computer still reaches it over plain HTTP at that address', async () => {
+    const bound = await startTown({ args: ['--host', /** @type {string} */ (lan), '--tls-cert', join(dir, 'cert.pem'), '--tls-key', join(dir, 'key.pem')] });
+    try {
+      assert.equal((await get('http', /** @type {string} */ (lan), bound.port, '/api/hello')).status, 200);
+      assert.equal((await get('https', /** @type {string} */ (lan), bound.port, '/api/hello')).status, 200);
+      const result = await bound.sendHook({ session_id: 'tls-host', cwd: '/w', hook_event_name: 'Stop' });
+      assert.deepEqual(result, { code: 0, stdout: '', stderr: '' });
+      await bound.waitForOutput(/Receiving hook events/, 5000);
+      assert.match(bound.output(), new RegExp(`From another computer: https://${lan.replaceAll('.', '\\.')}:${bound.port}/\\?token=`));
+    } finally {
+      await bound.stop();
+    }
   });
 
   it('prints view links and invites with https and records it for the CLI', () => {

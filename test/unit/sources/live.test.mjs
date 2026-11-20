@@ -208,6 +208,29 @@ describe('helpers', () => {
     assert.equal(await fetchHello({ base, fetchImpl: /** @type {any} */ (failing) }), null);
   });
 
+  test('fetchHello tries a sign-in from the link on its own, and keeps it only if accepted', async () => {
+    /** @type {string[]} */
+    const sent = [];
+    /** @type {boolean[]} */
+    const settled = [];
+    const fetchImpl = async (/** @type {unknown} */ _url, /** @type {any} */ init) => {
+      sent.push(init.headers['x-andary-token'] ?? 'none');
+      return { ok: true, json: async () => ({ app: 'andary', authenticated: init.headers['x-andary-token'] === 'good-token-abcdefghij' }) };
+    };
+    const ask = (/** @type {string} */ candidate) => fetchHello({
+      base: 'http://127.0.0.1:4747/',
+      fetchImpl: /** @type {any} */ (fetchImpl),
+      credentials: () => ({ token: 'good-token-abcdefghij', view: null, candidate: { token: candidate, view: null } }),
+      confirm: (accepted) => settled.push(accepted),
+    });
+    assert.equal((await ask('junk-token-abcdefghij'))?.authenticated, true, 'the stored sign-in still works');
+    assert.deepEqual(sent, ['junk-token-abcdefghij', 'good-token-abcdefghij']);
+    assert.deepEqual(settled, [false]);
+    sent.length = 0;
+    assert.equal((await ask('good-token-abcdefghij'))?.authenticated, true);
+    assert.deepEqual([sent, settled], [['good-token-abcdefghij'], [false, true]]);
+  });
+
   test('fetchHello sends the sign-in as a header, never as a cookie', async () => {
     /** @type {any} */
     let sent = null;

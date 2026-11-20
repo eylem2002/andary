@@ -18,7 +18,7 @@ scripts/publish-github.sh              # secrets scan → push all branches → 
 ```
 
 The script stops before pushing anything if it finds a possible secret. It pushes `main` (an
-empty first commit) and the 27 branches, opens the 27 pull requests in merge order, scans
+empty first commit) and the 30 branches, opens the 30 pull requests in merge order, scans
 again, and only then makes the repository public. `KEEP_PRIVATE=1 scripts/publish-github.sh`
 keeps it private. It never merges anything.
 
@@ -31,11 +31,11 @@ push the branches and open the pull requests.
 ## 2. Review and merge the pull requests, in order
 
 They are stacked: each targets the one before it (order in `docs/prs/ORDER.md`). Merge from part
-1 to part 27. Parts 14–22 are the nine features you picked (one each), part 23 holds the fixes
+1 to part 30. Parts 14–22 are the nine features you picked (one each), part 23 holds the fixes
 from their independent review, part 24 connects Codex, part 25 is the architecture clean-up,
-part 26 the new README and part 27 the fixes from their independent review. After each merge
-GitHub retargets the
-next pull request to `main`. Nothing is merged until you decide.
+part 26 the new README, part 27 the fixes from their review, parts 28–29 fix the remaining risks
+(security, then product) and part 30 holds the fixes from their review. After each merge GitHub
+retargets the next pull request to `main`. Nothing is merged until you decide.
 
 ## 3. Optional repository settings (free)
 

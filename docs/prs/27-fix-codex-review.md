@@ -1,6 +1,6 @@
 # Fixes from the independent review of Codex, the refactor and the README
 
-Part 27 of 27 · base: `docs/usage-guide` · merge last
+Part 27 of 30 · base: `docs/usage-guide`
 
 A reviewer who had not seen parts 24–26 read them, ran the checks and reproduced each finding
 ([report](../reviews/codex-architecture-review-2026-11-20.md)). No must-fix; 7 should-fix and

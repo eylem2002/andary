@@ -114,6 +114,8 @@ function handleViewLogin(ctx, res, url) {
 }
 
 /**
+ * Only the app reads a sign-in from the fragment; other pages (the lab pages) just lose the token,
+ * so it never stays in their address.
  * @param {Response} res
  * @param {URL} url
  * @param {string} param   the query parameter to take out
@@ -122,8 +124,9 @@ function handleViewLogin(ctx, res, url) {
 function redirectWithFragment(res, url, param, fragment) {
   url.searchParams.delete(param);
   const query = url.searchParams.toString();
+  const app = url.pathname === '/' || url.pathname === '/index.html';
   res.writeHead(302, {
-    Location: `${url.pathname}${query ? `?${query}` : ''}#${fragment}`,
+    Location: `${url.pathname}${query ? `?${query}` : ''}${app ? `#${fragment}` : ''}`,
     'Cache-Control': 'no-store',
     'Content-Length': '0',
   });

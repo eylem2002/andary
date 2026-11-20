@@ -74,6 +74,8 @@ describe('sign-in', () => {
     assert.equal(res.headers['set-cookie'], undefined);
     assert.equal(res.headers['cache-control'], 'no-store');
     assert.equal((await rawRequest(town.port, { path: `/?token=${town.uiToken}` })).headers.location, `/#signin=${town.uiToken}`);
+    // A page that does not read the fragment just loses the token.
+    assert.equal((await rawRequest(town.port, { path: `/world-lab.html?token=${town.uiToken}&x=1` })).headers.location, '/world-lab.html?x=1');
   });
 
   it('answers a wrong token with a 403 page and no cookie', async () => {

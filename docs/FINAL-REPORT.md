@@ -1,7 +1,8 @@
 # Andary: final report
 
 Date: 2026-11-17; game view, sunset coast and nine more features added 2026-11-20; Codex
-support, an architecture refactor and a usage guide added the same day ·
+support, an architecture refactor, a usage guide and fixes for the remaining risks added the same
+day ·
 Repository: `eylem2002/andary` · Licence: MIT
 
 Andary is a local web app that shows every Claude Code or OpenAI Codex session on your machine
@@ -97,6 +98,26 @@ on your machine, and has no runtime dependencies.
   (team town, a static demo, recordings), security, troubleshooting, every command, how it works
   and how to develop it. The in-app setup steps mention Codex too.
 
+### The risks list, fixed (parts 28–29, 2026-11-20)
+- **Sign-in per origin, no cookie** (ADR 0015): a cookie for 127.0.0.1 reached every port on it;
+  the page now keeps the token in its own storage and sends it with each request.
+- **Approval cards show a file change in full** (a new file's content, an edit's diff, hidden
+  characters revealed) and take an optional **reason for a denial**, which the agent reads.
+- **The forwarder makes the server prove itself** before sending anything, so a recycled pid of a
+  dead server learns neither the events nor the hook secret.
+- **HTTPS for other computers** with your own certificate (`--tls-cert`, `--tls-key`; ADR 0016):
+  the network gets HTTPS only, this computer keeps plain HTTP on loopback.
+- **CI's linters and Lighthouse pinned by hash**.
+- **The plugin has no `bin/` folder** (the CLI moved to `cli/`), and `/andary:town` pre-approves
+  exactly its one command instead of every `node` command.
+- **First content no longer waits for the 3D world**: crews and the log show at once, and the town
+  replays what happened when it is ready.
+- **Edge cases**: crew numbers stay fixed for a crew's life; a crew without a session id ends after
+  10 idle minutes; two helpers of the same type keep their own labels; cars stop for people in
+  their lane (agents now stand on the kerb at road doors).
+- **CI on macOS and Windows** for the unit and integration tests, with the fixes Windows needs
+  (`andary stop` removes server.json itself; POSIX-only tests skip there with a reason).
+
 ## 2. Workflows
 
 1. **First run**: `npm install -g github:eylem2002/andary`, `andary install` (and
@@ -166,9 +187,17 @@ approval card; approvals for Codex patches answered in the terminal did not sett
 nits, all fixed in part 27 with tests ([report](reviews/codex-architecture-review-2026-11-20.md)).
 Spoofing the source, the member or the approval match from a hook is not possible.
 
+The fixes for the remaining risks (parts 28–29: the sign-in, approval cards, the forwarder's
+challenge, HTTPS, the product edge cases) were reviewed by one more reviewer who had not seen them:
+**2 must-fix**, both in the new HTTPS listener (with `--host <address>` and a certificate, local
+clients were refused; with TLS on, request time limits were off and stopping could hang on
+stalled connections), 2 should-fix (a demo opened from a sign-in link kept the token in the
+address; blank-line padding could push a change below the card's fold) and 5 nits. All are fixed
+in part 30 with tests ([report](reviews/hardening-review-2026-11-20.md)).
+
 ## 4. Test results and scores
 
-Final verification, 2026-11-20, from a fresh clone of the complete stack (27 branches) with a
+Final verification, 2026-11-20, from a fresh clone of the complete stack (30 branches) with a
 clean `npm ci` (Node 22.23, npm 10.9, Linux, Chrome 153 with software WebGL):
 
 | Check | Result |
@@ -178,28 +207,32 @@ clean `npm ci` (Node 22.23, npm 10.9, Linux, Chrome 153 with software WebGL):
 | Config lint (JSON, shellcheck, actionlint, yamllint) | pass |
 | Typecheck (`tsc --checkJs`) | 0 errors |
 | Dead code (`npm run deadcode`) | 0 dead exports |
-| Layer boundaries (`npm run boundaries`, 16 rules, 199 files) | none crossed |
-| Unit + integration tests (`node:test`) | **822 / 822 pass**, 132 suites (710 before the nine features, 782 after them, 800 after Codex and the clean-up) |
-| End-to-end + accessibility (Playwright, desktop and mobile) | **82 pass**, 12 skipped by design (keyboard-only cases on the phone profile) |
-| axe, WCAG 2.0/2.1/2.2 A and AA (main view light and dark, inspector, help, settings, setup, approval card, diff, usage and leaderboard dialogs) | 0 violations |
+| Layer boundaries (`npm run boundaries`, 16 rules, 202 files) | none crossed |
+| Unit + integration tests (`node:test`) | **858 / 858 pass**, 138 suites (710 before the nine features, 782 after them, 822 after Codex and the clean-up) |
+| End-to-end + accessibility (Playwright, desktop and mobile) | **94 pass**, 12 skipped by design (keyboard-only cases on the phone profile) |
+| axe, WCAG 2.0/2.1/2.2 A and AA (main view light and dark, inspector, help, settings, setup, approval cards for a command and for a file edit with its diff and reason field, diff, usage and leaderboard dialogs) | 0 violations |
 | Licences (98 installed packages, vendored three.js and fonts) | all on the allow-list |
 | Secrets (working tree and full git history) | none found |
 | Build: vendored files regenerated from `node_modules` | identical |
-| Build: `npm pack` → global install → `andary install`, `install codex`, `start`, `doctor`, `stop`, `uninstall` (and `team invite` at part 23) | all pass; `doctor` confirms both agents' hooks and hook → server → town |
-| Publishing: `scripts/publish-github.sh` from a clone of the bundle, against a stand-in GitHub | main and 27 branches pushed unchanged, 27 stacked pull requests with their prepared descriptions, public only after a second secrets scan. The first rehearsal stopped before pushing: part 24's line in ORDER.md broke the script's branch list; fixed in part 27, with a test |
-| Each branch checked out on its own (pre-push gate) | all 27 pass (24 to 822 tests as the stack grows) |
+| Build: `npm pack` → global install (the CLI now in `cli/`) → `andary install`, `install codex`, `start`, `doctor`, `stop`, `uninstall` (and `team invite` at part 23) | all pass; `doctor` confirms both agents' hooks and hook → server → town |
+| Publishing: `scripts/publish-github.sh` from a clone of the bundle, against a stand-in GitHub | main and 30 branches pushed unchanged, 30 stacked pull requests with their prepared descriptions, public only after a second secrets scan. An earlier rehearsal stopped before pushing: part 24's line in ORDER.md broke the script's branch list; fixed in part 27, with a test |
+| Each branch checked out on its own (pre-push gate) | all 30 pass (24 to 858 tests as the stack grows) |
 
-**Lighthouse 13.6** (`npm run perf`, demo page, measured at part 23; parts 24–27 add one small module to the page):
+**Lighthouse 13.6** (`npm run perf`, demo page, measured on the final version):
 
 | | Performance | Accessibility | Best practices | SEO | First paint | Layout shift |
 | --- | --- | --- | --- | --- | --- | --- |
-| Desktop | 35 | **100** | **100** | **100** | 0.3 s | 0.01 |
-| Mobile | 35 | **100** | **100** | **100** | 1.1 s | 0.045 |
+| Desktop | 35 | **100** | **100** | **100** | 0.3 s | 0.022 |
+| Mobile | 34 | **100** | **100** | **100** | 1.1 s | 0.067 |
 
 The performance score is held down by the test machine, not the page: with no GPU, Chrome draws
-the 3D town on the CPU (SwiftShader), so the frame loop shows up as Total Blocking Time (31 s on
-desktop, 144 s on mobile with Lighthouse's 4× CPU throttling). First paint and layout shift,
-which do not depend on the GPU, are good. QA rounds: mobile accessibility 98 → 100, mobile
+the 3D town on the CPU (SwiftShader), so the frame loop shows up as Total Blocking Time (29 s on
+desktop, 139 s on mobile with Lighthouse's 4× CPU throttling). First paint and layout shift,
+which do not depend on the GPU, are good. The largest paint (about 10 s) is a later entry in the
+demo's activity log, which keeps growing; the crews and the log now show before the 3D world
+(part 29), and the longest main-thread task while the demo loads is about 2 s, before and after
+that change. On this machine Lighthouse itself is flaky (the page is nearly always busy); its
+lockfile pins the dependency versions that ran reliably. QA rounds: mobile accessibility 98 → 100, mobile
 layout shift 0.127 → 0.034–0.06; desktop performance has measured 35–47 across runs (42 before
 the nine features, 35 after, with the same blocking time), the spread of a CPU-drawn page.
 
@@ -209,60 +242,47 @@ low, and each agent adds one.
 
 ## 5. Remaining risks
 
-Each item says what to do about it. None blocks normal use on a personal machine.
+Parts 28 and 29 fixed most of the earlier list (the fixes are in section 1). What is left, and
+what to do about it. None blocks normal use on a personal machine.
 
 **Security**
 
-1. **The sign-in cookie goes to every port on `127.0.0.1`** (browsers scope cookies by host, not
-   port). On a shared machine, a local web server run by another user that you open in the same
-   browser could capture it. Don't open other users' local services in that browser; the fix is
-   an origin-scoped token (a change to ADR 0004).
-2. **`/andary:town` pre-approves `node` commands during its turn.** Prefer `andary start` in a
-   terminal if you would rather approve nothing in advance.
-3. **Write/Edit approval cards show the exact path but not the new content.** Answer file
-   changes in the terminal (which shows the diff) unless you trust the change.
-4. **Pid reuse**: a recycled pid of the same user could still receive payloads; signed replies
-   stop it from steering Claude Code.
-5. **Local denial of service** needs local access (connection count, ping flood); nothing can be
-   read or changed that way.
-6. **`--host` other than loopback** sends secrets in clear; the CLI warns, keep the default.
-7. **Dev tooling**: CI installs two linters by pinned version without hashes; `npm run perf`
-   fetches Lighthouse through `npx` (pinned top-level version).
-8. **The team town is plain HTTP.** Keys, events and the view link travel unencrypted, and the
-   view link shows every crew's prompts, commands and edits to whoever holds it. Use it on a
-   network you trust or over a private network such as Tailscale (`--team-host`), and run
-   `andary team reset` if a link or key gets out. It is off unless you start with `--team`.
-9. **Phone notifications go through ntfy.sh**, a free third-party service; anyone who learns the
-   random topic can read them. They only ever say what happened ("A crew needs your
-   permission"), never a project, file or command; `--notify-url` points at your own server.
+1. **HTTPS needs a certificate you provide.** Without `--tls-cert`/`--tls-key`, a team town and
+   `--host` are plain HTTP (the CLI says so and how to fix it): keys, events and the view link
+   cross the network unencrypted. Use `tailscale cert` (free) or keep it to a network you trust,
+   and run `andary team reset` if a link or key gets out.
+2. **The sign-in is readable by the town's own page** (the price of not using a cookie, which
+   every port on 127.0.0.1 would receive; ADR 0015). The page runs only its own scripts under a
+   strict CSP and never renders event text as HTML, so nothing from a hook can run there.
+3. **Local denial of service** (flooding the port) needs an account on the computer; nothing can
+   be read or changed that way. Accepted.
+4. **Phone notifications go through ntfy.sh** when you turn them on; anyone who learns the random
+   topic can read them, but they never name a project, file or command. `--notify-url` points at
+   your own server. Accepted.
 
 **Product**
 
-10. **Codex was not available here.** The Codex connection follows Codex's published hook
-   format and is tested with recorded-style payloads, not a live Codex. If a Codex crew looks
-   wrong, `andary doctor` and `--record` show what arrived (ASSUMPTIONS 63).
-11. **Real GPUs were not available here.** Frame rate was measured only with software rendering;
-   once, the view went blank on High quality while following an agent there. Check on real
-   hardware (High quality, follow an agent for 30 s), and watch the director camera for a minute:
-   its moves between shots were only seen with software rendering and a slowed clock.
-12. **The plugin's `bin/` folder lands on Claude's `PATH`**, and claude.ai/Cowork reject plugins
-   with a `bin/` folder; the CLI install route is unaffected. Fixing it means moving the CLI.
-13. **No field for a deny reason** in the approval card (the protocol supports one).
-14. **First content waits for the 3D world** on slow devices (LCP); the store could start first.
-15. **Minor edge cases**: crew numbers shift when ended crews are pruned; an event without a
-    session id makes a crew that never ends; split-pane teammates appear as their own crew; two
-    subagents of the same type started together can swap labels briefly; cars can pass through
-    agents at the south-row doors.
-16. **Only tested on Linux.** Windows and macOS paths (opening the browser, `stop`) and the
-    `/andary:town` command inside a live Claude Code session were not exercised. The team town
-    was tested with two towns on one machine, not across two computers; ambient sound and
-    notifications were checked in headless Chrome, not by ear or on a phone.
-17. **CI has not run on GitHub yet**, because nothing could be pushed from here; the same checks
-    pass locally (`npm run check`).
+5. **Codex was not available here.** The connection follows Codex's published hook format and is
+   tested with recorded-style payloads. If a Codex crew looks wrong, `andary doctor` and
+   `--record` show what arrived (ASSUMPTIONS 63).
+6. **Real GPUs were not available here.** The blank view once seen on High quality could not be
+   reproduced in 60–90 s runs checked frame by frame; a lost WebGL context blanks the town and
+   recovers by itself (about 38 s on High with software rendering, under 8 s on Low). Check on
+   real hardware, and watch the director camera for a minute.
+7. **Split-pane teammates appear as their own crew.** Their hooks carry no documented field that
+   links them to their lead (README explains it).
+8. **macOS and Windows** now run the unit and integration tests in CI, but CI has not run yet;
+   the Windows job is marked `continue-on-error` until it has passed once. The `/andary:town`
+   command's narrowed permission relies on Claude Code 2.1.0 or newer filling in
+   `${CLAUDE_PLUGIN_ROOT}`; older versions ask (or refuse) instead of pre-approving, which is
+   safe. Ambient sound and notifications were checked in headless Chrome, not by ear or on a
+   phone; the team town on two towns on one machine, not across two computers.
+9. **CI has not run on GitHub yet**, because nothing could be pushed from here; the same checks
+   pass locally (`npm run check`).
 
 ## 6. What you need to do
 
 See [OWNER-SETUP.md](OWNER-SETUP.md): publish the code (one script, or give Claude's GitHub App
-access), merge the 26 pull requests in order, optionally turn on branch protection and
-Dependabot alerts, then `node bin/andary.mjs install && node bin/andary.mjs start`.
+access), merge the 30 pull requests in order, optionally turn on branch protection and
+Dependabot alerts, then `node cli/andary.mjs install && node cli/andary.mjs start`.
 

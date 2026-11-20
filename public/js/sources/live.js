@@ -5,7 +5,7 @@
 // backoff; before each retry `/api/hello` tells apart "server down" (Offline) from "this browser's
 // token no longer valid" (Sign in — e.g. the server restarted with a new token). Both carry the
 // page's sign-in (credentials.js): a header for fetch, a subprotocol for the WebSocket.
-import { readCredentials, signInHeaders, signInProtocols } from './credentials.js';
+import { confirmSignIn, readCredentials, signInHeaders, signInProtocols } from './credentials.js';
 
 /** @typedef {'connecting'|'live'|'offline'|'signin'} LinkStatus */
 
@@ -23,15 +23,42 @@ const SIGNIN_POLL_MS = 4000;
 const OPEN = 1;
 
 /**
+ * @typedef {object} HelloOptions
+ * @property {typeof fetch} [fetchImpl]
+ * @property {string} [base]
+ * @property {() => import('./credentials.js').Credentials} [credentials]
+ * @property {(accepted: boolean) => void} [confirm]  settles a sign-in from the address bar
+ */
+
+/**
  * Asks the server who it is. Null when no Andary server answers (static hosting, server down).
- * @param {{ fetchImpl?: typeof fetch, base?: string, credentials?: () => import('./credentials.js').Credentials }} [options]
+ * A sign-in that came with the link is tried first, on its own, and kept only if the server
+ * accepts it (credentials.js).
+ * @param {HelloOptions} [options]
  * @returns {Promise<Hello|null>}
  */
-export async function fetchHello({ fetchImpl = globalThis.fetch, base = globalThis.location?.href, credentials = () => readCredentials() } = {}) {
+export async function fetchHello({ fetchImpl = globalThis.fetch, base = globalThis.location?.href, credentials = () => readCredentials(), confirm = (accepted) => confirmSignIn(accepted) } = {}) {
+  const current = credentials();
+  if (current.candidate) {
+    const trial = await askHello(fetchImpl, base, current.candidate);
+    if (!trial) return null; // nobody answered: try the candidate again next time
+    confirm(trial.authenticated);
+    if (trial.authenticated) return trial;
+  }
+  return askHello(fetchImpl, base, current.candidate ? credentials() : current);
+}
+
+/**
+ * @param {typeof fetch} fetchImpl
+ * @param {string|undefined} base
+ * @param {import('./credentials.js').SignIn} signIn
+ * @returns {Promise<Hello|null>}
+ */
+async function askHello(fetchImpl, base, signIn) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HELLO_TIMEOUT_MS);
   try {
-    const headers = { accept: 'application/json', ...signInHeaders(credentials()) };
+    const headers = { accept: 'application/json', ...signInHeaders(signIn) };
     const response = await fetchImpl(new URL('./api/hello', base), { cache: 'no-store', headers, signal: controller.signal });
     if (!response.ok) return null;
     const body = await response.json();

@@ -293,7 +293,7 @@ async function main() {
   const approvalMs = Number.isFinite(state.approvalTimeoutMs) ? Number(state.approvalTimeoutMs) : 120_000;
   const timeoutMs = isPermission ? approvalMs + APPROVAL_GRACE_MS : EVENT_TIMEOUT_MS;
   // Last line of defence: whatever happens, never outlive the request budget.
-  setTimeout(() => finish(), timeoutMs + 1000).unref();
+  setTimeout(() => finish(), EVENT_TIMEOUT_MS + timeoutMs + 1000).unref();
   if (!(await serverProves(state, EVENT_TIMEOUT_MS))) return '';
   const nonce = randomBytes(16).toString('base64url');
   const reply = await post(state, buildBody(event), nonce, timeoutMs);

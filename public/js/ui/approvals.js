@@ -8,6 +8,7 @@ import { h, renderList, setAttr, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { approvalChange, describeApproval, formatCountdown } from './format.js';
 import { diffView } from './diff-view.js';
+import { diffStats } from './diff.js';
 import { approvalAgentKey, crewNumber, findSession, kbd, roundel, updateRoundel } from './parts.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
@@ -152,7 +153,8 @@ function showChange(p, approval) {
     p.changeBody.replaceChildren();
     return;
   }
-  setText(p.changeNote, change.note);
+  const { added, removed } = diffStats(change.hunks);
+  setText(p.changeNote, `${change.note}: ${added} ${added === 1 ? 'line' : 'lines'} added, ${removed} removed`);
   p.changeBody.replaceChildren(...change.hunks.map((hunk, index) => diffView(hunk, { index, count: change.hunks.length, exact: true, compact: true })));
 }
 
