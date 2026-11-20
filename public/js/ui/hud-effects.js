@@ -11,7 +11,8 @@ import { approvalAgentKey, crewNumber, findSession } from './parts.js';
 /** Events older than this are history: they render but don't toast. */
 export const FRESH_MS = 15_000;
 const MAX_QUEUED = 20;
-const MAX_TOASTS_PER_FRAME = 3;
+/** As many as the toast list shows (toasts.js MAX_VISIBLE): more in one frame would push each other out. */
+const MAX_TOASTS_PER_FRAME = 2;
 
 /**
  * @typedef {{ type: 'session', sessionId: string }
@@ -89,7 +90,7 @@ function showToast(ctx, effect, state) {
   if (effect.type === 'session') return crewArrived(ctx, effect.sessionId, state);
   if (effect.type === 'approval') return approvalArrived(ctx, effect.approval, state);
   const { achievement } = effect;
-  ctx.toasts.show({ tone: 'achievement', icon: 'medal', title: achievement.title, body: achievement.description });
+  ctx.toasts.show({ tone: 'achievement', icon: 'medal', title: achievement.title, body: achievement.description, group: 'achievement' });
   ctx.sound.play('chime');
   ctx.announcer.polite(`Achievement unlocked: ${achievement.title}.`);
   return undefined;
@@ -112,6 +113,7 @@ function crewArrived(ctx, sessionId, state) {
   const number = crewNumber(state, session.id);
   ctx.toasts.show({
     tone: 'crew',
+    group: 'crew',
     number,
     color: session.color,
     title: `New crew in ${session.project}`,
