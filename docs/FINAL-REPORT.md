@@ -1,6 +1,6 @@
 # Andary: final report
 
-Date: 2026-11-17 · Repository: `eylem2002/andary` · Licence: MIT
+Date: 2026-11-17, game view added 2026-11-20 · Repository: `eylem2002/andary` · Licence: MIT
 
 Andary is a local web app that shows every Claude Code session on your machine as a crew of
 tiny workers in a living 3D town. Agents walk to the building for the tool they are using, talk
@@ -34,6 +34,10 @@ and has no runtime dependencies.
 - Thirteen achievements, from First Contact to node_modules Black Hole.
 
 ### The interface
+- A director camera that follows whoever is doing the most interesting thing (an arrival, a
+  permission prompt, a failure, a handoff) in close-up, with a caption saying who is on screen
+  and what they are doing; it stands back while you use the camera. `H` puts the side boards
+  away so the town fills the screen, the way a demo on a static host opens.
 - Crews panel (crews drawn as metro lines), Tasks (goals, todos, team tasks), Activity log with
   filters, Approvals with countdowns, an agent inspector and building cards.
 - Toolbar and keyboard shortcuts for the camera, time of day, quality, sound and the demo.
@@ -95,12 +99,15 @@ The QA review fixed 8 issues (CLI crash on closed pipes, the demo countdown runn
 paused, a 450 px layout jump on phones, a publish-script ordering bug, and four accessibility
 details) ([report](qa/checks-2026-11-17.md)). The code-quality review removed all dead exports,
 split the most complex functions and gated dead code in CI
-([report](reviews/code-quality-review-2026-11-17.md)).
+([report](reviews/code-quality-review-2026-11-17.md)). The game view had its own independent
+review: 3 must-fix problems (approvals unreachable with the boards put away, the director holding
+on to a follow, focus lost when the boards hide), 4 should-fix and a few nits, all fixed with
+tests; no security findings ([report](reviews/game-view-review-2026-11-20.md)).
 
 ## 4. Test results and scores
 
-Final verification, 2026-11-17, from a fresh clone of the complete stack with a clean
-`npm ci` (Node 22.23, npm 10.9, Linux, Chrome 153 with software WebGL):
+Final verification, 2026-11-20, from a fresh clone of the complete stack (12 branches) with a
+clean `npm ci` (Node 22.23, npm 10.9, Linux, Chrome 153 with software WebGL):
 
 | Check | Result |
 | --- | --- |
@@ -109,28 +116,29 @@ Final verification, 2026-11-17, from a fresh clone of the complete stack with a 
 | Config lint (JSON, shellcheck, actionlint, yamllint) | pass |
 | Typecheck (`tsc --checkJs`) | 0 errors |
 | Dead code (`npm run deadcode`) | 0 dead exports |
-| Unit + integration tests (`node:test`) | **678 / 678 pass**, 112 suites |
-| End-to-end + accessibility (Playwright, desktop and mobile) | **52 pass**, 6 skipped by design (keyboard-only cases on the phone profile) |
+| Unit + integration tests (`node:test`) | **710 / 710 pass**, 120 suites |
+| End-to-end + accessibility (Playwright, desktop and mobile) | **60 pass**, 12 skipped by design (keyboard-only cases on the phone profile) |
 | axe, WCAG 2.0/2.1/2.2 A and AA (main view light and dark, inspector, help, settings, setup, approval card) | 0 violations |
 | Licences (98 installed packages, vendored three.js and fonts) | all on the allow-list |
 | Secrets (working tree and full git history) | none found |
 | Build: vendored files regenerated from `node_modules` | identical |
 | Build: `npm pack` → global install → `andary install`, `start`, `doctor`, `stop`, `uninstall` | all pass; `doctor` confirms hook → server → town |
-| Publishing: `scripts/publish-github.sh` from a clone of the bundle, against a stand-in GitHub | 12 branches pushed unchanged, 11 stacked pull requests, public only after a second secrets scan |
-| Each branch checked out on its own (pre-push gate) | all 11 pass |
+| Publishing: `scripts/publish-github.sh` from a clone of the bundle, against a stand-in GitHub | 13 branches pushed unchanged, 12 stacked pull requests, public only after a second secrets scan |
+| Each branch checked out on its own (pre-push gate) | all 12 pass |
 
 **Lighthouse 13.6** (`npm run perf`, demo page):
 
 | | Performance | Accessibility | Best practices | SEO | First paint | Layout shift |
 | --- | --- | --- | --- | --- | --- | --- |
-| Desktop | 47 | **100** | **100** | **100** | 0.3 s | 0.017 |
-| Mobile | 35 | **100** | **100** | **100** | 1.1 s | 0.06 |
+| Desktop | 42 | **100** | **100** | **100** | 0.2 s | 0.01 |
+| Mobile | 35 | **100** | **100** | **100** | 1.1 s | 0.035 |
 
 The performance score is held down by the test machine, not the page: with no GPU, Chrome draws
-the 3D town on the CPU (SwiftShader), so the frame loop shows up as Total Blocking Time (29 s on
-desktop, 159 s on mobile with Lighthouse's 4× CPU throttling). First paint and layout shift,
+the 3D town on the CPU (SwiftShader), so the frame loop shows up as Total Blocking Time (31 s on
+desktop, 152 s on mobile with Lighthouse's 4× CPU throttling). First paint and layout shift,
 which do not depend on the GPU, are good. QA rounds: mobile accessibility 98 → 100, mobile
-layout shift 0.127 → 0.034–0.06.
+layout shift 0.127 → 0.034–0.06; on 2026-11-17 desktop performance was 47, within the spread of a
+CPU-drawn page.
 
 **Other measurements**: a 5-minute demo at 4× speed levels off at ≈ 11 MB of JavaScript heap and
 ≈ 4,000 DOM nodes (no leak); the town draws 54–61 calls per frame on high quality and 25–29 on
@@ -162,7 +170,8 @@ Each item says what to do about it. None blocks normal use on a personal machine
 
 8. **Real GPUs were not available here.** Frame rate was measured only with software rendering;
    once, the view went blank on High quality while following an agent there. Check on real
-   hardware (High quality, follow an agent for 30 s).
+   hardware (High quality, follow an agent for 30 s), and watch the director camera for a minute:
+   its moves between shots were only seen with software rendering and a slowed clock.
 9. **The plugin's `bin/` folder lands on Claude's `PATH`**, and claude.ai/Cowork reject plugins
    with a `bin/` folder; the CLI install route is unaffected. Fixing it means moving the CLI.
 10. **No field for a deny reason** in the approval card (the protocol supports one).
@@ -179,6 +188,6 @@ Each item says what to do about it. None blocks normal use on a personal machine
 ## 6. What you need to do
 
 See [OWNER-SETUP.md](OWNER-SETUP.md): publish the code (one script, or give Claude's GitHub App
-access), merge the 11 pull requests in order, optionally turn on branch protection and
+access), merge the 12 pull requests in order, optionally turn on branch protection and
 Dependabot alerts, then `node bin/andary.mjs install && node bin/andary.mjs start`.
 

@@ -351,7 +351,7 @@ World {
   getTimeOfDay(): number
   setReducedMotion(on: boolean): void
 
-  focusAgent(id, opts?: { follow?: boolean }): void
+  focusAgent(id, opts?: { follow?: boolean, zoom?: number }): void  // zoom: eases there (1 = whole town)
   focusBuilding(key: BuildingKey): void
   stopFollow(): void
   resetCamera(): void
@@ -501,6 +501,7 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]` |
 | `[data-testid="remote-approvals-toggle"]` | checkbox/switch for remote approvals (live mode) |
 | `[data-testid="settings-button"]` | opens the settings dialog (holds the remote approvals switch) |
+| `[data-testid="director-caption"]` | the director camera's caption (plain text, not a live region); shown while it has a shot, hidden while you hold the camera or an agent is selected |
 
 ### 8.2 URL options
 

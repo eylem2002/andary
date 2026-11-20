@@ -61,6 +61,18 @@ bring a personal rain cloud, rate limits a thunderstorm, passing tests fireworks
 achievements to unlock ("Red to Green", "node_modules Black Hole", "Night Shift"…). Day and
 night follow your clock. Click any agent for its details, or any building for who is inside.
 
+### Director camera and full-screen town
+
+Leave the camera alone and a director takes it. It follows whoever is doing the most interesting
+thing right now (a new subagent arriving, a permission prompt, a failing command, a message to a
+teammate) in close-up, pulls back for a wider shot every few cuts, and a caption says who is on
+screen and what they are doing. Select an agent, drag, zoom or rotate and it stands back; after
+20 quiet seconds it carries on. `C` turns it off or on (it starts off if you have asked for
+reduced motion), and `H` puts the side boards away so the town fills the screen (both are also on
+the toolbar). A demo on a static host opens this way.
+
+![The full-screen town, with the director camera on three agents leaving the Town Hall](docs/media/andary-director.webp)
+
 ## Approve permission prompts from the town
 
 Off by default. Turn on **Remote approvals** in Settings (or start with
