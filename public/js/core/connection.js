@@ -81,6 +81,7 @@ export function socketUrl(pageUrl) {
  * @property {(settings: object) => void} [onSettings]
  * @property {(message: string) => void} [onError]
  * @property {(progress: unknown) => void} [onProgress]  the town's growth and busy days (§4.9)
+ * @property {(ok: boolean) => void} [onNotifyTest]  the answer to notifyTest()
  * @property {new (url: string) => WebSocket} [WebSocketImpl]
  * @property {() => Promise<Hello|null>} [hello]
  * @property {string} [url]
@@ -97,6 +98,7 @@ export function connectLive({
   onSettings = () => {},
   onError = () => {},
   onProgress = () => {},
+  onNotifyTest = () => {},
   WebSocketImpl = globalThis.WebSocket,
   hello = () => fetchHello(),
   url = socketUrl(globalThis.location?.href ?? 'http://127.0.0.1/'),
@@ -166,6 +168,7 @@ export function connectLive({
     else if (message.t === 'settings') onSettings(message.settings ?? {});
     else if (message.t === 'usage') store.setUsage?.(message.u, message.days);
     else if (message.t === 'progress') onProgress(message.p);
+    else if (message.t === 'notify-test') onNotifyTest(message.ok === true);
     else if (message.t === 'error') onError(String(message.message ?? 'The server reported an error.'));
   }
 
@@ -178,7 +181,7 @@ export function connectLive({
     const usage = message.usage ?? {};
     for (const record of Array.isArray(usage.agents) ? usage.agents : []) store.setUsage?.(record);
     if (Array.isArray(usage.days)) store.setUsage?.(null, usage.days);
-    onSettings(message.settings ?? {});
+    onSettings({ ...(message.settings ?? {}), notifyUrl: typeof message.notifyUrl === 'string' ? message.notifyUrl : null });
     if (message.progress) onProgress(message.progress);
     setStatus('live');
     startPing();
@@ -217,19 +220,7 @@ export function connectLive({
     get status() {
       return status;
     },
-    /**
-     * Answers a held permission request.
-     * @param {string} id
-     * @param {'allow'|'deny'} decision
-     * @param {string} [message]
-     */
-    decide(id, decision, message) {
-      return send({ t: 'decide', id, decision, ...(message ? { message: String(message).slice(0, 500) } : {}) });
-    },
-    /** @param {boolean} on */
-    setRemoteApprovals(on) {
-      return send({ t: 'settings', settings: { remoteApprovals: Boolean(on) } });
-    },
+    ...requests(send),
     close() {
       closed = true;
       if (retryTimer) clearTimeout(retryTimer);
@@ -239,3 +230,30 @@ export function connectLive({
     },
   };
 }
+
+/**
+ * What the browser can ask the server for (CONTRACTS §4.5); false when the socket is not open.
+ * @param {(message: object) => boolean} send
+ */
+function requests(send) {
+  return {
+    /**
+     * Answers a held permission request.
+     * @param {string} id
+     * @param {'allow'|'deny'} decision
+     * @param {string} [message]
+     */
+    decide(id, decision, message) {
+      return send({ t: 'decide', id, decision, ...(message ? { message: String(message).slice(0, 500) } : {}) });
+    },
+    /** Asks the server to send a test phone notification. */
+    notifyTest() {
+      return send({ t: 'notify-test' });
+    },
+    /** @param {boolean} on */
+    setRemoteApprovals(on) {
+      return send({ t: 'settings', settings: { remoteApprovals: Boolean(on) } });
+    },
+  };
+}
+

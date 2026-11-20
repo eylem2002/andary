@@ -18,6 +18,7 @@ import { MILESTONES, unlockedAt } from '../core/growth.js';
 import { createDiffDialog } from './changes.js';
 import { createUsageDialog } from './usage.js';
 import { createLeaderboard } from './leaderboard.js';
+import { installNotifications } from './notifications.js';
 import { createMasthead } from './masthead.js';
 import { createNotices } from './notices.js';
 import { savePrefs } from './prefs.js';
@@ -95,6 +96,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
   });
   const stopShortcuts = installShortcuts({ getMode: () => view.mode, handle: (action, event) => handleShortcut(hud, action, event) });
   const stopTicker = watchEnvironment(ctx, ui);
+  installNotifications(ctx);
   shell.measureSheets = trackSheets(ui.board.el, [ui.inspector.el, ui.place.el], ui.toolbar.el);
   ctx.refresh();
 

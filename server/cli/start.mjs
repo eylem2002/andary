@@ -7,9 +7,10 @@ import { CLI_PATH, DEFAULT_HOST, readVersion, resolveHome } from '../config.mjs'
 import { applyHooksChange, inspectInstallations, planHooksChange, refreshForwarder, settingsPathFor } from '../installer.mjs';
 import { openBrowser } from '../open-browser.mjs';
 import { isLoopbackHost } from '../security.mjs';
+import { savedTopicUrl } from '../notify.mjs';
 import { ensureHome, findRunningServer, loginUrl, probeServer, readStateFile } from '../state-file.mjs';
 import { cliInvocation, sleep, tildify } from './io.mjs';
-import { parseApprovalTimeout, parsePort } from './options.mjs';
+import { parseApprovalTimeout, parseNotifyUrl, parsePort } from './options.mjs';
 
 /** Options shared by start and demo (parseArgs format). */
 export const START_OPTIONS = Object.freeze({
@@ -17,6 +18,8 @@ export const START_OPTIONS = Object.freeze({
   host: { type: 'string' },
   'no-open': { type: 'boolean' },
   'remote-approvals': { type: 'boolean' },
+  notify: { type: 'boolean' },
+  'notify-url': { type: 'string' },
   'approval-timeout': { type: 'string' },
   record: { type: 'boolean' },
   detach: { type: 'boolean' },
@@ -28,6 +31,8 @@ export const START_OPTIONS = Object.freeze({
  * @property {string} host
  * @property {boolean} open
  * @property {boolean} remoteApprovals
+ * @property {boolean} notify          --notify: a private ntfy.sh topic kept in ANDARY_HOME
+ * @property {string|null} notifyUrl   --notify-url or ANDARY_NOTIFY_URL
  * @property {number|undefined} approvalTimeoutMs
  * @property {boolean} record
  * @property {boolean} detach
@@ -46,6 +51,8 @@ function startSettings(values, io, demo) {
     host: values.host ?? DEFAULT_HOST,
     open: !values['no-open'],
     remoteApprovals: Boolean(values['remote-approvals']),
+    notify: Boolean(values.notify),
+    notifyUrl: parseNotifyUrl(values['notify-url'] ?? io.env.ANDARY_NOTIFY_URL),
     approvalTimeoutMs: parseApprovalTimeout(values['approval-timeout'], (warning) => io.err(`Warning: ${warning}`)),
     record: Boolean(values.record),
     detach: Boolean(values.detach),
@@ -79,7 +86,7 @@ function linkFor(state, settings) {
 }
 
 /** Flags that only matter when a new server starts. */
-const SERVER_SHAPING = new Set(['port', 'host', 'remote-approvals', 'approval-timeout', 'record']);
+const SERVER_SHAPING = new Set(['port', 'host', 'remote-approvals', 'notify', 'notify-url', 'approval-timeout', 'record']);
 
 /**
  * @param {import('../state-file.mjs').ServerState} state
@@ -113,6 +120,7 @@ async function runForeground(settings, home, io) {
       host: settings.host,
       home,
       remoteApprovals: settings.remoteApprovals,
+      notifyUrl: settings.notifyUrl ?? (settings.notify ? savedTopicUrl(home) : null),
       approvalTimeoutMs: settings.approvalTimeoutMs,
       record: settings.record,
       log: (message) => io.out(`[${new Date().toLocaleTimeString()}] ${message}`),
@@ -173,6 +181,8 @@ function printBanner(server, settings, io) {
   io.out(`  ${linkFor(server.state, settings)}`);
   io.out('');
   io.out(`  Remote approvals: ${settings.remoteApprovals ? 'on' : 'off (switch them on in the town, or start with --remote-approvals)'}`);
+  const { notifyUrl } = server;
+  io.out(notifyUrl ? `  Phone notifications: on. In the free ntfy app, subscribe to ${notifyUrl}` : '  Phone notifications: off (start with --notify to get them in the free ntfy app)');
   if (server.recordingPath) {
     io.out(`  Recording to ${tildify(server.recordingPath)} (it will contain your prompts and commands)`);
   }
@@ -264,6 +274,8 @@ async function startDetached(settings, home, io) {
 function forwardedFlags(settings) {
   const flags = ['--port', String(settings.port), '--host', settings.host];
   if (settings.remoteApprovals) flags.push('--remote-approvals');
+  if (settings.notify) flags.push('--notify');
+  if (settings.notifyUrl) flags.push('--notify-url', settings.notifyUrl);
   if (settings.approvalTimeoutMs !== undefined) flags.push('--approval-timeout', String(settings.approvalTimeoutMs / 1000));
   if (settings.record) flags.push('--record');
   return flags;

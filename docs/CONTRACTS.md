@@ -203,12 +203,13 @@ same `subagent_type` (FIFO). Normalise ids by stripping a leading `agent-`.
 Server → browser:
 
 ```js
-{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs }, history: Envelope[], approvals: Approval[], usage: { agents: UsageRecord[], days: UsageDay[] }, progress: { points, days } }
+{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs }, history: Envelope[], approvals: Approval[], usage: { agents: UsageRecord[], days: UsageDay[] }, progress: { points, days }, notifyUrl: string|null }
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
 { t: 'settings', settings: {...} }
 { t: 'usage', u: UsageRecord, days: UsageDay[] }   // §4.8, when an agent's totals change
 { t: 'progress', p: { points, days: string[] } }   // §4.9, when a point or a busy day is added
+{ t: 'notify-test', ok: boolean }                  // §4.10, the answer to a test
 { t: 'error', message }
 // Envelope = { id: number /* server sequence */, ts: number /* hook start, ms */, rx: number /* server receive */, event: object /* sanitized payload */ }
 // Approval = { id, status: 'pending'|'allowed'|'denied'|'expired'|'resolved', held: boolean, sessionId, agentId: string|null,
@@ -220,6 +221,7 @@ Browser → server:
 ```js
 { t: 'decide', id, decision: 'allow'|'deny', message?: string /* ≤ 500 chars */ }
 { t: 'settings', settings: { remoteApprovals: boolean } }
+{ t: 'notify-test' }   // sends a test phone notification (rate limits apply)
 { t: 'ping' }
 ```
 
@@ -289,6 +291,21 @@ kept). Both live in `<ANDARY_HOME>/progress.json` (0600). Points unlock `MILESTO
 icecream 25, statue 50, wheel 100, balloon 200, golden 500); the HUD hands the unlocked ids to
 `world.setLandmarks(ids, { grow })` (§6), with `grow` only for ones unlocked while watching. The
 demo keeps its points in `localStorage['andary:demo-progress']`, starting at 92.
+
+### 4.10 Notifications
+
+Phone (`server/notify.mjs`), opt-in: `--notify` uses a random ntfy.sh topic kept in
+`<ANDARY_HOME>/notify.json` (0600); `--notify-url <url>` or `ANDARY_NOTIFY_URL` names any http(s)
+ntfy topic (no credentials in the URL). A `PermissionRequest` or `Notification`
+(`permission_prompt`) hook posts "A crew needs your permission." (priority high), `idle_prompt`
+"Claude is waiting for your next prompt.", the main agent's `Stop` "A crew finished its turn.",
+`StopFailure` a limit or error note. The body never names a project, file or command. At most
+one of a kind per 30 s and 30 an hour; a failed post is logged once. `settings.notify` (also in the
+unauthenticated `/api/hello`) is a boolean; the topic URL is only in the WebSocket `hello`.
+
+This computer (`public/js/ui/notifications.js`), opt-in in Settings (`prefs.desktopNotify`, after
+the browser's permission): while the page is hidden, a fresh pending approval, the main agent's
+finished turn or a failed turn becomes a system notification naming the crew.
 
 ## 5. Browser: events, store, director
 

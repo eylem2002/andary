@@ -21,3 +21,4 @@ bottom; after a merge GitHub retargets the next pull request to `main`.
 - `feat/town-weather` — rain, storms, fog and rainbows from what the crews go through
 - `feat/town-growth` — finished work earns points, and points build landmarks
 - `feat/leaderboard` — the town's growth, records and the busiest agents
+- `feat/notifications` — notifications on your phone (ntfy, opt-in) and on this computer
