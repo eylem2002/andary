@@ -1,6 +1,7 @@
 // Records for the leaderboard: the fastest fix (from failing tests to passing ones in the same
 // crew), who made the most test runs go green, and, from the store's own counts, the busiest
 // agents. Pure and fed with the store's events, so it is unit-tested.
+import { localDateBefore } from './dates.js';
 
 /** @typedef {import('./events.js').TownEvent} TownEvent */
 
@@ -61,9 +62,7 @@ export function createRecords() {
 export function streakOf(days, now) {
   const set = new Set(days);
   const date = (/** @type {number} */ back) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() - back);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return localDateBefore(now, back);
   };
   let back = set.has(date(0)) ? 0 : 1;
   let streak = 0;

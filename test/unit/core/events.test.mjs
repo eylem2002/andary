@@ -1,16 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  agentKeyOf,
-  classifyCommand,
-  classifyError,
-  hostPath,
-  normalize,
-  normalizeAgentId,
-  shortCommand,
-  shortPath,
-  summarizeTool,
-} from '../../../public/js/core/events.js';
+import { normalize } from '../../../public/js/core/events.js';
+import { agentKeyOf, normalizeAgentId } from '../../../public/js/core/ids.js';
+import { classifyCommand, classifyError, summarizeTool } from '../../../public/js/core/summaries.js';
+import { hostPath, shortCommand, shortPath } from '../../../public/js/core/text.js';
 import { CWD, FIXTURES, SESSION, envelope, hook } from './helpers.mjs';
 
 const MAIN = agentKeyOf(SESSION, null);

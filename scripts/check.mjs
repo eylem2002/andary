@@ -15,6 +15,7 @@ const STEPS = [
   { name: 'Config lint (JSON, shell, workflows)', cmd: npm, args: ['run', '--silent', 'lint:config'] },
   { name: 'Typecheck', cmd: npm, args: ['run', '--silent', 'typecheck'] },
   { name: 'Dead code', cmd: npm, args: ['run', '--silent', 'deadcode'] },
+  { name: 'Layer boundaries', cmd: npm, args: ['run', '--silent', 'boundaries'] },
   { name: 'Unit + integration tests', cmd: npm, args: ['run', '--silent', 'test'] },
   { name: 'Licences', cmd: npm, args: ['run', '--silent', 'licenses'] },
   { name: 'Secrets scan', cmd: npm, args: ['run', '--silent', 'secrets'] },

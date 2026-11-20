@@ -10,6 +10,7 @@ import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { safeEqual } from './auth.mjs';
 import { createTokenBucket } from './rate-limit.mjs';
+import { isDoctorSession } from '../public/js/core/ids.js';
 
 export const TEAM_HEADER = 'x-andary-team';
 const MAX_NAME_CHARS = 24;
@@ -251,7 +252,7 @@ export function createTeamRelay({ url, key, fetchImpl = globalThis.fetch, log = 
   return {
     /** @param {{ ts: number, event: Record<string, any> }} envelope  sanitized */
     send(envelope) {
-      if (disposed || String(envelope.event?.session_id ?? '').startsWith('andary-doctor-')) return;
+      if (disposed || isDoctorSession(envelope.event?.session_id)) return;
       const text = JSON.stringify({ ts: envelope.ts, event: envelope.event });
       const bytes = Buffer.byteLength(text);
       if (bytes > MAX_BATCH_BYTES) {

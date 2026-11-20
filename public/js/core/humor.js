@@ -4,7 +4,7 @@
 // House style: warm, developer-flavoured, inclusive; the joke is on the code or on the crew
 // itself, never on the person at the keyboard.
 
-import { clip, oneLine } from './events.js';
+import { clip, oneLine } from './text.js';
 
 /** @type {Readonly<Record<string, readonly string[]>>} */
 const LINES = Object.freeze({

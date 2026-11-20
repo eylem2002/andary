@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DENY_MESSAGE, createApprovalBroker, decisionOutput, normalizeAgentId } from '../../../server/approvals.mjs';
+import { DENY_MESSAGE, createApprovalBroker, decisionOutput } from '../../../server/approvals.mjs';
+import { normalizeAgentId } from '../../../public/js/core/ids.js';
 
 /** A broker with a fake clock and manual timers. */
 function setup({ maxPending = 50, maxSettled = 50 } = {}) {

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProgress } from '../../../server/progress.mjs';
 import { MILESTONES, earnsPoint, nextMilestone, unlockedAt } from '../../../public/js/core/growth.js';
-import { createDemoProgress, DEMO_PROGRESS_KEY } from '../../../public/js/ui/demo-progress.js';
+import { createDemoProgress, DEMO_PROGRESS_KEY } from '../../../public/js/sources/demo-progress.js';
 
 test('milestones are in order, and points unlock them', () => {
   const points = MILESTONES.map((m) => m.points);

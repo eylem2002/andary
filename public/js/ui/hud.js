@@ -15,7 +15,7 @@ import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
 import { createInspector } from './inspector.js';
 import { createWeatherDriver } from '../core/town-weather.js';
 import { MILESTONES, unlockedAt } from '../core/growth.js';
-import { LOOK } from '../world/env/look.js';
+import { LOOK } from '../core/looks.js';
 import { createDiffDialog } from './changes.js';
 import { createUsageDialog } from './usage.js';
 import { createLeaderboard } from './leaderboard.js';

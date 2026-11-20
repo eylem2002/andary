@@ -48,6 +48,7 @@ jobs:
       - run: npm run lint:config
       - run: npm run typecheck
       - run: npm run deadcode
+      - run: npm run boundaries
       - run: npm test
       - run: npm run licenses
       - run: npm run secrets

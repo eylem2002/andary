@@ -2,6 +2,8 @@
 // blocked third-party storage) or hold values from an older version, so reading validates every
 // field and falls back to the default, and writing never throws.
 
+import { PREFS_STORAGE_KEY } from '../core/looks.js';
+
 /**
  * @typedef {object} Prefs
  * @property {boolean} sound          sound effects (off until the viewer turns them on)
@@ -46,7 +48,7 @@ export const DEFAULT_PREFS = Object.freeze({
   townLook: 'coast',
 });
 
-export const STORAGE_KEY = 'andary:prefs';
+export const STORAGE_KEY = PREFS_STORAGE_KEY;
 
 /** @type {Record<string, readonly any[]>} */
 const CHOICES = {

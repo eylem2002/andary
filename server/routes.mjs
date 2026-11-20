@@ -2,11 +2,13 @@
 // name one of our own hosts.
 import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, browserRole, hasHookSecret, loginCookie, safeEqual, signHookReply, viewCookie } from './auth.mjs';
 import { TEAM_HEADER, verifyMemberKey } from './team.mjs';
-import { sourceOf, toTownPayloads } from './adapters/index.mjs';
+import { sourceOf } from './adapters/index.mjs';
+import { ingestHook, ingestTeam } from './ingest.mjs';
 import { APP_ID, LIMITS } from './config.mjs';
 import { publicSettings } from './browsers.mjs';
 import { BAD_TOKEN_PAGE, HttpError, readBody, sendHtml, sendJson, sendText } from './http-util.mjs';
 import { isAllowedHost } from './security.mjs';
+import { isObject } from '../public/js/core/text.js';
 
 /**
  * @typedef {import('./app.mjs').TownContext} TownContext
@@ -187,20 +189,10 @@ async function handleTeam(ctx, req, res) {
     sendJson(res, 429, { error: 'Too many team events' }, { 'Retry-After': '1' });
     return;
   }
-  const now = Date.now();
-  for (const item of events) {
-    // The session id is prefixed so two people's sessions can never collide.
-    const event = { ...item.event, andary_member: member, session_id: `${member}~${String(item.event.session_id ?? 'unknown')}` };
-    // Another computer's clock: keep its order, but not times in the future or long past.
-    ctx.ingest({ ts: Number.isFinite(item.ts) ? Math.min(now, Math.max(now - TEAM_MAX_AGE_MS, item.ts)) : now, event });
-    ctx.progress.observe(event);
-  }
+  ingestTeam(ctx, member, events);
   ctx.team?.seen(member);
   sendJson(res, 200, { ok: true });
 }
-
-/** A teammate's queued events older than this arrive dated an hour ago. */
-const TEAM_MAX_AGE_MS = 60 * 60 * 1000;
 
 /**
  * Reads a teammate's batch: `{ v: 1, events: [{ ts, event }] }`, at most 200 well-formed items.
@@ -243,7 +235,8 @@ async function handleApi(ctx, req, res, pathname) {
 }
 
 /**
- * POST /api/hook from the forwarder: authenticate, rate-limit, read, then broadcast.
+ * POST /api/hook from the forwarder: authenticate, rate-limit, read, ingest (ingest.mjs), and
+ * answer: a permission request may be held for the town to decide.
  * @param {TownContext} ctx
  * @param {Request} req
  * @param {Response} res
@@ -269,20 +262,10 @@ async function handleHook(ctx, req, res) {
     sendJson(res, error.status, { error: error.message }, error.status === 413 ? { Connection: 'close' } : {});
     return;
   }
-  // Token usage is read from Claude Code's transcripts only.
-  if (body.source === 'claude') ctx.usage.observe(body.event);
-  const events = toTownPayloads(body.source, body.event);
-  for (const event of events) {
-    ctx.progress.observe(event);
-    ctx.notifier.observe(event);
-    const envelope = ctx.ingest({ ts: body.ts, event });
-    ctx.relay?.send(envelope);
-    // Adapters never split or rewrite a permission request (see adapters/codex.mjs).
-    if (envelope.event.hook_event_name === 'PermissionRequest') {
-      await answerPermissionRequest(ctx, req, res, envelope.event, shownInFull(body.event.tool_input, envelope.event.tool_input));
-      return;
-    }
-    ctx.broker.observe(envelope.event);
+  const request = ingestHook(ctx, body).find((envelope) => envelope.event.hook_event_name === 'PermissionRequest');
+  if (request) {
+    await answerPermissionRequest(ctx, req, res, request.event, shownInFull(body.event.tool_input, request.event.tool_input));
+    return;
   }
   sendHookReply(ctx, req, res, null);
 }
@@ -306,14 +289,6 @@ function sendHookReply(ctx, req, res, output) {
     ...(signature ? { [HOOK_SIGNATURE_HEADER]: signature } : {}),
   });
   res.end(text);
-}
-
-/**
- * @param {unknown} value
- * @returns {value is Record<string, any>}
- */
-function isObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**

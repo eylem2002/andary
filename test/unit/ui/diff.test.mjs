@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { diffStats, lineDiff } from '../../../public/js/ui/diff.js';
-import { changeHunks, createStore } from '../../../public/js/core/store.js';
+import { changeHunks } from '../../../public/js/core/changes.js';
+import { createStore } from '../../../public/js/core/store.js';
 import { CWD, envelope, hook } from '../core/helpers.mjs';
 
 test('lineDiff keeps shared lines and marks the rest', () => {

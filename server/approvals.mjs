@@ -7,6 +7,7 @@
 // it stays pending with held=false, the hook gets a null answer, and Claude Code shows its normal
 // terminal prompt.
 import { randomUUID } from 'node:crypto';
+import { normalizeAgentId } from '../public/js/core/ids.js';
 
 export const DENY_MESSAGE = 'Denied from Andary';
 
@@ -38,16 +39,6 @@ const AGENT_END_EVENTS = new Set(['Stop', 'SubagentStop']);
  * @property {number} settledOrder  increases with every settlement (orders the history)
  */
 
-/**
- * Same rule as the browser (CONTRACTS §4.2): ids are compared without a leading "agent-".
- * @param {unknown} id
- * @returns {string|null}
- */
-export function normalizeAgentId(id) {
-  const value = typeof id === 'string' ? id.trim() : '';
-  if (!value) return null;
-  return value.startsWith('agent-') && value.length > 6 ? value.slice(6) : value;
-}
 
 /**
  * The hook output for a town decision (CONTRACTS §4.5).
