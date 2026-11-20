@@ -4,10 +4,14 @@
 // still and there is no lightning (no flashes).
 import * as THREE from 'three';
 import { PLINTH } from './terrain.js';
+import { STYLE } from './palette.js';
+
+/** In the snowy look the town's rain falls as snow: short, slow, drifting flakes. */
+const SNOW = STYLE.snow;
 
 const RAIN_TOP = 16;
 const RAIN_BOTTOM = -0.4;
-const DROP_LENGTH = 1.3;
+const DROP_LENGTH = SNOW ? 0.09 : 1.3;
 
 const RAIN_VERTEX = /* glsl */ `
 attribute vec4 aDrop; // x, z, phase 0-1, rank 0-1 (drops below the intensity are shown)
@@ -20,7 +24,8 @@ void main() {
   float span = ${(RAIN_TOP - RAIN_BOTTOM).toFixed(2)};
   float fall = mod(aDrop.z * span + uTime * uSpeed, span);
   float y = ${RAIN_TOP.toFixed(2)} - fall + aEnd * ${DROP_LENGTH.toFixed(2)};
-  vec3 p = vec3(aDrop.x + aEnd * 0.25, y, aDrop.y + aEnd * 0.1);
+  float drift = ${SNOW ? '1.0' : '0.0'} * sin(uTime * 0.8 + aDrop.z * 40.0) * 0.5;
+  vec3 p = vec3(aDrop.x + aEnd * 0.25 + drift, y, aDrop.y + aEnd * 0.1 + drift * 0.6);
   vAlpha = step(aDrop.w, uIntensity) * (1.0 - aEnd * 0.85);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
 }`;
@@ -87,7 +92,8 @@ export function createTownWeatherFx({ scene, camera, flash, reducedMotion = fals
     /** @param {number} night 0..1 */
     setNight(night) {
       target.night = night;
-      rain.material.uniforms.uColor.value.setRGB(0.72 - 0.42 * night, 0.78 - 0.4 * night, 0.86 - 0.32 * night);
+      if (SNOW) rain.material.uniforms.uColor.value.setRGB(1 - 0.35 * night, 1 - 0.33 * night, 1 - 0.25 * night);
+      else rain.material.uniforms.uColor.value.setRGB(0.72 - 0.42 * night, 0.78 - 0.4 * night, 0.86 - 0.32 * night);
     },
     /** @param {'high'|'low'} q */
     setQuality(q) {
@@ -106,7 +112,7 @@ export function createTownWeatherFx({ scene, camera, flash, reducedMotion = fals
       const u = rain.material.uniforms;
       u.uTime.value = time;
       u.uIntensity.value = now.rain * (quality === 'low' ? 0.45 : 1);
-      u.uOpacity.value = 0.7 - 0.3 * target.night;
+      u.uOpacity.value = SNOW ? 0.95 - 0.3 * target.night : 0.7 - 0.3 * target.night;
       rain.mesh.visible = now.rain > 0.02;
       rainbow.material.uniforms.uOpacity.value = now.rainbow * (1 - target.night * 0.6);
       rainbow.mesh.visible = now.rainbow > 0.02;
@@ -172,7 +178,7 @@ function createRain() {
     uniforms: {
       uTime: { value: 0 },
       uIntensity: { value: 0 },
-      uSpeed: { value: 14 },
+      uSpeed: { value: SNOW ? 2.2 : 14 },
       uOpacity: { value: 0.55 },
       uColor: { value: new THREE.Color(0.72, 0.78, 0.86) },
     },

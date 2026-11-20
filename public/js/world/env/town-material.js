@@ -6,6 +6,11 @@
 //  - night glow: windows switch on one by one at dusk and some go dark late at night,
 //  - per-building highlight (emissive lift + rim) and pulse bounce (squash and stretch).
 import * as THREE from 'three';
+import { STYLE } from './palette.js';
+
+/** @param {number[]} rgb */
+const glslVec3 = (rgb) => `vec3( ${rgb.map((c) => c.toFixed(3)).join(', ')} )`;
+const STRATA = STYLE.strata;
 
 /** Number of building slots in the shader (index 0 = not a building). */
 const BUILDING_SLOTS = 16;
@@ -118,13 +123,13 @@ float ttNoise( vec3 x ) {
 vec3 ttStrata( vec3 w ) {
   float wave = ( ttNoise( vec3( w.x * 0.35 + w.z * 0.35, 0.0, 0.0 ) ) - 0.5 ) * 0.5 + sin( ( w.x + w.z ) * 0.7 ) * 0.08;
   float y = w.y + wave;
-  vec3 c = vec3( 0.55, 0.38, 0.27 );
-  c = mix( c, vec3( 0.66, 0.47, 0.32 ), smoothstep( -0.95, -0.85, y ) );
-  c = mix( c, vec3( 0.52, 0.36, 0.25 ), smoothstep( -0.45, -0.38, y ) );
-  c = mix( c, vec3( 0.34, 0.6, 0.2 ), smoothstep( -0.16, -0.08, y ) );
-  vec3 rock = mix( vec3( 0.94, 0.82, 0.7 ), vec3( 0.86, 0.71, 0.6 ), step( 0.5, fract( y * 1.6 ) ) * 0.6 );
+  vec3 c = ${glslVec3(STRATA.soil)};
+  c = mix( c, ${glslVec3(STRATA.soilLight)}, smoothstep( -0.95, -0.85, y ) );
+  c = mix( c, ${glslVec3(STRATA.soil.map((x) => x * 0.95))}, smoothstep( -0.45, -0.38, y ) );
+  c = mix( c, ${glslVec3(STRATA.lip)}, smoothstep( -0.16, -0.08, y ) );
+  vec3 rock = mix( ${glslVec3(STRATA.rock)}, ${glslVec3(STRATA.rockAlt)}, step( 0.5, fract( y * 1.6 ) ) * 0.6 );
   c = mix( rock, c, smoothstep( -1.75, -1.6, y ) );
-  c = mix( vec3( 0.62, 0.48, 0.42 ), c, smoothstep( -3.3, -3.1, y ) );
+  c = mix( ${glslVec3(STRATA.base)}, c, smoothstep( -3.3, -3.1, y ) );
   float pebble = smoothstep( 0.72, 0.78, ttNoise( w * vec3( 3.0, 5.0, 3.0 ) ) );
   return mix( c, c * 1.2 + 0.06, pebble * 0.7 );
 }

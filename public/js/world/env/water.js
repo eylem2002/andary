@@ -4,6 +4,10 @@
 import * as THREE from 'three';
 import { BEACH, WATERLINE_Z } from './beach.js';
 import { PLINTH, SEA } from './terrain.js';
+import { STYLE } from './palette.js';
+
+/** @param {number[]} rgb */
+const glslVec3 = (rgb) => `vec3( ${rgb.map((c) => c.toFixed(3)).join(', ')} )`;
 
 const WATER_VERTEX_PARS = /* glsl */ `
 varying vec3 vWaterWorld;
@@ -55,8 +59,8 @@ float wShore = mix( uBeach.y, uShoreZ, smoothstep( uBeach.x - 1.5, uBeach.x + 2.
 float wDepth = clamp( ( wShore - vWaterWorld.z ) / 11.0, 0.0, 1.0 );
 float wPierD = wRectDistance( vWaterWorld.xz, uPier );
 wDepth = min( wDepth, clamp( wPierD / 3.0 + 0.15, 0.0, 1.0 ) );
-vec3 wShallow = vec3( 0.2, 0.84, 0.8 );
-vec3 wDeep = vec3( 0.02, 0.36, 0.6 );
+vec3 wShallow = ${glslVec3(STYLE.water.shallow)};
+vec3 wDeep = ${glslVec3(STYLE.water.deep)};
 diffuseColor.rgb = mix( wShallow, wDeep, smoothstep( 0.0, 1.0, wDepth ) );
 float wShoreDist = min( wShore - vWaterWorld.z, wPierD );
 float wFoamBand = 1.0 - smoothstep( 0.05, 0.55, wShoreDist + ( wNoise( vWaterWorld.xz * 2.0 + uTtTime * 0.5 ) - 0.5 ) * 0.35 );
@@ -77,7 +81,7 @@ const SEA_EMISSIVE = /* glsl */ `
 // Shimmering reflections of the town's neon near the shore at night, pink and cyan.
 float wNear = 1.0 - smoothstep( 0.0, 3.5, mix( uBeach.y, uShoreZ, smoothstep( uBeach.x - 1.5, uBeach.x + 2.5, vWaterWorld.x ) ) - vWaterWorld.z );
 float wStreak = smoothstep( 0.55, 0.95, wNoise( vec2( vWaterWorld.x * 2.2, vWaterWorld.z * 9.0 + uTtTime * 0.7 ) ) );
-totalEmissiveRadiance += mix( vec3( 1.0, 0.5, 0.75 ), vec3( 0.4, 0.9, 1.0 ), step( 0.5, fract( vWaterWorld.x * 0.21 ) ) ) * wNear * wStreak * uTtNight * 0.6;
+totalEmissiveRadiance += mix( ${glslVec3(STYLE.water.streakA)}, ${glslVec3(STYLE.water.streakB)}, step( 0.5, fract( vWaterWorld.x * 0.21 ) ) ) * wNear * wStreak * uTtNight * 0.6;
 `;
 
 /**

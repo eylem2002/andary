@@ -6,6 +6,8 @@
 // The day is stylised rather than astronomical: the sun rises at 06:00 and sets at 18:30 every day,
 // so the town looks the same in winter and summer and evenings always get a golden hour.
 
+import { LOOK } from './look.js';
+
 const SUNRISE = 6;
 const SUNSET = 18.5;
 /** Highest sun elevation (radians). Lower than Amman's summer noon so shadows stay readable. */
@@ -33,7 +35,7 @@ const MOON_RISES = 18.9;
  */
 
 /** @type {readonly SkyKey[]} */
-export const SKY_KEYS = Object.freeze([
+const COAST_KEYS = Object.freeze([
   { h: 0, zenith: '#140a35', horizon: '#3b1d5e', bottom: '#120b2b', light: '#b9b0ff', lightI: 0.85, hemiSky: '#5a4aa8', hemiGround: '#2c2030', hemiI: 0.8, envI: 0.35, night: 1 },
   { h: 4.6, zenith: '#150b37', horizon: '#3d1f60', bottom: '#130c2d', light: '#b9b0ff', lightI: 0.8, hemiSky: '#5a4aa8', hemiGround: '#2c2030', hemiI: 0.8, envI: 0.35, night: 1 },
   { h: 5.35, zenith: '#2a1f5e', horizon: '#8a5a9a', bottom: '#2a1f44', light: '#c4b0ff', lightI: 0.06, hemiSky: '#6a5cb0', hemiGround: '#3a2a34', hemiI: 0.75, envI: 0.32, night: 0.85 },
@@ -50,6 +52,68 @@ export const SKY_KEYS = Object.freeze([
   { h: 19.6, zenith: '#1c1550', horizon: '#5a2f7e', bottom: '#24194a', light: '#b0a8ff', lightI: 0.45, hemiSky: '#5c4cb0', hemiGround: '#2e2232', hemiI: 0.75, envI: 0.32, night: 0.92 },
   { h: 20.6, zenith: '#160b38', horizon: '#3d1f60', bottom: '#140c2e', light: '#b9b0ff', lightI: 0.8, hemiSky: '#5a4aa8', hemiGround: '#2c2030', hemiI: 0.8, envI: 0.35, night: 1 },
 ]);
+
+/** The limestone town's sky: softer days, a peach dusk and blue nights. @type {readonly SkyKey[]} */
+const AMMAN_KEYS = Object.freeze([
+  { h: 0, zenith: '#0a1430', horizon: '#22315c', bottom: '#121a33', light: '#a9bdff', lightI: 0.85, hemiSky: '#5268ab', hemiGround: '#2c2824', hemiI: 0.8, envI: 0.35, night: 1 },
+  { h: 4.6, zenith: '#0b1532', horizon: '#24325e', bottom: '#131b35', light: '#a9bdff', lightI: 0.8, hemiSky: '#5268ab', hemiGround: '#2c2824', hemiI: 0.8, envI: 0.35, night: 1 },
+  { h: 5.35, zenith: '#26315e', horizon: '#86708f', bottom: '#2a2a4a', light: '#b9b4ff', lightI: 0.06, hemiSky: '#6a72b0', hemiGround: '#3a2e2a', hemiI: 0.75, envI: 0.32, night: 0.85 },
+  { h: MOON_SETS, zenith: '#33447a', horizon: '#c48a86', bottom: '#47405e', light: '#ffb184', lightI: 0, hemiSky: '#7a82b8', hemiGround: '#4a3a30', hemiI: 0.7, envI: 0.3, night: 0.75 },
+  { h: 6.25, zenith: '#5577b8', horizon: '#ffc4a0', bottom: '#b9a6b6', light: '#ffb27c', lightI: 0.6, hemiSky: '#9cb4dd', hemiGround: '#8a6e55', hemiI: 0.5, envI: 0.26, night: 0.35 },
+  { h: 7.3, zenith: '#6c9fd8', horizon: '#f3e2d0', bottom: '#d3d2d6', light: '#ffe2c2', lightI: 1.0, hemiSky: '#b9d3f0', hemiGround: '#a58e70', hemiI: 0.36, envI: 0.26, night: 0.03 },
+  { h: 9, zenith: '#5f9ddd', horizon: '#e5eef2', bottom: '#d2dce4', light: '#fff3e2', lightI: 1.15, hemiSky: '#c2dbf5', hemiGround: '#b29c7c', hemiI: 0.38, envI: 0.3, night: 0 },
+  { h: 12.5, zenith: '#5a9ce0', horizon: '#e9f2f5', bottom: '#d4dee6', light: '#fff9f0', lightI: 1.2, hemiSky: '#c5ddf6', hemiGround: '#b8a283', hemiI: 0.38, envI: 0.3, night: 0 },
+  { h: 16, zenith: '#6098d8', horizon: '#ecebe2', bottom: '#d6dbe0', light: '#fff0da', lightI: 1.15, hemiSky: '#c2d7ef', hemiGround: '#b39a78', hemiI: 0.37, envI: 0.3, night: 0 },
+  { h: 17.4, zenith: '#6b91c8', horizon: '#ffdcb2', bottom: '#e6d2c4', light: '#ffcd8c', lightI: 1.3, hemiSky: '#c0cde6', hemiGround: '#b08e68', hemiI: 0.42, envI: 0.28, night: 0.02 },
+  { h: 18.2, zenith: '#5568a5', horizon: '#ffa178', bottom: '#c9a3a6', light: '#ff9a5c', lightI: 1.0, hemiSky: '#a6acd6', hemiGround: '#8e6a52', hemiI: 0.48, envI: 0.25, night: 0.25 },
+  { h: 18.7, zenith: '#38457a', horizon: '#d07a7c', bottom: '#6e5a78', light: '#ff7c52', lightI: 0.18, hemiSky: '#7a7fb8', hemiGround: '#5c4436', hemiI: 0.55, envI: 0.25, night: 0.6 },
+  { h: MOON_RISES, zenith: '#2c376a', horizon: '#9e6b82', bottom: '#4b4466', light: '#c4c2ff', lightI: 0, hemiSky: '#6670ad', hemiGround: '#40322c', hemiI: 0.65, envI: 0.3, night: 0.72 },
+  { h: 19.6, zenith: '#18234d', horizon: '#45497a', bottom: '#202748', light: '#a9b8ff', lightI: 0.45, hemiSky: '#5568aa', hemiGround: '#2c2622', hemiI: 0.75, envI: 0.32, night: 0.92 },
+  { h: 20.6, zenith: '#0c1736', horizon: '#24325e', bottom: '#141c38', light: '#a9bdff', lightI: 0.8, hemiSky: '#5268ab', hemiGround: '#2c2824', hemiI: 0.8, envI: 0.35, night: 1 },
+]);
+
+/**
+ * A key with its colours pulled towards others: each entry is [field, target rgb, amount].
+ * @param {SkyKey} key
+ * @param {[keyof SkyKey, number[], number][]} pulls
+ * @param {Partial<SkyKey>} [patch]
+ * @returns {SkyKey}
+ */
+function tinted(key, pulls, patch = {}) {
+  /** @type {any} */
+  const out = { ...key };
+  for (const [field, target, amount] of pulls) out[field] = rgbToHex(mixRgb(hexToRgb(/** @type {string} */ (key[field])), /** @type {RGB} */ (target), amount));
+  return { ...out, ...patch };
+}
+
+/** @param {number[]} rgb @returns {string} */
+function rgbToHex(rgb) {
+  return `#${rgb.map((c) => Math.round(Math.min(1, Math.max(0, c)) * 255).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/**
+ * The sky keys of a town look (look.js): the coast's, Amman's, or one of them tinted.
+ * @param {import('./look.js').LookId} look
+ * @returns {readonly SkyKey[]}
+ */
+export function skyKeysFor(look) {
+  if (look === 'amman') return AMMAN_KEYS;
+  if (look === 'snow') {
+    // Pale winter light, snow bouncing light up from the ground.
+    return Object.freeze(AMMAN_KEYS.map((k) => tinted(k, [['zenith', [0.82, 0.88, 0.95], 0.3 * (1 - k.night)], ['horizon', [0.9, 0.93, 0.97], 0.35 * (1 - k.night)], ['bottom', [0.86, 0.9, 0.95], 0.4], ['light', [1, 0.98, 0.95], 0.35], ['hemiGround', [0.8, 0.83, 0.88], 0.6]], { envI: k.envI * 1.1 })));
+  }
+  if (look === 'neon') {
+    // A violet haze all day; the town's lights never quite switch off.
+    return Object.freeze(COAST_KEYS.map((k) => tinted(k, [['zenith', [0.18, 0.07, 0.36], 0.6], ['horizon', [0.75, 0.25, 0.6], 0.45], ['bottom', [0.12, 0.06, 0.22], 0.6], ['light', [1, 0.55, 0.85], 0.4], ['hemiSky', [0.45, 0.3, 0.8], 0.4]], { lightI: k.lightI * 0.6, night: Math.max(k.night, 0.55) })));
+  }
+  if (look === 'desert') {
+    return Object.freeze(COAST_KEYS.map((k) => tinted(k, [['horizon', [1, 0.82, 0.58], 0.3 * (1 - k.night)], ['zenith', [0.35, 0.6, 0.9], 0.2 * (1 - k.night)], ['hemiGround', [0.85, 0.65, 0.45], 0.5]])));
+  }
+  return COAST_KEYS;
+}
+
+/** The sky keys of the look this page was built with. */
+export const SKY_KEYS = skyKeysFor(LOOK);
 
 /**
  * Wraps any number of hours into [0, 24).

@@ -21,6 +21,7 @@
  * @property {boolean} weather       rain, storms, fog and rainbows from what the crews go through
  * @property {boolean} desktopNotify notifications on this computer while the town is in the background
  * @property {boolean} ambient       waves, gulls, city hum and soft music while sound is on
+ * @property {'coast'|'snow'|'neon'|'desert'|'amman'} townLook  the town's look (world/env/look.js); changing it reloads
  */
 
 /** @type {Readonly<Prefs>} */
@@ -42,6 +43,7 @@ export const DEFAULT_PREFS = Object.freeze({
   weather: true,
   desktopNotify: false,
   ambient: true,
+  townLook: 'coast',
 });
 
 export const STORAGE_KEY = 'andary:prefs';
@@ -56,6 +58,7 @@ const CHOICES = {
   speed: [1, 2, 4],
   panels: ['auto', 'shown', 'hidden'],
   directorCam: ['auto', 'on', 'off'],
+  townLook: ['coast', 'snow', 'neon', 'desert', 'amman'],
 };
 
 /**

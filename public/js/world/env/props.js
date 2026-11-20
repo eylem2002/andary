@@ -6,7 +6,7 @@ import { DECOR, MAP, tileToWorld } from '../layout.js';
 import { PIER } from './buildings/industry.js';
 import { buildBeach } from './beach.js';
 import { bench, flowerBed, hedge } from './buildings/details.js';
-import { C, S } from './palette.js';
+import { C, S, STYLE } from './palette.js';
 import { createRng, range } from './rand.js';
 import { createJetMaterial, createPoolMaterial } from './water.js';
 
@@ -67,8 +67,8 @@ function placeMapTrees(trees, rng) {
       if (ch === 't') {
         const front = row >= 24 || col === 25;
         if (front && (col + row) % 2 === 1) continue;
-        // Mostly palms, with a few broad shade trees among them.
-        const kind = (col * 7 + row * 3) % 5 === 0 ? 'round' : 'palm';
+        // Mostly the look's own tree (palms on the coast), with a few broad shade trees among them.
+        const kind = (col * 7 + row * 3) % 5 === 0 ? 'round' : STYLE.rimTree;
         trees.push({ kind, x: x + range(rng, -0.35, 0.35), z: z + range(rng, -0.35, 0.35), y: 0.1, scale: front ? range(rng, 0.62, 0.8) : range(rng, 0.8, 1.05) });
       } else if (ch === '.' && rng() < 0.3) {
         trees.push({ kind: 'round', x: x + range(rng, -0.5, 0.5), z: z + range(rng, -0.5, 0.5), y: 0.07, scale: range(rng, 0.32, 0.45) });
@@ -121,7 +121,7 @@ function promenade(kit, trees) {
   const z = -20.9;
   for (let x = -24; x <= 24; x += 6) {
     if (Math.abs(x - PIER.x) < 2) continue;
-    trees.push({ kind: 'palm', x, z: z + 0.15, y: 0.04, scale: 0.85 });
+    trees.push({ kind: STYLE.rimTree === 'cypress' ? 'cypress' : 'palm', x, z: z + 0.15, y: 0.04, scale: 0.85 });
     kit.cyl([x, 0.04, z + 0.15], 0.4, 0.18, C.stoneTrim, { seg: 12, surface: S.stone });
     kit.cyl([x, 0.22, z + 0.15], 0.36, 0.02, C.soil, { seg: 12, surface: S.ground });
     if (x < 21) bench(kit, x + 3, -21.35, Math.PI);
