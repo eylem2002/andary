@@ -607,3 +607,16 @@ describe('store: team town members (§4.11)', () => {
     assert.ok(member.length <= 24);
   });
 });
+
+describe('store: Codex crews (§4.12)', () => {
+  it('marks a session that came from Codex', () => {
+    const ctx = setup();
+    ctx.send(hook('SessionStart', { source: 'startup', model: 'gpt-5.3-codex', andary_source: 'codex' }, { session: 'thr_1' }));
+    ctx.send(hook('SessionStart', { source: 'startup', model: 'claude-opus-5-5' }));
+    const [codexCrew, claudeCrew] = ctx.state().sessions;
+    assert.equal(codexCrew.source, 'codex');
+    assert.equal(claudeCrew.source, 'claude');
+    assert.equal(ctx.state().agents['thr_1:main'].hat, 'cap');
+  });
+});
+

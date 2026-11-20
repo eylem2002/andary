@@ -26,3 +26,4 @@ bottom; after a merge GitHub retargets the next pull request to `main`.
 - `feat/town-looks` — five town looks: coast, snowy village, neon city, desert oasis, Amman
 - `feat/team-town` — teammates' sessions in one shared town over your network, with a view-only link
 - `fix/feature-review` — fixes from the independent review of the nine features
+- `feat/codex` — connect OpenAI Codex: `andary install codex`, a server-side adapter, a Codex badge

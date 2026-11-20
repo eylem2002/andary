@@ -31,10 +31,16 @@ const START_HELP = `Options:
       --record              Also write every event to ~/.andary/recordings (holds prompts and commands)
       --detach              Run the server in the background and return`;
 
-const HOOKS_HELP = `Options:
-  -s, --scope <scope>       user (default: ~/.claude/settings.json, every project),
-                            project (<dir>/.claude/settings.json, shared with the repository) or
-                            local (<dir>/.claude/settings.local.json, this project, just you)
+const HOOKS_HELP = `Agents:
+  (none) or claude          Claude Code
+  codex                     OpenAI Codex CLI (hooks in ~/.codex/hooks.json; Codex asks you to
+                            trust them the next time it starts)
+
+Options:
+  -s, --scope <scope>       user (default: ~/.claude/settings.json or ~/.codex/hooks.json, every
+                            project), project (<dir>/.claude/settings.json or <dir>/.codex/hooks.json,
+                            shared with the repository) or local (Claude Code only:
+                            <dir>/.claude/settings.local.json, this project, just you)
       --dir <path>          Project folder for the project and local scopes (default: current folder)
       --dry-run             Show what would change and write nothing
       --print               Print the hooks JSON to merge by hand and write nothing`;
@@ -67,17 +73,19 @@ const COMMANDS = {
   },
   stop: { usage: 'stop', summary: 'Stop the running server', options: {}, run: runStop },
   install: {
-    usage: 'install [options]',
-    summary: 'Register the Claude Code hooks that feed the town',
+    usage: 'install [codex] [options]',
+    summary: 'Register the hooks that feed the town: Claude Code\'s, or Codex\'s with "codex"',
     help: HOOKS_HELP,
     options: HOOKS_OPTIONS,
+    positionals: true,
     run: runInstall,
   },
   uninstall: {
-    usage: 'uninstall [options]',
+    usage: 'uninstall [codex] [options]',
     summary: 'Remove the Andary hooks (and nothing else)',
     help: HOOKS_HELP,
     options: HOOKS_OPTIONS,
+    positionals: true,
     run: runUninstall,
   },
   team: {

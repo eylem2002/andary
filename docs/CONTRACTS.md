@@ -74,7 +74,7 @@ docs/                        ADRs, QA and security reports, this file
 - Tests live next to their area in `test/unit/<area>/…` (and `test/integration/…`). Pure logic
   must have unit tests.
 
-## 4. Claude Code → server: the hook pipeline
+## 4. Claude Code (or Codex) → server: the hook pipeline
 
 ### 4.1 Hook registration (written by `andary install`)
 
@@ -96,6 +96,14 @@ entries. Tool events use no matcher (match everything).
 Deliberately **not** registered: `WorktreeCreate`/`WorktreeRemove` (a hook there replaces git's
 worktree behaviour), `MessageDisplay` (fires per streamed text chunk, 10 s timeout), `Elicitation*`,
 `ConfigChange`, `FileChanged`, `Setup`.
+
+**Codex** (`andary install codex`, `server/clients.mjs`): the same layout in `$CODEX_HOME/hooks.json`
+(default `~/.codex/hooks.json`; `--scope project` writes `<dir>/.codex/hooks.json`; there is no
+local scope). The command is `node "<home>/hook.mjs" codex # andary`. Registered: SessionStart,
+UserPromptSubmit, PreToolUse, PostToolUse, SubagentStart, SubagentStop, Stop, PreCompact and
+PostCompact async; PermissionRequest with `"timeout": 150`; SessionEnd and Interrupt with
+`"timeout": 3` (Codex's maximum for those two). Codex asks the user to trust new or changed hooks
+at its next start; untrusted hooks do not run. `inspectInstallations` reports both agents' scopes.
 
 ### 4.2 Hook payloads (from the official hooks reference, Nov 2026)
 
@@ -148,7 +156,9 @@ same `subagent_type` (FIFO). Normalise ids by stripping a leading `agent-`.
    the same user (a stale file whose port someone else may now hold), exits 0 immediately.
 3. Reads stdin fully, parses JSON (on failure sends `{hook_event_name: 'Unknown', raw: <first 4000 chars>}`).
 4. `POST http://127.0.0.1:<port>/api/hook` with headers `x-andary-secret: <secret>` and
-   `x-andary-nonce: <16 random bytes, base64url>` and body `{"v":1,"ts":<ts>,"event":<payload>}`.
+   `x-andary-nonce: <16 random bytes, base64url>` and body `{"v":1,"ts":<ts>,"event":<payload>}`;
+   run with the argument `codex`, the body also has `"source":"codex"` (§4.12). Codex reads the
+   same PermissionRequest decision format, so step 5 is the same for both.
    Timeout 1.5 s, or `approvalTimeoutMs + 5000` for `PermissionRequest`.
 5. Only for `PermissionRequest`: if the reply carries a valid `x-andary-signature`
    (`base64url(HMAC-SHA256(responseKey, nonce + "\n" + body))`) and its `output` is a plain allow
@@ -361,6 +371,33 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
   teammates' crews, and a viewer gets none. `hello` always sets `settings.team` (null when not
   a team host). `server.json` records `team: true` on a host, so `team invite` can warn when the
   running town is not one.
+
+### 4.12 Source adapters (Codex)
+
+Every agent's payloads are translated on the server, before ingest, into the one event contract
+the rest of the town reads: the Claude Code hook payload (§4.2). `server/adapters/index.mjs`
+picks the adapter by the body's `source` (`claude` when absent) and drops `andary_member` and
+`andary_source` from what arrived (only the server sets them).
+
+- **Claude Code**: unchanged.
+- **Codex** (`server/adapters/codex.mjs`): Codex's hooks use Claude Code's event and field names,
+  so payloads pass through with `andary_source: "codex"` added, except:
+  - `PreToolUse`/`PostToolUse` of `apply_patch`: the patch (`tool_input.command`, `.input` or
+    `.patch`; the `*** Begin Patch` format, `server/adapters/apply-patch.mjs`) becomes one event
+    per file: an added file `Write {file_path, content}`, an updated file `Edit {file_path,
+    old_string, new_string}` (one hunk) or `MultiEdit {file_path, edits}` (several; a move uses
+    the new path), a deleted file stays `apply_patch {command, file_path}`. Paths are joined to
+    `cwd`. The first keeps the `tool_use_id`, the others get `<id>#2`, `<id>#3`…
+  - `spawn_agent` becomes `Agent {description, prompt, subagent_type}`.
+  - `Bash` with `tool_input.command` as a list: joined with spaces. A `PostToolUse` whose
+    `tool_response` (or the payload) has a non-zero `exit_code`/`exitCode`/`metadata.exit_code`
+    becomes `PostToolUseFailure` with `error` (stderr, output or "Exit code N", ≤ 500 characters).
+  - `Interrupt` becomes `Stop` with `stop_reason: "interrupted"`.
+  - `PermissionRequest` is never split or rewritten: the town shows exactly what it would approve.
+- Token usage is read from Claude Code transcripts only (Codex rollouts are not read yet).
+- The browser reads `andary_source` into `TownEvent.source` and `Session.source`
+  (`'claude'|'codex'`); a Codex crew has a `crew-agent` badge, OpenAI model ids get a cap and a
+  label such as "GPT-5.3 Codex", and `apply_patch`/`spawn_agent` map to the Workshop/Town Hall.
 
 ## 5. Browser: events, store, director
 

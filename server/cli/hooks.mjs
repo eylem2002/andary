@@ -1,8 +1,8 @@
-// `andary install` and `andary uninstall`.
+// `andary install [claude|codex]` and `andary uninstall [claude|codex]`.
 import { resolveHome } from '../config.mjs';
-import { HOOK_REGISTRATIONS, applyHooksChange, buildHooksConfig, hookCommand, planHooksChange } from '../installer.mjs';
+import { applyHooksChange, buildHooksConfig, hookCommand, planHooksChange } from '../installer.mjs';
 import { tildify } from './io.mjs';
-import { parseScope } from './options.mjs';
+import { UsageError, parseClient, parseScope } from './options.mjs';
 
 export const HOOKS_OPTIONS = Object.freeze({
   scope: { type: 'string', short: 's' },
@@ -13,41 +13,44 @@ export const HOOKS_OPTIONS = Object.freeze({
 
 /**
  * @param {Record<string, any>} values
- * @param {string[]} _positionals
+ * @param {string[]} positionals  [claude|codex]
  * @param {import('./io.mjs').CliIo} io
  * @returns {Promise<number>}
  */
-export async function runInstall(values, _positionals, io) {
-  return changeHooks('install', values, io);
+export async function runInstall(values, positionals, io) {
+  return changeHooks('install', values, positionals, io);
 }
 
 /**
  * @param {Record<string, any>} values
- * @param {string[]} _positionals
+ * @param {string[]} positionals  [claude|codex]
  * @param {import('./io.mjs').CliIo} io
  * @returns {Promise<number>}
  */
-export async function runUninstall(values, _positionals, io) {
-  return changeHooks('uninstall', values, io);
+export async function runUninstall(values, positionals, io) {
+  return changeHooks('uninstall', values, positionals, io);
 }
 
 /**
  * @param {'install'|'uninstall'} action
  * @param {Record<string, any>} values
+ * @param {string[]} positionals
  * @param {import('./io.mjs').CliIo} io
  * @returns {number}
  */
-function changeHooks(action, values, io) {
-  const scope = parseScope(values.scope);
+function changeHooks(action, values, positionals, io) {
+  if (positionals.length > 1) throw new UsageError(`Name one agent: "andary ${action}" for Claude Code or "andary ${action} codex".`);
+  const client = parseClient(positionals[0]);
+  const scope = parseScope(values.scope, client);
   const home = resolveHome(io.env);
   if (values.print) {
     // For people who prefer to merge the JSON into their settings by hand.
-    io.out(JSON.stringify({ hooks: buildHooksConfig(hookCommand(home)) }, null, 2));
+    io.out(JSON.stringify({ hooks: buildHooksConfig(hookCommand(home, client), client) }, null, 2));
     return 0;
   }
   let plan;
   try {
-    plan = planHooksChange({ action, scope, dir: values.dir ?? io.cwd, home, env: io.env });
+    plan = planHooksChange({ action, scope, dir: values.dir ?? io.cwd, home, env: io.env, client });
   } catch (error) {
     if (error.name !== 'SettingsError') throw error;
     io.err(error.message);
@@ -74,7 +77,7 @@ function changeHooks(action, values, io) {
  * @param {import('./io.mjs').CliIo} io
  */
 function describePlan(plan, io) {
-  const where = `${tildify(plan.settingsPath)} (${plan.scope} scope)`;
+  const where = `${tildify(plan.settingsPath)} (${plan.client.name}, ${plan.scope} scope)`;
   if (!plan.changed) {
     io.out(`Dry run: ${where} is already up to date; nothing would change.`);
     return;
@@ -82,7 +85,7 @@ function describePlan(plan, io) {
   io.out(`Dry run: this would update ${where}:`);
   if (plan.removed > 0) io.out(`  remove ${plan.removed} Andary hook entr${plan.removed === 1 ? 'y' : 'ies'}`);
   if (plan.deleteFile) io.out('  delete the file, which Andary created and which would now be empty');
-  if (plan.added > 0) io.out(`  add ${plan.added} hook entries (${HOOK_REGISTRATIONS.map((r) => r.event).join(', ')})`);
+  if (plan.added > 0) io.out(`  add ${plan.added} hook entries (${plan.client.registrations.map((r) => r.event).join(', ')})`);
   if (plan.exists) io.out('  and keep a timestamped backup of the current file next to it.');
   if (plan.action === 'install') io.out(`  It would also copy the hook forwarder to ${tildify(plan.hookPath)}.`);
   io.out('Nothing was written.');
@@ -94,7 +97,7 @@ function describePlan(plan, io) {
  * @param {import('./io.mjs').CliIo} io
  */
 function reportResult(plan, backupPath, io) {
-  const where = `${tildify(plan.settingsPath)} (${plan.scope} scope)`;
+  const where = `${tildify(plan.settingsPath)} (${plan.client.name}, ${plan.scope} scope)`;
   if (plan.action === 'install') {
     io.out(plan.changed ? `Andary hooks installed in ${where}.` : `Andary hooks are already installed in ${where}.`);
     io.out(`  Forwarder: ${tildify(plan.hookPath)}`);
@@ -105,7 +108,7 @@ function reportResult(plan, backupPath, io) {
     io.out(`No Andary hooks found in ${where}; nothing to remove.`);
   }
   if (backupPath) io.out(`  Backup of the previous file: ${tildify(backupPath)}`);
-  if (plan.changed) io.out('  Claude Code reads hooks when a session starts: restart running sessions to apply this.');
+  if (plan.changed) io.out(`  ${plan.client.applyHint}`);
   if (plan.action === 'uninstall' && plan.changed) {
     io.out(`  ${tildify(plan.home)} still holds the forwarder and any recordings; delete it to remove everything.`);
   }

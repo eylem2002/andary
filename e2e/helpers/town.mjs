@@ -24,8 +24,8 @@ const START_TIMEOUT_MS = 15_000;
  * @property {() => string} output  everything the server printed so far
  * @property {(pattern: RegExp, timeoutMs?: number) => Promise<string>} waitForOutput
  *   resolves with the output once it matches `pattern`
- * @property {(payload: unknown, options?: { input?: string, timeoutMs?: number }) => Promise<{ code: number|null, stdout: string, stderr: string }>} sendHook
- *   runs the real hooks/hook.mjs with the payload on stdin
+ * @property {(payload: unknown, options?: { input?: string, timeoutMs?: number, args?: string[] }) => Promise<{ code: number|null, stdout: string, stderr: string }>} sendHook
+ *   runs the real hooks/hook.mjs with the payload on stdin (args ['codex']: as Codex runs it)
  * @property {() => Promise<void>} stop  stops the server and deletes the temporary folders
  */
 
@@ -39,7 +39,7 @@ export async function startTown({ remoteApprovals = false, args = [], env = {} }
   const claudeDir = join(root, 'claude');
   mkdirSync(claudeDir, { recursive: true });
   /** @type {NodeJS.ProcessEnv} */
-  const childEnv = { ...process.env, ANDARY_HOME: home, CLAUDE_CONFIG_DIR: claudeDir, ...env };
+  const childEnv = { ...process.env, ANDARY_HOME: home, CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: join(root, 'codex'), ...env };
   delete childEnv.ANDARY_PORT;
   const cliArgs = [CLI, 'start', '--port', '0', '--no-open', ...(remoteApprovals ? ['--remote-approvals'] : []), ...args];
   const child = spawn(process.execPath, cliArgs, { cwd: root, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });

@@ -73,6 +73,9 @@ export const TOOL_BUILDING = Object.freeze({
   ExitWorktree: 'grove',
   Agent: 'hall',
   Task: 'hall',
+  // Codex tools the server's adapter leaves as they are (a deleted file, an unread patch).
+  apply_patch: 'workshop',
+  spawn_agent: 'hall',
 });
 
 /** @type {Readonly<Record<BuildingKey, Activity>>} */
@@ -141,6 +144,8 @@ export const CREW_COLORS = Object.freeze([
 
 /** Hats signal the model a session runs on; unknown models keep the role hat. */
 const MODEL_HATS = Object.freeze({ opus: 'crown', sonnet: 'beret', haiku: 'sunhat', fable: 'wizard', mythos: 'wizard' });
+/** OpenAI models (a Codex crew): "gpt-5.3-codex", "o4-mini". */
+const OPENAI_MODEL = /^(gpt-|o\d)/i;
 
 /**
  * Human model name: "claude-opus-5-5" → "Opus 5.5", "claude-3-5-sonnet-20241022" → "Sonnet 3.5".
@@ -153,13 +158,23 @@ export function modelLabel(modelId) {
   if (modelId == null || modelId === '') return '';
   const raw = String(modelId).trim();
   const id = raw.toLowerCase();
+  // "gpt-5.3-codex" → "GPT-5.3 Codex", "gpt-5-codex-mini" → "GPT-5 Codex Mini"
+  if (id.startsWith('gpt-')) {
+    const [version, ...words] = raw.slice(4).split('-');
+    return clipLabel([`GPT-${version}`, ...words.filter(Boolean).map((word) => word[0].toUpperCase() + word.slice(1))].join(' '));
+  }
   const family = Object.keys(MODEL_HATS).find((name) => id.includes(name));
-  if (!family) return raw.length > 24 ? `${raw.slice(0, 23)}…` : raw;
+  if (!family) return clipLabel(raw);
   const name = family[0].toUpperCase() + family.slice(1);
   const after = id.match(new RegExp(`${family}-(\\d{1,2})(?:[-.](\\d{1,2}))?(?!\\d)`));
   const before = id.match(new RegExp(`(\\d)-(\\d)-${family}`));
   const version = (after ? [after[1], after[2]] : before ? [before[1], before[2]] : []).filter(Boolean).join('.');
   return version ? `${name} ${version}` : name;
+}
+
+/** @param {string} label */
+function clipLabel(label) {
+  return label.length > 24 ? `${label.slice(0, 23)}…` : label;
 }
 
 /**
@@ -168,6 +183,7 @@ export function modelLabel(modelId) {
  */
 export function hatForModel(modelId) {
   if (!modelId) return null;
+  if (OPENAI_MODEL.test(modelId)) return 'cap';
   const id = modelId.toLowerCase();
   for (const [family, hat] of Object.entries(MODEL_HATS)) {
     if (id.includes(family)) return hat;

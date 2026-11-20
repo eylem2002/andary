@@ -38,7 +38,7 @@ async function readRecording(dir, lines) {
 /** A fresh, empty ANDARY_HOME + Claude config folder + working folder. */
 function sandbox(name) {
   const root = join(scratch, name);
-  const env = { ANDARY_HOME: join(root, 'home'), CLAUDE_CONFIG_DIR: join(root, 'claude') };
+  const env = { ANDARY_HOME: join(root, 'home'), CLAUDE_CONFIG_DIR: join(root, 'claude'), CODEX_HOME: join(root, 'codex') };
   mkdirSync(join(root, 'work'), { recursive: true });
   return { root, cwd: join(root, 'work'), env };
 }
@@ -158,7 +158,7 @@ describe('server lifecycle', () => {
 
   it('status and stop work against a running server', async () => {
     const town = await startTown();
-    const env = { ANDARY_HOME: town.home, CLAUDE_CONFIG_DIR: join(town.home, '..', 'claude') };
+    const env = { ANDARY_HOME: town.home, CLAUDE_CONFIG_DIR: join(town.home, '..', 'claude'), CODEX_HOME: join(town.home, '..', 'codex') };
     const status = await runCli(['status'], { env });
     assert.equal(status.code, 0);
     assert.match(status.stdout, /running on http:\/\/127\.0\.0\.1/);
@@ -315,12 +315,12 @@ describe('install, uninstall and doctor', () => {
 
   it('doctor finds missing hooks, then passes once they are installed', async () => {
     const town = await startTown();
-    const env = { ANDARY_HOME: town.home, CLAUDE_CONFIG_DIR: join(town.home, '..', 'doctor-claude') };
+    const env = { ANDARY_HOME: town.home, CLAUDE_CONFIG_DIR: join(town.home, '..', 'doctor-claude'), CODEX_HOME: join(town.home, '..', 'doctor-codex') };
     const cwd = join(town.home, '..');
     try {
       const before = await runCli(['doctor'], { env, cwd });
       assert.equal(before.code, 1);
-      assert.match(before.stdout, /hooks are not installed/);
+      assert.match(before.stdout, /No hooks are installed/);
       assert.match(before.stdout, /A test event went through the hook forwarder and reached the town/);
 
       const install = await runCli(['install'], { env, cwd });
@@ -328,7 +328,7 @@ describe('install, uninstall and doctor', () => {
       assert.match(install.stdout, /hooks installed/);
       const after = await runCli(['doctor'], { env, cwd });
       assert.equal(after.code, 0, after.stdout);
-      assert.match(after.stdout, /Hooks: user scope: installed/);
+      assert.match(after.stdout, /Hooks: Claude Code, user scope: installed/);
       assert.match(after.stdout, /reached the town/);
 
       const uninstall = await runCli(['uninstall'], { env, cwd });

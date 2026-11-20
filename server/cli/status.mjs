@@ -1,6 +1,6 @@
 // `andary status`: is the server up, and where are the hooks registered?
 import { readVersion, resolveHome } from '../config.mjs';
-import { HOOK_REGISTRATIONS, inspectInstallations } from '../installer.mjs';
+import { inspectInstallations } from '../installer.mjs';
 import { isProcessAlive, loginUrl, probeServer, readStateFile, serverOrigin } from '../state-file.mjs';
 import { cliInvocation, tildify } from './io.mjs';
 
@@ -36,10 +36,12 @@ export async function runStatus(_values, _positionals, io) {
  */
 export function describeScope(report) {
   const where = tildify(report.settingsPath);
-  if (report.error) return `${report.scope} scope: cannot read ${where}`;
-  if (report.events.length === 0) return `${report.scope} scope: not installed (${where})`;
-  if (report.complete) return `${report.scope} scope: installed (${where})`;
-  return `${report.scope} scope: partly installed, ${report.events.length} of ${HOOK_REGISTRATIONS.length} events (${where}); run install again`;
+  const which = `${report.client.name}, ${report.scope} scope`;
+  if (report.error) return `${which}: cannot read ${where}`;
+  if (report.events.length === 0) return `${which}: not installed (${where})`;
+  if (report.complete) return `${which}: installed (${where})`;
+  const again = report.client.id === 'claude' ? 'install' : `install ${report.client.id}`;
+  return `${which}: partly installed, ${report.events.length} of ${report.client.registrations.length} events (${where}); run ${again} again`;
 }
 
 /**

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { cliInvocation, printable, tildify } from '../../../server/cli/io.mjs';
-import { UsageError, parseApprovalTimeout, parsePort, parseScope, parseSeed, parseSpeed } from '../../../server/cli/options.mjs';
+import { UsageError, parseApprovalTimeout, parseClient, parsePort, parseScope, parseSeed, parseSpeed } from '../../../server/cli/options.mjs';
 import { formatDuration } from '../../../server/cli/status.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -35,6 +35,13 @@ describe('option parsing', () => {
     assert.equal(parseScope(undefined), 'user');
     assert.equal(parseScope('local'), 'local');
     assert.throws(() => parseScope('machine'), UsageError);
+    const codex = parseClient('codex');
+    assert.equal(codex.name, 'Codex');
+    assert.equal(parseClient(undefined).id, 'claude');
+    assert.equal(parseClient('Claude').id, 'claude');
+    assert.throws(() => parseClient('gemini'), /claude or codex/);
+    assert.equal(parseScope(undefined, codex), 'user');
+    assert.throws(() => parseScope('local', codex), /--scope for Codex must be user, project/);
   });
 });
 

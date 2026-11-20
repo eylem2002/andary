@@ -78,7 +78,7 @@ function checkHooks(report, home, io) {
   const inSettings = installs.scopes.filter((scope) => scope.events.length > 0);
   for (const scope of installs.scopes.filter((s) => s.error)) report('warn', describeScope(scope), scope.error ?? undefined);
   if (!installs.installed) {
-    report('fail', 'Claude Code hooks are not installed', `Run: ${cliInvocation()} install`);
+    report('fail', 'No hooks are installed', `Run: ${cliInvocation()} install (Claude Code) or ${cliInvocation()} install codex`);
     return installs;
   }
   for (const scope of inSettings) report(scope.complete ? 'ok' : 'warn', `Hooks: ${describeScope(scope)}`);
@@ -86,8 +86,10 @@ function checkHooks(report, home, io) {
   if (installs.plugin && inSettings.length > 0) {
     report('warn', 'Hooks are registered by both the plugin and settings', `Every event would arrive twice. Remove one: ${cliInvocation()} uninstall`);
   }
-  if (inSettings.length > 1) {
-    report('warn', 'Hooks are registered in more than one settings file', 'Sessions in this folder will send every event more than once.');
+  // Claude Code and Codex side by side are fine; one agent registered twice is not.
+  for (const id of new Set(inSettings.map((scope) => scope.client.id))) {
+    const files = inSettings.filter((scope) => scope.client.id === id);
+    if (files.length > 1) report('warn', `${files[0].client.name} hooks are registered in more than one file`, 'Sessions in this folder will send every event more than once.');
   }
   return installs;
 }

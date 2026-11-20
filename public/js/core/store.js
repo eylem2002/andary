@@ -48,6 +48,7 @@ export { ACHIEVEMENTS };
  * @property {number} [endedAt]
  * @property {string} [endReason]
  * @property {string|null} [member]  the teammate whose session this is, in a team town
+ * @property {'claude'|'codex'} [source]  the agent behind the session (§4.12)
  */
 
 /**
@@ -272,6 +273,7 @@ function newSession(m, e) {
     endedAt: undefined,
     endReason: undefined,
     member: e.member ?? null,
+    source: e.source ?? 'claude',
   };
   m.sessions.set(s.id, s);
   m.state.sessions.push(s);

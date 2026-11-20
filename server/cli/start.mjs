@@ -229,10 +229,11 @@ function printBanner(server, settings, io) {
 async function offerHookInstall(home, io) {
   if (inspectInstallations({ dir: io.cwd, env: io.env, home }).installed) return;
   io.out('');
-  io.out('Claude Code is not reporting to the town yet: its hooks are not installed.');
-  io.out(`Install them with:  ${cliInvocation()} install`);
+  io.out('No agent is reporting to the town yet: its hooks are not installed.');
+  io.out(`For Claude Code:  ${cliInvocation()} install`);
+  io.out(`For Codex:        ${cliInvocation()} install codex`);
   if (!io.interactive) return;
-  const answer = await io.ask(`Install them now in your user settings (${tildify(settingsPathFor('user', { env: io.env }))})? [y/N] `);
+  const answer = await io.ask(`Install the Claude Code hooks now in your user settings (${tildify(settingsPathFor('user', { env: io.env }))})? [y/N] `);
   if (!/^y(?:es)?$/i.test(answer.trim())) return;
   try {
     const plan = planHooksChange({ action: 'install', scope: 'user', home, env: io.env, dir: io.cwd });

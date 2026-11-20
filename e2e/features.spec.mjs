@@ -169,3 +169,16 @@ test('a teammate\'s crew carries their name, in the crews board and on its forem
   // Your own crews have no badge.
   await expect(page.locator('[data-testid="crew"]').first().getByTestId('crew-member')).toBeHidden();
 });
+
+test('a Codex crew says so on the crews board', async ({ page }) => {
+  await openDemo(page);
+  // A Codex session as the server delivers it (CONTRACTS §4.12): the town reads it like any other.
+  await page.evaluate(() => {
+    const payload = { session_id: 'thr_e2e', transcript_path: '/t.jsonl', cwd: '/home/dev/code/cli-tool', permission_mode: 'default', hook_event_name: 'SessionStart', source: 'startup', model: 'gpt-5.3-codex', andary_source: 'codex' };
+    /** @type {any} */ (window).__andary.store.ingest({ id: 999_001, ts: Date.now(), rx: Date.now(), event: payload });
+  });
+  const crew = page.locator('[data-testid="crew"][data-session-id="thr_e2e"]');
+  await expect(crew.getByTestId('crew-agent')).toHaveText('Codex');
+  await expect(crew).toContainText('GPT-5.3 Codex');
+  await expect(page.locator('[data-testid="crew"]').first().getByTestId('crew-agent')).toBeHidden();
+});
