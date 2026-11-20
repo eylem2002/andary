@@ -200,7 +200,7 @@ export function createActivityPanel(ctx) {
 
   /** @param {StoreState} state */
   function updateCrewOptions(state) {
-    const options = [{ id: '', label: 'All crews' }, ...state.sessions.map((session, index) => ({ id: session.id, label: `${index + 1}. ${session.project}` }))];
+    const options = [{ id: '', label: 'All crews' }, ...state.sessions.map((session) => ({ id: session.id, label: `${session.number}. ${session.project}` }))];
     const select = /** @type {HTMLSelectElement} */ (crewSelect);
     if (select.options.length === options.length && options.every((option, i) => select.options[i].value === option.id && select.options[i].text === option.label)) return;
     select.replaceChildren(...options.map((option) => h('option', { value: option.id, text: option.label })));

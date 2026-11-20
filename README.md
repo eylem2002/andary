@@ -60,7 +60,9 @@ already running pick the hooks up when they restart.
 - **See it before it is written:** `andary install --dry-run` (or `--print` for the JSON, to
   merge by hand).
 - **Agent teams** show up too; enable them in Claude Code with
-  `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
+  `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. Teammates in split panes (tmux or iTerm2) are
+  separate Claude Code sessions, and their hooks carry nothing that names the lead's session,
+  so each shows up as a crew of its own. The default in-process teammates join the lead's crew.
 
 ## 3. Connect Codex
 

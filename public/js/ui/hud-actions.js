@@ -269,7 +269,7 @@ function escape(hud) {
  */
 function selectCrew(hud, number) {
   const state = hud.ctx.store.getState();
-  const session = state.sessions[number - 1];
+  const session = state.sessions.find((s) => s.number === number);
   const lead = session?.agentKeys.find((key) => state.agents[key]?.role === 'lead') ?? session?.agentKeys[0];
   if (!lead) return false;
   hud.ui.crews.reveal(session.id);

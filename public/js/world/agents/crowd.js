@@ -170,6 +170,20 @@ export class Crowd {
   }
 
   /**
+   * Whether anyone in town stands or walks within `reach` of a ground point. Vehicles ask this
+   * for points on their lane ahead (through the facade: the town's code cannot see the crowd).
+   * @param {number} x @param {number} z @param {number} reach
+   */
+  occupied(x, z, reach) {
+    for (const agent of this.agents.values()) {
+      if (!agent.group.visible) continue;
+      const p = agent.position;
+      if ((p.x - x) ** 2 + (p.z - z) ** 2 < reach * reach) return true;
+    }
+    return false;
+  }
+
+  /**
    * Lab helper: stands an agent at an exact point (no spot, no route), e.g. for line-ups.
    * @param {string} id @param {number} x @param {number} z @param {number} [yaw]
    */

@@ -115,6 +115,8 @@ class World {
       reducedMotion: this.reducedMotion,
       onPick: (id) => this.userSelect({ type: 'agent', id }),
     });
+    // Cars and the mail truck wait for people in their lane; the town asks the crowd through here.
+    this.env.setPedestrians?.((/** @type {number} */ x, /** @type {number} */ z, /** @type {number} */ reach) => this.crowd.occupied(x, z, reach));
     this.view.camera = this.env.camera;
     this.renderer.info.autoReset = false; // count every pass of a frame, not just the last one
     this.attachInput();

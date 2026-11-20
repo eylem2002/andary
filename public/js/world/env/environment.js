@@ -254,6 +254,11 @@ function createApi(core, f) {
     removeWorktree: (id) => f.grove.remove(id),
     /** @param {'mailtruck'|'boat'|'bus'} kind @param {'arrive'|'depart'|'trip'} [action] */
     vehicle: (kind, action) => f.vehicles.trigger(kind, action ?? 'trip'),
+    /**
+     * How vehicles see people: the facade passes the crowd's query in (env/ cannot import agents/).
+     * @param {(x: number, z: number, reach: number) => boolean} occupied
+     */
+    setPedestrians: (occupied) => f.vehicles.setPedestrians(occupied),
     dispose() {
       rig.dispose();
       for (const part of [f.signs, f.fx, f.board, f.pile, f.grove, f.vehicles, f.ambient, atmosphere, core.lighting]) part.dispose();

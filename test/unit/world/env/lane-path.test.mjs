@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createPath, offsetPolyline, rightOf, roundCorners } from '../../../../public/js/world/env/lane-path.js';
+import { createPath, laneBlocked, offsetPolyline, rightOf, roundCorners } from '../../../../public/js/world/env/lane-path.js';
 import { ringRoadCorners } from '../../../../public/js/world/layout.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
@@ -63,4 +63,17 @@ test('open paths clamp at their ends', () => {
   assert.equal(out.x, 3);
   path.sample(-5, out);
   assert.equal(out.x, 0);
+});
+
+test('laneBlocked: someone in the lane just ahead stops a vehicle; beside it or behind it does not', () => {
+  const lane = createPath([{ x: 0, z: 0.5 }, { x: 20, z: 0.5 }], false);
+  /** @param {{x: number, z: number}[]} people */
+  const query = (people) => (/** @type {number} */ x, /** @type {number} */ z, /** @type {number} */ reach) =>
+    people.some((p) => Math.hypot(p.x - x, p.z - z) < reach);
+  const reach = 0.42;
+  assert.equal(laneBlocked(lane, 5, query([{ x: 6.2, z: 0.6 }]), reach), true, 'crossing just ahead');
+  assert.equal(laneBlocked(lane, 5, query([{ x: 6.2, z: 1 }]), reach), false, 'on the centre line of the next lane');
+  assert.equal(laneBlocked(lane, 5, query([{ x: 6.2, z: 0.05 }]), reach), false, 'on the kerb');
+  assert.equal(laneBlocked(lane, 5, query([{ x: 4, z: 0.5 }]), reach), false, 'behind');
+  assert.equal(laneBlocked(lane, 5, query([{ x: 9, z: 0.5 }]), reach), false, 'far ahead');
 });

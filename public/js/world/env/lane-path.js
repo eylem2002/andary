@@ -1,5 +1,6 @@
 // Paths for vehicles: road centre lines offset into the right-hand lane, corners rounded, sampled
-// by distance travelled. Pure (no three.js), unit-tested in Node.
+// by distance travelled, and whether someone is on the lane ahead. Pure (no three.js),
+// unit-tested in Node.
 
 /**
  * @typedef {{x: number, z: number}} Point
@@ -127,4 +128,25 @@ function findSegment(cumulative, d) {
     else hi = mid - 1;
   }
   return Math.max(0, lo);
+}
+
+/** Where ahead of a vehicle's centre its lane is checked for people (world units along the path). */
+const LOOK_AHEAD = Object.freeze([0.5, 1, 1.5, 2]);
+/** @type {PathSample} */
+const scratch = { x: 0, z: 0, angle: 0 };
+
+/**
+ * Whether someone is in a vehicle's lane just ahead of it, so it should wait: a few points along
+ * its path, each checked with `occupied` (is anyone within `reach` of this point?).
+ * @param {{ sample: (distance: number, out: PathSample) => PathSample }} path
+ * @param {number} distance  the vehicle's position along the path
+ * @param {(x: number, z: number, reach: number) => boolean} occupied
+ * @param {number} reach  half the vehicle's width plus a little of a person's
+ */
+export function laneBlocked(path, distance, occupied, reach) {
+  for (const ahead of LOOK_AHEAD) {
+    path.sample(distance + ahead, scratch);
+    if (occupied(scratch.x, scratch.z, reach)) return true;
+  }
+  return false;
 }

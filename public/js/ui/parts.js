@@ -52,12 +52,12 @@ export function kbd(text) {
 }
 
 /**
- * 1-based crew number in first-seen order (stable for the session's lifetime), or 0 if unknown.
+ * The crew's number (kept for its whole life, see Session.number), or 0 if unknown.
  * @param {StoreState} state
  * @param {string} sessionId
  */
 export function crewNumber(state, sessionId) {
-  return state.sessions.findIndex((session) => session.id === sessionId) + 1;
+  return findSession(state, sessionId)?.number ?? 0;
 }
 
 /**

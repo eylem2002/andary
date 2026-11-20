@@ -120,12 +120,11 @@ export function createCrewsPanel(ctx) {
     setText(count, active.length ? `${active.length} active` : '');
     setText(empty, emptyText(ctx));
     setHidden(empty, state.sessions.length > 0);
-    const numbers = new Map(state.sessions.map((session, index) => [session.id, index + 1]));
     const asking = new Map();
     for (const approval of state.approvals) {
       if (approval.status === 'pending' && !asking.has(approvalAgentKey(approval))) asking.set(approvalAgentKey(approval), approval);
     }
-    renderList(lines, [...active, ...ended], (session) => session.id, createLine, (line, session) => updateLine(line, session, state, numbers.get(session.id), asking));
+    renderList(lines, [...active, ...ended], (session) => session.id, createLine, (line, session) => updateLine(line, session, state, session.number, asking));
     applyCollapsed();
   }
 

@@ -43,6 +43,9 @@ import { clip, finite, isObject, listOf, oneLine, own, str, textOf } from './tex
  * @property {Record<string, any>} data  kind-specific fields, see the *Data typedefs below
  */
 
+/** The session of events that carry no session id: they share one crew (see store.js). */
+export const NO_SESSION = 'unknown';
+
 /**
  * Data of tool.start / tool.end / tool.fail / permission.request / permission.denied.
  * @typedef {object} ToolData
@@ -338,7 +341,7 @@ function envelopeId(envelope) {
  */
 function baseOf(envelope, payload, now) {
   const ts = finite(envelope.ts) ?? finite(envelope.rx) ?? now();
-  const sessionId = oneLine(payload.session_id) || 'unknown';
+  const sessionId = oneLine(payload.session_id) || NO_SESSION;
   const agentId = normalizeAgentId(payload.agent_id);
   return {
     id: envelopeId(envelope),

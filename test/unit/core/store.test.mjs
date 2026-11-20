@@ -108,6 +108,25 @@ describe('store: sessions and the lead', () => {
     assert.equal(state().stats.events, 0);
   });
 
+  it('ends the crew of events without a session id once it has been quiet for 10 minutes', () => {
+    const { send, state, changes } = setup();
+    const { session_id: _omitted, ...orphan } = pre('Read', { file_path: `${CWD}/a.ts` }, 'r1');
+    send(orphan, 1_000_000);
+    const crew = () => state().sessions.find((s) => s.id === 'unknown');
+    assert.equal(crew()?.status, 'working');
+    send(hook('UserPromptSubmit', { prompt: 'go' }), 1_000_000 + 9 * 60_000);
+    assert.notEqual(crew()?.status, 'ended', 'another crew at work says nothing about this one');
+    send(hook('UserPromptSubmit', { prompt: 'again' }), 1_000_000 + 11 * 60_000);
+    assert.equal(crew()?.status, 'ended');
+    assert.equal(crew()?.agentKeys.length, 0);
+    const end = changes.find((c) => c.type === 'event' && c.event.kind === 'session.end');
+    assert.equal(end?.event.sessionId, 'unknown', 'an ordinary session end, so the town sees it leave');
+    assert.ok(state().log.some((l) => l.sessionId === 'unknown' && l.text === 'Session ended (idle)'));
+    // Another event without a session id brings the crew back, like a resumed session.
+    send({ ...orphan, tool_use_id: 'r2' }, 1_000_000 + 12 * 60_000);
+    assert.equal(crew()?.status, 'working');
+  });
+
   it('keeps at most 10 ended sessions', () => {
     const { send, state } = setup();
     for (let i = 0; i < 13; i++) {
@@ -119,6 +138,26 @@ describe('store: sessions and the lead', () => {
     assert.equal(sessions.filter((s) => s.status === 'ended').length, 10);
     assert.equal(sessions[0].id, 's3');
     assert.equal(sessions.at(-1).id, 'live');
+  });
+});
+
+describe('store: crew numbers', () => {
+  it('numbers each crew once: pruning ended crews renumbers nobody, and a newcomer takes the lowest free number', () => {
+    const { send, state } = setup();
+    const number = (/** @type {string} */ id) => state().sessions.find((s) => s.id === id)?.number;
+    send(hook('SessionStart', { source: 'startup' }, { session: 'live' }));
+    for (let i = 0; i < 10; i++) {
+      send(hook('SessionStart', { source: 'startup' }, { session: `s${i}` }));
+      send(hook('SessionEnd', { reason: 'other' }, { session: `s${i}` }));
+    }
+    send(hook('SessionStart', { source: 'startup' }, { session: 'late' }));
+    assert.deepEqual([number('live'), number('s0'), number('s9'), number('late')], [1, 2, 11, 12]);
+    // An eleventh ended crew: the oldest one (s0, number 2) is pruned.
+    send(hook('SessionEnd', { reason: 'other' }, { session: 'late' }));
+    assert.equal(number('s0'), undefined);
+    assert.deepEqual([number('live'), number('s9'), number('late')], [1, 11, 12], 'nobody is renumbered');
+    send(hook('SessionStart', { source: 'startup' }, { session: 'new' }));
+    assert.equal(number('new'), 2);
   });
 });
 
@@ -159,6 +198,43 @@ describe('store: attribution', () => {
     assert.equal(result.kind, 'spawn.result');
     assert.equal(state().agents[`${SESSION}:y`].description, 'First job');
     assert.equal(state().agents[`${SESSION}:x`].description, 'Second job');
+  });
+
+  it('pairs parallel subagents with their calls by when the hooks started, not when they arrived', () => {
+    const { send, state } = setup();
+    send(spawn('Explore', 'Second job', 't2'), 1_000_110);
+    send(spawn('Explore', 'First job', 't1'), 1_000_100);
+    // Async hooks race: the later subagent's SubagentStart arrives first.
+    send(hook('SubagentStart', {}, agent('y', 'Explore')), 1_000_130);
+    assert.equal(state().agents[`${SESSION}:y`].description, 'First job', 'a guess until the other one shows up');
+    send(hook('SubagentStart', {}, agent('x', 'Explore')), 1_000_120);
+    assert.equal(state().agents[`${SESSION}:x`].description, 'First job');
+    assert.equal(state().agents[`${SESSION}:y`].description, 'Second job');
+  });
+
+  it('labels a subagent whose Agent call arrives after it started', () => {
+    const { send, state } = setup();
+    send(hook('SubagentStart', {}, agent('x', 'Explore')), 1_000_120);
+    assert.equal(state().agents[`${SESSION}:x`].description, undefined);
+    send(spawn('Explore', 'Late call', 't1'), 1_000_100);
+    assert.equal(state().agents[`${SESSION}:x`].description, 'Late call');
+    assert.equal(state().agents[`${SESSION}:x`].name, 'Scout 1');
+  });
+
+  it('an Agent result that comes before its SubagentStart wins over another helper\'s guess', () => {
+    const { send, state } = setup();
+    send(FIXTURES.SessionStart);
+    send(spawn('general-purpose', 'UI', 'tm0', { name: 'frontend', run_in_background: true }));
+    send(spawn('general-purpose', 'API', 'tm1', { name: 'backend', run_in_background: true }));
+    send(hook('SubagentStart', {}, agent('b', 'general-purpose')));
+    assert.equal(state().agents[`${SESSION}:b`].name, 'frontend', 'the oldest call, as a guess');
+    // frontend's launch result arrives before frontend's own SubagentStart.
+    const [, result] = send(post('Agent', { name: 'frontend', subagent_type: 'general-purpose', description: 'UI', prompt: 'p' }, 'tm0', { status: 'async_launched', agentId: 'f' }));
+    assert.equal(state().agents[`${SESSION}:b`].name, 'backend');
+    assert.deepEqual(result.data.relabels.map((/** @type {any} */ r) => [r.key, r.name]), [[`${SESSION}:b`, 'backend']]);
+    send(hook('SubagentStart', {}, agent('f', 'general-purpose')));
+    assert.equal(state().agents[`${SESSION}:f`].name, 'frontend');
+    assert.equal(state().agents[`${SESSION}:b`].name, 'backend', 'a proof is never undone by a later guess');
   });
 
   it('names teammates after their spawn name, with distinct hats, and renames on evidence', () => {

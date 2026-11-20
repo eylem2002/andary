@@ -166,8 +166,21 @@ totalTokens, totalDurationMs, totalToolUseCount}`.
 
 Hook-to-agent attribution: an event with `agent_id` belongs to that subagent/teammate; without it,
 to the session's main agent. Subagent identity is announced by `SubagentStart`; its label comes
-from the most recent unmatched `PreToolUse` of the Agent/Task tool in the same session with the
-same `subagent_type` (FIFO). Normalise ids by stripping a leading `agent-`.
+from an unmatched `PreToolUse` of the Agent/Task tool in the same session with the same
+`subagent_type`. Until something proves the pairing, it is a guess: the earliest-started helper of
+a type gets the oldest call, by the hooks' start times (`ts`), not by arrival order, and the
+guesses are paired again whenever a helper or a call of that type arrives. The proof is the Agent
+call's `PostToolUse` (`tool_response.agentId` with its `tool_use_id`; at once for background
+agents, at the end for foreground ones) or a teammate's name in `TeammateIdle`/`Task*`; it wins
+over any guess, also when it arrives before the subagent's `SubagentStart`, and is never undone.
+Normalise ids by stripping a leading `agent-`. An event without `session_id` belongs to one shared
+crew (`unknown`); no `SessionEnd` comes for it, so the store ends it once another crew's event
+arrives 10 minutes after its last one.
+
+Agent-team teammates in split panes (tmux, iTerm2) are separate Claude Code sessions with their
+own `session_id`. No documented field of their hooks names the lead's session (`team_name`,
+derived from the lead's session id, is deprecated and only on `TeammateIdle`/`Task*`), so each
+shows up as a crew of its own.
 
 ### 4.3 The forwarder (`hooks/hook.mjs`)
 
@@ -492,7 +505,8 @@ StoreState {
   usage: Record<agentKey, AgentUsage>            // §4.8
   usageDays: UsageDay[]
 }
-Session { id, project /* cwd basename */, cwd, title?, color, model?, permissionMode?,
+Session { id, number /* the crew's number: lowest free when it arrived, never changed */,
+          project /* cwd basename */, cwd, title?, color, model?, permissionMode?,
           member?: string|null /* §4.11 */, source?: 'claude'|'codex' /* §4.12 */,
           status: 'working'|'waiting'|'idle'|'ended', goal? /* latest prompt, trimmed */,
           startedAt, lastActivity, agentKeys: string[],
@@ -626,6 +640,8 @@ Env {
   highlightBuilding(key: BuildingKey|null): void
   setBuildingStat, pulseBuilding, setBoard, setNodeModules, addWorktree, removeWorktree  // as in World
   vehicle(kind, action): void
+  setPedestrians(occupied: (x, z, reach) => boolean): void  // the crowd's query, from the facade:
+                                                  // cars and the mail truck wait for people in their lane
   dispose(): void
 }
 ```
@@ -646,6 +662,11 @@ environment in an overlay element it appends to `container`.
   and accepts an optional `timeOfDay`. three r187 removed `PCFSoftShadowMap`; soft shadows use
   `PCFShadowMap` with `shadow.radius`. Low quality skips the post chain and tone-maps in the shaders.
 - A drag suppresses the click that follows it, and a user drag stops follow mode.
+- Vehicles drive 0.5 either side of a road's centre line. At a door on a road, agents stand on
+  the kerb by the building and on the centre line (`layout.workSpots`, `queueSpot`), clear of
+  both lanes; cars and the mail truck stop for anyone in their lane ahead (agents crossing to a
+  door, or walking along the road). The bus keeps its timetable, which the crowd's bus arrivals
+  are timed to.
 - `world.debugPlace(id, x, z, yaw)` exists for the lab pages only.
 - Each agent is one skinned mesh (one draw call, two on high with the shadow pass); blob shadows
   are one instanced call for everyone; each effect type costs one call while active.
