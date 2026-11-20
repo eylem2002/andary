@@ -63,6 +63,13 @@ is a sunset coast (pastel stucco, palms, a beach, neon at dusk) that follows you
 `N` for day, sunset or night. Click any agent for its details, including a diff of every file
 it changed, or any building for who is inside.
 
+### Cost and tokens
+
+Each crew shows what it has cost so far, and `U` (or a crew's cost) opens **Usage**: today's
+total and the last 14 days as a chart. Andary reads the token counts from Claude Code's own
+transcripts on your computer and prices them at the API list prices, so on a Pro or Max plan it
+is an estimate of value, not a bill. The agent inspector shows each agent's tokens too.
+
 ### Director camera and full-screen town
 
 Leave the camera alone and a director takes it. It follows whoever is doing the most interesting
@@ -104,7 +111,8 @@ flowchart LR
   run with `"async": true`, so they never slow Claude down; only `PermissionRequest` waits, and
   only when remote approvals are on.
 - **Server**: Node built-ins only. Sanitises and redacts every payload, keeps the last 2,000
-  events in memory for newly opened tabs, writes nothing to disk unless you pass `--record`.
+  events in memory for newly opened tabs. On disk it keeps only number totals (tokens and cost
+  per day) in `~/.andary`; prompts and commands are written only if you pass `--record`.
 - **Browser**: plain ES modules and three.js, no build step. The same pipeline runs the demo.
 
 Design notes and interfaces: [docs/CONTRACTS.md](docs/CONTRACTS.md) and
@@ -122,7 +130,7 @@ Andary sees what your agents see (prompts, commands, file paths), so it is locke
 - strict Content-Security-Policy, no third-party requests (fonts and three.js are bundled), and
   event text is never rendered as HTML;
 - secrets that look like API keys, tokens or passwords are redacted before anything leaves the
-  server; nothing is logged or written to disk by default;
+  server; nothing you or Claude wrote is logged or written to disk by default;
 - the hook forwarder only talks to a live server of yours, and only obeys replies signed with a
   per-start key that never leaves `~/.andary` (a stale state file cannot hand your prompts, or
   control of Claude Code, to whoever grabs the old port);

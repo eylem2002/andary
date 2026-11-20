@@ -5,6 +5,7 @@
 // stands still while the demo is paused).
 
 import { normalizeAgentId } from '../core/events.js';
+import { createDemoUsage } from './demo-usage.js';
 
 /** @typedef {import('./types.js').Approval} Approval */
 
@@ -12,7 +13,7 @@ export const DEMO_APPROVAL_MS = 25_000;
 
 /**
  * @typedef {object} DemoOptions
- * @property {{ ingest: (e: any) => any, setApproval: (a: Approval) => void }} store
+ * @property {{ ingest: (e: any) => any, setApproval: (a: Approval) => void, setUsage?: (u: unknown, days?: unknown) => void }} store
  * @property {(options: { seed?: number, speed?: number, emit: (payload: any) => any }) => { start(): void, stop(): void, setSpeed(n: number): void, running: boolean }} createSimulation
  * @property {number} [seed]
  * @property {number} [speed]
@@ -31,12 +32,14 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
    * @type {Map<string, { approval: Approval, resolve: (value: object) => void, timer: ReturnType<typeof setTimeout>|undefined, left?: number }>}
    */
   const waiting = new Map();
+  const usage = createDemoUsage(store, now);
 
   /** @param {any} payload */
   function emit(payload) {
     const ts = now();
     const id = ++sequence;
     store.ingest({ id, ts, rx: ts, event: payload });
+    usage(payload);
     if (payload?.hook_event_name === 'PermissionRequest') return hold(payload, id, ts);
     return undefined;
   }

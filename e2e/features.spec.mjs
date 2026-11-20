@@ -52,3 +52,18 @@ test('an agent\'s edits open as a diff', async ({ page }) => {
   await expect(dialog).toBeHidden();
   await expect(page.getByTestId('agent-inspector')).toBeVisible();
 });
+
+test('crews show what they cost, and U opens the usage chart', async ({ page }) => {
+  await openDemo(page);
+  await expect(page.getByTestId('crew-cost').first()).toHaveText(/^\$\d|<\$0\.01/, { timeout: 30_000 });
+  // The crew's cost opens the usage chart (on a phone there is no U key).
+  await page.getByTestId('crew-cost').first().click();
+  const dialog = page.getByRole('dialog', { name: 'Usage' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(/Today: \$/);
+  await expect(dialog.getByRole('table')).toHaveCount(1);
+  await expect(dialog.locator('.hud-usage__bar')).toHaveCount(14);
+  await expect(dialog).toContainText('The demo makes these numbers up');
+  const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
+  expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([]);
+});

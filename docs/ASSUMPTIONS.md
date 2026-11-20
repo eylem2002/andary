@@ -155,4 +155,17 @@ section.
     sent it to the hook, after redaction and the 2,000-character cut) is all Andary sees; it
     never reads your files. A Write shows the whole new content as added lines, since the old
     file is unknown. The last 20 changes per agent are kept in memory only.
+45. **Cost is read from Claude Code's transcripts and priced at API list prices.** Hooks carry no
+    token counts, but every hook names its transcript, where each assistant message records its
+    usage. Prices (checked 2026-11-20) live in one file. On a subscription plan nobody pays per
+    token, so the town says "estimated at API prices" and shows tokens when a model's price is
+    unknown. Transcript format assumed: one JSON object per line, `type: "assistant"`,
+    `message.id`, `message.model`, `message.usage`, `timestamp`; subagents in
+    `<session>/subagents/agent-<id>.jsonl`.
+46. **Two small files on disk.** To keep day totals across restarts without counting anything
+    twice, `~/.andary/usage.json` holds day totals and how far each transcript was read (numbers
+    and paths only, mode 0600). The promise "nothing on disk without `--record`" now reads
+    "none of your prompts or commands on disk without `--record`".
+47. **Usage is a dialog, not a fourth board tab.** `U`, the toolbar's coins button or a crew's
+    cost opens it; the board stays at three tabs on a phone.
 

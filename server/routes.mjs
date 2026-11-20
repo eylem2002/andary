@@ -158,6 +158,7 @@ async function handleHook(ctx, req, res) {
     sendJson(res, error.status, { error: error.message }, error.status === 413 ? { Connection: 'close' } : {});
     return;
   }
+  ctx.usage.observe(body.event);
   const envelope = ctx.ingest(body);
   if (envelope.event.hook_event_name === 'PermissionRequest') {
     await answerPermissionRequest(ctx, req, res, envelope.event, shownInFull(body.event.tool_input, envelope.event.tool_input));
