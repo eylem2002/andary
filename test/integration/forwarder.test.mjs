@@ -57,6 +57,19 @@ describe('forwarder delivery', () => {
     assert.ok(message.e.ts >= started && message.e.ts <= message.e.rx);
   });
 
+  it('stamps the time its process started, before any start-up work', async () => {
+    // Start-up made slow on purpose (a module loaded before the forwarder waits 800 ms): the stamp
+    // is still the start, so a hook started earlier keeps its place ahead of one started later.
+    const slowStart = `--import=data:text/javascript,Atomics.wait(new%20Int32Array(new%20SharedArrayBuffer(4)),0,0,800)`;
+    const started = Date.now();
+    const payload = hookPayload('UserPromptSubmit', { session_id: 'deliver-slow', prompt: 'x' });
+    const result = await town.sendHook(payload, { env: isolatedEnv({ ANDARY_HOME: town.home, NODE_OPTIONS: slowStart }) });
+    assert.equal(result.code, 0);
+    const message = await waitForMessage(browser, (m) => m?.t === 'hook' && m.e.event.session_id === 'deliver-slow');
+    assert.ok(message.e.rx - started >= 800, 'it started slowly');
+    assert.ok(message.e.ts >= started - 1 && message.e.ts - started < 500, `stamped ${message.e.ts - started} ms after it was started`);
+  });
+
   it('forwards stdin that is not JSON as an Unknown event with a raw preview', async () => {
     const result = await town.sendHook(undefined, { input: `garbage-start ${'z'.repeat(5000)}` });
     assert.deepEqual(result, { code: 0, stdout: '', stderr: '' });
@@ -75,6 +88,18 @@ describe('forwarder delivery', () => {
     const message = await waitForMessage(browser, (m) => m?.t === 'hook' && m.e.event.session_id === 'big-1');
     assert.equal(message.e.event.tool_input.file_path, 'src/huge.json');
     assert.ok(message.e.event.tool_input.content.length < 2100);
+    assert.equal(message.e.event.truncated, true, 'and says so, so the town never approves what it cannot show');
+  });
+
+  it('keeps only the identifying fields when shortening is not enough, and says so', async () => {
+    const payload = hookPayload('PostToolUse', {
+      session_id: 'big-2',
+      tool_name: 'mcp__deploy__run',
+      tool_input: Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`key${i}`, 'y'.repeat(800)])),
+    });
+    assert.equal((await town.sendHook(payload)).code, 0);
+    const message = await waitForMessage(browser, (m) => m?.t === 'hook' && m.e.event.session_id === 'big-2');
+    assert.deepEqual([message.e.event.tool_name, message.e.event.tool_input, message.e.event.truncated], ['mcp__deploy__run', undefined, true]);
   });
 
   it('finds the server from its own folder when installed there', async () => {
@@ -261,6 +286,32 @@ describe('forwarder trust (another program on the recorded port)', () => {
       assert.deepEqual(JSON.parse(permission.stdout), { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
       const prompt = await runHookScript({ payload: hookPayload('UserPromptSubmit', { prompt: 'hi' }), env });
       assert.deepEqual(prompt, { code: 0, stdout: '', stderr: '' });
+    } finally {
+      await fake.close();
+    }
+  });
+});
+
+describe('forwarder capabilities', () => {
+  it('declares on every body that it marks one it shortened, so the town may trust one unmarked', async () => {
+    const fake = await impostor(() => ({}), 'caps-key');
+    try {
+      const env = isolatedEnv({ ANDARY_HOME: homeWith('caps', { pid: process.pid, port: fake.port, responseKey: 'caps-key' }) });
+      const payloads = [
+        hookPayload('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'ls' } }),
+        hookPayload('PermissionRequest', { tool_name: 'Write', tool_input: { file_path: 'a.ts', content: 'x'.repeat(3 * 1024 * 1024) } }),
+        hookPayload('PermissionRequest', { tool_name: 'mcp__deploy__run', tool_input: Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`key${i}`, 'y'.repeat(800)])) }),
+      ];
+      for (const payload of payloads) assert.equal((await runHookScript({ payload, env })).code, 0);
+      const bodies = fake.received.filter((entry) => entry.body).map((entry) => JSON.parse(entry.body));
+      assert.deepEqual(
+        bodies.map((body) => [body.caps, body.event.truncated]),
+        [
+          [['truncated'], undefined],
+          [['truncated'], true],
+          [['truncated'], true],
+        ],
+      );
     } finally {
       await fake.close();
     }

@@ -155,9 +155,14 @@ Off by default. Turn on **Remote approvals** in Settings (or start with
 `andary start --remote-approvals`). A permission request then gets **Allow** and **Deny** buttons
 and a countdown; if nobody answers within two minutes, the normal prompt appears in your
 terminal. The card shows the exact request, and for a file change the change itself: a new
-file's content, or an edit as a diff. To tell the agent why you said no, type a reason before
+file's content, or an edit as a diff. Anything that draws nothing (an unusual space, a
+zero-width or direction mark, a run of blank lines) shows as a marker such as `⟨U+00A0⟩`, so
+nothing can hide in what you approve. To tell the agent why you said no, type a reason before
 **Deny** (or press Enter in the reason field). A request the town cannot show in full (a secret
-was masked, a long value was cut) is never held there and goes straight to your terminal.
+was masked, a long value was cut, or it has an option the card does not show, such as running a
+command outside the sandbox) is never held there and goes straight to your terminal; so does one
+from an older copy of Andary's hook (the card says how to update it). Codex does not say whether
+a command asks to leave its sandbox, so a Codex command's card says that allowing it may.
 While a request waits, a yellow **approvals waiting for you** button sits at the top right and the
 browser tab reads **(1) Andary**, so you notice it from another tab or with the side boards away.
 
@@ -177,7 +182,11 @@ browser tab reads **(1) Andary**, so you notice it from another tab or with the 
 - **Notifications:** on this computer (Settings, while the tab is in the background), or on your
   phone with `andary start --notify` through the free [ntfy](https://ntfy.sh) app, no account.
   Phone messages say only what happened ("A crew needs your permission"), never your project,
-  files or commands.
+  files or commands. A note for a permission request, a question, a plan or an MCP server's form
+  waits ten seconds, and none is sent if Andary sees the answer first: a decision in the town, the
+  tool finishing after your answer in the terminal, or your next prompt. Andary sees a yes for a
+  longer command only when it finishes, and a "No" only at your next prompt, so those can still
+  send one.
 
 ![The town's five looks](docs/media/andary-looks.webp)
 

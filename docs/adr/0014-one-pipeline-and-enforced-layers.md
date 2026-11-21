@@ -35,3 +35,13 @@ An independent architecture review (2026-11-20) found the design sound but the s
   "where to find things" table.
 - The server depends on a handful of browser-side core modules; the boundary check keeps that
   list explicit.
+
+## Update (2026-11)
+
+Modules that joined the server's list since this decision (`SERVER_CORE` in
+`scripts/check-boundaries.mjs` keeps the full list): `dialogs` (`public/js/core/dialogs.js`), the
+one model of what an agent has asked you and had no answer to. The phone notes and the approval
+broker must agree on when an agent waits for you and what the terminal answered, so that rule
+lives once, in a pure module both read. `card-fields` (`public/js/core/card-fields.js`), the
+input fields an approval card shows for each tool: the server holds a request only when the card
+shows every field of it, so the card and that rule read one list.

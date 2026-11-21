@@ -100,6 +100,7 @@ export { ACHIEVEMENTS };
  * @property {string|null} agentId
  * @property {string} toolName
  * @property {any} toolInput
+ * @property {'claude'|'codex'} [source]  the agent that asked
  * @property {string} [cwd]
  * @property {number} createdAt
  * @property {number|null} expiresAt

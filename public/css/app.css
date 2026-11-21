@@ -1506,6 +1506,18 @@ body {
   font-size: 13px;
 }
 
+/* What the request cannot say that allowing it grants (a Codex command may leave its sandbox). */
+.hud-approval__grants {
+  margin: 8px 0 0;
+  padding: 6px 9px;
+  border-left: 3px solid var(--waiting-fill);
+  border-radius: 0 5px 5px 0;
+  background: var(--code-bg);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
 /* A file change in full: what would be written, as a diff, before anyone allows it. */
 .hud-approval__change {
   display: grid;

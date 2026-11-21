@@ -101,6 +101,8 @@ function buildCard(id, approvalId) {
   const crew = h('span', { class: 'hud-approval__crew' });
   const tool = h('code', { class: 'hud-approval__tool hud-mono' });
   const detail = h('code', { class: 'hud-approval__detail hud-mono', id: `${id}-detail` });
+  // What the request cannot say that allowing it grants (a Codex command may leave its sandbox).
+  const grants = h('p', { class: 'hud-approval__grants', id: `${id}-grants`, 'data-testid': 'approval-grants' });
   const changeNote = h('p', { class: 'hud-approval__change-note' });
   const changeBody = h('div', { class: 'hud-approval__change-body' });
   const change = h('div', { class: 'hud-approval__change', 'data-testid': 'approval-change' }, changeNote, changeBody);
@@ -114,11 +116,11 @@ function buildCard(id, approvalId) {
   const actions = h('div', { class: 'hud-approval__actions' }, allow, deny);
   const terminal = h('p', { class: 'hud-approval__terminal' }, icon('terminal', { size: 16 }), h('span', { text: 'Answer in your terminal.' }));
   const result = h('p', { class: 'hud-approval__result' });
-  const card = h('article', { class: 'hud-approval', 'data-testid': 'approval-card', 'data-approval-id': approvalId, 'aria-labelledby': `${id}-who`, 'aria-describedby': `${id}-detail` },
+  const card = h('article', { class: 'hud-approval', 'data-testid': 'approval-card', 'data-approval-id': approvalId, 'aria-labelledby': `${id}-who`, 'aria-describedby': `${id}-detail ${id}-grants` },
     h('header', { class: 'hud-approval__head' }, mark, h('div', {}, who, h('p', { class: 'hud-approval__meta' }, crew, tool))),
-    h('pre', { class: 'hud-approval__code' }, detail), change, timer, reasonRow, actions, terminal, result);
+    h('pre', { class: 'hud-approval__code' }, detail), grants, change, timer, reasonRow, actions, terminal, result);
   const item = h('li', { class: 'hud-approvals__item' }, card);
-  return { item, parts: { mark, who, crew, tool, detail, change, changeNote, changeBody, changeKey: '', reason, reasonRow, timer, bar, countdown, actions, allow, deny, terminal, result, card, index: -1, armedAt: 0, armTimer: 0 } };
+  return { item, parts: { mark, who, crew, tool, detail, grants, change, changeNote, changeBody, changeKey: '', reason, reasonRow, timer, bar, countdown, actions, allow, deny, terminal, result, card, index: -1, armedAt: 0, armTimer: 0 } };
 }
 
 /**
@@ -130,12 +132,14 @@ function buildCard(id, approvalId) {
 function describeRequest(p, approval, state) {
   const session = findSession(state, approval.sessionId);
   const agent = state.agents[approvalAgentKey(approval)];
-  const { action, detail } = describeApproval(approval, { exact: true });
+  const { action, detail, note = '' } = describeApproval(approval, { exact: true });
   updateRoundel(p.mark, crewNumber(state, approval.sessionId), session?.color);
   setText(p.who, `${agent?.name ?? 'An agent'} wants to ${action}`);
   setText(p.crew, session ? `in ${session.project}` : '');
   setText(p.tool, approval.toolName || 'Tool');
   setText(p.detail, detail || approval.toolName);
+  setText(p.grants, note);
+  setHidden(p.grants, !note);
   showChange(p, approval);
 }
 
@@ -153,7 +157,7 @@ function showChange(p, approval) {
     p.changeBody.replaceChildren();
     return;
   }
-  const { added, removed } = diffStats(change.hunks);
+  const { added, removed } = diffStats(change.hunks, { exact: true });
   setText(p.changeNote, `${change.note}: ${added} ${added === 1 ? 'line' : 'lines'} added, ${removed} removed`);
   p.changeBody.replaceChildren(...change.hunks.map((hunk, index) => diffView(hunk, { index, count: change.hunks.length, exact: true, compact: true })));
 }

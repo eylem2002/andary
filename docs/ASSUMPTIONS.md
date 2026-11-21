@@ -288,9 +288,36 @@ section.
 78. **"This computer" for plain HTTP includes a peer that connects from the address it connected
     to.** That is how a local client of `--host <address>` arrives; TCP addresses cannot be forged
     that way from another computer. A local reverse proxy counts as this computer, as before.
-79. **Blank-line runs on an approval card collapse into a marker.** Three or more blank lines in a
-    row show as "⟨N blank lines⟩", and the note gives the line counts, so padding cannot push the
-    rest of a change out of sight.
+79. **Blank-line runs on an approval card collapse into a marker.** Three or more lines in a row
+    that show nothing (blank, or only spaces, tabs, characters that draw nothing, such as
+    no-break or ideographic spaces and the Braille blank, and combining marks, which on such a line
+    sit on nothing that shows) show as "⟨N blank lines⟩", naming any such characters ("with
+    U+00A0", "and combining marks": to a shell such a line is a word, not a blank), and the note
+    gives the line counts, so padding cannot push the rest of a request or a change out of sight;
+    two such lines are shown as they are. The same three-line rule holds in the command and in a
+    diff, where a run is collapsed whatever its lines' kinds and a mixed one counts each ("⟨120
+    blank lines: 80 added, 40 removed⟩"; a run of one kind keeps its + or −). Every other space
+    but the plain one, and every character that draws nothing, shows as a marker too: every
+    default-ignorable code point, assigned or not, since browsers draw an unassigned one (U+2065,
+    U+E0080) with no width, as well as controls, format characters, private-use characters (a font
+    may draw them as anything, or nothing), separators, the Braille blank, the Hangul fillers and
+    the Khitan filler (U+16FE4). A run of them is one marker naming them (three at most, then "N more")
+    with its length ("⟨U+00A0 ×1900⟩", "⟨U+00A0 U+3000 ×2000⟩"), so a million of them make one
+    marker. A run holding a character that some reader takes for a line break also breaks the line
+    after its marker (once per run), so the lines you read are the ones it reads: U+2028 and U+2029
+    (JavaScript, Python's `str.splitlines()`), NEL (`splitlines()` and some editors, though not
+    JavaScript), and a carriage return that is neither part of a CRLF nor the last character of its
+    line (JavaScript, Python source and most editors: `// note\rconsole.log("RAN")` runs its second
+    line; a shell reads it as part of a word, so a break there shows more than bash sees, never
+    less). In a diff only a newline ends a row, so a carriage return in a file's content is marked
+    (⟨U+000D⟩) rather than drawn as a line break. Markers make the text longer (about 4.5 times
+    for single hidden characters each between plain ones, 5 for lone carriage returns or line
+    separators, which also break the line); that stays linear and is bounded by the request's own size (1 MiB), so it is
+    left as it is. More than
+    three combining marks on one base become "⟨N combining marks⟩": no script needs more than
+    three in common text, and a taller stack paints over the lines around it. Right-to-left
+    letters (Hebrew, Arabic) are left as they are: they reorder what they touch but hide nothing,
+    and the characters that override that order (bidirectional controls) are marked.
 80. **A name "fits" when it takes at most 64% of its lot's width on screen (ADR 0017).** Lots
     have yards and pavements around the building, so the whole lot would be too generous. At the
     whole-town view on a laptop the names take 34–82% of their lots, with a clear gap between
@@ -320,3 +347,76 @@ section.
     oldest without a button goes first, then a crew arrival, and an approval's toast last.
 86. **The page title counts approvals only.** "(2) Andary" is for things that block an agent
     until you answer; failures and finished work do not change the title.
+87. **A phone note for a dialog waits ten seconds.** Most prompts are answered within a few seconds
+    by someone at the computer; a note that arrives after you answered is noise. Each dialog (a
+    permission request, a question, a plan, a form an MCP server asks you to fill in) has its own
+    ten seconds. Dialogs whose seconds run out together become one note, which also covers the
+    other dialogs their crews have open, since parallel calls ask a moment apart. A finished turn
+    sends nothing by itself: Claude Code's `idle_prompt`, a minute later, covers a turn nobody came
+    back to.
+88. **Plans and questions are never held in the town.** A plain allow cannot approve a plan
+    (`ExitPlanMode`) or answer a question (`AskUserQuestion`); both wait in the terminal, and the card
+    always says so, also when remote approvals are off. On the phone they have notes of their own
+    ("A crew has a question for you."). An agent cannot ask again while one waits, so its next
+    question or plan shows the older one was answered: "No, keep planning" sends nothing, and the
+    revised plan is a dialog, and a note, of its own. An MCP server's form (Claude Code's
+    `elicitation_dialog`, `elicitation_url_dialog` and `agent_needs_input` notices) is a question
+    too; it names no tool, so it closes like a session's notice (below).
+89. **A dialog's note is dropped only on proof of an answer.** Proof is that very call reporting
+    back (the same tool and call key, taken from the input as it arrived, before anything is cut,
+    without the `description` of any Codex call, which Codex adds, its reason for asking, to a
+    request of any tool and never to the call's start or result, nor of a Claude Code command
+    (Bash, PowerShell), which runs nothing; any other Claude Code tool's description counts, as an
+    MCP tool's may be what it acts on, so two calls that differ only in it are told apart; for a
+    call Codex's adapter renamed, from the original call; questions and plans by name, since your
+    answer changes their input), your prompt or `/compact`, the agent's turn ending (in an
+    error too, or a teammate going idle) or the session ending, or a decision in the town. Your
+    prompt answers every dialog of the session, whoever asked, since nobody can type while a dialog
+    shows in the terminal; except a request the town holds right now, which is not in the terminal
+    and does not stop you typing to the lead. A session's notice or form, which names no tool, also
+    closes when the lead starts its next call, and is not opened at all when it arrives after a
+    call the lead started 250 ms or more after it was sent (each tracker remembers every session's
+    lead's newest call start, for as many sessions as it keeps dialogs). A new request from the same agent is no proof,
+    because parallel calls each ask on their own (a question or a plan aside, 88); nor is a request
+    that timed out in the town or went back to the terminal: the agent still waits there, and your
+    next prompt answers it. Each hook counts at the time it was sent, not when it arrived: a
+    permission request is sent at once and a PreToolUse or a notice in the background, so a
+    question's request can arrive before its own start, and a notice before the call started ahead
+    of it. That time is when the forwarder's process started (`performance.timeOrigin`), which no
+    start-up work delays: with a clock read once Node runs, of two hooks started 1 ms apart the
+    later one came first in 8 pairs of 40. It is kept between an hour before its arrival (an older
+    stamp counts as an hour old) and its arrival: the stamp is this computer's own clock, and a
+    computer that sleeps or suspends can hold a forwarder back for minutes, after which a
+    question's start must still find its own dialog. Two processes' times
+    may still be a few milliseconds the wrong way round, so a hook counts as before or after
+    another only 250 ms (`ORDER_SLACK_MS`) apart: a question's or plan's start joins its own request
+    stamped after it or no more than 250 ms before it, a question or plan closes only those opened more than 250 ms
+    before it, and a notice is closed only by a call started 250 ms or more after it. Nothing that
+    shows an answer comes that soon: asking again takes your answer and a model turn. Known limit:
+    if a plan's or question's request never reaches the town (a 429, a failed proof, a restart)
+    and the next one's request overtakes its own start, that request joins the older dialog, which
+    its start then closes: the broker resolves the waiting request as answered, early (it was not
+    held, so the terminal still asks), while the phone still notes the new one. The approval broker
+    follows the same table, so the town's cards and the phone agree on what the terminal
+    answered.
+    Andary sees a yes in the terminal only when the tool finishes, a "No" only at your next prompt,
+    and a diff you change in your IDE not at all (its result has another input), so a note can
+    come after you answered: one note too many is better than none for an agent that waits. A tool
+    result too big for the forwarder (over 1 MiB) arrives shortened; if its input was cut, it no
+    longer matches its request.
+90. **A dialog that has had its note is remembered for 30 minutes at most.** Until its proof it
+    sends no second note, not even for Claude Code's own `permission_prompt` about it. A crashed
+    session sends no SessionEnd, so after 30 minutes its dialogs are forgotten. Claude Code sends
+    that notice once per dialog, so in practice a forgotten dialog brings no second note. At most
+    100 dialogs are kept; the oldest give way.
+91. **Codex gets its "waiting" note after a minute.** Codex sends no Notification events, so no
+    `idle_prompt`. After a Codex lead's Stop (an interrupt too), Andary waits the same 60 seconds
+    as Claude Code, and sends one note per Stop. Codex names a helper only when it starts and ends,
+    so a helper's tool calls look like the lead's: a tool starting pauses the minute; its result, a
+    helper ending or the lead's next Stop starts it again; only your prompt, or the session
+    starting or ending, ends the wait (at most 100 sessions are waited on at once). For the same
+    reason Codex's dialogs cannot be told apart by agent: a helper's request counts as the lead's,
+    and the lead's Stop answers it too. Andary cannot see you typing in Codex, so a reply that
+    takes you over a minute to write still sends the note.
+92. **The waiting note names no agent.** "A crew is waiting for your next prompt." fits Claude Code
+    and Codex alike, as the notes for permission requests, questions and plans do.

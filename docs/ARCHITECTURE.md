@@ -70,7 +70,9 @@ world is still being built; the director then plays the changes it missed (CONTR
 **Pure core.** `public/js/core/` has no DOM and no I/O, so it runs anywhere and is unit-tested in
 Node. What the page was opened with (the town look, from the address or saved preferences) is read
 once, in `page.js`, and the HUD and the town's environment take it from there. The server reuses the few core modules both sides must read the same way: identifiers,
-dates, text helpers, prices and the growth rules.
+dates, text helpers, prices, the growth rules, and what an approval card shows of a request (card
+fields). When an agent is waiting for you (open dialogs) is a pure core model too, which the phone
+notes and the approval broker both follow.
 
 **The world behind a facade.** The app talks to the 3D world only through `world/world.js`
 (CONTRACTS §6). Inside it, the town (`env/`) and the people (`agents/`) never import each other;
@@ -84,7 +86,7 @@ references may cross.
 | Area | May import |
 | --- | --- |
 | `hooks/` | Node built-ins only (it is copied out and must stand alone) |
-| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text` |
+| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields` |
 | `server/cli/`, `cli/` | the server, those core modules, the simulation (for `andary simulate`) |
 | `public/js/core/` | `core/` only |
 | `public/js/sources/` | `sources/`, `core/` |
@@ -103,6 +105,7 @@ references may cross.
 | which agents can connect, and their hooks files | `server/clients.mjs`, `server/installer.mjs` |
 | how another agent's events are translated | `server/adapters/` |
 | what happens to an event on the server | `server/ingest.mjs` |
+| when an agent waits for you, and what each hook proves | `public/js/core/dialogs.js` (`afterHook`), `server/hook-steps.mjs` |
 | who may connect, and what they may do | `server/auth.mjs`, `server/browsers.mjs`, `server/security.mjs` |
 | the team town | `server/team.mjs`, `ingestTeam` in `server/ingest.mjs` |
 | how a hook becomes town events | `public/js/core/events.js`, `summaries.js` |

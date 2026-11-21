@@ -42,7 +42,8 @@ public/css/*.css             HUD styles (app.css) and in-world overlay styles (w
 public/js/page.js            What the page was opened with (the town look), read once at load
 public/js/core/              Pure logic, no DOM, no I/O: events (normalize), store (+ crews, changes,
                              store-model), director (+ director-queue), catalog, text, summaries,
-                             ids, dates, looks, prices, growth, records, town-weather, humor
+                             ids, dates, looks, prices, growth, records, town-weather, humor,
+                             dialogs (open dialogs), card-fields (what an approval card shows)
 public/js/sources/           Where events come from: live.js (WebSocket) and demo.js (simulation),
                              one TownSource shape (types.js)
 public/js/world/layout.js    Town plan (shared, pure data)
@@ -184,7 +185,9 @@ shows up as a crew of its own.
 
 ### 4.3 The forwarder (`hooks/hook.mjs`)
 
-1. Records `ts = Date.now()` first thing.
+1. Records `ts` first thing: the time its process started (`performance.timeOrigin`, whole ms),
+   which no import or start-up work delays, so hooks started a moment apart keep their order
+   (a clock read once Node is running would not: its start-up time varies by more than that).
 2. Reads `<ANDARY_HOME>/server.json`; if missing, unreadable, or its `pid` is not a live process of
    the same user (a stale file whose port someone else may now hold), exits 0 immediately.
 3. Reads stdin fully, parses JSON (on failure sends `{hook_event_name: 'Unknown', raw: <first 4000 chars>}`).
@@ -195,9 +198,13 @@ shows up as a crew of its own.
    within 1.5 s the forwarder exits 0 having sent nothing: a recycled pid of a dead server whose
    port someone else now holds learns neither the event nor the secret.
 4. `POST http://127.0.0.1:<port>/api/hook` with headers `x-andary-secret: <secret>` and
-   `x-andary-nonce: <16 random bytes, base64url>` and body `{"v":1,"ts":<ts>,"event":<payload>}`;
-   run with the argument `codex`, the body also has `"source":"codex"` (§4.12). Codex reads the
-   same PermissionRequest decision format, so step 5 is the same for both.
+   `x-andary-nonce: <16 random bytes, base64url>` and body
+   `{"v":1,"ts":<ts>,"caps":["truncated"],"event":<payload>}`; run with the argument `codex`, the
+   body also has `"source":"codex"` (§4.12). `caps` says what this forwarder does (strings; the
+   server ignores any it does not know): `truncated`, it marks a body it had to shorten (§4.6). The
+   server holds a request for the town only from a forwarder that declares it (§4.5); `andary
+   replay` and `andary simulate` post the same body, `caps` included, as they never shorten one.
+   Codex reads the same PermissionRequest decision format, so step 5 is the same for both.
    Timeout 1.5 s, or `approvalTimeoutMs + 5000` for `PermissionRequest`.
 5. Only for `PermissionRequest`: if the reply carries a valid `x-andary-signature`
    (`base64url(HMAC-SHA256(responseKey, nonce + "\n" + body))`) and its `output` is a plain allow
@@ -267,7 +274,8 @@ Server → browser:
 { t: 'error', message }
 // Envelope = { id: number /* server sequence */, ts: number /* hook start, ms */, rx: number /* server receive */, event: object /* sanitized payload */ }
 // Approval = { id, status: 'pending'|'allowed'|'denied'|'expired'|'resolved', held: boolean, sessionId, agentId: string|null,
-//              toolName, toolInput, cwd, createdAt, expiresAt: number|null, decidedBy?: 'town'|'terminal'|'timeout', message? }
+//              toolName, toolInput, callKey: string|null /* the request's andary_key, §4.6 */, source: 'claude'|'codex',
+//              cwd, createdAt, expiresAt: number|null, decidedBy?: 'town'|'terminal'|'timeout', proof?: 'ran'|'denied'|'stopped', message? }
 ```
 
 Browser → server:
@@ -285,14 +293,57 @@ until a `decide` arrives or `approvalTimeoutMs` (default 120 s) passes; it then 
 `{"output":{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}}`
 or `{"behavior":"deny","message":"Denied from Andary"}`, or `{"output":null}` on timeout (the
 normal terminal prompt then appears). If remote approvals are off, the server answers at once with
-`null` and broadcasts the approval with `held: false` ("answer in your terminal"). A non-held
-approval becomes `resolved` (`decidedBy: 'terminal'`) when the same session + agent + tool next
-reports PostToolUse, PostToolUseFailure, PermissionDenied, Stop or SessionEnd (the tool matches
-by `tool_name` or, for a call an adapter renamed, `andary_tool`, §4.12). At most 50 pending.
-A request whose `tool_input` was changed by sanitising (a value redacted or cut) is never held,
-because the town could not show what would run: it is answered at once with `null` and its
-approval has `held: false` and `message: "The town cannot show this request in full (…)"`. In the
-browser, Allow/Deny ignore pointer clicks for 1 s after a card appears or changes place.
+`null` and broadcasts the approval with `held: false` ("answer in your terminal"). Every request is
+a dialog in the broker's own tracker (§4.6, at most 500): a non-held pending approval becomes
+`resolved` (`decidedBy: 'terminal'`) when its dialog closes, and `proof` says what showed it:
+`'ran'` (its `PostToolUse` or `PostToolUseFailure`), `'denied'` (its `PermissionDenied`) or
+`'stopped'` (anything else: your prompt, the turn or the session ending, the same agent asking a
+new question or plan). A held approval is not resolved by the terminal while the town holds it.
+Released, it waits in the terminal like any other and is resolved when its dialog closes, or at
+once if its dialog closed while it was held (its turn or session ended; `proof` says by what). An
+expired one stays expired, but its dialog shows in the terminal now, so your next prompt answers
+it. `callKey` is the request's call key (§4.6): the phone notes find the approval's own dialog by
+it (§4.10), as a parallel call of the same tool may be open beside it. At most 50 pending.
+`ExitPlanMode` and `AskUserQuestion` requests are never held: a plain allow or deny cannot approve
+a plan or answer a question, so they are answered with `null` at once (`held: false`) and their
+`message` always says they are answered in the terminal. A request is held only when its card
+shows every field of its `tool_input` as the agent will receive it, so never one whose
+`tool_input` is missing or not an object, was changed by sanitising (a value redacted or cut), or
+that the forwarder had to shorten (`truncated`, §4.6). `public/js/core/card-fields.js` lists, per
+tool with a view of its own on the card (Bash, PowerShell, Write, Edit, MultiEdit, NotebookEdit,
+Read, WebFetch, WebSearch), the fields that view shows, with the values it shows as they are,
+and the fields the card adds as `name: value` lines below it, with the values they may hold there
+(such as Bash's `description`, `timeout`, `run_in_background`, and `dangerouslyDisableSandbox`
+when `false`); a field it does not list (an option a later Claude Code adds), a value the view or
+a line would not show as it is (`dangerouslyDisableSandbox: true`, an edit with a field the diff
+leaves out), or a view with nothing to show (a MultiEdit with no edits) keeps the request from
+being held. The card of any other tool lists every field. Such a request is answered at once with
+`null`; when the town would otherwise have held it (remote approvals on, a browser signed in), its
+approval has `held: false` and `message: "The town cannot show this request in full (…)"`. Nor is
+a request held from a forwarder that does not declare `caps: ["truncated"]` (§4.3; an older copy):
+its `message` asks to run `andary install` or update the plugin. A Codex command's card
+(`source: 'codex'`, Bash or PowerShell) adds a line its request cannot carry, as Codex does not
+say whether it asks to leave its sandbox: "Codex did not say what this needs: allowing may let it
+run outside its sandbox, with network access." (`cardNote()`, `core/card-fields.js`). The card
+shows the request as the agent will receive it (`revealHidden()`, `core/text.js`): every space but
+the plain one and every character that draws nothing (controls, format characters such as
+bidirectional overrides and zero-width characters, private-use characters, every default-ignorable
+code point, assigned or not, the Braille blank, Hangul fillers, the Khitan filler U+16FE4,
+variation selectors) as a marker such as `⟨U+00A0⟩`; a run of them as one marker naming them (at
+most three, then "N more") and its length (`⟨U+00A0 ×1900⟩`, `⟨U+00A0 U+3000 ×2000⟩`); more than
+three combining marks on one base as `⟨N combining marks⟩`; and three or more lines in a row that
+show nothing (blank, or only spaces, tabs, such characters and combining marks) as one
+`⟨N blank lines with U+00A0⟩` marker (`… and combining marks` when they hold any), in the command
+and in a diff alike. A run that holds a character some reader takes for a line break is followed
+by a line break (one per run), so the lines on the card are the lines it reads: U+2028 and U+2029
+(line breaks in JavaScript and in Python's `str.splitlines()`), NEL (in `splitlines()` and some
+editors, not in JavaScript), and a carriage return that is neither part of a CRLF nor the last
+character of its line (a line break in JavaScript, in Python source and in most editors:
+`// note\rconsole.log("RAN")` runs its second line). In a diff only a newline ends a row, so a
+carriage return in file content is shown as `⟨U+000D⟩`, and a run of blank-looking rows is
+collapsed whatever its rows' kinds; a run of more than one kind counts each
+(`⟨120 blank lines: 80 added, 40 removed⟩`). In the browser, Allow/Deny ignore pointer clicks for
+1 s after a card appears or changes place.
 
 ### 4.6 Implementation notes (server)
 
@@ -312,13 +363,83 @@ Settled during implementation; they refine §4.3–§4.5.
   `serverOrigin` (the bound address, or `127.0.0.1` for a wildcard). With `--host`, `start` also
   prints an `https://` sign-in link for other computers. WebSocket `Origin` may be `http://` or
   `https://` with an allowed host. Stopping ends every connection, stalled ones included.
-- The forwarder shrinks payloads over 1 MiB instead of dropping them, and also looks for
+- The forwarder shrinks payloads over 1 MiB instead of dropping them (strings to 2,000 characters,
+  lists to 50 items, 8 levels deep; if that is not enough, only the top-level fields that are not
+  objects) and marks such a body `truncated: true` (after either step), so the server never holds
+  what it was not sent in full; every body declares so (`caps`, §4.3). It also looks for
   `server.json` next to itself (plugin installs).
-- Approvals: `SubagentStop` also resolves that subagent's terminal-answered approvals; approval
-  `agentId` has no `agent-` prefix. A held approval goes back to the terminal (`held: false`,
-  still pending) when remote approvals are switched off, no browser has been connected for 5 s,
-  the hook disconnects, or the server shuts down. Beyond 50 pending, the oldest expires. A deny
-  with a typed reason reads "Denied from Andary: <reason>".
+- **Call keys** (`server/hook-steps.mjs`): in ingest, before anything reads it, every
+  PermissionRequest, PreToolUse, PostToolUse, PostToolUseFailure and PermissionDenied payload gets
+  `andary_key`: `inputKey()` (`core/dialogs.js`) of its `tool_input` as it arrived, before
+  sanitising, so a request and its result match however long they are. The key leaves out the
+  `description` of every Codex call (`andary_source: "codex"`, whatever the tool: Codex adds its
+  reason for asking to a request only, never to the call's `PreToolUse` or result) and of a
+  Claude Code `Bash` or `PowerShell` call (it changes nothing that runs); any other Claude Code
+  tool's, such as an MCP tool's, is part of the call. It reads a command given as an argument
+  list as one line. An adapter that renames a call (`andary_tool`,
+  §4.12) sets the key itself, from the original call's input, on every payload it makes of it; a
+  key from a teammate's server is kept (§4.11). A forwarder's never arrives (its `andary_` fields
+  are dropped, §4.12). A renamed call without a key (from an older teammate's server) gets null and
+  goes by name. Other hooks lose any `andary_key`. Sanitising keeps it: envelopes carry it.
+- **Open dialogs** (`public/js/core/dialogs.js`): what an agent has asked you and had no answer to,
+  one dialog per call. The phone notes (§4.10) and the approval broker (§4.5) each keep their own
+  tracker and follow one table, `afterHook()`, at each hook's own time (`hookTime()`,
+  `server/hook-steps.mjs`): the forwarder's `ts` (the envelope's), kept between an hour before
+  its arrival (`MAX_HOOK_AGE_MS`; an older stamp counts as `arrival − 1 h`) and its arrival. The
+  stamp is this computer's own clock, and a computer that sleeps or suspends can hold a hook back
+  for minutes, which must still find its own dialog. A
+  `PermissionRequest` is sent at once and a `PreToolUse` or a `Notification` in the background, so
+  a later hook can arrive first. Each forwarder stamps its own `ts`, so two hooks sent a moment
+  apart may carry theirs the wrong way round: "before" and "after" leave `ORDER_SLACK_MS` (250 ms,
+  `core/dialogs.js`) between them, as below. Nothing that proves an answer comes that soon (asking
+  again takes your answer and a model turn).
+  - A dialog opens with a `PermissionRequest`, or with the `PreToolUse` of a question
+    (`AskUserQuestion`) or a plan (`ExitPlanMode`), whose own `PermissionRequest` then joins it
+    (the newest of that agent's it has not joined yet; with none, it opens one). A request that
+    overtook its `PreToolUse` opened the dialog itself: the `PreToolUse` joins it (the newest of
+    that agent's of the kind it has not joined yet, opened no more than `ORDER_SLACK_MS` before the
+    `PreToolUse`'s time, or after it). A new question or plan closes that agent's older ones of its
+    kind (opened more than `ORDER_SLACK_MS` before it): it cannot ask again while one waits, and a
+    "No, keep planning" sends nothing else. Known limit: when a plan's or question's request never
+    reaches the town (a 429, a failed proof, a restart) and the next one's request overtakes its
+    `PreToolUse`, that request joins the older dialog and its `PreToolUse` then closes it: the
+    broker resolves the new request `stopped` while it still waits in the terminal (it was never
+    held, so only its card goes early); the phone notes still send the new one's note, for the
+    dialog its `PreToolUse` opened. A `Notification` (`permission_prompt`) opens one,
+    naming no tool, only when nothing of its session is open (its request never reached the town: a
+    429, a failed proof, a restart). An MCP server's form (`Notification` with
+    `elicitation_dialog`, `elicitation_url_dialog` or `agent_needs_input`) opens a question naming
+    no tool, unless the session has one open. Neither opens when it was sent `ORDER_SLACK_MS` or
+    more before the newest call the session's lead has started (its newest non-question, non-plan
+    `PreToolUse` time; each tracker keeps it for as many sessions as it keeps dialogs, the least
+    recent giving way, and forgets it when the session ends or is interrupted): it arrived after
+    the call that showed it was answered.
+  - It closes only on proof of an answer: that very call reporting back (`PostToolUse`,
+    `PostToolUseFailure` or `PermissionDenied` from the same agent, with a tool name in common and
+    the same call key; a side without one, a question or a plan, goes by name);
+    the town deciding the request it held for it; your prompt or `/compact` (`UserPromptSubmit`, a
+    manual `PreCompact`: every dialog of the session, whoever asked, except one whose request the
+    town holds right now: nobody can type while a dialog shows in the terminal, and a held one is
+    not there); the agent's turn ending (`Stop` for the lead and the session's notices;
+    `SubagentStop`, `StopFailure`, or `TeammateIdle` with an agent id for that agent); the session
+    ending (`SessionEnd`) or a Codex interrupt (the `Stop` with `stop_reason: "interrupted"`). A
+    session's notice or form also closes when the lead starts a new call after it (one whose
+    `PreToolUse` was sent `ORDER_SLACK_MS` or more after it, whenever it arrives), never on a tool
+    result.
+  - Each tracker knows which requests the town holds: `link(call, approvalId, held)` with the
+    approval's `held` when it is created, and `toTerminal(approvalId)` when it goes back to the
+    terminal (released or expired), after which your next prompt answers it and no later call of
+    the same tool takes it for its own.
+  - No proof: a new request (parallel calls each ask on their own; a question or plan aside,
+    above), a request that expired or was released (the agent waits in its terminal), any tool
+    result for a dialog that names no tool.
+  - Codex names a helper only on `SubagentStart` and `SubagentStop`, never on its tool calls
+    (§4.12), so Codex's dialogs cannot be told apart by agent: a helper's request is the lead's to
+    the model, and the lead's `Stop` closes it too.
+- Approvals: approval `agentId` has no `agent-` prefix. A held approval goes back to the terminal
+  (`held: false`, still pending) when remote approvals are switched off, no browser has been
+  connected for 5 s, the hook disconnects, or the server shuts down. Beyond 50 pending, the oldest
+  expires. A deny with a typed reason reads "Denied from Andary: <reason>".
 - Redaction covers more than §4.4 lists (including fields named like `password`/`api_key`); every
   pattern is length-bounded so a 1 MiB payload cannot trigger quadratic regex time.
 - The installer records each settings file's state in `<ANDARY_HOME>/installs.json`, so
@@ -366,12 +487,42 @@ demo keeps its points in `localStorage['andary:demo-progress']`, starting at 92.
 
 Phone (`server/notify.mjs`), opt-in: `--notify` uses a random ntfy.sh topic kept in
 `<ANDARY_HOME>/notify.json` (0600); `--notify-url <url>` or `ANDARY_NOTIFY_URL` names any http(s)
-ntfy topic (no credentials in the URL). A `PermissionRequest` or `Notification`
-(`permission_prompt`) hook posts "A crew needs your permission." (priority high), `idle_prompt`
-"Claude is waiting for your next prompt.", the main agent's `Stop` "A crew finished its turn.",
-`StopFailure` a limit or error note. The body never names a project, file or command. At most
-one of a kind per 30 s and 30 an hour; a failed post is logged once. `settings.notify` (also in the
-unauthenticated `/api/hello`) is a boolean; the topic URL is only in the WebSocket `hello`.
+ntfy topic (no credentials in the URL). The body never names a project, file, command or tool. At
+most one note of a kind per 30 s and 30 an hour (test notes aside); a failed post is logged once.
+`settings.notify` (also in the unauthenticated `/api/hello`) is a boolean; the topic URL is only in
+the WebSocket `hello`. Only this computer's events count (§4.11).
+
+- **Open dialogs** follow the one table of §4.6 (`core/dialogs.js`, `afterHook()`). The notifier
+  keeps its own tracker (at most 100), reads each call by its `andary_key`, and links the town's
+  requests to their dialogs by `callKey` as the broker reports them, with whether the town holds
+  them (a release reports `held: false`; an expiry hands it back too). Only the town's decision
+  (`allowed`, `denied`) closes a dialog from the broker: `resolved` follows from the same events,
+  which the notifier has already seen.
+- **Dialog notes** (priority high): due 10 s after the dialog opens (when its hook was sent), sent
+  if it is still open: "A crew needs your permission.", "A crew has a question for you." (an MCP
+  server's form too) or "A crew has a plan for you to approve." (a revised plan has a note of its
+  own). Dialogs due together make one note with a crew count ("3 crews need your permission."; of
+  mixed kinds "3 crews need you."), and a note covers every dialog its crews have open then. One
+  30 s limit holds for all dialog notes: while it holds one back, the dialogs wait and go out when
+  it allows; past the hour's limit they count as noted, unsent. A noted dialog stays open until its
+  proof, at most 30 minutes after it opened (a crashed session sends no `SessionEnd`), so a later
+  `permission_prompt` for it sends nothing. At most 100 dialogs are kept; the oldest give way.
+
+  What cannot be seen: a yes in the terminal shows only when the tool finishes (approve a 30 s
+  `npm test` in 1 s and the note still goes out); a "No" sends no event before your next prompt or
+  the agent's turn ending; a diff you change in your IDE before accepting it reports back with
+  another input, so it is not taken for the answer. Any of these can still send a note.
+- **Waiting**: "A crew is waiting for your next prompt.", for Claude Code's `idle_prompt`. Codex
+  sends no `Notification` events: a Codex lead's `Stop` (an interrupt too) starts a 60 s wait
+  (`CODEX_IDLE_MS`) that ends in the same note, once per `Stop`. Codex marks no helper on its tool
+  calls, so the session's tools pause the minute while they run: a `PreToolUse` or
+  `PermissionRequest` pauses it; a `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`,
+  `SubagentStop` or the lead's next `Stop` starts it again; only `UserPromptSubmit`,
+  `SessionStart` or `SessionEnd` ends the wait, or its note: the session is then forgotten until
+  the lead's next `Stop`. At most 100 sessions wait at once; the oldest gives way. Andary cannot
+  see you typing in Codex, so a reply that takes over a minute still sends the note.
+- **Stopped**: `StopFailure` posts a limit or an error note.
+- A finished turn posts nothing by itself. Stopping the server drops every note still waiting.
 
 This computer (`public/js/ui/notifications.js`), opt-in in Settings (`prefs.desktopNotify`, after
 the browser's permission): while the page is hidden, a fresh pending approval, the main agent's
@@ -431,7 +582,8 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
 Every agent's payloads are translated on the server, before ingest, into the one event contract
 the rest of the town reads: the Claude Code hook payload (§4.2). `server/adapters/index.mjs`
 picks the adapter by the body's `source` (`claude` when absent) and drops every `andary_` field
-from what arrived (`andary_member`, `andary_source`, `andary_tool`: only the server sets them).
+from what arrived (`andary_member`, `andary_source`, `andary_tool`, `andary_key`: only the server
+sets them).
 
 - **Claude Code**: unchanged.
 - **Codex** (`server/adapters/codex.mjs`): Codex's hooks use Claude Code's event and field names,
@@ -443,9 +595,10 @@ from what arrived (`andary_member`, `andary_source`, `andary_tool`: only the ser
     the new path), a deleted file stays `apply_patch {command, file_path}`. Paths are joined to
     `cwd`. The first keeps the `tool_use_id`, the others get `<id>#2`, `<id>#3`…
   - `spawn_agent` becomes `Agent {description, prompt, subagent_type}`.
-  - Both keep Codex's own tool name in `andary_tool` (`apply_patch`, `spawn_agent`): a permission
-    request asked under that name settles when the renamed call runs (§4.5), and the browser's
-    `ToolData.sourceTool` carries it.
+  - Both keep Codex's own tool name in `andary_tool` (`apply_patch`, `spawn_agent`) and the call
+    key of the original call's input in `andary_key` (on every payload made of it, §4.6): a
+    permission request asked under that name settles when the renamed call runs (§4.5), and the
+    browser's `ToolData.sourceTool` carries the name.
   - `Bash` with `tool_input.command` as a list: joined with spaces, each argument quoted the way a
     shell would need it (`['rm', 'a b']` → `rm 'a b'`). The approval card quotes a list the same way. A `PostToolUse` whose
     `tool_response` (or the payload) has a non-zero `exit_code`/`exitCode`/`metadata.exit_code`
@@ -454,6 +607,12 @@ from what arrived (`andary_member`, `andary_source`, `andary_tool`: only the ser
   - An event it already translated passes through unchanged, so `andary replay` sends a recorded
     Codex event (one with `andary_source: "codex"`) as Codex's again and it keeps its mark.
   - `PermissionRequest` is never split or rewritten: the town shows exactly what it would approve.
+    It does not say whether the command asks to leave Codex's sandbox or reach the network, so the
+    card says that allowing may (§4.5). Its `tool_input` may carry a `description`, Codex's reason for asking, for any tool,
+    which the call's `PreToolUse` and `PostToolUse` do not: every Codex call's key leaves it out
+    (§4.6).
+  - Codex names a helper (`agent_id`) only on `SubagentStart` and `SubagentStop`: its other
+    events, tool calls included, read as the lead's (§4.6, §4.10).
 - Token usage is read from Claude Code transcripts only (Codex rollouts are not read yet).
 - The browser reads `andary_source` into `TownEvent.source` and `Session.source`
   (`'claude'|'codex'`); a Codex crew has a `crew-agent` badge, OpenAI model ids get a cap and a

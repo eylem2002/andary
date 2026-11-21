@@ -27,6 +27,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {string} [publicDir]
  * @property {boolean} [remoteApprovals]
  * @property {string|null} [notifyUrl]    ntfy topic URL for phone notifications (null: off)
+ * @property {number} [notifyDelayMs]      how long a dialog's phone note waits (DIALOG_DELAY_MS); for tests, no CLI flag
  * @property {string} [claudeDir]          Claude Code's config folder, for reading token usage from transcripts
  * @property {boolean} [team]              host a team town: teammates' Andarys may send their events here
  * @property {string[]} [teamHosts]        names teammates reach a team host by (a VPN name), besides its addresses
@@ -179,6 +180,7 @@ function createHttpServer(ctx, tls) {
  */
 function createContext(config, options) {
   const hub = createHub(LIMITS.wsClients);
+  const notifier = createNotifier({ url: options.notifyUrl ?? null, log: config.log, delayMs: options.notifyDelayMs });
   /** @type {TownContext} */
   const ctx = {
     version: readVersion(),
@@ -193,7 +195,11 @@ function createContext(config, options) {
       timeoutMs: config.approvalTimeoutMs,
       maxPending: LIMITS.pendingApprovals,
       maxSettled: LIMITS.settledApprovals,
-      onChange: (approval) => hub.broadcastOwners({ t: 'approval', a: approval }),
+      onChange: (approval) => {
+        hub.broadcastOwners({ t: 'approval', a: approval });
+        // Links a request to its dialog; one decided in the town needs no phone note.
+        notifier.approvalChanged(approval);
+      },
     }),
     hub,
     team: options.team
@@ -211,7 +217,7 @@ function createContext(config, options) {
       stateFile: config.writeState ? join(config.home, 'usage.json') : null,
       onChange: (record, days) => hub.broadcastOwners({ t: 'usage', u: record, days }),
     }),
-    notifier: createNotifier({ url: options.notifyUrl ?? null, log: config.log }),
+    notifier,
     progress: createProgress({
       stateFile: config.writeState ? join(config.home, 'progress.json') : null,
       onChange: (progress) => hub.broadcast({ t: 'progress', p: progress }),
@@ -252,6 +258,8 @@ function listen(server, port, host) {
 async function stopServer(ctx, listener, config) {
   if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
   if (ctx.hostTimer) clearInterval(ctx.hostTimer);
+  // First, so no phone note goes out while the server stops: whoever stops it is at the computer.
+  ctx.notifier.dispose();
   ctx.broker.releaseAll();
   // Last events to the team host, but never hold up shutdown for long.
   if (ctx.relay) await Promise.race([ctx.relay.flush(), new Promise((resolve) => setTimeout(resolve, 1500).unref())]);
