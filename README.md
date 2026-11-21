@@ -155,7 +155,9 @@ Off by default. Turn on **Remote approvals** in Settings (or start with
 `andary start --remote-approvals`). A permission request then gets **Allow** and **Deny** buttons
 and a countdown; if nobody answers within two minutes, the normal prompt appears in your
 terminal. The card shows the exact request, and for a file change the change itself: a new
-file's content, or an edit as a diff. To tell the agent why you said no, type a reason before
+file's content, or an edit as a diff. Anything that draws nothing (an unusual space, a
+zero-width or direction mark, a run of blank lines) shows as a marker such as `⟨U+00A0⟩`, so
+nothing can hide in what you approve. To tell the agent why you said no, type a reason before
 **Deny** (or press Enter in the reason field). A request the town cannot show in full (a secret
 was masked, a long value was cut, or it has an option the card does not show, such as running a
 command outside the sandbox) is never held there and goes straight to your terminal; so does one

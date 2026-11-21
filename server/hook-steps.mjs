@@ -27,7 +27,7 @@ export function withCallKey(event) {
     return rest;
   }
   if (typeof event.andary_key === 'string') return event;
-  return { ...event, andary_key: event.andary_tool ? null : inputKey(event.tool_input) };
+  return { ...event, andary_key: event.andary_tool ? null : inputKey(event.tool_input, event.tool_name) };
 }
 
 /**
@@ -50,15 +50,20 @@ export function callOf(event) {
   };
 }
 
+/** The oldest a hook's own time may be, before its arrival: a forwarder delivers within seconds. */
+export const MAX_HOOK_AGE_MS = 60_000;
+
 /**
- * A hook's own time: when the agent sent it (the forwarder's `ts`), never later than now; its
- * arrival when it has none. A permission request is sent at once and a PreToolUse or a notice in
- * the background, so a later hook can arrive first: the dialog rules go by this time.
+ * A hook's own time: when the agent sent it (the forwarder's `ts`), kept between a minute before
+ * now (MAX_HOOK_AGE_MS) and now, so a wrong clock or a forged stamp cannot place a hook ahead of
+ * every other or behind them all; its arrival when it has none. A permission request is sent at
+ * once and a PreToolUse or a notice in the background, so a later hook can arrive first: the
+ * dialog rules go by this time.
  * @param {unknown} ts @param {number} now
  * @returns {number}
  */
 export function hookTime(ts, now) {
-  return typeof ts === 'number' && Number.isFinite(ts) ? Math.min(ts, now) : now;
+  return typeof ts === 'number' && Number.isFinite(ts) ? Math.max(now - MAX_HOOK_AGE_MS, Math.min(ts, now)) : now;
 }
 
 /**

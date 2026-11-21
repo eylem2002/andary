@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { DENY_MESSAGE, createApprovalBroker, decisionOutput } from '../../../server/approvals.mjs';
 import { withCallKey } from '../../../server/hook-steps.mjs';
-import { inputKey } from '../../../public/js/core/dialogs.js';
+import { ORDER_SLACK_MS, inputKey } from '../../../public/js/core/dialogs.js';
 import { normalizeAgentId } from '../../../public/js/core/ids.js';
 
 /** A broker with a fake clock and manual timers. */
@@ -349,6 +349,32 @@ describe('the dialog model decides what the terminal answered (core/dialogs.js)'
     assert.deepEqual([slow.broker.list()[0].status, slow.broker.list()[0].proof], ['resolved', 'stopped']);
   });
 
+  it(`a plan's PreToolUse and request stamped within ${ORDER_SLACK_MS} ms either way round are one dialog, in either arrival order`, () => {
+    // Each hook's forwarder stamps its own time; one started a millisecond later may stamp first.
+    const plan = (/** @type {string} */ text) => ({ session_id: 's1', tool_name: 'ExitPlanMode', tool_input: { plan: text } });
+    for (const [requestAt, startAt] of [[10_001, 10_000], [10_000, 10_001]]) {
+      for (const requestFirst of [true, false]) {
+        const { broker, advance } = setup();
+        broker.observe(keyed({ hook_event_name: 'PreToolUse', ...plan('v1') }), 1_000);
+        broker.create(keyed(request(plan('v1'))), { hold: false, at: 1_000 });
+        advance(9_100);
+        const label = `request at ${requestAt}, start at ${startAt}, ${requestFirst ? 'request' : 'start'} first`;
+        const start = () => broker.observe(keyed({ hook_event_name: 'PreToolUse', ...plan('v2') }), startAt);
+        const create = () => broker.create(keyed(request(plan('v2'))), { hold: false, at: requestAt });
+        if (requestFirst) {
+          create();
+          assert.equal(start(), 0, `${label}: its own start answers nothing`);
+        } else {
+          assert.equal(start(), 1, `${label}: a new plan answers the older one`);
+          create();
+        }
+        assert.deepEqual(broker.list().map((a) => [/** @type {any} */ (a.toolInput).plan, a.status]), [['v2', 'pending'], ['v1', 'resolved']], label);
+        assert.equal(broker.observe(keyed({ hook_event_name: 'PostToolUse', ...plan('v2'), tool_response: {} }), 12_000), 1, label);
+        assert.equal(broker.list()[0].proof, 'ran', label);
+      }
+    }
+  });
+
   it("a held request whose turn or session ended meanwhile is answered once it goes back to the terminal", () => {
     /** @type {[string, Record<string, any>][]} */
     const ends = [
@@ -388,6 +414,15 @@ describe('the dialog model decides what the terminal answered (core/dialogs.js)'
     broker.create(ask('git push', { tool_input: { command: ['git', 'push'], description: 'Push the branch' }, andary_source: 'codex' }), { hold: false });
     assert.equal(broker.observe(keyed({ hook_event_name: 'PostToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'git push' }, tool_response: {}, andary_source: 'codex' })), 1);
     assert.deepEqual([broker.list()[0].status, broker.list()[0].proof], ['resolved', 'ran']);
+  });
+
+  it("two parallel MCP calls that differ only in their description are each answered by their own result", () => {
+    const { broker } = setup();
+    const issue = (/** @type {string} */ description) => ({ session_id: 's1', tool_name: 'mcp__gh__create_issue', tool_input: { repo: 'a/b', title: 'Flaky test', description } });
+    broker.create(keyed(request(issue('Seen on CI'))), { hold: false });
+    broker.create(keyed(request(issue('Seen locally'))), { hold: false });
+    assert.equal(broker.observe(keyed({ hook_event_name: 'PostToolUse', ...issue('Seen locally'), tool_response: {} })), 1);
+    assert.deepEqual(broker.list().map((a) => [/** @type {any} */ (a.toolInput).description, a.status]), [['Seen on CI', 'pending'], ['Seen locally', 'resolved']]);
   });
 
   it('says which agent asked, so a Codex card can say what Allow may grant', () => {

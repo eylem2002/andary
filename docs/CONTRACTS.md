@@ -185,7 +185,9 @@ shows up as a crew of its own.
 
 ### 4.3 The forwarder (`hooks/hook.mjs`)
 
-1. Records `ts = Date.now()` first thing.
+1. Records `ts` first thing: the time its process started (`performance.timeOrigin`, whole ms),
+   which no import or start-up work delays, so hooks started a moment apart keep their order
+   (a clock read once Node is running would not: its start-up time varies by more than that).
 2. Reads `<ANDARY_HOME>/server.json`; if missing, unreadable, or its `pid` is not a live process of
    the same user (a stale file whose port someone else may now hold), exits 0 immediately.
 3. Reads stdin fully, parses JSON (on failure sends `{hook_event_name: 'Unknown', raw: <first 4000 chars>}`).
@@ -323,12 +325,18 @@ its `message` asks to run `andary install` or update the plugin. A Codex command
 (`source: 'codex'`, Bash or PowerShell) adds a line its request cannot carry, as Codex does not
 say whether it asks to leave its sandbox: "Codex did not say what this needs: allowing may let it
 run outside its sandbox, with network access." (`cardNote()`, `core/card-fields.js`). The card
-shows the request as the agent will receive it: every space but the plain one and every character
-that draws nothing (controls, format characters such as bidirectional overrides and zero-width
-characters, the Braille blank, Hangul fillers, variation selectors) as a marker such as
-`⟨U+00A0⟩`, a run of one as one marker with its count (`⟨U+00A0 ×1900⟩`), and three or more lines
-that show nothing (blank, or only spaces and such characters) as one `⟨N blank lines with U+00A0⟩`
-marker, in the command and in a diff alike. In the browser, Allow/Deny ignore pointer clicks for
+shows the request as the agent will receive it (`revealHidden()`, `core/text.js`): every space but
+the plain one and every character that draws nothing (controls, format characters such as
+bidirectional overrides and zero-width characters, every default-ignorable code point, assigned or
+not, the Braille blank, Hangul fillers, variation selectors) as a marker such as `⟨U+00A0⟩`; a run
+of them as one marker naming them (at most three, then "N more") and its length
+(`⟨U+00A0 ×1900⟩`, `⟨U+00A0 U+3000 ×2000⟩`); U+2028, U+2029 and NEL, which JavaScript and some
+tools read as line breaks, as a marker followed by a line break (one per run); more than three
+combining marks on one base as `⟨N combining marks⟩`; and three or more lines in a row that show
+nothing (blank, or only spaces, tabs and such characters) as one `⟨N blank lines with U+00A0⟩`
+marker, in the command and in a diff alike. In a diff the run is collapsed whatever its lines'
+kinds; a run of more than one kind counts each (`⟨120 blank lines: 80 added, 40 removed⟩`), and a
+carriage return in file content stays in its line, as `⟨U+000D⟩`. In the browser, Allow/Deny ignore pointer clicks for
 1 s after a card appears or changes place.
 
 ### 4.6 Implementation notes (server)
@@ -358,24 +366,36 @@ Settled during implementation; they refine §4.3–§4.5.
   PermissionRequest, PreToolUse, PostToolUse, PostToolUseFailure and PermissionDenied payload gets
   `andary_key`: `inputKey()` (`core/dialogs.js`) of its `tool_input` as it arrived, before
   sanitising, so a request and its result match however long they are. The key leaves out a
-  `description` (it changes nothing that runs, and Codex sends one with a request only) and reads
-  a command given as an argument list as one line. An adapter that renames a call (`andary_tool`,
+  `Bash` or `PowerShell` call's `description` (it changes nothing that runs, and Codex sends one
+  with a request only; any other tool's, such as an MCP tool's, is part of the call) and reads a
+  command given as an argument list as one line. An adapter that renames a call (`andary_tool`,
   §4.12) sets the key itself, from the original call's input, on every payload it makes of it; a
   key from a teammate's server is kept (§4.11). A forwarder's never arrives (its `andary_` fields
   are dropped, §4.12). A renamed call without a key (from an older teammate's server) gets null and
   goes by name. Other hooks lose any `andary_key`. Sanitising keeps it: envelopes carry it.
 - **Open dialogs** (`public/js/core/dialogs.js`): what an agent has asked you and had no answer to,
   one dialog per call. The phone notes (§4.10) and the approval broker (§4.5) each keep their own
-  tracker and follow one table, `afterHook()`, at each hook's own time: the forwarder's `ts` (the
-  envelope's), never later than its arrival. A `PermissionRequest` is sent at once and a
-  `PreToolUse` or a `Notification` in the background, so a later hook can arrive first.
+  tracker and follow one table, `afterHook()`, at each hook's own time (`hookTime()`,
+  `server/hook-steps.mjs`): the forwarder's `ts` (the envelope's), kept between 60 s before its
+  arrival (`MAX_HOOK_AGE_MS`; an older stamp counts as `arrival − 60 s`) and its arrival. A
+  `PermissionRequest` is sent at once and a `PreToolUse` or a `Notification` in the background, so
+  a later hook can arrive first. Each forwarder stamps its own `ts`, so two hooks sent a moment
+  apart may carry theirs the wrong way round: "before" and "after" leave `ORDER_SLACK_MS` (250 ms,
+  `core/dialogs.js`) between them, as below. Nothing that proves an answer comes that soon (asking
+  again takes your answer and a model turn).
   - A dialog opens with a `PermissionRequest`, or with the `PreToolUse` of a question
     (`AskUserQuestion`) or a plan (`ExitPlanMode`), whose own `PermissionRequest` then joins it
     (the newest of that agent's it has not joined yet; with none, it opens one). A request that
     overtook its `PreToolUse` opened the dialog itself: the `PreToolUse` joins it (the newest of
-    that agent's of the kind it has not joined yet, opened at or after the `PreToolUse`'s time). A
-    new question or plan closes that agent's older ones of its kind (opened before it): it cannot
-    ask again while one waits, and a "No, keep planning" sends nothing else. A `Notification` (`permission_prompt`) opens one,
+    that agent's of the kind it has not joined yet, opened no more than `ORDER_SLACK_MS` before the
+    `PreToolUse`'s time, or after it). A new question or plan closes that agent's older ones of its
+    kind (opened more than `ORDER_SLACK_MS` before it): it cannot ask again while one waits, and a
+    "No, keep planning" sends nothing else. Known limit: when a plan's or question's request never
+    reaches the town (a 429, a failed proof, a restart) and the next one's request overtakes its
+    `PreToolUse`, that request joins the older dialog and its `PreToolUse` then closes it: the
+    broker resolves the new request `stopped` while it still waits in the terminal (it was never
+    held, so only its card goes early); the phone notes still send the new one's note, for the
+    dialog its `PreToolUse` opened. A `Notification` (`permission_prompt`) opens one,
     naming no tool, only when nothing of its session is open (its request never reached the town: a
     429, a failed proof, a restart). An MCP server's form (`Notification` with
     `elicitation_dialog`, `elicitation_url_dialog` or `agent_needs_input`) opens a question naming
@@ -390,7 +410,8 @@ Settled during implementation; they refine §4.3–§4.5.
     `SubagentStop`, `StopFailure`, or `TeammateIdle` with an agent id for that agent); the session
     ending (`SessionEnd`) or a Codex interrupt (the `Stop` with `stop_reason: "interrupted"`). A
     session's notice or form also closes when the lead starts a new call after it (one whose
-    `PreToolUse` was sent after it, whenever it arrives), never on a tool result.
+    `PreToolUse` was sent `ORDER_SLACK_MS` or more after it, whenever it arrives), never on a tool
+    result.
   - Each tracker knows which requests the town holds: `link(call, approvalId, held)` with the
     approval's `held` when it is created, and `toTerminal(approvalId)` when it goes back to the
     terminal (released or expired), after which your next prompt answers it and no later call of
@@ -574,7 +595,7 @@ sets them).
   - `PermissionRequest` is never split or rewritten: the town shows exactly what it would approve.
     It does not say whether the command asks to leave Codex's sandbox or reach the network, so the
     card says that allowing may (§4.5). Its `tool_input` may carry a `description`, which the
-    call's `PreToolUse` and `PostToolUse` do not: call keys leave it out (§4.6).
+    call's `PreToolUse` and `PostToolUse` do not: a command's call key leaves it out (§4.6).
   - Codex names a helper (`agent_id`) only on `SubagentStart` and `SubagentStop`: its other
     events, tool calls included, read as the lead's (§4.6, §4.10).
 - Token usage is read from Claude Code transcripts only (Codex rollouts are not read yet).

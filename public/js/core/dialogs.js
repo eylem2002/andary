@@ -20,11 +20,21 @@
 // Hooks may arrive out of order (a permission request is sent at once, a PreToolUse or a
 // notice in the background), so every rule goes by the hook's own time: a question's request
 // that overtook its PreToolUse is joined by it, and a notice is closed only by a call started
-// after it. afterHook() is the table of which hook does what; every consumer follows it.
+// after it. Two hooks sent a moment apart may still carry their times the wrong way round (each
+// forwarder is its own process), so "before" and "after" leave ORDER_SLACK_MS between them.
+// afterHook() is the table of which hook does what; every consumer follows it.
 import { isObject, shellWords } from './text.js';
 
 /** Tools that stop the agent until you answer them in the terminal. */
 export const INTERACTIVE_TOOLS = Object.freeze({ AskUserQuestion: 'question', ExitPlanMode: 'plan' });
+
+/**
+ * How far apart two hooks' times must be to count as one before the other. Each hook's forwarder
+ * stamps its own time, so a PreToolUse and its own request may carry theirs a few milliseconds the
+ * wrong way round. Nothing that proves an answer comes this soon: asking again takes your answer
+ * and a model turn.
+ */
+export const ORDER_SLACK_MS = 250;
 
 /** Notification types for an MCP server's form, which waits for you like a question. */
 export const FORM_NOTICES = Object.freeze(['elicitation_dialog', 'elicitation_url_dialog', 'agent_needs_input']);
@@ -64,17 +74,25 @@ export const FORM_NOTICES = Object.freeze(['elicitation_dialog', 'elicitation_ur
  */
 
 /**
+ * Tools whose `description` only labels the call: it changes nothing that runs, and Codex sends
+ * one with a request only, not with the call's PreToolUse or result. Any other tool's (an MCP
+ * tool's) may be what it acts on.
+ */
+const LABELLED_TOOLS = Object.freeze(['Bash', 'PowerShell']);
+
+/**
  * A short key for a tool input, equal for equal inputs. A command sent as an argument list
  * (Codex) is joined first, as the request and its result may differ in that alone, and a
- * `description` is left out: it changes nothing that runs, and Codex sends one with a request
- * only, not with the call's PreToolUse or result.
+ * command's `description` is left out (LABELLED_TOOLS).
  * @param {unknown} input
+ * @param {unknown} [tool]  the tool's name
  * @returns {string}
  */
-export function inputKey(input) {
+export function inputKey(input, tool) {
   if (!isObject(input)) return hash53(JSON.stringify(input ?? null));
   const { description: _label, ...rest } = input;
-  return hash53(JSON.stringify(Array.isArray(rest.command) ? { ...rest, command: shellWords(rest.command) } : rest));
+  const kept = typeof tool === 'string' && LABELLED_TOOLS.includes(tool) ? rest : input;
+  return hash53(JSON.stringify(Array.isArray(kept.command) ? { ...kept, command: shellWords(kept.command) } : kept));
 }
 
 /** The kind of dialog a call opens. @param {readonly string[]} tools @returns {DialogKind} */
@@ -126,12 +144,12 @@ export function createDialogs({ max = 200 } = {}) {
   }
 
   /**
-   * That agent's questions or plans of a kind opened before `at`: answered, as it cannot ask again
-   * while one waits.
+   * That agent's questions or plans of a kind opened before `at` (by more than ORDER_SLACK_MS):
+   * answered, as it cannot ask again while one waits.
    * @param {Call} call @param {DialogKind} kind @param {number} at
    */
   function closeOlder(call, kind, at) {
-    return close((d) => !isNotice(d) && d.kind === kind && d.sessionId === call.sessionId && d.agentId === call.agentId && d.at < at);
+    return close((d) => !isNotice(d) && d.kind === kind && d.sessionId === call.sessionId && d.agentId === call.agentId && d.at < at - ORDER_SLACK_MS);
   }
 
   /**
@@ -169,14 +187,14 @@ export function createDialogs({ max = 200 } = {}) {
      * A question or a plan starting (its PreToolUse): a dialog matched by name, as your answer
      * changes its input. Its own request may have come first (a PreToolUse is sent in the
      * background): the newest of that agent's of the kind not begun yet, opened at or after this
-     * hook's time, is this one. Either way it closes that agent's older ones of the kind (opened
-     * before it).
+     * hook's time (less ORDER_SLACK_MS), is this one. Either way it closes that agent's older ones
+     * of the kind (opened before it, by more than ORDER_SLACK_MS).
      * @param {Call} call @param {number} at @param {string} [text]
      * @returns {Asked}
      */
     begin(call, at, text = '') {
       const kind = kindOf(call.tools);
-      const own = open.findLast((d) => d.kind === kind && !d.begun && d.at >= at && fits(d, call));
+      const own = open.findLast((d) => d.kind === kind && !d.begun && d.at >= at - ORDER_SLACK_MS && fits(d, call));
       if (!own) return askAgain(call, kind, at, text, { requested: false, begun: true });
       own.begun = true;
       return { dialog: own, opened: false, closed: closeOlder(call, kind, at) };
@@ -251,13 +269,13 @@ export function createDialogs({ max = 200 } = {}) {
     },
 
     /**
-     * The lead started a new tool call: a session's notice that came before it was answered (an
-     * agent waiting on a dialog starts nothing). Tool results prove nothing for such a dialog: a
-     * parallel call may finish while it still waits.
+     * The lead started a new tool call: a session's notice that came before it (by ORDER_SLACK_MS
+     * at least) was answered (an agent waiting on a dialog starts nothing). Tool results prove
+     * nothing for such a dialog: a parallel call may finish while it still waits.
      * @param {string} sessionId @param {number} at @returns {Dialog[]}
      */
     movedOn(sessionId, at) {
-      return close((d) => d.sessionId === sessionId && isNotice(d) && d.at <= at);
+      return close((d) => d.sessionId === sessionId && isNotice(d) && d.at <= at - ORDER_SLACK_MS);
     },
 
     /** The session ended or was interrupted: all of its dialogs. @param {string} sessionId @returns {Dialog[]} */

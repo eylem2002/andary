@@ -25,8 +25,9 @@ const START_TIMEOUT_MS = 15_000;
  * @property {() => string} output  everything the server printed so far
  * @property {(pattern: RegExp, timeoutMs?: number) => Promise<string>} waitForOutput
  *   resolves with the output once it matches `pattern`
- * @property {(payload: unknown, options?: { input?: string, timeoutMs?: number, args?: string[] }) => Promise<{ code: number|null, stdout: string, stderr: string }>} sendHook
- *   runs the real hooks/hook.mjs with the payload on stdin (args ['codex']: as Codex runs it)
+ * @property {(payload: unknown, options?: { input?: string, timeoutMs?: number, args?: string[], env?: NodeJS.ProcessEnv }) => Promise<{ code: number|null, stdout: string, stderr: string }>} sendHook
+ *   runs the real hooks/hook.mjs with the payload on stdin (args ['codex']: as Codex runs it; env:
+ *   its whole environment instead of the town's)
  * @property {() => Promise<void>} stop  stops the server and deletes the temporary folders
  */
 

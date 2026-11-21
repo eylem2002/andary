@@ -3,7 +3,7 @@
 // waiting agent could otherwise be lost.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { afterHook, createDialogs, inputKey } from '../../../public/js/core/dialogs.js';
+import { ORDER_SLACK_MS, afterHook, createDialogs, inputKey } from '../../../public/js/core/dialogs.js';
 
 const S = 'session-1';
 const lead = (/** @type {string[]} */ tools, /** @type {unknown} */ input = {}) => ({ sessionId: S, agentId: null, tools, input: inputKey(input) });
@@ -53,17 +53,17 @@ describe('createDialogs', () => {
   test('a revised plan or a question asked again is a new dialog: the agent cannot ask again while one waits', () => {
     const d = createDialogs();
     const plan = (/** @type {string} */ text) => lead(['ExitPlanMode'], { plan: text });
-    d.begin(plan('v1'), 1);
-    assert.equal(d.ask(plan('v1'), 2).opened, false, "its permission request joins it");
+    d.begin(plan('v1'), 1_000);
+    assert.equal(d.ask(plan('v1'), 2_000).opened, false, "its permission request joins it");
     // "No, keep planning" sends nothing; the next plan is the proof.
-    const v2 = d.begin(plan('v2'), 3);
-    assert.deepEqual([v2.opened, v2.closed.map((x) => x.at)], [true, [1]]);
-    assert.equal(d.ask(plan('v2'), 4).opened, false, 'v2 is joined, not v1');
-    d.begin(helper(['ExitPlanMode'], { plan: 'theirs' }), 5);
-    assert.deepEqual(d.list().map((x) => [x.agentId, x.at]), [[null, 3], ['h1', 5]], "another agent's plan stays");
+    const v2 = d.begin(plan('v2'), 3_000);
+    assert.deepEqual([v2.opened, v2.closed.map((x) => x.at)], [true, [1_000]]);
+    assert.equal(d.ask(plan('v2'), 4_000).opened, false, 'v2 is joined, not v1');
+    d.begin(helper(['ExitPlanMode'], { plan: 'theirs' }), 5_000);
+    assert.deepEqual(d.list().map((x) => [x.agentId, x.at]), [[null, 3_000], ['h1', 5_000]], "another agent's plan stays");
     // A request for one whose start never arrived opens it, and takes the older one's place.
-    const late = d.ask(plan('v3'), 6);
-    assert.deepEqual([late.opened, late.closed.map((x) => x.at)], [true, [3]]);
+    const late = d.ask(plan('v3'), 6_000);
+    assert.deepEqual([late.opened, late.closed.map((x) => x.at)], [true, [3_000]]);
   });
 
   test("a plan's request that overtook its PreToolUse is joined by it, not taken for an older plan", () => {
@@ -95,6 +95,47 @@ describe('createDialogs', () => {
     assert.deepEqual(f.list().map((x) => x.at), [1_005, 1_001, 1_001]);
   });
 
+  test(`hooks sent within ${ORDER_SLACK_MS} ms of each other may carry their times either way round`, () => {
+    // Each hook has its own forwarder process: a plan's PreToolUse and its own request, started a
+    // moment apart, may be stamped in either order and arrive in either order.
+    const plan = (/** @type {string} */ text) => lead(['ExitPlanMode'], { plan: text });
+    for (const [requestAt, startAt] of [[10_001, 10_000], [10_000, 10_001], [10_000, 10_000 + ORDER_SLACK_MS]]) {
+      for (const requestFirst of [true, false]) {
+        const d = createDialogs();
+        d.ask(plan('v1'), 1_000);
+        d.begin(plan('v1'), 1_000);
+        const hooks = [() => d.ask(plan('v2'), requestAt), () => d.begin(plan('v2'), startAt)];
+        const [first, second] = requestFirst ? hooks : hooks.reverse();
+        const opened = first();
+        const joined = second();
+        const label = `request at ${requestAt}, start at ${startAt}, ${requestFirst ? 'request' : 'start'} first`;
+        assert.deepEqual([opened.opened, opened.closed.map((x) => x.at), joined.opened, joined.closed], [true, [1_000], false, []], label);
+        assert.deepEqual(d.list().map((x) => [x.requested, x.begun]), [[true, true]], label);
+      }
+    }
+    // Further apart, the request is older than the start: an earlier plan whose start never came.
+    const d = createDialogs();
+    d.ask(plan('old'), 10_000 - ORDER_SLACK_MS - 1);
+    const start = d.begin(plan('new'), 10_000);
+    assert.deepEqual([start.opened, start.closed.length], [true, 1]);
+  });
+
+  test(`a question or plan closes only those opened more than ${ORDER_SLACK_MS} ms before it`, () => {
+    const question = (/** @type {string} */ text) => lead(['AskUserQuestion'], { questions: [{ question: text }] });
+    const d = createDialogs();
+    d.begin(question('Which port?'), 10_000);
+    assert.deepEqual(d.begin(question('Which host?'), 10_000 + ORDER_SLACK_MS).closed, [], 'too close to be an answer');
+    assert.equal(d.list().length, 2);
+    assert.deepEqual(d.begin(question('Which user?'), 10_001 + ORDER_SLACK_MS).closed.map((x) => x.at), [10_000], 'one older by more was answered');
+  });
+
+  test(`a session's notice is closed only by a call the lead started ${ORDER_SLACK_MS} ms or more after it`, () => {
+    const d = createDialogs();
+    d.notice(S, 10_000);
+    assert.deepEqual(afterHook(d, { hook: 'PreToolUse', call: lead(['Read'], { file_path: 'x' }), at: 10_000 + ORDER_SLACK_MS - 1 }).closed, [], 'it may have started before it');
+    assert.equal(afterHook(d, { hook: 'PreToolUse', call: lead(['Read'], { file_path: 'y' }), at: 10_000 + ORDER_SLACK_MS }).closed.length, 1);
+  });
+
   test("a session's notice counts only when nothing of that session is known to be open", () => {
     const d = createDialogs();
     d.ask(helper(['Bash'], { command: 'npm run lint -- --fix' }), 1);
@@ -124,21 +165,21 @@ describe('createDialogs', () => {
 
   test("an MCP server's form waits like a question: one per session, closed like a session's notice", () => {
     const d = createDialogs();
-    const form = afterHook(d, { hook: 'Notification', notice: 'elicitation_dialog', call: lead([]), at: 1, text: 'Sign in to the API' });
+    const form = afterHook(d, { hook: 'Notification', notice: 'elicitation_dialog', call: lead([]), at: 1_000, text: 'Sign in to the API' });
     assert.equal(form.opened?.kind, 'question');
-    assert.equal(afterHook(d, { hook: 'Notification', notice: 'elicitation_url_dialog', call: lead([]), at: 2 }).opened, null, 'the same form again');
-    assert.equal(afterHook(d, { hook: 'PostToolUse', call: lead(['mcp__api__login']), at: 3 }).closed.length, 0, 'no tool result answers it');
-    assert.equal(afterHook(d, { hook: 'PreToolUse', call: lead(['Read'], { file_path: 'x' }), at: 4 }).closed.length, 1, 'the lead moved on');
+    assert.equal(afterHook(d, { hook: 'Notification', notice: 'elicitation_url_dialog', call: lead([]), at: 2_000 }).opened, null, 'the same form again');
+    assert.equal(afterHook(d, { hook: 'PostToolUse', call: lead(['mcp__api__login']), at: 3_000 }).closed.length, 0, 'no tool result answers it');
+    assert.equal(afterHook(d, { hook: 'PreToolUse', call: lead(['Read'], { file_path: 'x' }), at: 4_000 }).closed.length, 1, 'the lead moved on');
     for (const [hook, extra] of /** @type {const} */ ([['UserPromptSubmit', {}], ['Stop', {}], ['SessionEnd', {}]])) {
       const e = createDialogs();
-      afterHook(e, { hook: 'Notification', notice: 'agent_needs_input', call: lead([]), at: 1 });
-      assert.equal(afterHook(e, { hook, call: lead([]), at: 2, ...extra }).closed.length, 1, hook);
+      afterHook(e, { hook: 'Notification', notice: 'agent_needs_input', call: lead([]), at: 1_000 });
+      assert.equal(afterHook(e, { hook, call: lead([]), at: 2_000, ...extra }).closed.length, 1, hook);
     }
     // A helper's request open meanwhile is no reason to miss the form: it is a dialog of its own.
     const both = createDialogs();
-    both.ask(helper(['WebFetch'], { url: 'https://x.dev' }), 1);
-    assert.equal(afterHook(both, { hook: 'Notification', notice: 'elicitation_dialog', call: lead([]), at: 2 }).opened?.kind, 'question');
-    assert.equal(afterHook(both, { hook: 'Notification', notice: 'permission_prompt', call: lead([]), at: 3 }).opened, null, 'a permission notice is, when something is open');
+    both.ask(helper(['WebFetch'], { url: 'https://x.dev' }), 1_000);
+    assert.equal(afterHook(both, { hook: 'Notification', notice: 'elicitation_dialog', call: lead([]), at: 2_000 }).opened?.kind, 'question');
+    assert.equal(afterHook(both, { hook: 'Notification', notice: 'permission_prompt', call: lead([]), at: 3_000 }).opened, null, 'a permission notice is, when something is open');
   });
 
   test("an agent's turn ending closes its own dialogs; the session ending closes all", () => {
@@ -183,11 +224,19 @@ describe('inputKey', () => {
     assert.equal(inputKey(undefined), inputKey(null));
   });
 
-  test("a description is left out: it changes nothing that runs, and Codex sends one with a request only", () => {
-    assert.equal(inputKey({ command: 'git push', description: 'Push the branch' }), inputKey({ command: 'git push' }));
-    assert.equal(inputKey({ command: ['git', 'push'], description: 'Push' }), inputKey({ command: 'git push' }));
-    assert.notEqual(inputKey({ command: 'git push', timeout: 5 }), inputKey({ command: 'git push' }), 'every other field counts');
-    assert.equal(inputKey('description'), inputKey('description'), 'an input that is not an object is keyed as it is');
+  test("a command's description is left out: it changes nothing that runs, and Codex sends one with a request only", () => {
+    for (const tool of ['Bash', 'PowerShell']) {
+      assert.equal(inputKey({ command: 'git push', description: 'Push the branch' }, tool), inputKey({ command: 'git push' }, tool), tool);
+      assert.equal(inputKey({ command: ['git', 'push'], description: 'Push' }, tool), inputKey({ command: 'git push' }, tool), tool);
+    }
+    assert.notEqual(inputKey({ command: 'git push', timeout: 5 }, 'Bash'), inputKey({ command: 'git push' }, 'Bash'), 'every other field counts');
+    assert.equal(inputKey('description', 'Bash'), inputKey('description'), 'an input that is not an object is keyed as it is');
+  });
+
+  test("any other tool's description is part of its call: an MCP tool's may be what it acts on", () => {
+    const issue = (/** @type {string} */ description) => inputKey({ repo: 'a/b', title: 'Flaky test', description }, 'mcp__gh__create_issue');
+    assert.notEqual(issue('Seen on CI'), issue('Seen locally'), 'two parallel calls differing only in it');
+    assert.notEqual(inputKey({ description: 'x' }), inputKey({}), 'nor without a tool name');
   });
 });
 
@@ -236,12 +285,12 @@ describe('afterHook: the one table every consumer follows', () => {
 
   test("a session's notice closes when the lead starts a new call after it, never on a tool result", () => {
     const d = createDialogs();
-    afterHook(d, { hook: 'PreToolUse', call: lead(['Bash'], { command: 'curl x' }), at: 1 });
-    assert.equal(afterHook(d, { hook: 'Notification', notice: 'permission_prompt', call: lead([]), at: 2, text: 'Claude needs your permission' }).opened?.kind, 'unknown');
-    assert.equal(afterHook(d, { hook: 'PostToolUse', call: lead(['Read'], { file_path: 'x' }), at: 3 }).closed.length, 0, 'a parallel call finishing proves nothing');
-    assert.equal(afterHook(d, { hook: 'PreToolUse', call: helper(['Read']), at: 4 }).closed.length, 0, "a helper's call is not the lead's");
-    assert.equal(afterHook(d, { hook: 'PreToolUse', call: lead(['Read'], { file_path: 'y' }), at: 5 }).closed.length, 1);
-    assert.equal(afterHook(d, { hook: 'Notification', notice: 'idle_prompt', call: lead([]), at: 6 }).opened, null);
+    afterHook(d, { hook: 'PreToolUse', call: lead(['Bash'], { command: 'curl x' }), at: 1_000 });
+    assert.equal(afterHook(d, { hook: 'Notification', notice: 'permission_prompt', call: lead([]), at: 2_000, text: 'Claude needs your permission' }).opened?.kind, 'unknown');
+    assert.equal(afterHook(d, { hook: 'PostToolUse', call: lead(['Read'], { file_path: 'x' }), at: 3_000 }).closed.length, 0, 'a parallel call finishing proves nothing');
+    assert.equal(afterHook(d, { hook: 'PreToolUse', call: helper(['Read']), at: 4_000 }).closed.length, 0, "a helper's call is not the lead's");
+    assert.equal(afterHook(d, { hook: 'PreToolUse', call: lead(['Read'], { file_path: 'y' }), at: 5_000 }).closed.length, 1);
+    assert.equal(afterHook(d, { hook: 'Notification', notice: 'idle_prompt', call: lead([]), at: 6_000 }).opened, null);
   });
 
   test('hooks with no rule change nothing', () => {

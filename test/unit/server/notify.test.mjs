@@ -7,6 +7,7 @@ import { CODEX_IDLE_MS, DIALOG_DELAY_MS, checkNotifyUrl, createNotifier, noteFor
 import { createApprovalBroker } from '../../../server/approvals.mjs';
 import { toTownPayloads } from '../../../server/adapters/index.mjs';
 import { withCallKey } from '../../../server/hook-steps.mjs';
+import { ORDER_SLACK_MS } from '../../../public/js/core/dialogs.js';
 import { parseNotifyUrl } from '../../../server/cli/options.mjs';
 import { notificationFor } from '../../../public/js/ui/notifications.js';
 import { createFakeClock } from '../core/helpers.mjs';
@@ -473,6 +474,40 @@ test("a dialog goes by its hook's own time, whatever order the hooks arrive in",
   ahead.notifier.observe(ask(), 3_600_000);
   await ahead.at(DIALOG_DELAY_MS);
   assert.equal(ahead.posts.length, 1);
+});
+
+test(`hooks stamped within ${ORDER_SLACK_MS} ms either way round keep a plan's note and a notice's`, async () => {
+  // A plan's PreToolUse and its request, each stamped by its own forwarder: in either stamp order
+  // and either arrival order, one dialog, one note and a request still pending.
+  const plan = { tool_name: 'ExitPlanMode', tool_input: { plan: 'Split the module' } };
+  for (const [requestAt, startAt] of [[1_001, 1_000], [1_000, 1_001]]) {
+    for (const requestFirst of [true, false]) {
+      const town = testNotifier();
+      const broker = brokerFor(town);
+      await town.at(1_010);
+      const sendRequest = () => {
+        town.notifier.observe(hook('PermissionRequest', plan), requestAt);
+        broker.create(hook('PermissionRequest', plan), { hold: false, at: requestAt });
+      };
+      const sendStart = () => {
+        town.notifier.observe(hook('PreToolUse', plan), startAt);
+        broker.observe(hook('PreToolUse', plan), startAt);
+      };
+      for (const send of requestFirst ? [sendRequest, sendStart] : [sendStart, sendRequest]) send();
+      await town.at(60_000);
+      const label = `request at ${requestAt}, start at ${startAt}, ${requestFirst ? 'request' : 'start'} first`;
+      const due = (requestFirst ? requestAt : startAt) + DIALOG_DELAY_MS;
+      assert.deepEqual(town.posts.map((post) => [post.at, post.body]), [[due, 'A crew has a plan for you to approve.']], label);
+      assert.equal(broker.list()[0].status, 'pending', label);
+    }
+  }
+  // A call the lead started just before a notice, stamped just after it, is no proof of an answer.
+  const net = testNotifier();
+  await net.at(2_000);
+  net.notifier.observe(hook('Notification', { notification_type: 'permission_prompt' }), 2_000);
+  net.notifier.observe(hook('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'curl https://example.com' } }), 2_001);
+  await net.at(60_000);
+  assert.equal(net.posts.length, 1);
 });
 
 test("Codex's request, the only hook with the command's description, is answered by its call's result", async () => {

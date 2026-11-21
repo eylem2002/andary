@@ -17,7 +17,10 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ts = Date.now();
+// When the agent started this hook: the time this process started, which no import or start-up
+// work below can delay. Two hooks started a millisecond apart keep their order this way (the
+// clock read here would not: Node's start-up time varies by more than that).
+const ts = Math.floor(performance.timeOrigin);
 /** Who runs this hook: Codex passes `codex`; Claude Code passes nothing. */
 const SOURCE = process.argv[2] === 'codex' ? 'codex' : null;
 const EVENT_TIMEOUT_MS = 1500;

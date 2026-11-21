@@ -57,6 +57,19 @@ describe('forwarder delivery', () => {
     assert.ok(message.e.ts >= started && message.e.ts <= message.e.rx);
   });
 
+  it('stamps the time its process started, before any start-up work', async () => {
+    // Start-up made slow on purpose (a module loaded before the forwarder waits 800 ms): the stamp
+    // is still the start, so a hook started earlier keeps its place ahead of one started later.
+    const slowStart = `--import=data:text/javascript,Atomics.wait(new%20Int32Array(new%20SharedArrayBuffer(4)),0,0,800)`;
+    const started = Date.now();
+    const payload = hookPayload('UserPromptSubmit', { session_id: 'deliver-slow', prompt: 'x' });
+    const result = await town.sendHook(payload, { env: isolatedEnv({ ANDARY_HOME: town.home, NODE_OPTIONS: slowStart }) });
+    assert.equal(result.code, 0);
+    const message = await waitForMessage(browser, (m) => m?.t === 'hook' && m.e.event.session_id === 'deliver-slow');
+    assert.ok(message.e.rx - started >= 800, 'it started slowly');
+    assert.ok(message.e.ts >= started - 1 && message.e.ts - started < 500, `stamped ${message.e.ts - started} ms after it was started`);
+  });
+
   it('forwards stdin that is not JSON as an Unknown event with a raw preview', async () => {
     const result = await town.sendHook(undefined, { input: `garbage-start ${'z'.repeat(5000)}` });
     assert.deepEqual(result, { code: 0, stdout: '', stderr: '' });

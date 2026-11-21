@@ -157,7 +157,7 @@ function showChange(p, approval) {
     p.changeBody.replaceChildren();
     return;
   }
-  const { added, removed } = diffStats(change.hunks);
+  const { added, removed } = diffStats(change.hunks, { exact: true });
   setText(p.changeNote, `${change.note}: ${added} ${added === 1 ? 'line' : 'lines'} added, ${removed} removed`);
   p.changeBody.replaceChildren(...change.hunks.map((hunk, index) => diffView(hunk, { index, count: change.hunks.length, exact: true, compact: true })));
 }
