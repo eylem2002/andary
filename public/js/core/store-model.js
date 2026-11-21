@@ -1,9 +1,10 @@
 // The store's working memory (core/store.js): its state plus the indexes it keeps to attribute
-// events (recent spawns, role counters, hats handed out, retired helpers), and the limits on all
-// of them. Internal to the store's modules.
+// events (recent spawns, role counters, hats handed out, retired helpers), the open dialogs, the
+// stuck rules' memory, and the limits on all of them. Internal to the store's modules.
 import { createDialogs } from './dialogs.js';
 import { BUILDING_KEYS } from './catalog.js';
 import { createAchievementTracker } from './achievements.js';
+import { createLoops } from './loops.js';
 
 /** @typedef {import('./store.js').BuildingKey} BuildingKey */
 /** @typedef {import('./store.js').StoreState} StoreState */
@@ -75,6 +76,8 @@ export function createModel(localHour, maxLog) {
     turnFailed: new Set(),
     /** @type {Map<string, number>} finished subagents → when; late async hooks for them are dropped */
     retired: new Map(),
+    /** the stuck rules' memory of each agent's recent steps (loops.js), behind AgentState.stuck */
+    loops: createLoops(),
     tracker: createAchievementTracker({ localHour }),
     view: /** @type {import('./achievements.js').TrackerView} */ (null),
   };

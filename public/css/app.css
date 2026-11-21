@@ -1013,7 +1013,9 @@ body {
   font-weight: 600;
 }
 
-.hud-station[data-need="stopped"] .hud-station__doing {
+/* A stop, or an agent that seems stuck (core/loops.js): something went wrong, not a wait. */
+.hud-station[data-need="stopped"] .hud-station__doing,
+.hud-station[data-need="alert"] .hud-station__doing {
   color: var(--error);
 }
 

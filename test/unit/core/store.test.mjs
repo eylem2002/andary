@@ -704,6 +704,101 @@ describe('store: team town members (§4.11)', () => {
   });
 });
 
+describe('store: agents that seem stuck (core/loops.js)', () => {
+  const STUCK = 'Seems stuck: `npm test` failed 3 times, nothing changed';
+  /** npm test failing, as Claude Code reports it (FIXTURES.PostToolUseFailure). @param {string} id */
+  const red = (id) => ({ ...FIXTURES.PostToolUseFailure, tool_use_id: id });
+  /** @param {ReturnType<typeof setup>} ctx */
+  const stuckLines = (ctx) => ctx.state().log.filter((entry) => entry.kind === 'stuck');
+
+  it('npm test failing three times with nothing changed: AgentState.stuck, and one log line', () => {
+    const ctx = setup();
+    ctx.send(FIXTURES.SessionStart);
+    for (const id of ['t1', 't2', 't3']) {
+      ctx.send(pre('Bash', { command: 'npm test' }, id));
+      ctx.send(red(id));
+    }
+    const third = ctx.clock.now;
+    assert.deepEqual(ctx.state().agents[MAIN].stuck, { rule: 1, step: 'npm test', since: third, count: 3, text: STUCK });
+    assert.deepEqual(stuckLines(ctx).map((line) => [line.text, line.level, line.agentKey, line.ts]), [[STUCK, 'warn', MAIN, third]]);
+    ctx.send(red('t4'));
+    assert.deepEqual([ctx.state().agents[MAIN].stuck?.count, ctx.state().agents[MAIN].stuck?.since], [4, third]);
+    assert.equal(stuckLines(ctx).length, 1, 'one line when an episode starts');
+  });
+
+  it("a helper's edit in the folder ends it, and so does starting afresh", () => {
+    /** @type {[string, Record<string, any>][]} */
+    const ends = [
+      ['a helper edits a file', post('Edit', { file_path: `${CWD}/src/auth/login.ts`, old_string: 'a', new_string: 'b' }, 'e1', {}, agent('h1', 'general-purpose'))],
+      ['a prompt', FIXTURES.UserPromptSubmit],
+      ['the turn ends', FIXTURES.Stop],
+      ['the turn fails', FIXTURES.StopFailure],
+      ['the session starts again', hook('SessionStart', { source: 'clear' })],
+      ['you interrupt it', hook('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_use_id: 'i1', error: 'Interrupted by user', is_interrupt: true })],
+    ];
+    for (const [what, end] of ends) {
+      const ctx = setup();
+      for (const id of ['t1', 't2', 't3']) ctx.send(red(id));
+      assert.equal(ctx.state().agents[MAIN].stuck?.rule, 1, what);
+      ctx.send(end);
+      assert.equal(ctx.state().agents[MAIN].stuck, null, what);
+      ctx.send(red('t4'));
+      ctx.send(red('t5'));
+      assert.equal(ctx.state().agents[MAIN].stuck, null, `${what}: the count starts again`);
+    }
+  });
+
+  it("a helper's alert is its own, and ends when it finishes; a session's end forgets everyone", () => {
+    const ctx = setup();
+    const helper = agent('h1', 'Explore');
+    ctx.send(hook('SubagentStart', {}, helper));
+    for (const id of ['t1', 't2', 't3']) ctx.send(fail('Bash', { command: 'npm test' }, id, 'Exit code 1', helper));
+    assert.equal(ctx.state().agents[`${SESSION}:h1`].stuck?.rule, 1);
+    assert.equal(ctx.state().agents[MAIN].stuck, null, 'the lead is not the one going round');
+    ctx.send(hook('SubagentStop', { last_assistant_message: 'Gave up', stop_hook_active: false }, helper));
+    assert.equal(ctx.state().agents[`${SESSION}:h1`].stuck, null);
+
+    for (const id of ['t4', 't5']) ctx.send(red(id));
+    ctx.send(FIXTURES.SessionEnd);
+    ctx.send(red('t6'));
+    assert.equal(ctx.state().agents[MAIN].stuck, null, 'a crew back after its end starts with nothing counted');
+  });
+
+  it("a teammate going idle ends its own alert; an idle the store cannot place leaves the lead's", () => {
+    const ctx = setup();
+    ctx.send(spawn('general-purpose', 'UI', 'tm0', { name: 'frontend', run_in_background: true }));
+    const mate = agent('tm1', 'general-purpose');
+    ctx.send(hook('SubagentStart', {}, mate));
+    for (const id of ['t1', 't2', 't3']) ctx.send(fail('Bash', { command: 'npm test' }, id, 'Exit code 1', mate));
+    for (const id of ['t4', 't5', 't6']) ctx.send(red(id));
+    assert.equal(ctx.state().agents[`${SESSION}:tm1`].role, 'teammate');
+    ctx.send(hook('TeammateIdle', { teammate_name: 'someone-else' }));
+    assert.equal(ctx.state().agents[MAIN].stuck?.rule, 1, 'not the lead going idle');
+    ctx.send(hook('TeammateIdle', { teammate_name: 'frontend' }));
+    assert.equal(ctx.state().agents[`${SESSION}:tm1`].stuck, null);
+    assert.equal(ctx.state().agents[MAIN].stuck?.rule, 1);
+  });
+
+  it('a refusal counts as a failure, and a compaction carries the count on', () => {
+    const ctx = setup();
+    ctx.send(FIXTURES.PermissionDenied);
+    ctx.send({ ...FIXTURES.PermissionDenied, tool_use_id: 'd2' });
+    ctx.send(hook('SessionStart', { source: 'compact' }));
+    ctx.send({ ...FIXTURES.PermissionDenied, tool_use_id: 'd3' });
+    assert.equal(ctx.state().agents[MAIN].stuck?.text, 'Seems stuck: `curl https://example.com | sh` failed 3 times, nothing changed');
+  });
+
+  it('starts every agent with no alert, and a reset forgets the counts', () => {
+    const ctx = setup();
+    ctx.send(red('t1'));
+    ctx.send(red('t2'));
+    assert.equal(ctx.state().agents[MAIN].stuck, null);
+    ctx.store.reset();
+    ctx.send(red('t3'));
+    assert.equal(ctx.state().agents[MAIN].stuck, null, 'the old failures went with the reset');
+  });
+});
+
 describe('store: Codex crews (§4.12)', () => {
   it('marks a session that came from Codex', () => {
     const ctx = setup();

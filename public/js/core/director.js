@@ -106,6 +106,7 @@ import { agentState, contextFor, enqueue, makeVisit, pump, release, say, scoped,
  * @property {number} comboCount
  * @property {number} failStreak
  * @property {'rain'|'storm'|null} weather
+ * @property {boolean} stuck       the store says it seems stuck (AgentState.stuck): a storm over it
  * @property {string|null} status  last status sent to the world
  * @property {string|null} badge   last badge sent to the world
  */
@@ -320,6 +321,7 @@ function newRuntime(agent, at) {
     comboCount: 0,
     failStreak: 0,
     weather: null,
+    stuck: false,
     status: null,
     badge: null,
   };
@@ -434,6 +436,24 @@ function clearWeather(d, rt) {
   if (!rt.weather) return;
   rt.weather = null;
   d.world.weather(rt.key, null);
+}
+
+/**
+ * An agent that seems stuck (AgentState.stuck, core/loops.js) has a storm over it until its alert
+ * ends. Every agent is looked at, since one agent's change can end another's alert; it runs
+ * before an event's own show, so a show that brings weather of its own (a failed turn's storm)
+ * has the last word.
+ * @param {Director} d
+ */
+function syncStuck(d) {
+  const agents = d.store.getState().agents;
+  for (const rt of d.crew.values()) {
+    const stuck = Boolean(agents[rt.key]?.stuck);
+    if (stuck === rt.stuck) continue;
+    rt.stuck = stuck;
+    if (stuck) setWeather(d, rt, 'storm');
+    else if (rt.weather === 'storm') clearWeather(d, rt);
+  }
 }
 
 /** @param {Director} d @param {BuildingKey} building */
@@ -593,7 +613,8 @@ const SUCCESS_SHOWS = Object.freeze({
 
 /** @param {Director} d @param {Runtime} rt @param {TownEvent} e */
 function succeeded(d, rt, e) {
-  clearWeather(d, rt);
+  // Another step working is no way out of a loop: a stuck agent keeps its storm.
+  if (!rt.stuck) clearWeather(d, rt);
   rt.failStreak = 0;
   const combo = bumpCombo(rt, e.data.tool);
   setBadge(d, rt, combo >= 2 ? `×${combo}` : null);
@@ -1018,6 +1039,7 @@ function onEvent(d, e) {
   const rt = d.crew.get(e.agentKey);
   if (rt && !rt.leaving && !KEEPS_HOLD.has(e.kind)) release(d, rt);
   if (rt && !rt.leaving && WAKES.has(e.kind)) wake(d, rt);
+  syncStuck(d);
   own(EVENT_SHOWS, e.kind)?.(d, e);
   d.lastAgentKey = e.agentKey;
   d.lastHistoric = d.historic;
@@ -1100,6 +1122,7 @@ function syncFromStore(d) {
     setStatus(d, rt, agent.status);
     d.world.setActivity(agent.key, agent.activity || 'idle');
   }
+  syncStuck(d);
   refreshBoard(d, null);
   d.historic = false;
 }

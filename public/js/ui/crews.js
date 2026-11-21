@@ -1,8 +1,8 @@
 // The Crews panel: every Claude Code session is a line on a metro map (its colour and number),
 // and its agents are the stations along it. A station shows the agent's status, what it is doing
 // and for how long; clicking it selects the agent and points the camera at it. An agent that waits
-// for you ("needs you", core/attention.js) says what for and since when instead, and a finished
-// turn or a stop can be set aside from its row.
+// for you or seems stuck ("needs you", core/attention.js) says what for and since when instead,
+// and a finished turn, a stop or a stuck alert can be set aside from its row.
 import { crewUsage, usageShort } from './usage.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from './dom.js';
 import { icon } from './icons.js';

@@ -6,6 +6,7 @@
 //            request (answered in the town while it holds it, else in the terminal), a question,
 //            a plan to approve, an MCP server's form
 //   stopped  a turn ended in an error; crews stopped by one rate limit together are one item
+//   alert    an agent seems stuck (core/loops.js): counted until you set it aside
 //   ready    a lead finished its turn and nobody has answered: counted once Claude Code says so
 //            (idle_prompt, a minute later; Codex has no such signal: a minute too), for 30 minutes
 import { agentKeyOf } from './ids.js';
@@ -15,7 +16,7 @@ import { agentKeyOf } from './ids.js';
 /** @typedef {import('./store.js').Session} Session */
 /** @typedef {import('./store.js').Approval} Approval */
 /** @typedef {import('./dialogs.js').Dialog} Dialog */
-/** @typedef {'approval'|'terminal'|'question'|'plan'|'stopped'|'finished'} AttentionKind */
+/** @typedef {'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'finished'} AttentionKind */
 /** @typedef {'blocked'|'stopped'|'alert'|'ready'} AttentionLevel */
 
 /**
@@ -71,6 +72,8 @@ export function attentionItems(state, now, { dismissed } = {}) {
   for (const session of yours.values()) {
     for (const key of session.agentKeys) {
       const agent = state.agents[key];
+      // Stuck is a thing of its own: an agent that asks you something may still be going round.
+      if (agent?.stuck) items.push(stuckItem(agent, agent.stuck, session));
       const item = agent?.wait ? waitItem(agent, session, now) : null;
       if (!item) continue;
       items.push(item);
@@ -164,6 +167,34 @@ function waitItem(agent, session, now) {
     default:
       return null;
   }
+}
+
+/**
+ * An agent that seems stuck: counted until set aside; the episode's start is in its id, so the
+ * next time it gets stuck is a new item.
+ * @param {AgentState} agent
+ * @param {import('./loops.js').Stuck} stuck
+ * @param {Session} session
+ * @returns {AttentionItem}
+ */
+function stuckItem(agent, stuck, session) {
+  return {
+    id: `stuck:${agent.key}:${stuck.since}`,
+    kind: 'stuck',
+    level: 'alert',
+    sessionId: session.id,
+    agentKey: agent.key,
+    agentKeys: [agent.key],
+    approvalId: null,
+    since: stuck.since,
+    countedSince: stuck.since,
+    text: stuck.text,
+    counted: true,
+    dismissable: true,
+    crews: 1,
+    // The store judged it from calls that have already reported back: nothing can still change it.
+    settled: true,
+  };
 }
 
 /**

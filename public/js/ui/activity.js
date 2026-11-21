@@ -40,6 +40,7 @@ const KIND_ICONS = {
   'message.send': 'mail',
   approval: 'shield',
   achievement: 'medal',
+  stuck: 'repeat',
 };
 
 /** The store marks log lines with emoji (a building's sign emoji for tool calls). */

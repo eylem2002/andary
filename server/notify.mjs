@@ -12,13 +12,15 @@
 // DIALOG_DELAY_MS and goes out if the dialog is still open then; dialogs due together become one
 // note. A finished turn is no news by itself:
 // Claude Code's idle_prompt says so a minute later if nobody answered, and for Codex, which sends
-// no idle_prompt, that minute is counted here.
+// no idle_prompt, that minute is counted here. An agent that seems stuck gets one note per
+// episode, from the very rules the town's alert follows (core/loops.js).
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterHook, createDialogs } from '../public/js/core/dialogs.js';
-import { normalizeAgentId } from '../public/js/core/ids.js';
-import { isObject } from '../public/js/core/text.js';
+import { agentKeyOf, normalizeAgentId } from '../public/js/core/ids.js';
+import { createLoops } from '../public/js/core/loops.js';
+import { isObject, textOf } from '../public/js/core/text.js';
 import { hookStep, hookTime } from './hook-steps.mjs';
 
 /** @typedef {import('../public/js/core/dialogs.js').Dialog} Dialog */
@@ -53,6 +55,7 @@ const NOTES = Object.freeze({
   waiting: { title: 'Andary', body: 'A crew is waiting for your next prompt.', priority: 'default', tags: 'hourglass' },
   limit: { title: 'Andary', body: 'Claude Code stopped: it hit a usage or rate limit.', priority: 'high', tags: 'warning' },
   stopped: { title: 'Andary', body: 'Claude Code stopped with an error.', priority: 'high', tags: 'warning' },
+  stuck: { title: 'Andary', body: 'A crew seems stuck: the same step keeps failing.', priority: 'default', tags: 'repeat' },
   test: { title: 'Andary', body: 'This is a test notification from your town.', priority: 'default', tags: 'tada' },
 });
 
@@ -148,6 +151,53 @@ const WORK_DONE = new Set(['PostToolUse', 'PostToolUseFailure', 'PermissionDenie
  */
 function isCodexLeadStop(event) {
   return event.hook_event_name === 'Stop' && event.andary_source === 'codex' && normalizeAgentId(event.agent_id) === null;
+}
+
+/** Hooks after which an agent starts afresh for the stuck rules: as the town's store has them. */
+const FRESH_STARTS = new Set(['UserPromptSubmit', 'Stop', 'StopFailure', 'SubagentStop']);
+/** Finished tool calls, for the stuck rules: a refusal is a failure too. */
+const FINISHED_CALLS = new Set(['PostToolUse', 'PostToolUseFailure', 'PermissionDenied']);
+
+/**
+ * Whether an agent starts afresh after this hook: its turn ended, you sent a prompt or
+ * interrupted it, it finished, or its session started again (a compaction carries on).
+ * @param {Record<string, any>} event
+ */
+function startsAfresh(event) {
+  const name = event.hook_event_name;
+  if (FRESH_STARTS.has(name)) return true;
+  // Without an agent id a teammate's idle says nothing about the lead's turn.
+  if (name === 'TeammateIdle') return normalizeAgentId(event.agent_id) !== null;
+  if (name === 'SessionStart') return event.source !== 'compact';
+  return name === 'PostToolUseFailure' && event.is_interrupt === true;
+}
+
+/**
+ * A failed call's first error line ('' for a success), read as the town reads it.
+ * @param {Record<string, any>} event
+ */
+function errorLine(event) {
+  if (event.hook_event_name === 'PostToolUse') return '';
+  if (event.hook_event_name === 'PermissionDenied') return textOf(event.reason) || 'Permission denied';
+  return textOf(event.error).split('\n')[0] || 'Error';
+}
+
+/**
+ * What a hook means for the stuck rules (core/loops.js): a finished tool call, or a fresh start for
+ * its agent or, when the session ends, for all of the session's agents.
+ * @param {ReturnType<typeof createLoops>} loops
+ * @param {Record<string, any>} event  a raw hook payload
+ * @param {number} t
+ * @returns {import('../public/js/core/loops.js').LoopChange[]}
+ */
+function loopChanges(loops, event, t) {
+  const sessionId = text(event.session_id);
+  const agent = agentKeyOf(sessionId, normalizeAgentId(event.agent_id));
+  if (event.hook_event_name === 'SessionEnd') return loops.resetAll((key) => key.startsWith(`${sessionId}:`));
+  if (startsAfresh(event)) return loops.reset(agent);
+  if (!FINISHED_CALLS.has(event.hook_event_name)) return [];
+  const input = isObject(event.tool_input) ? event.tool_input : {};
+  return loops.record({ agent, folder: text(event.cwd), tool: text(event.tool_name), input, ok: event.hook_event_name === 'PostToolUse', error: errorLine(event), at: t });
 }
 
 /** At most one note of a kind every 30 s, and 30 an hour; test notes never use up the hour. */
@@ -288,6 +338,8 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
   /** This notifier's part of each open dialog: when its note is due, and whether it went out. @type {Map<number, { due: number, noted: boolean }>} */
   const notes = new Map();
   const idle = createIdleWatch(setTimer, clearTimer, () => void send(noteOf('waiting')));
+  /** The stuck rules' memory of this computer's agents (the town keeps its own, from the same rules). */
+  const loops = createLoops();
   /** @type {any} */
   let timer = null;
   let disposed = false;
@@ -394,7 +446,10 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
       const t = now();
       forgetNoted(t);
       watchIdle(event);
-      track(event, hookTime(ts, t));
+      const at = hookTime(ts, t);
+      track(event, at);
+      // One note when an episode starts; a later one held back by the 30 s limit is dropped.
+      if (loopChanges(loops, event, at).some((change) => change.started)) void send(noteOf('stuck'));
       const note = noteFor(event);
       if (note) void send(note);
     },
@@ -430,6 +485,7 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
       for (const dialog of [...dialogs.list()]) dialogs.forget(dialog.id);
       notes.clear();
       idle.clear();
+      loops.resetAll(() => true);
     },
   };
 }

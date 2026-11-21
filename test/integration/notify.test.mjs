@@ -64,6 +64,19 @@ describe('Phone notifications', () => {
     assert.match(town.output(), /Phone notifications: on/);
     await closeBrowser(browser);
   });
+
+  it('posts one note for a crew that seems stuck, naming nothing', async () => {
+    const red = (/** @type {number} */ n) =>
+      hookPayload('PostToolUseFailure', { session_id: 'crew-stuck', tool_name: 'Bash', tool_input: { command: 'npm run deploy-prod' }, tool_use_id: `t${n}`, error: 'Exit code 1', is_interrupt: false });
+    const before = received.length;
+    for (const n of [1, 2, 3, 4]) await postHook(town, red(n));
+    const stuck = () => received.slice(before).filter((post) => post.body.includes('stuck'));
+    for (let i = 0; i < 50 && stuck().length === 0; i += 1) await new Promise((r) => setTimeout(r, 50));
+    // Room for a second note to arrive, if one were (wrongly) sent for the fourth failure.
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(stuck().map((post) => post.body), ['A crew seems stuck: the same step keeps failing.'], 'one note for the episode');
+    assert.ok(!JSON.stringify(stuck()).includes('deploy'), 'the note never names the command');
+  });
 });
 
 describe('Phone notes for open dialogs, through the real server', () => {

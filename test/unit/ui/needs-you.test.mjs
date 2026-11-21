@@ -103,6 +103,8 @@ describe('words', () => {
     assert.deepEqual(waitedText(items[0], T0 + 65_000), { short: '1m 05s', long: 'waiting for 1m 05s' });
     const finished = { ...items[0], kind: /** @type {const} */ ('finished') };
     assert.equal(waitedText(finished, T0 + 65_000).long, 'finished 1m 05s ago');
+    const stuck = { ...items[0], kind: /** @type {const} */ ('stuck') };
+    assert.deepEqual(waitedText(stuck, T0 + 65_000), { short: '1m 05s', long: 'stuck for 1m 05s' }, 'a stuck agent is not waiting for you');
   });
 
   test('one item per agent: its most urgent', () => {

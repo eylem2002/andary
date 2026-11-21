@@ -90,8 +90,15 @@ export function needsYouLabel(counted, next) {
  */
 export function waitedText(item, now) {
   const waited = formatDuration(now - item.since);
-  return { short: waited, long: item.kind === 'finished' ? `finished ${waited} ago` : `waiting for ${waited}` };
+  return { short: waited, long: WAITED_WORDS[item.kind]?.(waited) ?? `waiting for ${waited}` };
 }
+
+/** Words for the time of the items that are not a wait for you. @type {Partial<Record<AttentionItem['kind'], (waited: string) => string>>} */
+const WAITED_WORDS = {
+  finished: (waited) => `finished ${waited} ago`,
+  // A stuck agent is not waiting for you: it has been going round for that long.
+  stuck: (waited) => `stuck for ${waited}`,
+};
 
 /**
  * Each agent's most urgent item (an item for several crews counts for each of their agents).

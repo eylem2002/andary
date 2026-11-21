@@ -509,3 +509,73 @@ section.
     rule's content get a backslash (Claude Code's own settings writer does this), so
     `Bash(echo \), Bash\(ls)` cannot read as two rules. Hidden characters are revealed on the card
     and in the log, as for commands.
+111. **"The same step" is judged from the call alone.** A shell command with its whitespace
+    collapsed, a leading `cd <dir> &&` and a trailing `2>&1`, `| tail …`, `| head …` or `| grep …`
+    dropped (only a single pipe: `|| true` stays), so `cd app && npm test 2>&1 | tail -40` is
+    `npm test`; `cd a && npm test` and `cd b && npm test` are therefore the same step. File tools go
+    by tool and path (Read with its offset and limit), so three failed Edits of one file with
+    different text are the same step; Grep and Glob by pattern and path; anything else by its input
+    as JSON with sorted keys. Keys are cut at 300 characters.
+112. **A change is judged by what the call says it did.** Andary cannot see the disk, so besides a
+    successful Edit, MultiEdit, Write, NotebookEdit or Codex patch, a successful shell command is a
+    change when it reads like one: `sed -i`, `perl -i`, a `--write` or `--fix` flag, `ruff format`,
+    `black`, `cargo fmt`, `go fmt`/`gofmt -w`, `patch`, `rm`, `mv`, `cp`, `mkdir`, `touch`, a
+    package install or removal, and the git commands that rewrite the work tree or the index:
+    `checkout`, `switch`, `restore`, `reset`, `stash` (not `list` or `show`), `apply`, `am`,
+    `merge`, `rebase`, `pull`, `cherry-pick`, `revert` and `commit` (after a commit, `git status`
+    has something new to say). Output written to a file (`npm test > test.log`) is not a change:
+    test runs are often kept that way, and counting it would hide the very loops rule 2 is for.
+    The list goes further than the design's examples, on the quiet side: a command wrongly taken
+    for a change can hide a loop, never invent one.
+113. **Whose change counts.** A change counts for the agent that made it, for every agent of any
+    crew working in the same folder (compared as given, with forward slashes and no trailing
+    slash), and for every agent whose folder holds the changed file (a helper that went into a
+    package of the project). A shell command names no file, so its change counts for its folder
+    only. An edit in a worktree inside the project's folder (`.claude/worktrees/…`) also counts for
+    the agents in the project folder: that can hide a loop, never invent one.
+114. **Steps that wait by nature are not counted under any rule, not only rule 2.** Waiting for CI
+    or a server often fails until it is over (`gh pr checks` exits 8 while checks are pending, a
+    health check fails until the server is up), and a wait that changes nothing is no loop. The
+    list: the tools `BashOutput`, `TaskOutput` (removed in Claude Code 2.1.277), `Monitor`,
+    `ScheduleWakeup`, `WaitForMcpServers`, `TaskList` and `TaskGet`; a Read of a background task's
+    output file (Claude Code writes it to
+    `<temp>/claude-<uid>/<project>/<session>/tasks/<id>.output` and has Claude read it with Read
+    since TaskOutput went), or a shell command that reads one; and
+    shell commands that start with `sleep` (`Start-Sleep` in PowerShell), loop with `sleep`, run
+    `watch`, or check CI and deployments: `gh run watch|view|list`, `gh pr checks|status`,
+    `gh workflow view`, `gh api` on runs, check runs, check suites or statuses, `glab ci|pipeline
+    status|view|list|trace`, `kubectl rollout status` and `kubectl wait`. A wait that changes files
+    (`sleep 5 && git pull`) is still a change. Codex polls a running command through `write_stdin`,
+    which fires no hooks, so it needs no entry.
+115. **An interrupt is no failure.** A tool call you stopped with Esc arrives as
+    PostToolUseFailure with `is_interrupt`; you are at the terminal, so the agent starts afresh, as
+    after a prompt.
+116. **Starting afresh forgets everything about the agent.** A prompt, the turn ending (Stop,
+    StopFailure, a Codex interrupt), the agent finishing (SubagentStop, a teammate's TeammateIdle),
+    its session starting again (startup, resume, clear) or ending all clear the counts too, not
+    just the alert: a loop is judged within a stretch of work. A compaction carries on with the
+    same work, so it keeps them. A TeammateIdle the store could not match to a teammate lands on
+    the lead and is not its turn ending; on the server, one without an `agent_id` resets nobody.
+117. **One alert per agent, one episode while it lasts.** While any of its steps meets a rule the
+    episode goes on, keeping the time it started (its id, so a dismissal holds) and showing the
+    step run most recently, its count updated. When several rules hold, the words follow rule 1,
+    then 3, then 2: "nothing changed" says the most, and rule 2 only speaks for a step that does
+    not visibly fail. A success of the step restarts its failure count but not its run count, so a
+    flaky test run over and over with nothing changed still meets rule 2.
+118. **A stuck alert stands beside a wait.** An agent that asks you something while it is stuck has
+    both items, the question first: the loop is still there once you answer.
+119. **The stuck rules remember a bounded amount.** 200 agents (the one quiet the longest is
+    forgotten first, and its alert ends), 20 steps each (the one run the longest ago goes first),
+    12 failures per step. The server keeps its own copy, for this computer's events only, and only
+    while phone notes are on.
+120. **One phone note per episode, through the usual limits.** The note goes out when an episode
+    starts, at default priority (the agent is not blocked). One held back by the 30 s limit (two
+    crews stuck within half a minute) is dropped, not sent later: the town shows both.
+121. **The desktop and phone words say "the same step keeps failing" for every rule.** A step run
+    five times with nothing changed is not getting anywhere, whatever its exit code says; the
+    town's own words name the rule. Screen readers hear of a new alert in the town's words, as of a
+    new question, plan or stop: a stuck agent's storm is in the town only.
+122. **In the town, the storm lasts as long as the alert.** Another step succeeding meanwhile does
+    not clear it (it used to clear an agent's rain), and a failed turn's storm, which comes with
+    the turn ending the alert, stays until the next prompt as before. The activity log gets one
+    line, level warn, when an episode starts.
