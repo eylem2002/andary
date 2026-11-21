@@ -602,6 +602,42 @@ body {
   gap: 8px;
 }
 
+/* Approvals waiting: a yellow plate that stays until you answer (like a wanted level). */
+.hud-waiting {
+  border-color: #B98419;
+  background: var(--waiting-fill);
+  color: #1E1A2E;
+  font-weight: 800;
+  animation: hud-waiting-in 0.5s ease-out;
+}
+
+.hud-waiting__count {
+  margin-right: -3px; /* the count and its words read as one phrase */
+}
+
+.hud-waiting:hover {
+  background: #F6C665;
+}
+
+@keyframes hud-waiting-in {
+  0% {
+    transform: scale(0.85);
+  }
+  60% {
+    transform: scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-waiting {
+    animation: none;
+  }
+}
+
+[data-motion="reduce"] .hud-waiting {
+  animation: none;
+}
+
 .hud-status {
   display: inline-flex;
   align-items: center;
@@ -2338,7 +2374,8 @@ body {
 /* Toasts sit at the top of the open middle of the town, clear of the side boards. */
 .hud-toasts {
   position: fixed;
-  top: var(--gap);
+  /* Below the top row, so a toast never covers the buttons there ("waiting for you" above all). */
+  top: calc(var(--gap) * 2 + var(--top-h));
   right: calc(var(--gap) * 2 + var(--right-w));
   left: calc(var(--gap) * 2 + var(--left-w));
   z-index: 60;
@@ -2882,6 +2919,19 @@ body {
 
   .hud-setup-button {
     display: none;
+  }
+
+  .hud-waiting {
+    padding-inline: 10px;
+  }
+
+  .hud-waiting__words {
+    display: none;
+  }
+
+  /* The sign makes room for the waiting button beside the status and settings. */
+  .hud-masthead:has(.hud-waiting:not([hidden])) .hud-sign {
+    max-width: calc(100vw - 190px - 72px);
   }
 
   .hud-status {

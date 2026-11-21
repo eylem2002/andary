@@ -517,13 +517,13 @@ export class Crowd {
       this.emitBeat(agent);
       const change = tickBubble(agent.bubble, nowMs);
       if (change === 'show') this.showBubble(agent);
-      else if (change === 'hide') agent.tag.hideBubble();
+      else if (change === 'hide') agent.tag.hideBubble(nowMs);
     }
     this.weather.update(dt, this.clock, this.topOf, this.pillLift);
     this.planes.update(dt);
     this.effects.update(dt, view.faceYaw);
     this.updateMarkers();
-    layoutTags(live, view, dt);
+    layoutTags(live, view, dt, nowMs);
   }
 
   /** Effects some activities make on their beat (hammer sparks, zzz, steam). @param {Agent} agent */

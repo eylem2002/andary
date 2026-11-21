@@ -205,7 +205,7 @@ function showProgress({ ctx }, shell, raw) {
   for (const id of fresh) {
     const milestone = MILESTONES.find((m) => m.id === id);
     if (!milestone) continue;
-    ctx.toasts.show({ tone: 'achievement', icon: 'spark', title: 'The town grew', body: `${milestone.name} ${milestone.where}.` });
+    ctx.toasts.show({ tone: 'achievement', icon: 'spark', title: 'The town grew', body: `${milestone.name} ${milestone.where}.`, group: 'achievement' });
     ctx.announcer.polite(`The town grew: ${milestone.name} ${milestone.where}.`);
   }
   ctx.refresh();

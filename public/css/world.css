@@ -211,6 +211,13 @@
   transition: opacity 150ms ease-out;
 }
 
+/* Too many bubbles at once: this one waits for room (tags.js decides each frame). */
+.tt-bubble.is-visible.is-muted {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 150ms ease-out, visibility 0s linear 150ms;
+}
+
 /* Tail pointing down at the speaker. */
 .tt-bubble::after {
   content: '';
@@ -291,7 +298,8 @@
 /* ── reduced motion (system setting, or the in-app toggle) ──────────────── */
 
 .tt-agents--still .tt-pill,
-.tt-agents--still .tt-bubble {
+.tt-agents--still .tt-bubble,
+.tt-agents--still .tt-bubble.is-visible.is-muted {
   transition: none;
 }
 
@@ -301,7 +309,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .tt-pill,
-  .tt-bubble {
+  .tt-bubble,
+  .tt-bubble.is-visible.is-muted {
     transition: none;
   }
 

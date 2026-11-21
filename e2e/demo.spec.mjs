@@ -131,7 +131,10 @@ test('a demo permission request can be allowed from the town', async ({ page }) 
   await expect(pending).toBeAttached({ timeout: 60_000 });
   const id = await pending.getAttribute('data-approval-id');
   const card = page.locator(`[data-testid="approval-card"][data-approval-id="${id}"]`);
-  await openTab(page, 'Approvals');
+  // Waiting for you: the page title (for a background tab) and a button that leads to it.
+  await expect(page).toHaveTitle(/^\(\d+\) Andary$/);
+  await page.getByTestId('waiting-for-you').click();
+  await expect(page.getByRole('tab', { name: /^Approvals/ })).toHaveAttribute('aria-selected', 'true');
   await expect(card).toBeVisible();
   await expect(card.locator('.hud-approval__code')).toContainText('$ ');
   await expect(card).toContainText('left');
@@ -139,6 +142,20 @@ test('a demo permission request can be allowed from the town', async ({ page }) 
   await expect(card).toHaveAttribute('data-status', 'allowed');
   await expect(card).toContainText('Allowed from the town');
   await expect(card.getByTestId('approve')).toBeHidden();
+});
+
+test.describe('on a smaller laptop', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('the waiting-for-you button stays clickable while the approval toast is up', async ({ page, isMobile }) => {
+    test.skip(isMobile, 'a desktop layout');
+    await page.goto(demoUrl('&world=fake'));
+    const toast = page.locator('.hud-toast--approval');
+    await expect(toast.first()).toBeVisible({ timeout: 60_000 });
+    // A click on a covered element fails (another element would receive it).
+    await page.getByTestId('waiting-for-you').click({ timeout: 5000 });
+    await expect(page.getByRole('tab', { name: /^Approvals/ })).toHaveAttribute('aria-selected', 'true');
+  });
 });
 
 test('toolbar buttons drive the camera, time, sound and the demo', async ({ page }, testInfo) => {
