@@ -196,8 +196,8 @@ test('what needs you: rows say what for, the button and I go through it, a stop 
     expect(await town.sendHook(payload)).toMatchObject({ code: 0 });
   }
   const button = page.getByTestId('waiting-for-you');
-  // The label carries the words (the count and its words are separate spans on screen).
-  await expect(button).toHaveAttribute('aria-label', '3 things need you. Next: Asks: Which port should the dev server use?');
+  // Its name starts with what it shows, then says where a click goes.
+  await expect(button).toHaveAttribute('aria-label', '3 need you. Next: Asks: Which port should the dev server use?');
   await expect(button).toHaveAttribute('data-level', 'blocked');
   await expect(page).toHaveTitle('(3) Andary');
   const row = (/** @type {string} */ session) => page.locator(`[data-testid="agent-row"][data-agent-key="${session}:main"]`);
@@ -207,17 +207,18 @@ test('what needs you: rows say what for, the button and I go through it, a stop 
   const dismiss = (/** @type {string} */ session) => page.locator(`.hud-stations__item:has([data-agent-key="${session}:main"]) [data-testid="dismiss-need"]`);
   await expect(dismiss('e2e-session')).toBeHidden();
   await dismiss('e2e-other').click();
-  await expect(button).toHaveAttribute('aria-label', /^2 things need you/);
+  await expect(button).toHaveAttribute('aria-label', /^2 need you/);
   await expect(page).toHaveTitle('(2) Andary');
 
   // Most urgent first: the question, then the finished turn, then around again.
   await page.keyboard.press('i');
   await expect(row('e2e-session')).toHaveAttribute('aria-current', 'true');
+  await expect(button).toHaveAttribute('aria-label', '2 need you. Next: Finished: All tests pass.');
   await button.click();
   await expect(row('e2e-third')).toHaveAttribute('aria-current', 'true');
   await expect(page.getByTestId('agent-inspector')).toContainText('Finished: All tests pass.');
   await page.getByTestId('inspector-dismiss').click();
-  await expect(button).toHaveAttribute('aria-label', /^1 thing needs you/);
+  await expect(button).toHaveAttribute('aria-label', /^1 needs you/);
   await expect(button).toHaveAttribute('data-level', 'blocked');
 
   // Answered in the terminal: nothing needs you, and the button goes.

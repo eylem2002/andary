@@ -44,14 +44,15 @@ export function createMasthead(ctx) {
   /** @param {StoreState} state */
   function render(state) {
     setText(subtitle, subtitleFor(state, ctx.view));
-    const counted = countedItems(ctx.needsYou.items(state));
+    const items = ctx.needsYou.items(state);
+    const counted = countedItems(items);
     const n = counted.length;
     // Answered elsewhere while the button had the keyboard: keep focus in the cluster.
     if (n === 0 && document.activeElement === waiting) settingsButton.focus();
     setHidden(waiting, n === 0);
     setText(waitingCount, String(n));
     setText(waitingWords, n === 1 ? 'needs you' : 'need you');
-    setAttr(waiting, 'aria-label', needsYouLabel(counted));
+    setAttr(waiting, 'aria-label', needsYouLabel(counted, ctx.needsYou.peek(items)));
     // Yellow while an agent is blocked or stopped; quieter when crews only finished their turns.
     setAttr(waiting, 'data-level', counted[0]?.level ?? null);
     updateTitle(n);

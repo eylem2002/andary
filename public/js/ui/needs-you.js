@@ -12,24 +12,40 @@ export const DISMISSED_KEY = 'andary:dismissed';
 const DISMISS_FOR_MS = 24 * 60 * 60 * 1000;
 
 /**
- * @param {{ storage?: Pick<Storage, 'getItem'|'setItem'>|null, now?: () => number, viewOnly?: () => boolean }} [options]
- *   viewOnly: the viewer only watches (a team town's view link), so nothing needs them
+ * @param {{ storage?: Pick<Storage, 'getItem'|'setItem'>|null, now?: () => number, viewOnly?: () => boolean, onChange?: () => void }} [options]
+ *   viewOnly: the viewer only watches (a team town's view link), so nothing needs them;
+ *   onChange: dismissals changed in another tab of this town
  */
-export function createNeedsYou({ storage = safeStorage(), now = Date.now, viewOnly = () => false } = {}) {
+export function createNeedsYou({ storage = safeStorage(), now = Date.now, viewOnly = () => false, onChange = () => {} } = {}) {
   /** @type {Map<string, number>} id → when the dismissal is forgotten */
-  const dismissed = loadDismissed(storage, now());
+  let dismissed = loadDismissed(storage, now());
   /** The item the button went to last: the next click goes on from there. */
   let cursor = '';
+  // Another tab set something aside: so does this one.
+  globalThis.addEventListener?.('storage', (event) => {
+    if (event.key !== DISMISSED_KEY) return;
+    dismissed = loadDismissed(storage, now());
+    onChange();
+  });
+
+  /** @param {AttentionItem[]} items @param {string} from */
+  const after = (items, from) => {
+    const counted = countedItems(items);
+    if (!counted.length) return null;
+    const at = counted.findIndex((item) => item.id === from);
+    return counted[(at + 1) % counted.length];
+  };
 
   return {
     /**
-     * Everything that needs the viewer, most urgent first, without what they dismissed.
+     * Everything that needs the viewer, most urgent first, without what they set aside.
      * @param {StoreState} state
      * @param {number} [at]
      */
     items(state, at = now()) {
       if (viewOnly()) return [];
-      return attentionItems(state, at, { dismissed: new Set(dismissed.keys()) });
+      const kept = new Set([...dismissed].filter(([, until]) => until > at).map(([id]) => id));
+      return attentionItems(state, at, { dismissed: kept });
     },
     /** @param {string} id */
     dismiss(id) {
@@ -37,30 +53,34 @@ export function createNeedsYou({ storage = safeStorage(), now = Date.now, viewOn
       saveDismissed(storage, dismissed, now());
     },
     /**
-     * The counted item after the one the button went to last (the first after the end).
+     * Where the button goes next, without going there: for its label.
+     * @param {AttentionItem[]} items
+     * @returns {AttentionItem|null}
+     */
+    peek(items) {
+      return after(items, cursor);
+    },
+    /**
+     * Goes on to the counted item after the one the button went to last (the first after the end).
      * @param {AttentionItem[]} items
      * @returns {AttentionItem|null}
      */
     next(items) {
-      const counted = countedItems(items);
-      if (!counted.length) return null;
-      const at = counted.findIndex((item) => item.id === cursor);
-      const item = counted[(at + 1) % counted.length];
-      cursor = item.id;
+      const item = after(items, cursor);
+      if (item) cursor = item.id;
       return item;
     },
   };
 }
 
 /**
- * The button's words: "3 need you", and what the first one is, for screen readers.
+ * The button's name: its visible words first ("3 need you"), then where a click goes.
  * @param {AttentionItem[]} counted
+ * @param {AttentionItem|null} next
  */
-export function needsYouLabel(counted) {
-  const n = counted.length;
-  const first = counted[0];
-  const count = `${n} ${n === 1 ? 'thing needs' : 'things need'} you`;
-  return first ? `${count}. Next: ${first.text}` : count;
+export function needsYouLabel(counted, next) {
+  const words = `${counted.length} ${counted.length === 1 ? 'needs' : 'need'} you`;
+  return next ? `${words}. Next: ${next.text}` : words;
 }
 
 /**
@@ -73,12 +93,15 @@ export function waitedText(item, now) {
   return { short: waited, long: item.kind === 'finished' ? `finished ${waited} ago` : `waiting for ${waited}` };
 }
 
-/** @param {StoreState} state @param {ReturnType<typeof createNeedsYou>} needsYou @param {number} now */
+/**
+ * Each agent's most urgent item (an item for several crews counts for each of their agents).
+ * @param {StoreState} state @param {ReturnType<typeof createNeedsYou>} needsYou @param {number} now
+ */
 export function itemsByAgent(state, needsYou, now) {
   /** @type {Map<string, AttentionItem>} */
   const byAgent = new Map();
   for (const item of needsYou.items(state, now)) {
-    if (!byAgent.has(item.agentKey)) byAgent.set(item.agentKey, item);
+    for (const key of item.agentKeys) if (!byAgent.has(key)) byAgent.set(key, item);
   }
   return byAgent;
 }

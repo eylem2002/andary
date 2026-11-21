@@ -422,9 +422,12 @@ section.
 92. **The waiting note names no agent.** "A crew is waiting for your next prompt." fits Claude Code
     and Codex alike, as the notes for permission requests, questions and plans do.
 93. **"Needs you" counts what blocks an agent, a stopped turn, and a finished turn nobody
-    answered.** A finished turn counts only once Claude Code's `idle_prompt` says nobody answered
-    (about a minute later), and for 30 minutes at most: by then the crew is probably done for now.
-    Teammates' crews and ended sessions never count.
+    answered.** A request, a question or a plan counts until the same proof of an answer the phone
+    waits for (89), so the town and the phone never disagree. A finished turn counts only once
+    Claude Code's `idle_prompt` says nobody answered (about a minute later), and for 30 minutes at
+    most: by then the crew is probably done for now. Teammates' crews and ended sessions never
+    count. A session's own notice that something asks for permission counts only when nothing of
+    that session is known to be open: it does not say whose it is.
 94. **A finished Codex turn counts after a minute without a prompt.** Codex sends no
     `idle_prompt`; a minute matches Claude Code's, and the phone's Codex note waits as long.
 95. **Crews stopped by one rate limit within ten minutes are one item.** One cause, one thing to
@@ -437,8 +440,11 @@ section.
     a background tab, and only if it started to count within the last two minutes: a reconnect or
     a page opened in the background shows older items in the town without popping them up.
     Changes that arrive together (a reconnect's history) are checked once, so a request asked and
-    answered within them is no news. They name the crew, never a command or a file: they can show
-    on a locked screen.
+    answered within them is no news. A permission request waits until its request reaches the town
+    (it follows its hook within milliseconds; three seconds at most), so it says the right place to
+    answer. They name the crew by its title or folder, never a request's command or file: they can
+    show on a locked screen. Screen readers hear of new questions, plans and stops the same way;
+    approvals are announced with their cards, and finished turns would be too chatty.
 98. **No "Turn finished" notification while only one of your crews is in town.** You are probably
     at its terminal.
 99. **`I` goes to what needs you.** It is free in the page (no browser uses a bare `I`), and reads

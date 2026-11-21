@@ -97,6 +97,9 @@ describe('what deserves a notification', () => {
 describe('installNotifications', () => {
   /** @type {{ title: string, body: string }[]} */
   let shown = [];
+  /** @type {string[]} */
+  let heard = [];
+  let refreshes = 0;
   /** @type {(() => void)[]} watchers to stop, even after a failed assertion (they keep a timer) */
   const watching = [];
   const saved = { document: globalThis.document, Notification: globalThis.Notification };
@@ -104,6 +107,8 @@ describe('installNotifications', () => {
 
   beforeEach(() => {
     shown = [];
+    heard = [];
+    refreshes = 0;
     page.hidden = false;
     page.title = '';
     Object.assign(globalThis, {
@@ -122,10 +127,11 @@ describe('installNotifications', () => {
     Object.assign(globalThis, saved);
   });
 
-  /** @param {ReturnType<typeof town>} t @param {Record<string, any>} [prefs] */
-  function watch(t, prefs = { desktopNotify: true }) {
-    const ctx = /** @type {any} */ ({ store: t.store, needsYou: t.needsYou, prefs });
-    watching.push(installNotifications(ctx, { now: t.now }));
+  /** @param {ReturnType<typeof town>} t @param {Record<string, any>} [prefs] @param {number} [every] */
+  function watch(t, prefs = { desktopNotify: true }, every = 60_000) {
+    const announcer = { polite: (/** @type {string} */ text) => void heard.push(text) };
+    const ctx = /** @type {any} */ ({ store: t.store, needsYou: t.needsYou, prefs, announcer, refresh: () => void (refreshes += 1) });
+    watching.push(installNotifications(ctx, { now: t.now, every }));
   }
   const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -172,5 +178,35 @@ describe('installNotifications', () => {
     watcher.ask('a1');
     await settle();
     assert.deepEqual([shown.length, page.title], [0, 'Andary'], 'nothing needs a viewer: no count either');
+  });
+
+  test('a request is not popped up before the town knows whether it holds it; then once, in the right words', async () => {
+    const t = town();
+    page.hidden = true;
+    watch(t);
+    t.send('SessionStart', { source: 'startup' });
+    t.send('SessionStart', { source: 'startup' }, other);
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'rm -rf secret-dir' } });
+    await settle();
+    assert.deepEqual(shown, [], 'the hook came first: its request may still be held in the town');
+    t.ask('a1');
+    await settle();
+    t.ask('a1');
+    await settle();
+    assert.deepEqual(shown, [{ title: 'Permission needed', body: 'api-server needs your permission.' }]);
+  });
+
+  test('screen readers hear of a new question or stop; the HUD redraws when the clock alone changes the list', async () => {
+    const t = town();
+    watch(t, { desktopNotify: false }, 5);
+    t.send('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which port?' }] }, tool_use_id: 'q1' });
+    t.store.ingest(envelope({ ...hook('Stop', {}, other), andary_source: 'codex' }, t.now()));
+    await settle();
+    assert.deepEqual(heard, ['api-server: Asks: Which port?']);
+    const before = refreshes;
+    t.advance(60_000);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.ok(refreshes > before, 'the Codex turn started to count with no event');
+    assert.equal(page.title, '(2) Andary');
   });
 });

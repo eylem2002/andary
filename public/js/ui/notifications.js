@@ -1,9 +1,9 @@
 // Notifications on this computer while the town is in a background tab, following "needs you"
 // (core/attention.js): an agent asks for your permission, asks a question, has a plan for you, a
 // turn stopped, or a finished turn waited with nobody answering. Off until the viewer turns them on
-// (the browser then asks for permission); clicking one brings the town back. These stay on the
-// computer, so they may name the crew, but never a command or a file: they can show on a locked
-// screen. Phone notifications are the server's (server/notify.mjs).
+// (the browser then asks for permission); clicking one brings the town back. They name the crew
+// (its title, or its project's folder) and never show a request's command or file: they can show
+// on a locked screen. Phone notifications are the server's (server/notify.mjs).
 //
 // The same watcher keeps the page title's count current: the HUD renders on animation frames,
 // which a background tab does not get, yet a background tab's title is the one you look at.
@@ -34,8 +34,7 @@ const MAX_SEEN = 500;
  */
 export function notificationFor(item, state, now) {
   if (!item.counted || now - item.countedSince > NEWS_MS) return null;
-  const session = state.sessions.find((s) => s.id === item.sessionId);
-  const crew = session ? session.title || session.project : 'A crew';
+  const crew = crewName(state, item);
   const note = (/** @type {string} */ title, /** @type {string} */ body) => ({ title, body, tag: item.id });
   switch (item.kind) {
     case 'approval':
@@ -54,6 +53,12 @@ export function notificationFor(item, state, now) {
     default:
       return null;
   }
+}
+
+/** The crew an item is about, by its title or its project. @param {StoreState} state @param {AttentionItem} item */
+function crewName(state, item) {
+  const session = state.sessions.find((s) => s.id === item.sessionId);
+  return session ? session.title || session.project : 'A crew';
 }
 
 /** Your crews still in town. @param {StoreState} state */
@@ -79,29 +84,42 @@ function show(note) {
   }
 }
 
+/** A request reaches the town a moment after its hook: until then it may still be held there. */
+const SETTLE_MS = 3000;
+/** New items a screen reader hears of (approvals are announced with their cards). */
+const ANNOUNCED = new Set(['question', 'plan', 'stopped']);
+
 /**
- * Watches the store and the clock: keeps the title's count, and notifies each new item once.
- * An item the viewer could already see (the tab in front, or notifications off) never pops up
- * later.
- * @param {Pick<HudContext, 'store'|'needsYou'|'prefs'>} ctx
- * @param {{ now?: () => number }} [options]  now: the clock (tests)
+ * Watches the store and the clock: keeps the title's count and the HUD current, notifies each new
+ * item once, and tells screen readers of new questions, plans and stops. An item the viewer could
+ * already see (the tab in front, or notifications off) never pops up later.
+ * @param {Pick<HudContext, 'store'|'needsYou'|'prefs'|'refresh'|'announcer'>} ctx
+ * @param {{ now?: () => number, every?: number }} [options]  the clock and how often it is read (tests)
  * @returns {() => void} stops watching
  */
-export function installNotifications(ctx, { now: clock = Date.now } = {}) {
+export function installNotifications(ctx, { now: clock = Date.now, every = CHECK_MS } = {}) {
   /** @type {Set<string>} */
   const seen = new Set();
   let queued = false;
+  let shownIds = '';
   const check = () => {
     queued = false;
     const state = ctx.store.getState();
     const now = clock();
     const counted = countedItems(ctx.needsYou.items(state, now));
     updateTitle(counted.length);
+    // The clock alone can change the list (a Codex turn starts to count, a finished one stops):
+    // the HUD then renders without a store change to wake it.
+    const ids = counted.map((item) => item.id).join('\n');
+    if (ids !== shownIds) ctx.refresh();
+    shownIds = ids;
     const notify = wanted(ctx);
     for (const item of counted) {
-      if (seen.has(item.id)) continue;
+      if (seen.has(item.id) || (!item.settled && now - item.since < SETTLE_MS)) continue;
       seen.add(item.id);
       if (seen.size > MAX_SEEN) seen.delete(seen.values().next().value ?? '');
+      if (now - item.countedSince > NEWS_MS) continue;
+      if (ANNOUNCED.has(item.kind)) ctx.announcer.polite(`${crewName(state, item)}: ${item.text}`);
       const note = notify ? notificationFor(item, state, now) : null;
       if (note) show(note);
     }
@@ -113,7 +131,7 @@ export function installNotifications(ctx, { now: clock = Date.now } = {}) {
     queued = true;
     queueMicrotask(check);
   });
-  const timer = setInterval(check, CHECK_MS);
+  const timer = setInterval(check, every);
   check();
   return () => {
     stop();

@@ -2,27 +2,30 @@
 // "need you" button, the crew rows, the page title and the desktop notifications, built from the
 // store's state. Pure and read-only.
 //
-//   blocked  an agent cannot go on without you: a permission request (answer it in the town, or
-//            in the terminal when the town cannot hold it), a question, a plan to approve
+//   blocked  an agent cannot go on without you: an open dialog (core/dialogs.js) — a permission
+//            request (answered in the town while it holds it, else in the terminal), a question,
+//            a plan to approve — or a session's own question
 //   stopped  a turn ended in an error; crews stopped by one rate limit together are one item
 //   ready    a lead finished its turn and nobody has answered: counted once Claude Code says so
 //            (idle_prompt, a minute later; Codex has no such signal: a minute too), for 30 minutes
-import { agentKeyOf, normalizeAgentId } from './ids.js';
-import { summarizeTool } from './summaries.js';
+import { agentKeyOf } from './ids.js';
 
 /** @typedef {import('./store.js').StoreState} StoreState */
 /** @typedef {import('./store.js').AgentState} AgentState */
 /** @typedef {import('./store.js').Session} Session */
+/** @typedef {import('./store.js').Approval} Approval */
+/** @typedef {import('./dialogs.js').Dialog} Dialog */
 /** @typedef {'approval'|'terminal'|'question'|'plan'|'stopped'|'finished'} AttentionKind */
 /** @typedef {'blocked'|'stopped'|'alert'|'ready'} AttentionLevel */
 
 /**
  * @typedef {object} AttentionItem
- * @property {string} id            kind, agent and start: a new episode is a new item
+ * @property {string} id            one per episode: the same while a request moves between the town and the terminal
  * @property {AttentionKind} kind
  * @property {AttentionLevel} level
  * @property {string} sessionId
  * @property {string} agentKey      who to show (the first, for a group)
+ * @property {string[]} agentKeys   everyone it stands for (a shared rate limit: every crew's agent)
  * @property {string|null} approvalId  the request to open in Approvals (kind 'approval')
  * @property {number} since         when the agent stopped for you
  * @property {number} countedSince  when it started to count (since, or idle_prompt for a finished turn)
@@ -30,6 +33,7 @@ import { summarizeTool } from './summaries.js';
  * @property {boolean} counted      part of the "need you" count and the page title
  * @property {boolean} dismissable
  * @property {number} crews         how many crews the item stands for (a shared rate limit)
+ * @property {boolean} settled      a dialog's request has reached the town (or never will): its kind is final
  */
 
 /** A finished turn counts for this long; after that the crew is probably done for now. */
@@ -50,53 +54,72 @@ const LEVEL_ORDER = Object.freeze({ blocked: 0, stopped: 1, alert: 2, ready: 3 }
  * @returns {AttentionItem[]} most urgent first; within a level, the longest waiting first
  */
 export function attentionItems(state, now, { dismissed } = {}) {
+  const yours = new Map(state.sessions.filter((s) => s.status !== 'ended' && !s.member).map((s) => [s.id, s]));
+  const approvals = new Map(state.approvals.map((a) => [a.id, a]));
   /** @type {AttentionItem[]} */
   const items = [];
-  const yours = new Map(state.sessions.filter((s) => s.status !== 'ended' && !s.member).map((s) => [s.id, s]));
-  const asking = new Map();
-  for (const approval of state.approvals) {
-    if (approval.status !== 'pending' || !yours.has(approval.sessionId)) continue;
-    const key = agentKeyOf(approval.sessionId, normalizeAgentId(approval.agentId));
-    if (asking.has(key)) continue;
-    asking.set(key, approval);
-    items.push(approvalItem(approval, key, yours.get(approval.sessionId)));
+  for (const dialog of state.dialogs ?? []) {
+    if (yours.has(dialog.sessionId)) items.push(dialogItem(dialog, dialog.approvalId ? approvals.get(dialog.approvalId) : undefined));
   }
+  /** @type {AttentionItem[]} */
+  const limited = [];
   for (const session of yours.values()) {
     for (const key of session.agentKeys) {
       const agent = state.agents[key];
-      const item = agent?.wait && !asking.has(key) ? waitItem(agent, session, now) : null;
-      if (item) items.push(item);
+      const item = agent?.wait ? waitItem(agent, session, now) : null;
+      if (!item) continue;
+      items.push(item);
+      if (item.kind === 'stopped' && agent.wait?.cause === 'rate_limit') limited.push(item);
     }
   }
   // A dismissed item stays away until the situation changes (a new episode has a new id).
-  return mergeSharedStops(items)
+  return mergeSharedStops(items, limited)
     .filter((item) => !(item.dismissable && dismissed?.has(item.id)))
     .sort(byUrgency);
 }
 
 /**
- * @param {import('./store.js').Approval} approval
- * @param {string} key
- * @param {Session|undefined} session
+ * @param {Dialog} dialog
+ * @param {Approval|undefined} approval  the town's request for it, when it has reached the town
  * @returns {AttentionItem}
  */
-function approvalItem(approval, key, session) {
-  const what = summarizeTool(String(approval.toolName ?? 'Tool'), approval.toolInput, approval.cwd ?? session?.cwd ?? '');
-  const since = Number(approval.createdAt) || 0;
+function dialogItem(dialog, approval) {
+  const agentKey = agentKeyOf(dialog.sessionId, dialog.agentId);
+  const held = approval?.status === 'pending' && approval.held === true;
+  /** @type {AttentionKind} */
+  const kind = dialog.kind === 'question' || dialog.kind === 'plan' ? dialog.kind : held ? 'approval' : 'terminal';
   return {
-    id: `${approval.held ? 'approval' : 'terminal'}:${key}:${since}`,
-    kind: approval.held ? 'approval' : 'terminal',
+    id: `dialog:${agentKey}:${dialog.at}:${dialog.input ?? dialog.kind}`,
+    kind,
     level: 'blocked',
-    sessionId: approval.sessionId,
-    agentKey: key,
-    approvalId: approval.held ? approval.id : null,
-    since,
-    countedSince: since,
-    text: approval.held ? `Needs permission: ${what}` : `Answer in your terminal: ${what}`,
+    sessionId: dialog.sessionId,
+    agentKey,
+    agentKeys: [agentKey],
+    approvalId: held && approval ? approval.id : null,
+    since: dialog.at,
+    countedSince: dialog.at,
+    text: dialogText(kind, dialog.text),
     counted: true,
     dismissable: false,
     crews: 1,
+    // A request reaches the town a moment after its hook: until then a permission dialog may
+    // still turn out to be held there. Questions, plans and notices never are.
+    settled: Boolean(approval) || dialog.kind !== 'permission',
   };
+}
+
+/** @param {AttentionKind} kind @param {string} what */
+function dialogText(kind, what) {
+  switch (kind) {
+    case 'approval':
+      return `Needs permission: ${what || 'a tool'}`;
+    case 'question':
+      return what ? `Asks: ${what}` : 'Asks you a question';
+    case 'plan':
+      return 'Waits for you to approve its plan';
+    default:
+      return what ? `Answer in your terminal: ${what}` : 'Needs your permission in its terminal';
+  }
 }
 
 /**
@@ -107,13 +130,14 @@ function approvalItem(approval, key, session) {
  */
 function waitItem(agent, session, now) {
   const wait = /** @type {import('./waits.js').Wait} */ (agent.wait);
-  /** @param {AttentionKind} kind @param {AttentionLevel} level @param {Partial<AttentionItem>} [extra] */
+  /** @param {AttentionKind} kind @param {AttentionLevel} level @param {Partial<AttentionItem>} [extra] @returns {AttentionItem} */
   const item = (kind, level, extra = {}) => ({
     id: `${kind}:${agent.key}:${wait.since}`,
     kind,
     level,
     sessionId: session.id,
     agentKey: agent.key,
+    agentKeys: [agent.key],
     approvalId: null,
     since: wait.since,
     countedSince: wait.since,
@@ -121,16 +145,12 @@ function waitItem(agent, session, now) {
     counted: true,
     dismissable: false,
     crews: 1,
+    settled: true,
     ...extra,
   });
   switch (wait.kind) {
-    // An approval the town no longer lists as pending (expired, released): the terminal asks.
-    case 'approval':
-      return item('terminal', 'blocked', { text: wait.text.replace(/^Needs permission: /, 'Answer in your terminal: ') });
     case 'question':
       return item('question', 'blocked');
-    case 'plan':
-      return item('plan', 'blocked');
     case 'stopped':
       return item('stopped', 'stopped', { dismissable: true });
     case 'finished':
@@ -156,16 +176,16 @@ function finishedItem(item, wait, session, now) {
 
 /**
  * Crews stopped by one rate limit within a few minutes of each other are one item: one cause,
- * one thing to do.
+ * one thing to do. Its id is `limit:<when the first stopped>`.
  * @param {AttentionItem[]} items
+ * @param {AttentionItem[]} limited  the rate-limit stops among them
  * @returns {AttentionItem[]}
  */
-function mergeSharedStops(items) {
-  const limited = items.filter((i) => i.kind === 'stopped' && i.text === 'Rate limited').sort((a, b) => a.since - b.since);
+function mergeSharedStops(items, limited) {
   if (limited.length < 2) return items;
   /** @type {AttentionItem[][]} */
   const groups = [];
-  for (const stop of limited) {
+  for (const stop of [...limited].sort((a, b) => a.since - b.since)) {
     const group = groups.at(-1);
     if (group && stop.since - group[0].since <= SHARED_STOP_MS) group.push(stop);
     else groups.push([stop]);
@@ -177,7 +197,7 @@ function mergeSharedStops(items) {
     if (group.length < 2) continue;
     const crews = new Set(group.map((g) => g.sessionId)).size;
     for (const stop of group) absorbed.add(stop);
-    merged.push({ ...group[0], id: `limit:${group[0].since}`, text: `Rate limited: ${crews} crews stopped`, crews });
+    merged.push({ ...group[0], id: `limit:${group[0].since}`, agentKeys: group.map((g) => g.agentKey), text: `Rate limited: ${crews} crews stopped`, crews });
   }
   return [...items.filter((i) => !absorbed.has(i)), ...merged];
 }

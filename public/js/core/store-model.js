@@ -1,6 +1,7 @@
 // The store's working memory (core/store.js): its state plus the indexes it keeps to attribute
 // events (recent spawns, role counters, hats handed out, retired helpers), and the limits on all
 // of them. Internal to the store's modules.
+import { createDialogs } from './dialogs.js';
 import { BUILDING_KEYS } from './catalog.js';
 import { createAchievementTracker } from './achievements.js';
 
@@ -53,7 +54,9 @@ export function createModel(localHour, maxLog) {
   const model = {
     maxLog,
     /** @type {StoreState} */
-    state: { sessions: [], agents: {}, approvals: [], log: [], stats: freshStats(), achievements: [], usage: {}, usageDays: [] },
+    state: { sessions: [], agents: {}, approvals: [], dialogs: [], log: [], stats: freshStats(), achievements: [], usage: {}, usageDays: [] },
+    /** What agents asked you and had no answer to yet (dialogs.js); state.dialogs is its list. */
+    dialogs: createDialogs(),
     /** @type {Map<string, Session>} */
     sessions: new Map(),
     /** @type {Map<string, Spawn[]>} recent Agent/Task calls per session, oldest first */

@@ -25,32 +25,82 @@ function town() {
   };
 }
 
-describe('what each agent waits for (AgentState.wait)', () => {
-  test('a permission request waits until the tool runs; a prompt or a tool call ends any wait', () => {
+/** @type {(fields?: Partial<import('../../../public/js/core/store.js').Approval>) => import('../../../public/js/core/store.js').Approval} */
+const approvalOf = (fields = {}) => ({ id: 'a1', status: 'pending', held: true, sessionId: SESSION, agentId: null, toolName: 'Bash', toolInput: { command: 'npm publish' }, createdAt: T0, expiresAt: T0 + 120_000, ...fields });
+
+describe('open dialogs, in the order the hooks really come', () => {
+  test('the hook comes first, then its request: one item that becomes answerable in the town', () => {
     const t = town();
-    t.send('SessionStart', { source: 'startup' });
-    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'rm -rf dist' } }, T0 + 1000);
-    assert.equal(t.lead().wait?.kind, 'approval');
-    assert.equal(t.lead().wait?.since, T0 + 1000);
-    assert.match(t.lead().wait?.text ?? '', /rm -rf dist/);
-    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'rm -rf dist' }, tool_response: {} }, T0 + 2000);
-    assert.equal(t.lead().wait, null);
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm publish' } }, T0);
+    const [before] = t.items();
+    assert.deepEqual([before.kind, before.settled], ['terminal', false], 'it may still be held: not final yet');
+    t.store.setApproval(approvalOf());
+    const [after] = t.items();
+    assert.deepEqual([after.kind, after.approvalId, after.settled], ['approval', 'a1', true]);
+    assert.equal(after.id, before.id, 'one episode, one id: one notification');
+    t.store.setApproval(approvalOf({ status: 'expired', held: false, decidedBy: 'timeout' }));
+    assert.deepEqual(t.items().map((i) => [i.kind, i.id]), [['terminal', before.id]], 'back in the terminal: still waiting');
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'npm publish' }, tool_response: {} }, T0 + 5000);
+    assert.deepEqual(t.items(), []);
   });
 
-  test('questions and plans wait until answered', () => {
+  test('parallel calls: each request waits for its own answer', () => {
+    const t = town();
+    t.send('PermissionRequest', { tool_name: 'WebFetch', tool_input: { url: 'https://a.example' } }, T0);
+    t.send('PermissionRequest', { tool_name: 'WebFetch', tool_input: { url: 'https://b.example' } }, T0 + 1);
+    t.store.setApproval(approvalOf({ id: 'A', toolName: 'WebFetch', toolInput: { url: 'https://a.example' } }));
+    t.store.setApproval(approvalOf({ id: 'B', toolName: 'WebFetch', toolInput: { url: 'https://b.example' } }));
+    t.store.setApproval(approvalOf({ id: 'B', toolName: 'WebFetch', toolInput: { url: 'https://b.example' }, status: 'allowed', decidedBy: 'town' }));
+    t.send('PostToolUse', { tool_name: 'Read', tool_input: { file_path: 'x' }, tool_response: {} }, T0 + 2);
+    t.store.setApproval(approvalOf({ id: 'A', toolName: 'WebFetch', toolInput: { url: 'https://a.example' }, status: 'expired', held: false }));
+    assert.deepEqual(t.items().map((i) => [i.kind, i.text]), [['terminal', 'Answer in your terminal: Fetch a.example']]);
+  });
+
+  test('a reconnect replays history, then the approvals as they ended: the agent still waiting stays', () => {
+    const t = town();
+    t.store.reset();
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm test' } }, T0);
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm publish' } }, T0 + 1);
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_response: {} }, T0 + 2);
+    t.store.setApproval(approvalOf({ id: 'B', status: 'expired', held: false, toolInput: { command: 'npm publish' } }));
+    t.store.setApproval(approvalOf({ id: 'A', status: 'allowed', decidedBy: 'town', toolInput: { command: 'npm test' } }));
+    assert.deepEqual(t.items().map((i) => i.text), ['Answer in your terminal: $ npm publish']);
+  });
+
+  test('a question keeps its words when Claude Code also asks permission for it', () => {
     const t = town();
     t.send('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which database?' }] }, tool_use_id: 'q1' });
-    assert.deepEqual([t.lead().wait?.kind, t.lead().wait?.text], ['question', 'Asks: Which database?']);
-    t.send('PostToolUse', { tool_name: 'AskUserQuestion', tool_input: {}, tool_use_id: 'q1', tool_response: {} }, T0 + 1);
-    assert.equal(t.lead().wait, null);
-    t.send('PreToolUse', { tool_name: 'ExitPlanMode', tool_input: { plan: 'x' }, tool_use_id: 'p1' }, T0 + 2);
-    assert.equal(t.lead().wait?.kind, 'plan');
-    t.send('UserPromptSubmit', { prompt: 'go on' }, T0 + 3);
-    assert.equal(t.lead().wait, null);
-    t.send('Notification', { notification_type: 'elicitation_dialog', message: 'The GitHub server needs input' }, T0 + 4);
-    assert.deepEqual([t.lead().wait?.kind, t.lead().wait?.text], ['question', 'The GitHub server needs input']);
+    t.send('PermissionRequest', { tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which database?' }] } }, T0 + 1);
+    t.store.setApproval(approvalOf({ toolName: 'AskUserQuestion', toolInput: { questions: [{ question: 'Which database?' }] }, held: false, message: 'Questions are answered in the terminal' }));
+    assert.deepEqual(t.items().map((i) => [i.kind, i.text]), [['question', 'Asks: Which database?']]);
+    t.send('PostToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which database?' }], answers: { 'Which database?': 'Postgres' } }, tool_use_id: 'q1', tool_response: {} }, T0 + 2);
+    assert.deepEqual(t.items(), [], 'answered, though your answer changed its input');
+    t.send('PreToolUse', { tool_name: 'ExitPlanMode', tool_input: { plan: 'x' }, tool_use_id: 'p1' }, T0 + 3);
+    assert.deepEqual(t.items().map((i) => [i.kind, i.text]), [['plan', 'Waits for you to approve its plan']]);
+    t.send('UserPromptSubmit', { prompt: 'go on' }, T0 + 4);
+    assert.deepEqual(t.items(), []);
   });
 
+  test("a helper's request is one item: the session's own notice about it lands nowhere else", () => {
+    const t = town();
+    const helper = { agent: { id: 'agent-h1', type: 'general-purpose' } };
+    t.send('SubagentStart', { agent_id: 'agent-h1', agent_type: 'general-purpose' }, T0, helper);
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm run lint -- --fix' } }, T0 + 1, helper);
+    t.send('Notification', { notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' }, T0 + 2);
+    assert.deepEqual(t.items().map((i) => i.agentKey), [`${SESSION}:h1`]);
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'npm run lint -- --fix' }, tool_response: {} }, T0 + 3, helper);
+    assert.deepEqual(t.items(), []);
+    // A notice the town knows nothing else about still counts, until the lead moves on.
+    t.send('Notification', { notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' }, T0 + 4);
+    assert.deepEqual(t.items().map((i) => [i.kind, i.text]), [['terminal', 'Answer in your terminal: Claude needs your permission to use Bash']]);
+    t.send('PostToolUse', { tool_name: 'Read', tool_input: { file_path: 'x' }, tool_response: {} }, T0 + 5);
+    assert.equal(t.items().length, 1, 'any tool result is no proof for a dialog nobody can name');
+    t.send('Stop', {}, T0 + 6);
+    assert.deepEqual(t.items().map((i) => i.kind), ['finished']);
+  });
+});
+
+describe('what each agent waits for (AgentState.wait)', () => {
   test('a finished turn waits; idle_prompt marks when nobody answered', () => {
     const t = town();
     t.send('Stop', { last_assistant_message: 'All tests pass.' }, T0);
@@ -67,20 +117,41 @@ describe('what each agent waits for (AgentState.wait)', () => {
     t.send('Stop', {}, T0 + 1, helper);
     assert.equal(t.store.getState().agents[`${SESSION}:h1`]?.wait ?? null, null);
     t.send('StopFailure', { error: 'rate_limit' }, T0 + 2);
-    assert.deepEqual([t.lead().wait?.kind, t.lead().wait?.text], ['stopped', 'Rate limited']);
+    assert.deepEqual([t.lead().wait?.kind, t.lead().wait?.text, t.lead().wait?.cause], ['stopped', 'Rate limited', 'rate_limit']);
   });
 
-  test('a request answered in the town ends the wait; one handed back to the terminal keeps it', () => {
+  test('moving on ends a wait: a prompt, a tool call, a new session, a helper finishing, /compact', () => {
+    for (const [name, extra] of /** @type {const} */ ([
+      ['UserPromptSubmit', { prompt: 'go on' }],
+      ['PreToolUse', { tool_name: 'Read', tool_input: { file_path: 'x' }, tool_use_id: 'r1' }],
+      ['SessionStart', { source: 'resume' }],
+      ['SubagentStop', { agent_type: 'Explore' }],
+      ['PreCompact', { trigger: 'manual' }],
+    ])) {
+      const t = town();
+      t.send('StopFailure', { error: 'server_error' }, T0);
+      t.send(name, extra, T0 + 1);
+      assert.equal(t.lead().wait, null, name);
+    }
     const t = town();
-    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm publish' } }, T0);
-    /** @type {import('../../../public/js/core/store.js').Approval} */
-    const approval = { id: 'a1', status: 'pending', held: true, sessionId: SESSION, agentId: null, toolName: 'Bash', toolInput: { command: 'npm publish' }, createdAt: T0, expiresAt: T0 + 120_000 };
-    t.store.setApproval(approval);
-    t.store.setApproval({ ...approval, status: 'expired', held: false, decidedBy: 'timeout' });
-    assert.equal(t.lead().wait?.kind, 'approval', 'the terminal asks now: still waiting');
-    t.store.setApproval({ ...approval, id: 'a2', status: 'pending' });
-    t.store.setApproval({ ...approval, id: 'a2', status: 'allowed', decidedBy: 'town' });
-    assert.equal(t.lead().wait, null);
+    t.send('StopFailure', { error: 'server_error' }, T0);
+    t.send('PreCompact', { trigger: 'auto' }, T0 + 1);
+    assert.equal(t.lead().wait?.kind, 'stopped', 'Claude Code compacting by itself is not you');
+  });
+
+  test("a teammate going idle ends only its own wait, never the lead's", () => {
+    const t = town();
+    t.send('StopFailure', { error: 'rate_limit' }, T0);
+    t.send('TeammateIdle', { teammate_name: 'nobody-known', team_name: 'core' }, T0 + 1);
+    assert.equal(t.lead().wait?.kind, 'stopped');
+  });
+
+  test("a session's own question (an MCP form) waits until a tool reports back", () => {
+    const t = town();
+    t.send('Notification', { notification_type: 'elicitation_dialog', message: 'The GitHub server needs input' }, T0);
+    assert.deepEqual(t.items().map((i) => [i.kind, i.text]), [['question', 'The GitHub server needs input']]);
+    t.send('PostToolUse', { tool_name: 'mcp__github__create_issue', tool_input: {}, tool_response: {} }, T0 + 1);
+    assert.deepEqual(t.items(), []);
   });
 });
 

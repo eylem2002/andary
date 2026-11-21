@@ -13,7 +13,8 @@ import { NO_SESSION, normalize } from './events.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
-import { waitAfter, waitAfterApproval } from './waits.js';
+import { dialogsAfterApproval, dialogsAfterEvent } from './store-dialogs.js';
+import { stopLabel, waitAfter } from './waits.js';
 
 export { ACHIEVEMENTS };
 
@@ -125,6 +126,7 @@ export { ACHIEVEMENTS };
  * @property {Session[]} sessions          in order first seen
  * @property {Record<string, AgentState>} agents
  * @property {Approval[]} approvals        pending first, then most recent
+ * @property {readonly import('./dialogs.js').Dialog[]} dialogs  open: asked and not answered yet, oldest first
  * @property {LogEntry[]} log              newest last
  * @property {Stats} stats
  * @property {Achievement[]} achievements
@@ -199,14 +201,6 @@ function upsertTask(s, patch) {
 // Applying events. Each handler mutates state and returns a log line (or null for no log line).
 
 const SESSION_SOURCES = Object.freeze({ startup: 'Arrived for work', resume: 'Resumed', clear: 'Started fresh', fork: 'Forked a session' });
-const STOP_FAILURES = Object.freeze({
-  rate_limit: 'Rate limited',
-  overloaded: 'Servers overloaded',
-  authentication_failed: 'Authentication failed',
-  billing_error: 'Billing problem',
-  server_error: 'Server error',
-  max_output_tokens: 'Hit the output limit',
-});
 const SHIPPING_LOG = Object.freeze({
   test: ['✅', 'Tests passed'],
   'git-commit': ['📮', 'Committed'],
@@ -387,7 +381,7 @@ function applyTurnFail(m, e, s, a) {
   m.turnFailed.add(a.key);
   m.state.stats.failures += 1;
   place(a, null, 'facepalm');
-  const label = own(STOP_FAILURES, e.data.error) ?? `Stopped (${String(e.data.error).replace(/_/g, ' ')})`;
+  const label = stopLabel(e.data.error);
   const details = e.data.errorDetails ? `: ${clip(e.data.errorDetails, 120)}` : '';
   return { icon: '⛈️', text: `${label}${details}`, level: 'error' };
 }
@@ -581,6 +575,7 @@ function apply(m, input) {
   const handler = own(APPLY, e.kind);
   const draft = handler && a ? handler(m, e, s, a, relabels) : null;
   if (a) setWait(a, waitAfter(a, e));
+  if (dialogsAfterEvent(m.dialogs, e, a ? a.agentId : e.agentId)) m.state.dialogs = m.dialogs.list();
   if (relabels.length) e.data.relabels = relabels;
   s.lastActivity = Math.max(s.lastActivity, e.ts);
   if (a) a.lastActivity = Math.max(a.lastActivity, e.ts);
@@ -664,10 +659,9 @@ function approvalChanged(m, approval, ts) {
   const a = m.state.agents[key];
   const tool = str(approval.toolName) || 'Tool';
   const summary = summarizeTool(tool, approval.toolInput, approval.cwd ?? s?.cwd ?? '');
-  if (a) {
-    waitForAnswer(m, a, key, approval.status, tool);
-    setWait(a, waitAfterApproval(a, approval, summary));
-  }
+  if (a) waitForAnswer(m, a, key, approval.status, tool);
+  dialogsAfterApproval(m.dialogs, approval, summary);
+  m.state.dialogs = m.dialogs.list();
   if (s && s.status !== 'ended') s.status = sessionStatus(m, s);
   const log = own(APPROVAL_LOG, approval.status);
   if (log) {

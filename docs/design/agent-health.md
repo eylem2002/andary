@@ -94,8 +94,11 @@ AttentionItem {
 | alert | stuck; same file when a Write lands on another active agent's change | until dismissed |
 | ready | a lead finished its turn and has had no prompt since | after Claude Code's `idle_prompt` (Codex: a minute with no prompt), for 30 minutes; never for agent-team teammates |
 
-The store gains `AgentState.wait = { kind, since, text } | null`, set and cleared by the handlers
-that already change an agent's status; `attentionItems` only reads. Teammates' crews are left
+The store keeps the open dialogs (requests, questions, plans) in the model the phone shares
+(`core/dialogs.js`, §2): one per call, closed only on proof of an answer, so parallel calls, a
+helper's request held while you type to the lead, and a reconnect's replay never lose an agent
+that waits. `AgentState.wait = { kind, since, text, idleAt, cause } | null` holds the rest
+(finished, stopped, a session's question); `attentionItems` only reads. Teammates' crews are left
 out; a view-only viewer gets no attention items.
 
 **HUD, first version (simpler than a new panel):**
@@ -107,8 +110,8 @@ out; a view-only viewer gets no attention items.
   Approvals; everything else selects the agent and points the camera); the next click goes to the
   next one. `I` does the same.
 - The tab title is "(3) Andary".
-- Dismiss (alerts and finished turns) is on the agent's row and in the inspector; dismissals are
-  kept in local storage.
+- Dismiss (alerts, stops and finished turns) is on the agent's row and in the inspector;
+  dismissals are kept in local storage.
 - **Desktop notifications** (opt-in) follow the model: one per new counted item, never for
   replayed history, and no "finished" notice while only one local crew is active (you are
   probably at its terminal).

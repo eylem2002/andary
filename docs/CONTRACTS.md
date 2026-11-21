@@ -526,13 +526,16 @@ the WebSocket `hello`. Only this computer's events count (§4.11).
 
 This computer (`public/js/ui/notifications.js`), opt-in in Settings (`prefs.desktopNotify`, after
 the browser's permission), follows "needs you" (§5.1): while the page is hidden, each new counted
-item becomes one system notification naming the crew, never a command or file ("Permission
-needed", "Question for you", "Plan to approve", "Turn stopped", "Turn finished"). An item the
-viewer could already see (the page in front, or notifications off) never pops up later, nor one
-that started to count more than two minutes ago (a reconnect or a page opened in the
-background); changes that arrive together (a reconnect's history) are checked once. No "Turn
-finished" while only one of your crews is in town, and nothing for someone watching a team town
-with its view link. The same watcher keeps the page title's count current in a background tab.
+item becomes one system notification naming the crew (its title, or its project's folder), never
+a request's command or file ("Permission needed", "Question for you", "Plan to approve", "Turn
+stopped", "Crews stopped", "Turn finished"). An item the viewer could already see (the page in
+front, or notifications off) never pops up later, nor one that started to count more than two
+minutes ago (a reconnect or a page opened in the background); changes that arrive together (a
+reconnect's history) are checked once. A permission request waits until its request reaches the
+town (or three seconds), so it is worded right the first time. No "Turn finished" while only one
+of your crews is in town, and nothing for someone watching a team town with its view link. The
+same watcher keeps the page title's count current in a background tab, redraws the HUD when the
+clock alone changes the list, and tells screen readers of new questions, plans and stops.
 
 ### 4.11 Team town
 
@@ -689,8 +692,12 @@ AgentState { key, sessionId, agentId: string|null, name, role: 'lead'|'subagent'
              changes: FileChange[] /* finished Edit/MultiEdit/Write/NotebookEdit, ≤ 20, newest last */,
              recent: LogEntry[] /* ≤ 30 */, errors: number, lastMessage?,
              wait: Wait|null /* what it waits for you on, below */ }
-Wait { kind: 'approval'|'question'|'plan'|'finished'|'stopped', since /* hook time */,
-       text /* one line */, idleAt: number|null /* finished: when idle_prompt said nobody answered */ }
+Wait { kind: 'question'|'finished'|'stopped', since /* hook time */, text /* one line */,
+       idleAt: number|null /* finished: when idle_prompt said nobody answered */,
+       cause: string|null /* stopped: StopFailure's error code */ }
+Dialog { id, sessionId, agentId: string|null, kind: 'permission'|'question'|'plan'|'unknown',
+         tools: string[], input: string|null /* inputKey() of the call */, at /* hook time */,
+         approvalId: string|null, text /* what it is about */ }  // StoreState.dialogs: open ones
 LogEntry { id, ts, sessionId, agentKey, agentName, color, kind, icon, text,
            level: 'info'|'success'|'warn'|'error' }
 Achievement { id, title, description, icon, unlockedAt }
@@ -698,30 +705,40 @@ FileChange { id, path /* relative to the crew's folder */, tool, ts, whole: bool
              hunks: { before: string, after: string }[] /* from tool_input, ≤ 4,000 characters each */ }
 ```
 
-**Needs you** (`core/waits.js`, `core/attention.js`, both pure; docs/design/agent-health.md §3).
-The store sets `AgentState.wait` after each event (`waitAfter`) and approval change
-(`waitAfterApproval`): a permission request, an `AskUserQuestion` or `ExitPlanMode` call, an
-`agent_needs_input`/elicitation notice, a lead's finished turn or a failed turn starts a wait; a
-prompt, a new session, a tool call (other than those two), an answer or a manual `/compact` ends
-it; an approval answered in the town ends it, one handed back to the terminal keeps it.
+**Needs you** (`core/dialogs.js`, `core/waits.js`, `core/attention.js`, all pure; docs/design/
+agent-health.md §3). `StoreState.dialogs` lists what agents asked you and had no answer to, in the
+model the phone notes share (§4.10, `core/dialogs.js`): a dialog per call, opened by a
+`PermissionRequest`, an `AskUserQuestion` or `ExitPlanMode` call (the permission request Claude
+Code sends for those joins it) or a session's `permission_prompt` notice when nothing of that
+session is known to be open; closed only by that very call reporting back (same tool and input;
+questions and plans by name), the town deciding its request, your prompt (the lead's dialogs), the
+agent's turn ending or the session ending. A request sent back to the terminal, a new request and
+the broker's `resolved` are no proof. `core/store-dialogs.js` feeds it from events and approval
+changes; an approval with no dialog (older than the history kept) opens one.
+`AgentState.wait` is the rest: a lead's finished turn, a failed turn, or a session's question
+(`agent_needs_input`, elicitation). A prompt, a tool call, a new session, a helper finishing or a
+manual `/compact` ends it; `TeammateIdle` ends only a teammate's own.
 `attentionItems(state, now, { dismissed? }) → AttentionItem[]`, most urgent first:
 
 ```js
-AttentionItem { id /* kind:agentKey:since — a new episode is a new item */,
+AttentionItem { id /* one per episode: dialog:agentKey:at:input, kind:agentKey:since, limit:since */,
                 kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'finished',
                 level: 'blocked'|'stopped'|'alert'|'ready', sessionId, agentKey,
-                approvalId: string|null /* a request the town can answer */, since, countedSince,
-                text, counted: boolean, dismissable: boolean, crews: number }
+                agentKeys: string[] /* everyone it stands for */,
+                approvalId: string|null /* a request the town holds */, since, countedSince,
+                text, counted: boolean, dismissable: boolean, crews: number,
+                settled: boolean /* false: a permission dialog whose request has not reached the town yet */ }
 ```
 
-Pending approvals are `approval` (held) or `terminal` items; a wait is the rest. A finished turn
-is listed at once and counted from `idle_prompt` (Codex: `CODEX_IDLE_MS`, a minute) for
-`READY_MS` (30 minutes). Stops by one rate limit within ten minutes merge into one item. Ended
+A permission dialog is an `approval` item while the town holds its request, else `terminal`;
+its id stays the same either way. A finished turn is listed at once and counted from
+`idle_prompt` (Codex: `CODEX_IDLE_MS`, a minute) for `READY_MS` (30 minutes). Stops by one rate
+limit (`cause: 'rate_limit'`) within ten minutes merge into one item for all their agents. Ended
 sessions and teammates' crews are left out. `ui/needs-you.js` adds the viewer's dismissals
-(stops and finished turns, kept in `localStorage["andary:dismissed"]` for a day; someone watching
-a team town with its view link gets no items, as they can answer nothing) and drives the
-masthead button, the `I` key, the page title, the crew rows, the inspector and the desktop
-notifications.
+(stops and finished turns, kept in `localStorage["andary:dismissed"]` for a day and shared with the
+town's other tabs; someone watching a team town with its view link gets no items, as they can
+answer nothing) and drives the masthead button (its name: the visible words, then where a click
+goes), the `I` key, the page title, the crew rows, the inspector and the desktop notifications.
 
 `director.js`: `createDirector({ world, store, backlog?, humor?, random? }) → { dispose() }`
 subscribes to the store and drives the world. `recordChanges(store) → { stop() }` keeps the

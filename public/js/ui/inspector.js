@@ -115,7 +115,7 @@ export function createInspector(ctx) {
     setText(role, `${roleLabel(agent)}${session ? ` in ${session.project}` : ''}`);
     updateStatusChip(chip, agent.status);
     const asking = state.approvals.find((approval) => approval.status === 'pending' && approvalAgentKey(approval) === agent.key);
-    need.update(ctx.needsYou.items(state).find((item) => item.agentKey === agent.key) ?? null);
+    need.update(ctx.needsYou.items(state).find((item) => item.agentKeys.includes(agent.key)) ?? null);
     renderSections(agent, session?.cwd, asking);
     const spent = state.usage?.[agent.key];
     setText(usage, spent ? usageSentence(spent) : '');

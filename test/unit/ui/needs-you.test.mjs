@@ -34,12 +34,15 @@ function town() {
 }
 
 describe('createNeedsYou', () => {
-  test('the button goes to the most urgent, then the next, then around again', () => {
+  test('the button goes to the most urgent, then the next, then around again; peek does not move', () => {
     const state = town().getState();
     const needsYou = createNeedsYou({ storage: null, now: () => T0 + 5000 });
     const items = needsYou.items(state);
     assert.deepEqual(items.map((i) => i.kind), ['question', 'stopped']);
-    assert.deepEqual([needsYou.next(items)?.kind, needsYou.next(items)?.kind, needsYou.next(items)?.kind], ['question', 'stopped', 'question']);
+    assert.equal(needsYou.peek(items)?.kind, 'question');
+    assert.equal(needsYou.next(items)?.kind, 'question');
+    assert.deepEqual([needsYou.peek(items)?.kind, needsYou.peek(items)?.kind], ['stopped', 'stopped']);
+    assert.deepEqual([needsYou.next(items)?.kind, needsYou.next(items)?.kind], ['stopped', 'question']);
     assert.equal(needsYou.next([]), null);
   });
 
@@ -56,6 +59,7 @@ describe('createNeedsYou', () => {
     const reloaded = createNeedsYou({ storage, now: () => now });
     assert.deepEqual(reloaded.items(state).map((i) => i.kind), ['question'], 'still set aside after a reload');
     now += DAY + 1;
+    assert.deepEqual(needsYou.items(state).map((i) => i.kind), ['question', 'stopped'], 'a day later it is back, without a reload');
     assert.deepEqual(createNeedsYou({ storage, now: () => now }).items(state).map((i) => i.kind), ['question', 'stopped']);
   });
 
@@ -89,9 +93,10 @@ describe('words', () => {
   const items = needsYou.items(state);
 
   test('the button says how many and what comes first', () => {
-    assert.equal(needsYouLabel(items), '2 things need you. Next: Asks: Which port?');
-    assert.equal(needsYouLabel(items.slice(0, 1)), '1 thing needs you. Next: Asks: Which port?');
-    assert.equal(needsYouLabel([]), '0 things need you');
+    // The visible words first ("2 need you"), then where a click goes.
+    assert.equal(needsYouLabel(items, items[1]), '2 need you. Next: Server error');
+    assert.equal(needsYouLabel(items.slice(0, 1), items[0]), '1 needs you. Next: Asks: Which port?');
+    assert.equal(needsYouLabel([], null), '0 need you');
   });
 
   test('crew rows say how long it has waited', () => {

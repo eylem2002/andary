@@ -73,7 +73,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       ui.dialogs.diff.show(agentKey, changeId);
     },
     // Someone watching a team town with its view link can answer nothing: nothing needs them.
-    needsYou: createNeedsYou({ viewOnly: () => view.serverSettings.team?.role === 'viewer' }),
+    needsYou: createNeedsYou({ viewOnly: () => view.serverSettings.team?.role === 'viewer', onChange: () => ctx.refresh() }),
     // The director camera needs the finished context, so it is attached right below.
     cinema: /** @type {any} */ (null),
   };
