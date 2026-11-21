@@ -215,15 +215,18 @@ rules while the suggestion stays), so the card is worded honestly.
 - The card offers **Allow always** for an `addRules` + `allow` suggestion whose destination is
   `localSettings` (this project, only you) or `session` (until the session ends); never
   `projectSettings` (committed, changes your teammates' prompts) or `userSettings`, never
-  `setMode` or directories. It shows the literal rule (`Bash(npm test:*)`) and where it is saved.
+  `setMode` or directories. It shows the literal rule (`Bash(npm test:*)`), what it allows in
+  words and where it is saved, so only rules it can say exactly are offered: one command, a Bash
+  prefix, one web host or one MCP tool, never a path rule (Claude Code reads those as gitignore
+  patterns).
 - The browser sends `decide { decision: 'allow', always: <index> }`; the server adds that one
   suggestion from the original request as `updatedPermissions`.
 - **The forwarder passes it on only if it equals one suggestion in its own input** (compared without
   regard to key order), and only one; anything else becomes a plain allow.
 - Not offered when sanitising changed the suggestion, on plan approvals, or for Codex (it sends no
   suggestions).
-- If the same request comes back after an "allow always", its card says so: the rule did not take
-  (a managed setting may forbid saved rules).
+- If the same request comes back in the same session after an "allow always" for this project, its
+  card says so: the rule may not have taken.
 - A count on the card ("allowed 4 times today") when it would help.
 
 **Decision:** do. Size: small–medium.

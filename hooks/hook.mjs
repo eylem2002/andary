@@ -48,8 +48,11 @@ const MAX_DENY_MESSAGE_CHARS = 1000;
 const CAPS = Object.freeze(['truncated', 'updatedPermissions']);
 /** Where an allow may save a rule: `.claude/settings.local.json` (this project, only you) or the session. */
 const LOCAL_DESTINATIONS = new Set(['localSettings', 'session']);
-/** Tools whose rules match a command line, where a trailing `:*` or ` *` means "starting with". */
+/** Tools whose rule content is a command line: a rule without a wildcard is one command. */
 const COMMAND_TOOLS = new Set(['Bash', 'PowerShell']);
+/** The fields of a rule, and of an `addRules` update; anything else is refused, as the town does. */
+const RULE_FIELDS = new Set(['toolName', 'ruleContent']);
+const UPDATE_FIELDS = new Set(['type', 'rules', 'behavior', 'destination']);
 
 /**
  * Exits 0, after flushing `text` to stdout if there is any.
@@ -297,35 +300,48 @@ function canonicalJson(value) {
 }
 
 /**
- * Whether a rule allows no more than it reads: one exact command or value, commands starting with
- * a prefix (`npm test:*` or `npm test *`, Bash and PowerShell only), or one MCP tool. Never a whole
- * built-in tool (no content, an empty content, which Claude Code saves as the bare tool, or `*`),
- * any other wildcard, or an MCP rule with content. The same test as ruleReach in
- * public/js/core/permission-rules.js, which decides what the town offers.
- * @param {any} rule
+ * Whether a value is an object with no field outside `fields`.
+ * @param {unknown} value
+ * @param {Set<string>} fields
+ * @returns {value is Record<string, any>}
+ */
+function hasOnly(value, fields) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every((key) => fields.has(key));
+}
+
+/**
+ * Whether a rule allows no more than the town can say exactly: one command (Bash, PowerShell),
+ * commands starting with a prefix (Bash only: `npm test:*` or `npm test *`), fetches from one
+ * host (WebFetch `domain:example.com`), or one MCP tool. Never a whole built-in tool (no content,
+ * an empty content, which Claude Code saves as the bare tool, or `*`), any other wildcard, a path
+ * rule (a gitignore pattern), an MCP rule with content, or another tool's rule. The same test as
+ * ruleReach in public/js/core/permission-rules.js, which decides what the town offers.
+ * @param {unknown} rule
  * @returns {boolean}
  */
 function isNarrowRule(rule) {
-  const tool = rule?.toolName;
-  const content = rule?.ruleContent;
+  if (!hasOnly(rule, RULE_FIELDS)) return false;
+  const { toolName: tool, ruleContent: content } = rule;
   if (typeof tool !== 'string' || !/^[A-Za-z][\w-]*$/.test(tool)) return false;
   if (content === undefined) return /^mcp__[\w-]+__[\w-]+$/.test(tool);
-  if (typeof content !== 'string' || content.trim() === '' || tool.startsWith('mcp__')) return false;
-  if (!COMMAND_TOOLS.has(tool)) return !/[*?[]/.test(content);
+  if (typeof content !== 'string' || content.trim() === '') return false;
+  if (tool === 'WebFetch') return /^domain:[A-Za-z0-9][A-Za-z0-9.-]*$/.test(content);
+  if (!COMMAND_TOOLS.has(tool)) return false;
   if (!content.includes('*')) return true;
-  const prefix = /^([^*]+?)(?::\*| \*)$/.exec(content);
+  const prefix = tool === 'Bash' ? /^([^*]+?)(?::\*| \*)$/.exec(content) : null;
   return prefix !== null && prefix[1].trim() !== '';
 }
 
 /**
  * Whether a permission update adds allow rules for this project (only you) or this session, each
- * allowing no more than it reads. Rules for the shared project settings or every project, modes
- * and folders are never saved.
- * @param {any} update
+ * allowing no more than it reads, with no field the town does not know. Rules for the shared
+ * project settings or every project, modes and folders are never saved.
+ * @param {unknown} update
  * @returns {boolean}
  */
 function isLocalAllowRule(update) {
-  if (update?.type !== 'addRules' || update.behavior !== 'allow' || !LOCAL_DESTINATIONS.has(update.destination)) return false;
+  if (!hasOnly(update, UPDATE_FIELDS) || update.type !== 'addRules' || update.behavior !== 'allow') return false;
+  if (!LOCAL_DESTINATIONS.has(update.destination)) return false;
   return Array.isArray(update.rules) && update.rules.length > 0 && update.rules.every(isNarrowRule);
 }
 

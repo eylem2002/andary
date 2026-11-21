@@ -25,9 +25,10 @@ export const MAX_REASON_CHARS = 500;
 
 /**
  * New requests are listed first, so a card can slide under the pointer just as the viewer clicks
- * the one they read (and a settled card above can move away). A click on Allow, Allow always or
- * Deny only counts once its card has stayed in place this long, like the input delay of browser
- * permission prompts. Keyboard answers are not delayed: focus stays on the card the viewer chose.
+ * the one they read (and a settled card above can move away, or shrink when it goes back to the
+ * terminal). A click on Allow, Allow always or Deny only counts once its card has stayed in place
+ * on the page this long, like the input delay of browser permission prompts. Keyboard answers are
+ * not delayed: focus stays on the card the viewer chose.
  */
 export const ANSWER_DELAY_MS = 1000;
 
@@ -41,20 +42,78 @@ export function answerReady(armedAt, now) {
 }
 
 /**
- * Restarts the answer delay when a card appears or changes place in the list: its buttons read as
- * unavailable (aria-disabled, not disabled, so focus is never lost) until the delay is over.
+ * Restarts the answer delay when a card appears or changes place in the list.
  * @param {any} p the card's parts
  * @param {number} index its place in the list now
  */
 function armCard(p, index) {
   if (p.index === index) return;
   p.index = index;
+  restartDelay(p);
+}
+
+/**
+ * Starts a card's answer delay over: its buttons read as unavailable (aria-disabled, not
+ * disabled, so focus is never lost) until the delay is over.
+ * @param {any} p the card's parts
+ */
+function restartDelay(p) {
   p.armedAt = performance.now();
   for (const button of [p.allow, p.always, p.deny]) setAttr(button, 'aria-disabled', 'true');
   clearTimeout(p.armTimer);
   p.armTimer = setTimeout(() => {
     for (const button of [p.allow, p.always, p.deny]) setAttr(button, 'aria-disabled', null);
   }, ANSWER_DELAY_MS);
+}
+
+/**
+ * Restarts a card's answer delay whenever it moves on the page, whatever moved it: a card above
+ * that was answered or went back to the terminal (its buttons and countdown hide), a hint, a card
+ * added or removed, or the panel shown again after requests arrived while it was hidden. Its place
+ * in the list stays the same in all of these. A ResizeObserver reports after layout and before
+ * paint, so a card is armed before it shows in its new place. The side boards sliding back on
+ * screen (they were put away, not hidden) move no card in its panel: `restartAll` is for that.
+ * @param {HTMLElement} list
+ * @param {WeakMap<HTMLElement, any>} parts
+ */
+function watchMoves(list, parts) {
+  /** @type {Set<HTMLElement>} */
+  const watched = new Set();
+  // A hidden panel has no layout: its cards are nowhere, so showing it moves even the first one.
+  const topOf = (/** @type {HTMLElement} */ item) => (item.offsetParent ? item.offsetTop : -1);
+  const watcher = new ResizeObserver(() => {
+    const items = /** @type {HTMLElement[]} */ ([...list.children]);
+    // Every position is read before any card is armed again, so the page is laid out only once.
+    const tops = items.map(topOf);
+    items.forEach((item, i) => {
+      const p = parts.get(item);
+      if (!p || p.top === tops[i]) return;
+      p.top = tops[i];
+      restartDelay(p);
+    });
+  });
+  return {
+    /** @param {HTMLElement} item a new card */
+    watch(item) {
+      watched.add(item);
+      watcher.observe(item);
+    },
+    /** Stops watching the cards that left the list. */
+    sweep() {
+      for (const item of watched) {
+        if (item.isConnected) continue;
+        watched.delete(item);
+        watcher.unobserve(item);
+      }
+    },
+    /** Starts every card's delay over: what the panel shows is new to the viewer. */
+    restartAll() {
+      for (const item of list.children) {
+        const p = parts.get(/** @type {HTMLElement} */ (item));
+        if (p) restartDelay(p);
+      }
+    },
+  };
 }
 
 /**
@@ -243,6 +302,7 @@ export function createApprovalsPanel(ctx) {
   const sending = new Map();
   /** @type {WeakMap<HTMLElement, any>} */
   const parts = new WeakMap();
+  const moves = watchMoves(list, parts);
 
   /**
    * @param {Approval} approval
@@ -268,6 +328,7 @@ export function createApprovalsPanel(ctx) {
   function createCard(first) {
     const { item, parts: p } = buildCard(`hud-approval-${++cards}`, first.id);
     parts.set(item, p);
+    moves.watch(item);
     p.allow.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'allow'));
     p.always.addEventListener('click', (event) => clickCounts(event, p) && p.offer && decide(p.approval, 'allow', '', p.offer.index));
     p.deny.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'deny', p.reason.value));
@@ -348,6 +409,7 @@ export function createApprovalsPanel(ctx) {
   function render(state) {
     const shown = state.approvals.slice(0, MAX_CARDS);
     renderList(list, shown, (approval) => approval.id, createCard, (item, approval, index) => updateCard(item, approval, state, index));
+    moves.sweep();
     setHidden(empty, shown.some((approval) => approval.status === 'pending'));
     renderNote();
   }
@@ -378,6 +440,8 @@ export function createApprovalsPanel(ctx) {
     focusFirstPending: () => focusCard(list, null),
     /** One request's card (from "need you"); the first pending one if it is gone. @param {string} id */
     focusApproval: (id) => focusCard(list, id),
+    /** The side boards came back on screen: no card takes a click at once. */
+    shown: () => moves.restartAll(),
   };
 }
 

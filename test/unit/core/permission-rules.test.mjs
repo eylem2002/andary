@@ -66,25 +66,30 @@ describe('which suggestions the town may offer', () => {
 });
 
 describe('what a rule allows', () => {
-  it('one exact command or value', () => {
-    assert.deepEqual(ruleReach(rule('Bash', 'npm test')), { kind: 'exact' });
-    assert.deepEqual(ruleReach(rule('Bash', 'rm -rf node_modules')), { kind: 'exact' });
-    assert.deepEqual(ruleReach(rule('PowerShell', 'Get-ChildItem')), { kind: 'exact' });
-    assert.deepEqual(ruleReach(rule('WebFetch', 'domain:example.com')), { kind: 'exact' });
-    assert.deepEqual(ruleReach(rule('Read', './src/app.ts')), { kind: 'exact' });
+  it('one command', () => {
+    assert.deepEqual(ruleReach(rule('Bash', 'npm test')), { kind: 'command' });
+    assert.deepEqual(ruleReach(rule('Bash', 'rm -rf node_modules')), { kind: 'command' });
+    assert.deepEqual(ruleReach(rule('PowerShell', 'Get-ChildItem')), { kind: 'command' });
   });
 
-  it('commands starting with a prefix, written either way Claude Code writes one', () => {
+  it('commands starting with a prefix, written either way Claude Code writes one, for Bash only', () => {
     assert.deepEqual(ruleReach(rule('Bash', 'npm test:*')), { kind: 'prefix', prefix: 'npm test' });
     assert.deepEqual(ruleReach(rule('Bash', 'npm test *')), { kind: 'prefix', prefix: 'npm test' });
-    assert.deepEqual(ruleReach(rule('PowerShell', 'git log:*')), { kind: 'prefix', prefix: 'git log' });
+    // PowerShell matching ignores letter case and expands aliases: a prefix covers more than it reads.
+    assert.equal(ruleReach(rule('PowerShell', 'git log:*')), null);
+    assert.equal(ruleReach(rule('PowerShell', 'Get-ChildItem *')), null);
+  });
+
+  it('fetches from one host', () => {
+    assert.deepEqual(ruleReach(rule('WebFetch', 'domain:example.com')), { kind: 'domain', host: 'example.com' });
+    assert.deepEqual(ruleReach(rule('WebFetch', 'domain:api.example-1.dev')), { kind: 'domain', host: 'api.example-1.dev' });
   });
 
   it('every call of one MCP tool, the narrowest rule there is for it', () => {
     assert.deepEqual(ruleReach(rule('mcp__github__get_issue')), { kind: 'tool' });
   });
 
-  it('nothing it cannot say plainly: whole tools, wildcards, MCP rules with content', () => {
+  it('nothing it cannot say exactly: whole tools, wildcards, path rules, unknown rules', () => {
     for (const [why, broad] of /** @type {[string, unknown][]} */ ([
       ['no content: the whole tool', rule('Bash')],
       ['empty content, which Claude Code saves as the bare tool', rule('Bash', '')],
@@ -98,10 +103,19 @@ describe('what a rule allows', () => {
       ['a prefix of spaces', rule('Bash', '   *')],
       ['a star glued to a word', rule('Bash', 'ls*')],
       ['a path pattern', rule('Read', '/home/me/project/**')],
-      ['a gitignore character class', rule('Edit', './src/[ab].ts')],
-      ['a gitignore single-character wildcard', rule('Edit', './src/a?.ts')],
-      ['a domain wildcard', rule('WebFetch', 'domain:*.example.com')],
+      ['a file path, which Claude Code reads as a gitignore pattern', rule('Read', './src/app.ts')],
+      ['a folder name, which covers every file under any such folder', rule('Edit', 'src')],
+      ['a file name, which covers it in every folder below', rule('Read', '.env')],
+      ['a file to write', rule('Write', 'out.txt')],
+      ['a search pattern', rule('Glob', 'src')],
+      ['a notebook', rule('NotebookEdit', 'analysis.ipynb')],
+      ['a folder to move to', rule('Cd', 'src')],
+      ['a skill, whose rules the town does not know', rule('Skill', 'commit')],
       ['a prefix on a tool that is not a command line', rule('Skill', 'commit:*')],
+      ['a domain wildcard', rule('WebFetch', 'domain:*.example.com')],
+      ['a domain with a single-character wildcard', rule('WebFetch', 'domain:exa?ple.com')],
+      ['a domain with a character class', rule('WebFetch', 'domain:[a].example.com')],
+      ['a fetch rule that is not a domain', rule('WebFetch', 'https://example.com')],
       ['a whole built-in tool', rule('WebSearch')],
       ['a whole MCP server', rule('mcp__github')],
       ['every tool of an MCP server', rule('mcp__github__*')],

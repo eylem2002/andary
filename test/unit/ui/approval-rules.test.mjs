@@ -8,7 +8,7 @@ const LINT = [{ toolName: 'Bash', ruleContent: 'npm run lint' }];
 /** 3 pm local time, and the evening before. */
 const NOW = new Date(2026, 10, 21, 15, 0).getTime();
 const YESTERDAY = new Date(2026, 10, 20, 23, 0).getTime();
-const ASKED_AGAIN = 'Claude Code asked again after “Allow always”: the rule may not have been saved (a managed setting can forbid saved rules).';
+const ASKED_AGAIN = 'Claude Code asked again after “Allow always”: the rule may not have taken.';
 
 /**
  * An approval with the fields these helpers read: by default a held request in /w/app, made a
@@ -66,6 +66,8 @@ describe('what the card offers to save', () => {
       ['an empty content, saved as the whole tool', { index: 0, rules: [{ toolName: 'Bash', ruleContent: '' }], destination: 'localSettings' }],
       ['a star', { index: 0, rules: [{ toolName: 'Bash', ruleContent: '*' }], destination: 'localSettings' }],
       ['a glob', { index: 0, rules: [{ toolName: 'Bash', ruleContent: 'rm -f *.log' }], destination: 'localSettings' }],
+      ['a path rule, a gitignore pattern', { index: 0, rules: [{ toolName: 'Edit', ruleContent: 'src' }], destination: 'localSettings' }],
+      ['a PowerShell prefix', { index: 0, rules: [{ toolName: 'PowerShell', ruleContent: 'Get-Item:*' }], destination: 'localSettings' }],
       ['a shared destination', { index: 0, rules: NPM_TEST, destination: 'projectSettings' }],
       ['not an object', 'Bash(npm test)'],
     ])) {
@@ -74,21 +76,35 @@ describe('what the card offers to save', () => {
   });
 
   test('the line above the button names the literal rule, what it allows and where it is kept', () => {
-    assert.equal(read(alwaysLine({ index: 0, rules: NPM_TEST, destination: 'localSettings' })), 'Allow always saves the rule [Bash(npm test)] for this project, only you.');
+    assert.equal(
+      read(alwaysLine({ index: 0, rules: NPM_TEST, destination: 'localSettings' })),
+      'Allow always asks Claude Code to save the rule [Bash(npm test)] (only this command) for this project, only you.',
+    );
     assert.equal(
       read(alwaysLine({ index: 0, rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], destination: 'session' })),
-      'Allow always saves the rule [Bash(npm test:*)] (commands starting with “npm test”) until this session ends.',
+      'Allow always asks Claude Code to save the rule [Bash(npm test:*)] (commands starting with “npm test”) until this session ends.',
     );
     assert.equal(
       read(alwaysLine({ index: 1, rules: [...LINT, { toolName: 'mcp__github__get_issue' }], destination: 'localSettings' })),
-      'Allow always saves the rules [Bash(npm run lint)], [mcp__github__get_issue] (every use of this tool) for this project, only you.',
+      'Allow always asks Claude Code to save the rules [Bash(npm run lint)] (only this command), [mcp__github__get_issue] (every use of this tool) for this project, only you.',
     );
   });
 
-  test('words for what a rule allows, with hidden characters shown', () => {
+  test('every rule gets words, so an escaped rule cannot pass for another command', () => {
+    assert.equal(
+      read(alwaysLine({ index: 0, rules: [{ toolName: 'Bash', ruleContent: 'echo ), Bash(git status' }], destination: 'localSettings' })),
+      'Allow always asks Claude Code to save the rule [Bash(echo \\), Bash\\(git status)] (only this command) for this project, only you.',
+    );
+    assert.equal(reachWords({ toolName: 'Bash', ruleContent: 'npm test' }), 'only this command');
+    assert.equal(reachWords({ toolName: 'PowerShell', ruleContent: 'Get-ChildItem' }), 'only this command');
     assert.equal(reachWords({ toolName: 'Bash', ruleContent: 'git log *' }), 'commands starting with “git log”');
-    assert.equal(reachWords({ toolName: 'Bash', ruleContent: 'npm test‮:*' }), 'commands starting with “npm test⟨U+202E⟩”');
-    assert.equal(reachWords({ toolName: 'Bash', ruleContent: 'npm test' }), '');
+    assert.equal(reachWords({ toolName: 'WebFetch', ruleContent: 'domain:example.com' }), 'only fetches from “example.com”');
+    assert.equal(reachWords({ toolName: 'mcp__github__get_issue' }), 'every use of this tool');
+    assert.equal(reachWords({ toolName: 'Read', ruleContent: 'src' }), '', 'a rule the town does not offer');
+  });
+
+  test('words show hidden characters', () => {
+    assert.equal(reachWords({ toolName: 'Bash', ruleContent: 'npm test\u202E:*' }), 'commands starting with “npm test⟨U+202E⟩”');
   });
 
   test('the rule an "Allow always" asked Claude Code to save, for the result line', () => {

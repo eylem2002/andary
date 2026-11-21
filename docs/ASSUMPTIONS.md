@@ -477,23 +477,29 @@ section.
 105. **The town says what it asked for, not what was saved.** Claude Code does not report whether
     it saved a rule, so a card answered with "Allow always" reads "Allowed; asked Claude Code to
     save …". A rule asked to be saved for this project that comes back in the same session, after
-    the choice, gets a neutral hint: it may not have been saved (a managed setting can forbid saved
-    rules). Rules kept for the session are not judged, since `claude --continue` keeps the session
-    id but not its session rules, and other sessions may have started before the rule was saved.
+    the choice, gets a neutral hint: the rule may not have taken. The town cannot tell why (it may
+    not have been saved, or another setting may still ask), so it does not guess. Rules kept for the
+    session are not judged, since `claude --continue` keeps the session id but not its session
+    rules, and other sessions may have started before the rule was saved.
 106. **The forwarder compares suggestions as JSON with sorted keys.** Key order means nothing in
     JSON. A value it cannot compare (nested too deeply) saves nothing: the answer is a plain allow.
 107. **The demo keeps a rule allowed always for its project.** Its suggestions are for this project
     (`localSettings`), so later demo sessions of the same project do not ask for it either, as
     Claude Code would not.
-108. **A rule is offered only when the card can say what it allows.** One exact command or value;
-    commands starting with a prefix, written `npm test:*` or `npm test *` (Claude Code reads the two
-    alike, and its permission dialog now writes the second), for Bash and PowerShell only, and said
-    in words ("commands starting with “npm test”"); or one MCP tool, the narrowest rule there is for
-    it ("every use of this tool"). Never a whole built-in tool (no content, an empty content, which
-    Claude Code saves as the bare tool, or `*`), a wildcard anywhere else (`rm -f *.log` also
-    allows `rm -f -r ~ x.log`; `?` and `[` are wildcards in path rules), or an MCP rule with
-    content (Claude Code skips those). A folder rule such as `Read(/project/**)` is not offered
-    either; the terminal still offers it.
+108. **A rule is offered only when the card can say what it allows.** The town lists what it
+    offers rather than what it refuses: one Bash or PowerShell command with no `*` ("only this
+    command"); Bash commands starting with a prefix, written `npm test:*` or `npm test *` (Claude
+    Code reads the two alike, and its permission dialog now writes the second), said in words
+    ("commands starting with “npm test”"); WebFetch from one host with no wildcard
+    (`domain:example.com`, "only fetches from “example.com”"); or one MCP tool with no content, the
+    narrowest rule there is for it ("every use of this tool"). Anything else is refused, among them
+    a whole built-in tool (no content, an empty content, which Claude Code saves as the bare tool,
+    or `*`), a wildcard anywhere else (`rm -f *.log` also allows `rm -f -r ~ x.log`), a
+    PowerShell prefix (its matching ignores letter case and expands aliases, so it covers more than
+    it reads), any rule for Read, Edit, Write, Glob, the notebook tools or Cd (Claude Code reads
+    their content as a gitignore pattern, so even `Edit(src)` covers every file under any `src/`,
+    and a folder rule such as `Read(/project/**)` a whole tree), and an MCP rule with content
+    (Claude Code skips those). The terminal still offers all of them.
 109. **"Allow always" needs a forwarder that can pass the rule on.** The plugin runs its own copy of
     the forwarder, and `andary start` refreshes only `<home>/hook.mjs`, so an older copy may answer
     for the town; it would print a plain allow. Each body says what its forwarder does (`caps`),

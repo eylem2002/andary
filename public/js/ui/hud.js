@@ -337,6 +337,8 @@ function flush(hud, shell, effects) {
  * Hidden panels slide away and become inert, so they cannot be reached by keyboard or read out.
  * Focus inside them moves to the button that brings them back, so the keyboard does not fall
  * to the top of the page. A slide does not resize the sheets, so phones are measured again.
+ * Approval cards that come back on screen wait a moment for a click (CONTRACTS §4.5): requests
+ * may have arrived while the panels were away.
  * @param {{ ctx: HudContext, ui: Parts }} hud
  * @param {() => void} measureSheets
  */
@@ -347,6 +349,7 @@ function applyPanels({ ctx, ui }, measureSheets) {
   if (hidden && docks.some((dock) => dock.contains(document.activeElement))) ui.toolbar.focusTool('toggle-panels');
   document.documentElement.classList.toggle('hud-panels-hidden', hidden);
   for (const dock of docks) dock.inert = hidden;
+  if (!hidden) ui.approvals.shown();
   measureSheets();
 }
 

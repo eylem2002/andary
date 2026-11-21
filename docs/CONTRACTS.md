@@ -218,11 +218,11 @@ shows up as a crew of its own.
    `{behavior:'allow', updatedPermissions:[s]}`. That last one only when the reply's
    `updatedPermissions` is an array of exactly one element that equals, whatever the order of
    keys, an element `s` of the hook's own stdin `permission_suggestions`, `s` is `addRules` with
-   `behavior: 'allow'` and `destination` `localSettings` or `session`, and each of its rules allows
-   no more than it reads (§4.5: never an empty content, `*`, a whole built-in tool or another
-   wildcard). `s` is printed from the hook's own input, never from the reply. Any other
-   `updatedPermissions` gives a plain allow; any other field is dropped. Nothing else is ever
-   printed.
+   `behavior: 'allow'` and `destination` `localSettings` or `session` and no other field, and each
+   of its rules is one the town offers (§4.5: one command, a Bash prefix, one web host or one MCP
+   tool, with no other field). `s` is printed from the hook's own input, never from the reply. Any
+   other `updatedPermissions` gives a plain allow; any other field is dropped. Nothing else is
+   ever printed.
 6. **Always exits 0** and never prints anything else. Any error → exit 0 silently.
 
 ### 4.4 Server (`server/`)
@@ -358,35 +358,41 @@ character of its line (a line break in JavaScript, in Python source and in most 
 carriage return in file content is shown as `⟨U+000D⟩`, and a run of blank-looking rows is
 collapsed whatever its rows' kinds; a run of more than one kind counts each
 (`⟨120 blank lines: 80 added, 40 removed⟩`). In the browser, Allow, Allow always and Deny ignore
-pointer clicks for 1 s after a card appears or changes place.
+pointer clicks for 1 s after a card appears or moves on the page: its place in the list changed, a
+card above it changed size (it was answered or went back to the terminal), or the panel was shown
+after it arrived (its tab opened, or the side boards came back on screen).
 
 **Allow always.** `Approval.suggestions` lists the request's `permission_suggestions` the town
 offers to save, each with its `index` in that list: `addRules` with `behavior: 'allow'`,
 `destination` `localSettings` (this project, only you) or `session` (until the session ends), and
 a non-empty `rules` of `{toolName, ruleContent?}` objects, with no field the town does not know on
-the suggestion or its rules, each allowing no more than it reads: one exact command or value,
-commands starting with a prefix (Bash and PowerShell: `npm test:*` or `npm test *`), or one MCP
-tool (`mcp__<server>__<tool>`, no content). Never an empty content (Claude Code saves it as the
-bare tool), `*`, a whole built-in tool, any other wildcard (`*`, and `?` or `[` outside command
-rules), or an MCP rule with content. Only suggestions sanitising left unchanged are offered, only
-when the hook's body declares `updatedPermissions` in `caps` (§4.3), and none for Codex,
-`ExitPlanMode` or `AskUserQuestion` (`public/js/core/permission-rules.js`, `offeredSuggestions` in
-`server/approvals.mjs`). The suggestions themselves stay on the server. `decide` with `always` is
-accepted only for a held, pending approval, with `decision: 'allow'` and the `index` of one of its
-suggestions; anything else answers `{t:'error'}` and changes nothing. The hook then gets
+the suggestion or its rules, each one the card can say exactly in words: one command (Bash or
+PowerShell, no `*`: "only this command"), commands starting with a prefix (Bash only, `npm test:*`
+or `npm test *`: "commands starting with “npm test”"), fetches from one host (WebFetch
+`domain:example.com`, no wildcard: "only fetches from “example.com”") or one MCP tool
+(`mcp__<server>__<tool>`, no content: "every use of this tool"). Never an empty content (Claude
+Code saves it as the bare tool), `*`, a whole built-in tool, any other wildcard, a PowerShell prefix
+(its matching ignores case and expands aliases), a path rule (Read, Edit, Write, Glob, Notebook…,
+Cd: Claude Code reads it as a gitignore pattern, so `Edit(src)` covers every file under any
+`src/`), an MCP rule with content, or a rule of any other tool. Only suggestions sanitising left
+unchanged are offered, only when the hook's body declares `updatedPermissions` in `caps` (§4.3),
+and none for Codex, `ExitPlanMode` or `AskUserQuestion` (`public/js/core/permission-rules.js`,
+`offeredSuggestions` in `server/approvals.mjs`). The suggestions themselves stay on the server.
+`decide` with `always` is accepted only for a held, pending approval, with `decision: 'allow'` and
+the `index` of one of its suggestions; anything else answers `{t:'error'}` and changes nothing.
+The hook then gets
 `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[<that suggestion, exactly as it arrived>]}}}`,
 which the forwarder checks again against its own input (§4.3), and the approval records
 `always: { rules, destination, at }`. Whether Claude Code saved the rule is not known, so the card
 says what happened: "Allowed; asked Claude Code to save Bash(npm test) for this project, only
 you". The card offers one suggestion (the first `localSettings` one, else the first `session`
-one): under Allow and Deny, a line names the rule as Claude Code writes it (a backslash and
-parentheses escaped with a backslash, hidden characters revealed), what it allows ("commands
-starting with “npm test”") and where it is kept, and then, set apart, the **Allow always**
-button, which has no key of its own. A short hint says how often the same rule was allowed today
-in the same project (allowed in the town, or resolved with `proof: 'ran'`), or that a rule asked to
-be saved for this project came back in the same session (it may not have been saved: a managed
-setting can forbid saved rules) (`public/js/ui/approval-rules.js`). The demo does the same
-(`sources/demo.js`).
+one): under Allow and Deny, a line says "Allow always asks Claude Code to save the rule …" with
+the rule as Claude Code writes it (a backslash and parentheses escaped with a backslash, hidden
+characters revealed), what it allows in words and where it is kept, and then, set apart, the
+**Allow always** button, which has no key of its own. A short hint says how often the same rule was
+allowed today in the same project (allowed in the town, or resolved with `proof: 'ran'`), or that
+a rule asked to be saved for this project came back in the same session (the rule may not have
+taken) (`public/js/ui/approval-rules.js`). The demo does the same (`sources/demo.js`).
 
 ### 4.6 Implementation notes (server)
 

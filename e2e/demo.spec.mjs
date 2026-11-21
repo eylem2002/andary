@@ -154,7 +154,7 @@ test('a demo permission request can be allowed always, and the card names the ru
   const always = card.getByTestId('approve-always');
   await expect(always).toBeVisible();
   // The literal rule and where it is kept, written out above the button and read as its description.
-  const saves = /^Allow always saves the rule Bash\(.+\) for this project, only you\.$/;
+  const saves = /^Allow always asks Claude Code to save the rule Bash\(.+\) \(only this command\) for this project, only you\.$/;
   await expect(card.getByTestId('approve-always-rule')).toHaveText(saves);
   await expect(always).toHaveAccessibleDescription(saves);
   const rule = (await card.getByTestId('approve-always-rule').locator('code').textContent()) ?? '';

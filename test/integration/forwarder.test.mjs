@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { HOOK_SOURCE } from '../../server/config.mjs';
 import { runHookScript } from '../../server/hook-runner.mjs';
+import { offerableSuggestions, ruleReach } from '../../public/js/core/permission-rules.js';
 import { connectBrowser, hookPayload, startTown, waitForMessage } from './helpers.mjs';
 
 /** @type {Awaited<ReturnType<typeof startTown>>} */
@@ -444,9 +445,102 @@ describe('forwarder: an allow that saves a rule (Allow always)', () => {
     }
   });
 
+  it('agrees with the town on every rule: one table through ruleReach and through the forwarder', async () => {
+    const echo = (/** @type {any} */ event) => allowSaving([event.permission_suggestions[0]]);
+    const cases = [
+      ...RULE_TABLE.map(([why, rule, saved]) => ({ why, suggestion: { ...SUGGESTION, rules: [rule] }, saved, town: ruleReach(rule) !== null })),
+      ...SUGGESTION_TABLE.map(([why, suggestion, saved]) => ({ why, suggestion, saved, town: offerableSuggestions([suggestion]).length === 1 })),
+    ];
+    const printedFor = await inBatches(cases, 4, ({ suggestion }) => printed([suggestion], echo));
+    cases.forEach(({ why, suggestion, saved, town }, i) => {
+      assert.equal(town, saved, `the town: ${why}`);
+      assert.equal(printedFor[i], saved ? allowWith(suggestion) : PLAIN_ALLOW, `the forwarder: ${why}`);
+    });
+  });
+
   it('a denial carries no rule', async () => {
     const deny = { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: 'Denied from Andary', updatedPermissions: [SUGGESTION] } } };
     const stdout = await printed([SUGGESTION], () => deny);
     assert.deepEqual(JSON.parse(stdout), { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: 'Denied from Andary' } } });
   });
 });
+
+/**
+ * Runs `run` over every item, at most `size` at a time, and returns the results in order.
+ * @template T, R
+ * @param {T[]} items
+ * @param {number} size
+ * @param {(item: T) => Promise<R>} run
+ * @returns {Promise<R[]>}
+ */
+async function inBatches(items, size, run) {
+  /** @type {R[]} */
+  const results = [];
+  for (let i = 0; i < items.length; i += size) results.push(...(await Promise.all(items.slice(i, i + size).map(run))));
+  return results;
+}
+
+/**
+ * Rules as Claude Code could suggest them, each in a local allow suggestion, and whether the town
+ * offers them and the forwarder passes them on (both must say the same).
+ * @type {[string, unknown, boolean][]}
+ */
+const RULE_TABLE = [
+  ['one Bash command', { toolName: 'Bash', ruleContent: 'npm test' }, true],
+  ['a Bash command with parentheses', { toolName: 'Bash', ruleContent: 'echo (hi)' }, true],
+  ['a Bash prefix', { toolName: 'Bash', ruleContent: 'npm test:*' }, true],
+  ['a Bash prefix, written with a space', { toolName: 'Bash', ruleContent: 'npm test *' }, true],
+  ['one PowerShell command', { toolName: 'PowerShell', ruleContent: 'Get-ChildItem' }, true],
+  ['fetches from one host', { toolName: 'WebFetch', ruleContent: 'domain:example.com' }, true],
+  ['one MCP tool', { toolName: 'mcp__github__get_issue' }, true],
+  ['the whole Bash tool', { toolName: 'Bash' }, false],
+  ['an empty content, saved as the whole tool', { toolName: 'Bash', ruleContent: '' }, false],
+  ['a blank content', { toolName: 'Bash', ruleContent: '   ' }, false],
+  ['a star: the whole tool', { toolName: 'Bash', ruleContent: '*' }, false],
+  ['a wildcard in the middle', { toolName: 'Bash', ruleContent: 'rm -f *.log' }, false],
+  ['a wildcard before the subcommand', { toolName: 'Bash', ruleContent: 'git * main' }, false],
+  ['a star glued to a word', { toolName: 'Bash', ruleContent: 'ls*' }, false],
+  ['a prefix of nothing', { toolName: 'Bash', ruleContent: ':*' }, false],
+  ['a prefix of spaces', { toolName: 'Bash', ruleContent: '   *' }, false],
+  ['a prefix of one space', { toolName: 'Bash', ruleContent: ' :*' }, false],
+  ['a PowerShell prefix', { toolName: 'PowerShell', ruleContent: 'Get-Item:*' }, false],
+  ['a PowerShell prefix, written with a space', { toolName: 'PowerShell', ruleContent: 'Get-Item *' }, false],
+  ['a file path, a gitignore pattern', { toolName: 'Read', ruleContent: './src/app.ts' }, false],
+  ['a folder name, every file under any such folder', { toolName: 'Edit', ruleContent: 'src' }, false],
+  ['a file name, in every folder below', { toolName: 'Read', ruleContent: '.env' }, false],
+  ['a file to write', { toolName: 'Write', ruleContent: 'out.txt' }, false],
+  ['a search pattern', { toolName: 'Glob', ruleContent: 'src' }, false],
+  ['a notebook', { toolName: 'NotebookEdit', ruleContent: 'analysis.ipynb' }, false],
+  ['a folder to move to', { toolName: 'Cd', ruleContent: 'src' }, false],
+  ['a skill', { toolName: 'Skill', ruleContent: 'commit' }, false],
+  ['a domain wildcard', { toolName: 'WebFetch', ruleContent: 'domain:*.example.com' }, false],
+  ['a domain with a single-character wildcard', { toolName: 'WebFetch', ruleContent: 'domain:exa?ple.com' }, false],
+  ['a domain with a character class', { toolName: 'WebFetch', ruleContent: 'domain:[a].example.com' }, false],
+  ['a fetch rule that is not a domain', { toolName: 'WebFetch', ruleContent: 'https://example.com' }, false],
+  ['a whole built-in tool', { toolName: 'WebSearch' }, false],
+  ['a whole MCP server', { toolName: 'mcp__github' }, false],
+  ['every tool of an MCP server', { toolName: 'mcp__github__*' }, false],
+  ['an MCP rule with content, which Claude Code skips', { toolName: 'mcp__github__get_issue', ruleContent: 'x' }, false],
+  ['a tool name with parentheses', { toolName: 'Bash(x)', ruleContent: 'ls' }, false],
+  ['a rule with a field the town does not know', { toolName: 'Bash', ruleContent: 'npm test', scope: 'all' }, false],
+  ['a content that is not text', { toolName: 'Bash', ruleContent: 42 }, false],
+  ['a list instead of a rule', ['Bash', 'npm test'], false],
+];
+
+/** Whole suggestions, and whether the town offers them and the forwarder passes them on. @type {[string, unknown, boolean][]} */
+const SUGGESTION_TABLE = [
+  ['for this project', { ...SUGGESTION }, true],
+  ['for this session', { ...SUGGESTION, destination: 'session' }, true],
+  ['two narrow rules', { ...SUGGESTION, rules: [{ toolName: 'Bash', ruleContent: 'npm test' }, { toolName: 'Bash', ruleContent: 'npm run lint:*' }] }, true],
+  ['committed project settings', { ...SUGGESTION, destination: 'projectSettings' }, false],
+  ['every project', { ...SUGGESTION, destination: 'userSettings' }, false],
+  ['a deny rule', { ...SUGGESTION, behavior: 'deny' }, false],
+  ['an ask rule', { ...SUGGESTION, behavior: 'ask' }, false],
+  ['replaced rules', { ...SUGGESTION, type: 'replaceRules' }, false],
+  ['a mode', { type: 'setMode', mode: 'acceptEdits', destination: 'session' }, false],
+  ['folders', { type: 'addDirectories', directories: ['/'], destination: 'session' }, false],
+  ['no rules', { ...SUGGESTION, rules: [] }, false],
+  ['rules that are not a list', { ...SUGGESTION, rules: { toolName: 'Bash', ruleContent: 'npm test' } }, false],
+  ['a narrow rule beside a broad one', { ...SUGGESTION, rules: [{ toolName: 'Bash', ruleContent: 'npm test' }, { toolName: 'Bash', ruleContent: '*' }] }, false],
+  ['a field the town does not know', { ...SUGGESTION, also: { destination: 'userSettings' } }, false],
+];

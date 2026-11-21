@@ -1,6 +1,8 @@
 // Live mode end to end: a real server, the real hook forwarder, and the HUD in a browser
 // (CONTRACTS §8.1 test ids).
+import { spawn } from 'node:child_process';
 import { expect, test } from '@playwright/test';
+import { HOOK_SOURCE } from '../server/config.mjs';
 import { startTown } from './helpers/town.mjs';
 
 // These tests cover the live pipeline and the HUD, not the 3D scene: ?world=fake skips WebGL,
@@ -176,6 +178,81 @@ test('a click meant for one request cannot answer another that just slid under t
   await page.locator(`[data-testid="approval-card"]:not([data-approval-id="${firstId}"])`).getByTestId('deny').click();
   await page.locator(`[data-testid="approval-card"][data-approval-id="${firstId}"]`).getByTestId('deny').click();
   for (const pending of [first, second]) expect(JSON.parse((await pending).stdout).hookSpecificOutput.decision.behavior).toBe('deny');
+});
+
+test('a card that slides up when the one above goes back to the terminal takes no click at once', async ({ page }) => {
+  await signIn(page);
+  await enableRemoteApprovals(page);
+  const lower = town.sendHook(hook('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm test' } }));
+  const cards = page.getByTestId('approval-card');
+  await expect(cards).toHaveCount(1);
+  // The request listed above it comes through a forwarder that Claude Code will cancel, which
+  // hands the request back to the terminal.
+  const upper = spawn(process.execPath, [HOOK_SOURCE], { env: { ...process.env, ANDARY_HOME: town.home }, stdio: ['pipe', 'ignore', 'ignore'] });
+  upper.stdin.end(JSON.stringify(hook('PermissionRequest', { session_id: 'e2e-upper', tool_name: 'Bash', tool_input: { command: 'rm -rf build' } })));
+  await expect(cards).toHaveCount(2);
+  if (!(await cards.first().isVisible())) await page.getByRole('tab', { name: /Approvals/ }).click();
+  const lowerCard = cards.filter({ hasText: '$ npm test' });
+  const allow = lowerCard.getByTestId('approve');
+  await expect(allow).not.toHaveAttribute('aria-disabled', 'true');
+  const before = await allow.boundingBox();
+  upper.kill('SIGKILL');
+  // Its buttons and countdown hide, and the card below slides up into their place, still second.
+  await cards.filter({ hasText: '$ rm -rf build' }).locator('.hud-approval__terminal').waitFor({ state: 'visible' });
+  const box = await allow.boundingBox();
+  if (!before || !box) throw new Error('the Allow button has no box');
+  expect(box.y).toBeLessThan(before.y - 50);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForTimeout(300);
+  await expect(lowerCard).toHaveAttribute('data-status', 'pending');
+  // A moment later, the same click counts.
+  await allow.click();
+  expect(JSON.parse((await lower).stdout).hookSpecificOutput.decision.behavior).toBe('allow');
+});
+
+test('a request that arrived while the Approvals tab was hidden takes no click for a moment once it opens', async ({ page }) => {
+  await signIn(page);
+  await enableRemoteApprovals(page);
+  await page.getByRole('tab', { name: 'Activity' }).click();
+  const pending = town.sendHook(hook('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm test' } }));
+  const card = page.getByTestId('approval-card');
+  await expect(card).toHaveCount(1);
+  await expect(card).toBeHidden();
+  // Longer than the delay: only the tab opening can start it again.
+  await page.waitForTimeout(1500);
+  await page.getByRole('tab', { name: /Approvals/ }).click();
+  const allow = card.getByTestId('approve');
+  await expect(allow).toHaveAttribute('aria-disabled', 'true');
+  await allow.click({ force: true });
+  await page.waitForTimeout(300);
+  await expect(card).toHaveAttribute('data-status', 'pending');
+  await allow.click();
+  expect(JSON.parse((await pending).stdout).hookSpecificOutput.decision.behavior).toBe('allow');
+});
+
+test('a request that arrived while the side boards were put away takes no click for a moment once they are back', async ({ page }) => {
+  await signIn(page);
+  await enableRemoteApprovals(page);
+  await page.getByRole('tab', { name: /Approvals/ }).click();
+  const boards = page.locator('[data-tool="toggle-panels"]');
+  await boards.click();
+  await expect(boards).toHaveAttribute('aria-pressed', 'true');
+  const pending = town.sendHook(hook('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm test' } }));
+  const card = page.getByTestId('approval-card');
+  await expect(card).toHaveCount(1);
+  // Longer than the delay: only the boards coming back can start it again.
+  await page.waitForTimeout(1500);
+  await boards.click();
+  await expect(boards).toHaveAttribute('aria-pressed', 'false');
+  const allow = card.getByTestId('approve');
+  await expect(allow).toHaveAttribute('aria-disabled', 'true');
+  // Once the boards have slid into place, a click on Allow still waits.
+  await page.locator('.hud-board').evaluate((board) => Promise.all(board.getAnimations().map((animation) => animation.finished)));
+  await allow.click({ force: true });
+  await page.waitForTimeout(300);
+  await expect(card).toHaveAttribute('data-status', 'pending');
+  await allow.click();
+  expect(JSON.parse((await pending).stdout).hookSpecificOutput.decision.behavior).toBe('allow');
 });
 
 test('what needs you: rows say what for, the button and I go through it, a stop can be set aside', async ({ page }) => {

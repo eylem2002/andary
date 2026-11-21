@@ -32,15 +32,26 @@ export function destinationWords(destination) {
 }
 
 /**
- * What a rule allows beyond its literal text, in words: "commands starting with “npm test”" for
- * a prefix, "every use of this tool" for an MCP tool; '' for one exact command or value.
+ * What a rule allows, in words, so an escaped or unusual rule cannot pass for another one: "only
+ * this command", "commands starting with “npm test”", "only fetches from “example.com”" or "every
+ * use of this tool"; '' for a rule the town does not offer.
  * @param {PermissionRule} rule
  * @returns {string}
  */
 export function reachWords(rule) {
   const reach = ruleReach(rule);
-  if (reach?.kind === 'prefix') return `commands starting with “${revealHidden(reach.prefix)}”`;
-  return reach?.kind === 'tool' ? 'every use of this tool' : '';
+  switch (reach?.kind) {
+    case 'command':
+      return 'only this command';
+    case 'prefix':
+      return `commands starting with “${revealHidden(reach.prefix)}”`;
+    case 'domain':
+      return `only fetches from “${revealHidden(reach.host)}”`;
+    case 'tool':
+      return 'every use of this tool';
+    default:
+      return '';
+  }
 }
 
 /**
@@ -66,15 +77,15 @@ export function offeredSuggestion(approval) {
 }
 
 /**
- * The line between Allow / Deny and the "Allow always" button: what it saves, what that allows,
- * and where, e.g. "Allow always saves the rule `Bash(npm test:*)` (commands starting with
- * “npm test”) for this project, only you."
+ * The line between Allow / Deny and the "Allow always" button: the rule it asks Claude Code to
+ * save, what that allows, and where, e.g. "Allow always asks Claude Code to save the rule
+ * `Bash(npm test:*)` (commands starting with “npm test”) for this project, only you."
  * @param {OfferedSuggestion} offer
  * @returns {Segment[]}
  */
 export function alwaysLine(offer) {
   /** @type {Segment[]} */
-  const line = [{ text: offer.rules.length === 1 ? 'Allow always saves the rule ' : 'Allow always saves the rules ' }];
+  const line = [{ text: `Allow always asks Claude Code to save the ${offer.rules.length === 1 ? 'rule' : 'rules'} ` }];
   offer.rules.forEach((rule, i) => {
     if (i > 0) line.push({ text: ', ' });
     line.push({ code: ruleText(rule) });
@@ -143,7 +154,8 @@ export function allowedToday(approval, approvals, now) {
 /**
  * Whether a request asks for a rule its own session asked Claude Code to save for this project
  * before the request was made. Claude Code applies a saved rule at once, so the rule may not have
- * been saved. Rules kept for a session are not judged: a resumed session keeps its id but not them.
+ * taken, for whatever reason (it was not saved, or another setting comes first). Rules kept for a
+ * session are not judged: a resumed session keeps its id but not them.
  * @param {Approval} approval
  * @param {Approval[]} approvals
  * @returns {boolean}
@@ -174,7 +186,7 @@ export function askedAgainAfterAlways(approval, approvals) {
  */
 export function approvalHint(approval, approvals, now) {
   if (approval.status !== 'pending') return '';
-  if (askedAgainAfterAlways(approval, approvals)) return 'Claude Code asked again after “Allow always”: the rule may not have been saved (a managed setting can forbid saved rules).';
+  if (askedAgainAfterAlways(approval, approvals)) return 'Claude Code asked again after “Allow always”: the rule may not have taken.';
   const count = allowedToday(approval, approvals, now);
   if (count < OFTEN) return '';
   const times = `You allowed this ${count} times today.`;

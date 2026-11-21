@@ -4,8 +4,10 @@
 // the store and the HUD write the rules the same way. The town only offers an allow rule kept for
 // this project and only you (`localSettings`) or until the session ends (`session`): never one
 // that changes other people's prompts (`projectSettings`, `userSettings`), a permission mode or
-// working folders, and never a rule that allows more than it reads (a whole built-in tool, a
-// wildcard). Pure and defensive: suggestions come from hook payloads and may be any shape.
+// working folders, and only a rule the card can say exactly in words: one command, a command
+// prefix, one web host or one MCP tool. Never a whole built-in tool, a wildcard, or a path rule
+// (Claude Code reads those as gitignore patterns: `Edit(src)` covers every file under any src/).
+// Pure and defensive: suggestions come from hook payloads and may be any shape.
 // hooks/hook.mjs checks the same rules again on its own, since it must stand alone.
 import { isObject, revealHidden } from './text.js';
 
@@ -13,20 +15,25 @@ import { isObject, revealHidden } from './text.js';
 const OFFERED_DESTINATIONS = Object.freeze(['localSettings', 'session']);
 /** Every field of an `addRules` suggestion; a suggestion with any other field is not offered. */
 const SUGGESTION_FIELDS = Object.freeze(['type', 'rules', 'behavior', 'destination']);
-/** Tools whose rules match a command line, where a trailing `:*` or ` *` means "starting with". */
+/** Tools whose rule content is a command line: a rule without a wildcard is one command. */
 const COMMAND_TOOLS = Object.freeze(['Bash', 'PowerShell']);
+/**
+ * Tools whose command rule may also be a prefix (a trailing `:*` or ` *`). Not PowerShell: its
+ * matching ignores letter case and expands aliases, so a prefix covers more than it reads.
+ */
+const PREFIX_TOOLS = Object.freeze(['Bash']);
 /** A tool's name as Claude Code writes it: no spaces, parentheses or wildcards. */
 const TOOL_NAME = /^[A-Za-z][\w-]*$/;
 /** One tool of one MCP server: allowing it allows that tool only (a server alone means all its tools). */
 const MCP_TOOL = /^mcp__[\w-]+__[\w-]+$/;
 /** The two ways to write "commands starting with": `npm test:*` and `npm test *`. */
 const COMMAND_PREFIX = /^([^*]+?)(?::\*| \*)$/;
-/** Wildcards in a path or other pattern (`*`, and gitignore's `?` and `[…]`). */
-const PATTERN = /[*?[]/;
+/** A WebFetch rule for one host, with no wildcard: `domain:example.com`. */
+const ONE_DOMAIN = /^domain:([A-Za-z0-9][A-Za-z0-9.-]*)$/;
 
 /** @typedef {{ toolName: string, ruleContent?: string }} PermissionRule */
 /** @typedef {'localSettings'|'session'} RuleDestination */
-/** @typedef {{ kind: 'exact' } | { kind: 'prefix', prefix: string } | { kind: 'tool' }} RuleReach */
+/** @typedef {{ kind: 'command' } | { kind: 'prefix', prefix: string } | { kind: 'domain', host: string } | { kind: 'tool' }} RuleReach */
 
 /**
  * A suggestion the town may offer, with its place in the request's `permission_suggestions`: the
@@ -50,11 +57,13 @@ export function isPermissionRule(rule) {
 }
 
 /**
- * What a rule allows, when the card can say so plainly: one exact command or value (`exact`),
- * commands starting with a prefix (`prefix`, Bash and PowerShell), or every call of one MCP tool
- * (`tool`). Null for a rule that allows more than it reads: a whole built-in tool (no content, an
- * empty content, which Claude Code saves as the bare tool, or `*`), any other wildcard (`rm -f *.log`
- * also allows `rm -f -r ~ x.log`), or an MCP rule with content (Claude Code skips those).
+ * What a rule allows, when the card can say it exactly: one command (`command`, Bash and
+ * PowerShell), commands starting with a prefix (`prefix`, Bash), fetches from one host
+ * (`domain`, WebFetch), or every call of one MCP tool (`tool`). Null for anything else, which
+ * would allow more than the card can say: a whole built-in tool (no content, an empty content,
+ * which Claude Code saves as the bare tool, or `*`), any other wildcard (`rm -f *.log` also
+ * allows `rm -f -r ~ x.log`), a path rule for a file tool (a gitignore pattern), an MCP rule with
+ * content (Claude Code skips those), or a tool whose rules the town does not know.
  * @param {unknown} rule
  * @returns {RuleReach|null}
  */
@@ -62,9 +71,14 @@ export function ruleReach(rule) {
   if (!isPermissionRule(rule) || !TOOL_NAME.test(rule.toolName)) return null;
   const { toolName, ruleContent } = rule;
   if (ruleContent === undefined) return MCP_TOOL.test(toolName) ? { kind: 'tool' } : null;
-  if (ruleContent.trim() === '' || toolName.startsWith('mcp__')) return null;
-  if (!COMMAND_TOOLS.includes(toolName)) return PATTERN.test(ruleContent) ? null : { kind: 'exact' };
-  if (!ruleContent.includes('*')) return { kind: 'exact' };
+  if (ruleContent.trim() === '') return null;
+  if (toolName === 'WebFetch') {
+    const host = ONE_DOMAIN.exec(ruleContent)?.[1];
+    return host ? { kind: 'domain', host } : null;
+  }
+  if (!COMMAND_TOOLS.includes(toolName)) return null;
+  if (!ruleContent.includes('*')) return { kind: 'command' };
+  if (!PREFIX_TOOLS.includes(toolName)) return null;
   const prefix = COMMAND_PREFIX.exec(ruleContent)?.[1].trimEnd() ?? '';
   return prefix.trim() === '' ? null : { kind: 'prefix', prefix };
 }
