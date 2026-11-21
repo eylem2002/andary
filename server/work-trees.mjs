@@ -4,9 +4,9 @@
 // on it as `andary_root`; a stamp that came from anywhere else is dropped first. The top is the
 // nearest folder, from the hook's folder up, that holds `.git` (a folder, or the file of a linked
 // worktree or a submodule). Each folder's answer is kept for a few minutes, for a bounded number
-// of folders, so a hook costs a few file lookups at most.
+// of folders, so a hook costs a few file lookups at most. Folders are read with forward slashes,
+// as the town compares them, on every system (a Windows `C:\\w\\app` is `C:/w/app`).
 import { statSync } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
 import { KEYED_HOOKS } from './hook-steps.mjs';
 
 /** Folders whose answer is kept; the one asked about the longest ago goes first. */
@@ -32,7 +32,9 @@ export function createWorkTrees({ exists = onDisk, now = Date.now } = {}) {
   const known = new Map();
   return {
     rootOf(folder) {
-      if (typeof folder !== 'string' || !folder || folder.length > MAX_FOLDER_CHARS || !isAbsolute(folder)) return null;
+      if (typeof folder !== 'string' || !folder || folder.length > MAX_FOLDER_CHARS) return null;
+      folder = slashed(folder);
+      if (!ABSOLUTE.test(folder)) return null;
       const hit = known.get(folder);
       if (hit && now() - hit.at < REFRESH_MS) return hit.root;
       const root = topOf(folder, exists);
@@ -59,12 +61,32 @@ export function withWorkTree(event, workTrees) {
   return root ? { ...clean, andary_root: root } : clean;
 }
 
+/** An absolute folder, with forward slashes: `/…`, a drive (`C:/…`) or a share (`//host/…`). */
+const ABSOLUTE = /^(?:\/|[A-Za-z]:\/)/;
+/** A folder that has no parent: `/`, a drive's top (`C:/`), a share's (`//host/share`). */
+const TOP = /^(?:\/|[A-Za-z]:\/|\/\/[^/]+\/[^/]+)$/;
+
+/** A folder with forward slashes and no trailing one (but a top's). @param {string} folder */
+function slashed(folder) {
+  const forward = folder.replace(/\\/g, '/');
+  const trimmed = forward.replace(/\/+$/, '');
+  return TOP.test(`${trimmed}/`) ? `${trimmed}/` : trimmed;
+}
+
+/** The folder above, or the folder itself at a top. @param {string} dir */
+function parentOf(dir) {
+  if (TOP.test(dir)) return dir;
+  const cut = dir.lastIndexOf('/');
+  const up = dir.slice(0, cut);
+  return TOP.test(`${up}/`) ? `${up}/` : up;
+}
+
 /** @param {string} folder @param {(path: string) => boolean} exists @returns {string|null} */
 function topOf(folder, exists) {
   let dir = folder;
   for (let i = 0; i < MAX_DEPTH; i += 1) {
-    if (exists(join(dir, '.git'))) return dir;
-    const up = dirname(dir);
+    if (exists(dir.endsWith('/') ? `${dir}.git` : `${dir}/.git`)) return dir;
+    const up = parentOf(dir);
     if (up === dir) return null;
     dir = up;
   }

@@ -32,6 +32,14 @@ describe('work trees on disk', () => {
     for (const folder of [undefined, '', 'relative/path', 42, `/${'x'.repeat(5000)}`]) assert.equal(trees.rootOf(folder), null, String(folder).slice(0, 20));
   });
 
+  test('Windows folders are read with forward slashes, as the town compares them', () => {
+    const trees = createWorkTrees({ exists: (path) => path === 'C:/r/.git' || path === '//host/share/x/.git' });
+    assert.equal(trees.rootOf('C:\\r\\app\\src'), 'C:/r');
+    assert.equal(trees.rootOf('C:/r/'), 'C:/r');
+    assert.equal(trees.rootOf('\\\\host\\share\\x\\y'), '//host/share/x');
+    assert.equal(trees.rootOf('D:\\other'), null, 'walks up to the drive and stops');
+  });
+
   test('an answer is kept for a few minutes, for a bounded number of folders', () => {
     let now = 0;
     /** @type {string[]} */
