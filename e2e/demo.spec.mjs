@@ -51,6 +51,27 @@ test('crews fill with agents, the log grows and tasks appear', async ({ page }) 
   await expect(page.getByTestId('task-item').first()).toBeVisible({ timeout: 45_000 });
 });
 
+test('place labels sit on the buildings: names where they fit, more as you zoom in', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'zoom and P are keyboard shortcuts');
+  await page.addInitScript(() => localStorage.setItem('andary:prefs', JSON.stringify({ setupSeen: true, directorCam: 'off', panels: 'hidden' })));
+  await page.goto(demoUrl());
+  const signs = page.locator('.tt-sign[data-building]');
+  await expect.poll(() => signs.count(), { timeout: 45_000 }).toBe(15);
+  // A name shows as "full" (with its stat chip) or "name" (the chip waits for room).
+  const selector = (/** @type {string} */ state) => (state === 'name' ? '.tt-sign[data-building]:is(.is-full, .is-name)' : `.tt-sign[data-building].is-${state}`);
+  const count = (/** @type {string} */ state) => page.locator(selector(state)).count();
+  // The whole town: the small places show just their icon.
+  await expect.poll(() => count('icon'), { timeout: 30_000 }).toBeGreaterThan(0);
+  const namesBefore = await count('name');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('+');
+  await expect.poll(() => count('name'), { timeout: 10_000 }).toBeGreaterThan(namesBefore);
+  await page.keyboard.press('0');
+  await page.keyboard.press('p'); // always
+  await expect.poll(() => count('icon'), { timeout: 10_000 }).toBe(0);
+  await page.keyboard.press('p'); // off
+  await expect.poll(async () => (await count('name')) + (await count('icon')), { timeout: 10_000 }).toBe(0);
+});
+
 test('the toolbar is placed above the board from the first frame (no layout shift)', async ({ page }) => {
   await page.addInitScript(() => {
     /** @type {any} */ (window).__shifts = [];
@@ -110,7 +131,10 @@ test('a demo permission request can be allowed from the town', async ({ page }) 
   await expect(pending).toBeAttached({ timeout: 60_000 });
   const id = await pending.getAttribute('data-approval-id');
   const card = page.locator(`[data-testid="approval-card"][data-approval-id="${id}"]`);
-  await openTab(page, 'Approvals');
+  // Waiting for you: the page title (for a background tab) and a button that leads to it.
+  await expect(page).toHaveTitle(/^\(\d+\) Andary$/);
+  await page.getByTestId('waiting-for-you').click();
+  await expect(page.getByRole('tab', { name: /^Approvals/ })).toHaveAttribute('aria-selected', 'true');
   await expect(card).toBeVisible();
   await expect(card.locator('.hud-approval__code')).toContainText('$ ');
   await expect(card).toContainText('left');
@@ -118,6 +142,65 @@ test('a demo permission request can be allowed from the town', async ({ page }) 
   await expect(card).toHaveAttribute('data-status', 'allowed');
   await expect(card).toContainText('Allowed from the town');
   await expect(card.getByTestId('approve')).toBeHidden();
+});
+
+test('a demo permission request can be allowed always, and the card names the rule first', async ({ page }) => {
+  await page.goto(demoUrl('&world=fake'));
+  const pending = page.locator('[data-testid="approval-card"][data-status="pending"]').first();
+  await expect(pending).toBeAttached({ timeout: 60_000 });
+  const id = await pending.getAttribute('data-approval-id');
+  const card = page.locator(`[data-testid="approval-card"][data-approval-id="${id}"]`);
+  await page.getByTestId('waiting-for-you').click();
+  const always = card.getByTestId('approve-always');
+  await expect(always).toBeVisible();
+  // The literal rule and where it is kept, written out above the button and read as its description.
+  const saves = /^Allow always asks Claude Code to save the rule Bash\(.+\) \(only this command\) for this project, only you\.$/;
+  await expect(card.getByTestId('approve-always-rule')).toHaveText(saves);
+  await expect(always).toHaveAccessibleDescription(saves);
+  const rule = (await card.getByTestId('approve-always-rule').locator('code').textContent()) ?? '';
+  await always.click();
+  await expect(card).toHaveAttribute('data-status', 'allowed');
+  await expect(card).toContainText(`Allowed; asked Claude Code to save ${rule} for this project, only you`);
+  await expect(always).toBeHidden();
+  await openTab(page, 'Activity');
+  await expect(page.getByTestId('activity-log')).toContainText(`Allowed; asked to save ${rule}`);
+});
+
+test('a click on Allow always right after its card appears does not count', async ({ page }) => {
+  await page.goto(demoUrl('&world=fake'));
+  // The Approvals tab is open before any request, so a card is on screen the moment it arrives.
+  await openTab(page, 'Approvals');
+  const first = page.locator('[data-testid="approval-card"][data-status="pending"] [data-testid="approve-always"]').first();
+  await first.waitFor({ state: 'visible', timeout: 60_000 });
+  const { id, armed } = await first.evaluate((button) => ({
+    id: button.closest('[data-approval-id]')?.getAttribute('data-approval-id') ?? '',
+    armed: button.getAttribute('aria-disabled') === 'true',
+  }));
+  expect(armed, 'the card is still inside its one-second guard').toBe(true);
+  const card = page.locator(`[data-testid="approval-card"][data-approval-id="${id}"]`);
+  const always = card.getByTestId('approve-always');
+  // A real pointer click, past Playwright's own wait for the button to be enabled.
+  await always.click({ force: true });
+  await page.waitForTimeout(300);
+  await expect(card).toHaveAttribute('data-status', 'pending');
+  await expect(card.locator('.hud-approval__result')).toBeHidden();
+  // Once the guard is over, the same click counts.
+  await always.click();
+  await expect(card).toHaveAttribute('data-status', 'allowed');
+});
+
+test.describe('on a smaller laptop', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('the waiting-for-you button stays clickable while the approval toast is up', async ({ page, isMobile }) => {
+    test.skip(isMobile, 'a desktop layout');
+    await page.goto(demoUrl('&world=fake'));
+    const toast = page.locator('.hud-toast--approval');
+    await expect(toast.first()).toBeVisible({ timeout: 60_000 });
+    // A click on a covered element fails (another element would receive it).
+    await page.getByTestId('waiting-for-you').click({ timeout: 5000 });
+    await expect(page.getByRole('tab', { name: /^Approvals/ })).toHaveAttribute('aria-selected', 'true');
+  });
 });
 
 test('toolbar buttons drive the camera, time, sound and the demo', async ({ page }, testInfo) => {
@@ -215,8 +298,7 @@ test('without a server the town fills the screen, then offers the setup steps', 
   await dialog.getByRole('button', { name: 'Keep watching the demo' }).click();
   await expect(dialog).toBeHidden();
   // Seen once, it is not offered again.
-  const seen = await page.evaluate(() => JSON.parse(localStorage.getItem('andary:prefs') ?? '{}').setupSeen);
-  expect(seen).toBe(true);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('andary:prefs') ?? '{}').setupSeen)).toBe(true);
 
   // The boards come back with one press, and stay back on the next visit.
   await page.locator('[data-tool="toggle-panels"]').click();

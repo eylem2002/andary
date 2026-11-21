@@ -1,8 +1,11 @@
 // The cost meter: tokens and estimated cost per agent and per crew, and a "Usage" dialog with
 // today's total, the last 14 days as a bar chart (with the same numbers in a table for screen
 // readers) and today's crews. Costs are estimates at API list prices (core/prices.js).
+// Also each agent's context in use, as tokens only: the window it fills is not known (today's
+// default models run 1M, the user may move the compaction point), so there is no percentage.
 import { createDialog } from './dialogs.js';
 import { h, setHidden, setText } from './dom.js';
+import { formatAgo } from './format.js';
 import { localDateBefore } from '../core/dates.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
@@ -28,13 +31,23 @@ export function formatCost(usd) {
 export function formatTokens(n) {
   if (!Number.isFinite(n) || n <= 0) return '0';
   if (n < 1000) return String(Math.round(n));
-  if (n < 1e6) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0).replace(/\.0$/, '')}k`;
+  // From 999,500 the thousands would round to "1000k": that is a million.
+  if (n < 999_500) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0).replace(/\.0$/, '')}k`;
   return `${(n / 1e6).toFixed(n < 1e7 ? 1 : 0).replace(/\.0$/, '')}M`;
 }
 
 /** @param {AgentUsage['tokens']} tokens */
 export function totalTokens(tokens) {
   return tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
+}
+
+/**
+ * True once anything was counted. A record can carry a context reading alone: a forked
+ * session's first messages are copies, already counted for the session they came from.
+ * @param {AgentUsage} usage
+ */
+export function hasCounted(usage) {
+  return usage.costUsd > 0 || totalTokens(usage.tokens) > 0;
 }
 
 /**
@@ -48,7 +61,8 @@ export function crewUsage(state, sessionId) {
   let sum = null;
   for (const [key, usage] of Object.entries(state.usage ?? {})) {
     if (!key.startsWith(`${sessionId}:`)) continue;
-    sum ??= { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0, unpriced: false, model: usage.model };
+    // Each agent has a context of its own: there is no crew total of it.
+    sum ??= { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0, unpriced: false, model: usage.model, context: null, compactedAt: null };
     sum.tokens.input += usage.tokens.input;
     sum.tokens.output += usage.tokens.output;
     sum.tokens.cacheRead += usage.tokens.cacheRead;
@@ -64,9 +78,55 @@ export function crewUsage(state, sessionId) {
  * @param {AgentUsage|null} usage
  */
 export function usageShort(usage) {
-  if (!usage) return '';
+  if (!usage || !hasCounted(usage)) return '';
   if (usage.costUsd > 0) return formatCost(usage.costUsd);
   return `${formatTokens(totalTokens(usage.tokens))} tokens`;
+}
+
+/**
+ * @typedef {{ tokens: number|null, at: number }} ContextView  an agent's context in use as the
+ *   HUD shows it: a reading (`at`: when the message that used it was written), or `tokens: null`
+ *   from a compaction (`at`: when) to its next message
+ */
+
+/**
+ * An agent's context in use while it can still be true. A finished helper's or an ended crew's
+ * describes a context that is gone, so there is none: a finished helper stays listed for a while,
+ * an ended crew's agents leave the store. A reading from before the last compaction no longer
+ * holds either (the server drops it then); the compaction shows until the next reading.
+ * @param {StoreState} state
+ * @param {string} agentKey
+ * @returns {ContextView|null}
+ */
+export function liveContext(state, agentKey) {
+  const usage = state.usage?.[agentKey];
+  const agent = state.agents[agentKey];
+  if (!usage || !agent || agent.status === 'done') return null;
+  const { context, compactedAt } = usage;
+  if (context && (compactedAt === null || context.at > compactedAt)) return context;
+  return compactedAt ? { tokens: null, at: compactedAt } : null;
+}
+
+/**
+ * What the lead's row shows under its time: "182k in context", or "context compacted" until the
+ * next reading.
+ * @param {ContextView|null} view
+ */
+export function contextShort(view) {
+  if (!view) return '';
+  return view.tokens === null ? 'context compacted' : `${formatTokens(view.tokens)} in context`;
+}
+
+/**
+ * The inspector's sentence: the exact count and how old the message that used it is ("as of":
+ * Andary read it later), "182,340 tokens in context, as of 2m ago."; or when it compacted.
+ * @param {ContextView} view
+ * @param {number} now
+ */
+export function contextSentence(view, now) {
+  const ago = formatAgo(view.at, now);
+  if (view.tokens === null) return `Context compacted ${ago}; the new count comes with the next message.`;
+  return `${view.tokens.toLocaleString('en-US')} ${view.tokens === 1 ? 'token' : 'tokens'} in context, as of ${ago}.`;
 }
 
 /**
@@ -126,7 +186,7 @@ export function createUsageDialog(ctx) {
       : 'Estimated at API list prices from Claude Code\'s transcripts on this computer. On a Pro or Max plan you pay for the plan, not per token.');
     drawChart(chart, days);
     table.replaceChildren(h('caption', { class: 'hud-sr', text: 'Estimated cost per day' }), h('tbody', {}, ...days.slice().reverse().map((day) => h('tr', {}, h('th', { scope: 'row', text: day.date }), h('td', { text: `${formatCost(day.costUsd)}, ${formatTokens(day.tokens)} tokens` })))));
-    const rows = state.sessions.filter((session) => session.status !== 'ended').map((session) => ({ session, usage: crewUsage(state, session.id) })).filter((row) => row.usage);
+    const rows = state.sessions.filter((session) => session.status !== 'ended').map((session) => ({ session, usage: crewUsage(state, session.id) })).filter((row) => row.usage && hasCounted(row.usage));
     setHidden(crewsBox, !rows.length);
     crews.replaceChildren(...rows.map(({ session, usage }) => h('li', { class: 'hud-usage__crew' },
       h('span', { class: 'hud-usage__crew-name', text: session.title || session.project }),

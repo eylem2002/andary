@@ -288,6 +288,692 @@ section.
 78. **"This computer" for plain HTTP includes a peer that connects from the address it connected
     to.** That is how a local client of `--host <address>` arrives; TCP addresses cannot be forged
     that way from another computer. A local reverse proxy counts as this computer, as before.
-79. **Blank-line runs on an approval card collapse into a marker.** Three or more blank lines in a
-    row show as "⟨N blank lines⟩", and the note gives the line counts, so padding cannot push the
-    rest of a change out of sight.
+79. **Blank-line runs on an approval card collapse into a marker.** Three or more lines in a row
+    that show nothing (blank, or only spaces, tabs, characters that draw nothing, such as
+    no-break or ideographic spaces and the Braille blank, and combining marks, which on such a line
+    sit on nothing that shows) show as "⟨N blank lines⟩", naming any such characters ("with
+    U+00A0", "and combining marks": to a shell such a line is a word, not a blank), and the note
+    gives the line counts, so padding cannot push the rest of a request or a change out of sight;
+    two such lines are shown as they are. The same three-line rule holds in the command and in a
+    diff, where a run is collapsed whatever its lines' kinds and a mixed one counts each ("⟨120
+    blank lines: 80 added, 40 removed⟩"; a run of one kind keeps its + or −). Every other space
+    but the plain one, and every character that draws nothing, shows as a marker too: every
+    default-ignorable code point, assigned or not, since browsers draw an unassigned one (U+2065,
+    U+E0080) with no width, as well as controls, format characters, private-use characters (a font
+    may draw them as anything, or nothing), separators, the Braille blank, the Hangul fillers and
+    the Khitan filler (U+16FE4). A run of them is one marker naming them (three at most, then "N more")
+    with its length ("⟨U+00A0 ×1900⟩", "⟨U+00A0 U+3000 ×2000⟩"), so a million of them make one
+    marker. A run holding a character that some reader takes for a line break also breaks the line
+    after its marker (once per run), so the lines you read are the ones it reads: U+2028 and U+2029
+    (JavaScript, Python's `str.splitlines()`), NEL (`splitlines()` and some editors, though not
+    JavaScript), and a carriage return that is neither part of a CRLF nor the last character of its
+    line (JavaScript, Python source and most editors: `// note\rconsole.log("RAN")` runs its second
+    line; a shell reads it as part of a word, so a break there shows more than bash sees, never
+    less). In a diff only a newline ends a row, so a carriage return in a file's content is marked
+    (⟨U+000D⟩) rather than drawn as a line break. Markers make the text longer (about 4.5 times
+    for single hidden characters each between plain ones, 5 for lone carriage returns or line
+    separators, which also break the line); that stays linear and is bounded by the request's own size (1 MiB), so it is
+    left as it is. More than
+    three combining marks on one base become "⟨N combining marks⟩": no script needs more than
+    three in common text, and a taller stack paints over the lines around it. Right-to-left
+    letters (Hebrew, Arabic) are left as they are: they reorder what they touch but hide nothing,
+    and the characters that override that order (bidirectional controls) are marked.
+80. **A name "fits" when it takes at most 64% of its lot's width on screen (ADR 0017).** Lots
+    have yards and pavements around the building, so the whole lot would be too generous. At the
+    whole-town view on a laptop the names take 34–82% of their lots, with a clear gap between
+    61% and 68%: 64% sits in that gap, so nine names show steadily and six buildings show icons,
+    instead of names flipping with a pixel of zoom.
+81. **Only figures in front of a building fade its label, for at least 600 ms.** "In front" is
+    judged on screen: the figure's feet are below the building's ground point under the label.
+    A figure behind the building is hidden by the building itself, so fading the label for it
+    would look like a glitch. One ground point is approximate at the edges of a wide label; the
+    minimum fade time keeps a figure on that edge from making the label blink.
+82. **`always` lets names overlap.** It is the viewer's explicit choice, so every name is written,
+    the nearer on top, rather than shrinking some to icons and calling that "always".
+83. **`P` is free in the page.** No browser uses a bare `P`, and the 3D view's own keys are
+    arrows, `+`/`-`, `Q`/`E`. Screen readers may (JAWS: next paragraph in its virtual cursor),
+    but in browse mode they keep the key for themselves, as they already do for `N`, `M`, `H`
+    and `L`; the setting is also in Settings.
+84. **Four speech bubbles on screen at once, two over one spot.** More buried the agents saying
+    them (six stacked over the plaza in the demo). The selected or pointed-at agent keeps its
+    bubble first, then agents that wait for you or are failing, then whoever has been seen
+    talking least recently, so every agent gets turns. A bubble that appears keeps its place for
+    four seconds, time to read most lines. The others are muted, not lost: they show when room
+    frees up, or run out unseen (a line with under a second left stays unseen rather than flash).
+    The events behind them are in the log.
+85. **Two toasts at most, one per kind.** A newer crew arrival replaces the older one's toast, and
+    a newer achievement the older's; the Crews panel and the leaderboard keep them all. A toast
+    under the pointer or the keyboard is never replaced or pushed out. When one must go, the
+    oldest without a button goes first, then a crew arrival, and an approval's toast last.
+86. **The page title counts what needs you.** "(2) Andary" counts the same items as the "need
+    you" button (93): what blocks an agent, a stopped turn, a finished turn nobody answered.
+    (It first counted approvals only; a question or a plan blocks an agent just as much.)
+87. **A phone note for a dialog waits ten seconds.** Most prompts are answered within a few seconds
+    by someone at the computer; a note that arrives after you answered is noise. Each dialog (a
+    permission request, a question, a plan, a form an MCP server asks you to fill in) has its own
+    ten seconds. Dialogs whose seconds run out together become one note, which also covers the
+    other dialogs their crews have open, since parallel calls ask a moment apart. A finished turn
+    sends nothing by itself: Claude Code's `idle_prompt`, a minute later, covers a turn nobody came
+    back to.
+88. **Plans and questions are never held in the town.** A plain allow cannot approve a plan
+    (`ExitPlanMode`) or answer a question (`AskUserQuestion`); both wait in the terminal, and the card
+    always says so, also when remote approvals are off. On the phone they have notes of their own
+    ("A crew has a question for you."). An agent cannot ask again while one waits, so its next
+    question or plan shows the older one was answered: "No, keep planning" sends nothing, and the
+    revised plan is a dialog, and a note, of its own. An MCP server's form (Claude Code's
+    `elicitation_dialog`, `elicitation_url_dialog` and `agent_needs_input` notices) is a question
+    too; it names no tool, so it closes like a session's notice (below).
+89. **A dialog's note is dropped only on proof of an answer.** Proof is that very call reporting
+    back (the same tool and call key, taken from the input as it arrived, before anything is cut,
+    without the `description` of any Codex call, which Codex adds, its reason for asking, to a
+    request of any tool and never to the call's start or result, nor of a Claude Code command
+    (Bash, PowerShell), which runs nothing; any other Claude Code tool's description counts, as an
+    MCP tool's may be what it acts on, so two calls that differ only in it are told apart; for a
+    call Codex's adapter renamed, from the original call; questions and plans by name, since your
+    answer changes their input), your prompt or `/compact`, the agent's turn ending (in an
+    error too, or a teammate going idle) or the session ending, or a decision in the town. Your
+    prompt answers every dialog of the session, whoever asked, since nobody can type while a dialog
+    shows in the terminal; except a request the town holds right now, which is not in the terminal
+    and does not stop you typing to the lead. A session's notice or form, which names no tool, also
+    closes when the lead starts its next call, and is not opened at all when it arrives after a
+    call the lead started 250 ms or more after it was sent (each tracker remembers every session's
+    lead's newest call start, for as many sessions as it keeps dialogs). A new request from the same agent is no proof,
+    because parallel calls each ask on their own (a question or a plan aside, 88); nor is a request
+    that timed out in the town or went back to the terminal: the agent still waits there, and your
+    next prompt answers it. Each hook counts at the time it was sent, not when it arrived: a
+    permission request is sent at once and a PreToolUse or a notice in the background, so a
+    question's request can arrive before its own start, and a notice before the call started ahead
+    of it. That time is when the forwarder's process started (`performance.timeOrigin`), which no
+    start-up work delays: with a clock read once Node runs, of two hooks started 1 ms apart the
+    later one came first in 8 pairs of 40. It is kept between an hour before its arrival (an older
+    stamp counts as an hour old) and its arrival: the stamp is this computer's own clock, and a
+    computer that sleeps or suspends can hold a forwarder back for minutes, after which a
+    question's start must still find its own dialog. Two processes' times
+    may still be a few milliseconds the wrong way round, so a hook counts as before or after
+    another only 250 ms (`ORDER_SLACK_MS`) apart: a question's or plan's start joins its own request
+    stamped after it or no more than 250 ms before it, a question or plan closes only those opened more than 250 ms
+    before it, and a notice is closed only by a call started 250 ms or more after it. Nothing that
+    shows an answer comes that soon: asking again takes your answer and a model turn. Known limit:
+    if a plan's or question's request never reaches the town (a 429, a failed proof, a restart)
+    and the next one's request overtakes its own start, that request joins the older dialog, which
+    its start then closes: the broker resolves the waiting request as answered, early (it was not
+    held, so the terminal still asks), while the phone still notes the new one. The approval broker
+    follows the same table, so the town's cards and the phone agree on what the terminal
+    answered.
+    Andary sees a yes in the terminal only when the tool finishes, a "No" only at your next prompt,
+    and a diff you change in your IDE not at all (its result has another input), so a note can
+    come after you answered: one note too many is better than none for an agent that waits. A tool
+    result too big for the forwarder (over 1 MiB) arrives shortened; if its input was cut, it no
+    longer matches its request.
+90. **A dialog that has had its note is remembered for 30 minutes at most.** Until its proof it
+    sends no second note, not even for Claude Code's own `permission_prompt` about it. A crashed
+    session sends no SessionEnd, so after 30 minutes its dialogs are forgotten. Claude Code sends
+    that notice once per dialog, so in practice a forgotten dialog brings no second note. At most
+    100 dialogs are kept; the oldest give way.
+91. **Codex gets its "waiting" note after a minute.** Codex sends no Notification events, so no
+    `idle_prompt`. After a Codex lead's Stop (an interrupt too), Andary waits the same 60 seconds
+    as Claude Code, and sends one note per Stop. Codex names a helper only when it starts and ends,
+    so a helper's tool calls look like the lead's: a tool starting pauses the minute; its result, a
+    helper ending or the lead's next Stop starts it again; only your prompt, or the session
+    starting or ending, ends the wait (at most 100 sessions are waited on at once). For the same
+    reason Codex's dialogs cannot be told apart by agent: a helper's request counts as the lead's,
+    and the lead's Stop answers it too. Andary cannot see you typing in Codex, so a reply that
+    takes you over a minute to write still sends the note.
+92. **The waiting note names no agent.** "A crew is waiting for your next prompt." fits Claude Code
+    and Codex alike, as the notes for permission requests, questions and plans do.
+93. **"Needs you" counts what blocks an agent, a stopped turn, and a finished turn nobody
+    answered.** A request, a question or a plan counts until the same proof of an answer the phone
+    waits for (89), so the town and the phone never disagree. A finished turn counts only once
+    Claude Code's `idle_prompt` says nobody answered (about a minute later), and for 30 minutes at
+    most: by then the crew is probably done for now. Teammates' crews and ended sessions never
+    count. A session's own notice that something asks for permission counts only when nothing of
+    that session is known to be open: it does not say whose it is.
+94. **A finished Codex turn counts after a minute without a prompt.** Codex sends no
+    `idle_prompt`; a minute matches Claude Code's, and the phone's Codex note waits as long.
+95. **Crews stopped by one rate limit within ten minutes are one item.** One cause, one thing to
+    do: "Rate limited: 3 crews stopped". It takes two crews: a lead and its helper stopped by the
+    same limit are one crew's two stops.
+96. **Stops and finished turns can be set aside, until the situation changes and for a day at
+    most; a request, question or plan only once it has waited five minutes, and never while the
+    town holds it.** A waiting dialog blocks the agent, so it stays until answered, unless it may
+    be stale: an interrupted helper sends no hook at all, and only you can tell. An item's id
+    carries the time it started, so a new stop is a new item; dismissals are kept in this
+    browser's local storage and forgotten after 24 hours.
+97. **Desktop notifications are for news only.** An item pops up once, only while the town is in
+    a background tab, and only if it started to count within the last two minutes: a reconnect or
+    a page opened in the background shows older items in the town without popping them up.
+    Changes that arrive together (a reconnect's history) are checked once, so a request asked and
+    answered within them is no news. A permission request waits until its request reaches the town
+    (it follows its hook within milliseconds; three seconds at most), so it says the right place to
+    answer. They name the crew by its title or folder, never a request's command or file: they can
+    show on a locked screen. Screen readers hear of new questions, plans and stops the same way;
+    approvals are announced with their cards, and finished turns would be too chatty.
+98. **No "Turn finished" notification while only one of your crews is in town.** You are probably
+    at its terminal.
+99. **`I` goes to what needs you.** It is free in the page (no browser uses a bare `I`), and reads
+    as "inbox". A request the town can answer opens its card in Approvals; anything else is
+    answered in the terminal, so the agent is selected and the camera points at it.
+100. **A hook sent before an agent's wait began, or before it last moved on, is stale.** Every hook
+    but a permission request reaches the town on its own, in the background, so a late
+    `PreToolUse` of a finished turn does not end its wait, and a `Stop` that arrives after the
+    prompt you queued behind it starts none. The town goes by each hook's own time, as the phone
+    notes and the broker do; the clock is the agent's machine, the same one for all its hooks.
+101. **"Allow always" saves only rules that stay with you.** The town offers an allow rule for this
+    project and only you (`.claude/settings.local.json`) or until the session ends; never one for
+    the committed project settings (it would change your teammates' prompts) or for every project,
+    never a mode or folders, and never a rule that allows more than it reads (108). The forwarder
+    enforces the same rules on its own.
+102. **A suggestion the town cannot show exactly is not offered.** One with a field the town does not
+    know, on the suggestion or on a rule, or one that sanitising changed (a secret masked, a long
+    value cut) gets no "Allow always": the card must show the very rule it saves.
+103. **One rule per card, and no key for it.** The card offers the first suggestion kept for this
+    project, else the first kept for the session. `A` stays a plain allow, so saving a rule always
+    takes its own button, with the same one-second click delay as Allow and Deny.
+104. **"You allowed this N times today" counts what this town saw, in one project.** Earlier
+    requests for the same rule from the same folder, on the viewer's calendar day, among the requests
+    the page knows (the last 100; a new tab gets the server's last 50 settled ones): those allowed in
+    the town, and those answered in the terminal whose tool then ran. One the terminal settled
+    because the agent or session stopped is not counted: it may have been a denial.
+105. **The town says what it asked for, not what was saved.** Claude Code does not report whether
+    it saved a rule, so a card answered with "Allow always" reads "Allowed; asked Claude Code to
+    save …". A rule asked to be saved for this project that comes back in the same session, after
+    the choice, gets a neutral hint: the rule may not have taken. The town cannot tell why (it may
+    not have been saved, or another setting may still ask), so it does not guess. Rules kept for the
+    session are not judged, since `claude --continue` keeps the session id but not its session
+    rules, and other sessions may have started before the rule was saved.
+106. **The forwarder compares suggestions as JSON with sorted keys.** Key order means nothing in
+    JSON. A value it cannot compare (nested too deeply) saves nothing: the answer is a plain allow.
+107. **The demo keeps a rule allowed always for its project.** Its suggestions are for this project
+    (`localSettings`), so later demo sessions of the same project do not ask for it either, as
+    Claude Code would not.
+108. **A rule is offered only when the card can say what it allows.** The town lists what it
+    offers rather than what it refuses: one Bash or PowerShell command with no `*` ("only this
+    command"); Bash commands starting with a prefix, written `npm test:*` or `npm test *` (Claude
+    Code reads the two alike, and its permission dialog now writes the second), said in words
+    ("commands starting with “npm test”"); WebFetch from one host with no wildcard
+    (`domain:example.com`, "only fetches from “example.com”"); or one MCP tool with no content, the
+    narrowest rule there is for it ("every use of this tool"). Anything else is refused, among them
+    a whole built-in tool (no content, an empty content, which Claude Code saves as the bare tool,
+    or `*`), a wildcard anywhere else (`rm -f *.log` also allows `rm -f -r ~ x.log`), a
+    PowerShell prefix (its matching ignores letter case and expands aliases, so it covers more than
+    it reads), any rule for Read, Edit, Write, Glob, the notebook tools or Cd (Claude Code reads
+    their content as a gitignore pattern, so even `Edit(src)` covers every file under any `src/`,
+    and a folder rule such as `Read(/project/**)` a whole tree), and an MCP rule with content
+    (Claude Code skips those). The terminal still offers all of them.
+109. **"Allow always" needs a forwarder that can pass the rule on.** The plugin runs its own copy of
+    the forwarder, and `andary start` refreshes only `<home>/hook.mjs`, so an older copy may answer
+    for the town; it would print a plain allow. Each body says what its forwarder does (`caps`),
+    and a request whose body does not declare `updatedPermissions` offers no rule (one that does
+    not declare `truncated` is not held at all).
+110. **Rules are written the way Claude Code writes them.** A backslash and each parenthesis in a
+    rule's content get a backslash (Claude Code's own settings writer does this), so
+    `Bash(echo \), Bash\(ls)` cannot read as two rules. Hidden characters are revealed on the card
+    and in the log, as for commands.
+111. **"The same step" is judged from the call alone.** Shell commands are read by `core/shell.js`
+    as a shell reads them (quotes, here-documents and their bodies, redirections, comments;
+    PowerShell's in its own mode). A shell command is read as the command inside a
+    shell it was handed to (one level of `bash`/`sh`/`zsh -c` or `-lc '…'`: Codex sends
+    every command so), its whitespace collapsed, without a leading `sleep N &&` (or `;`) and
+    without a trailing `2>&1`, `| tail …` or `| head …` (only a single pipe: `|| true` stays). A
+    trailing `| grep …` is dropped only after a test or build run (`npm test`, `npm run build`,
+    `pytest`, `cargo test`, `go test`, `make`, `tsc` and the like), so `npm test 2>&1 | grep FAIL`
+    is `npm test` while `git log | grep fix` and `git log | grep feat` are two steps. Leading
+    `cd <dir> &&` (or `;`) are followed to the folder they lead to, from the hook's cwd, and that
+    folder is part of the step: `cd packages/a && npm test` and `cd packages/b && npm test` are two
+    steps, `cd . && npm test` or a `cd` into the cwd itself is `npm test`, and `npm test` run from
+    `packages/a` is `cd packages/a && npm test` run from the project. A `cd ~/x` or `cd $DIR` is
+    kept as written. The alert shows such a step with its `cd`, relative to the cwd. File tools go
+    by tool and path (Read with its offset and limit), so three failed Edits of one file with
+    different text are the same step; Grep and Glob by pattern and path; anything else by its input
+    as JSON with sorted keys. Keys are cut at 300 characters.
+112. **A change is judged by what the call says it did, and can be wrong both ways.** Andary cannot
+    see the disk, so besides a successful Edit, MultiEdit, Write, NotebookEdit or Codex patch, a
+    successful shell command (read inside one level of `bash -lc '…'`, as in 111) is a change when
+    it reads like one: `sed -i`, `perl -i`, a `--write`, `--fix` or `-w` flag (not grep's, curl's,
+    wc's, diff's or git's `-w`), `ruff format`, `black`, `cargo fmt`, `go fmt`, an npm, pnpm, yarn
+    or bun script whose name has `format`, `fix`, `codegen` or `generate` in it (`lint:fix`, not
+    `test:fixtures`) or is `build:types`, `node scripts/…` or `python scripts/…`, `patch`, `rm`,
+    `mv`, `cp`, `mkdir`, `touch` (also after a `(` or a quote opening a `-c` script), a package
+    install or removal, the git commands that rewrite the work tree or the index (`checkout`,
+    `switch`, `restore`, `reset`, `stash` but not `list` or `show`, `apply`, `am`, `merge`,
+    `rebase`, `pull`, `cherry-pick`, `revert` and `commit`: after a commit, `git status` has
+    something new to say), output or a here-document written with `>`, `>>`, `tee` or `tee -a` to
+    a path that is not a log or temporary file (`*.log`, `*.out`, `/tmp/…`, `/dev/…` do not count),
+    and a script given to python, node, ruby, perl or a shell inline (a here-document, `-c`, `-e`)
+    that opens a file for writing (`open(…, 'w')` or `'a'`) or calls `writeFile`, `appendFile`,
+    `write_text` or `write_bytes` (a shell's here-document is read as a command line itself).
+    Wrongly taken for a change: test output kept in a file that is not a log
+    (`npm test | tee results.txt`), a script that only reads, a `-w` that means something else, a
+    word in a grep pattern (`grep "git commit"`). Each can hide a loop, never invent one. Missed: a
+    change made in a way not listed (a script under another folder, a code generator by another
+    name, a tool the agent calls through MCP), which can invent a loop that is not one; the list
+    goes far enough that this needs an unusual command.
+113. **Whose change counts.** A change counts for the agent that made it, for every agent of any
+    crew working in the same folder (compared as given, with forward slashes and no trailing
+    slash), and for every agent whose folder holds the changed file (a helper that went into a
+    package of the project). A shell command names no file, so its change counts for its folder
+    only. An edit in a worktree inside the project's folder (`.claude/worktrees/…`) also counts for
+    the agents in the project folder: that can hide a loop, never invent one.
+114. **Steps that wait by nature are not counted under any rule, not only rule 2.** Waiting for CI
+    or a server often fails until it is over (`gh pr checks` exits 8 while checks are pending, a
+    health check fails until the server is up), and a wait that changes nothing is no loop. The
+    list: the tools `BashOutput`, `TaskOutput` (removed in Claude Code 2.1.277), `Monitor`,
+    `ScheduleWakeup`, `WaitForMcpServers`, `TaskList` and `TaskGet`; a Read of a background task's
+    output file (Claude Code writes it to
+    `<temp>/claude-<uid>/<project>/<session>/tasks/<id>.output` and has Claude read it with Read
+    since TaskOutput went), or a shell command that reads one; a shell command that loops with
+    `sleep`; and a shell command (read inside `bash -lc '…'`, as in 111) whose every pipeline, between
+    `&&`, `||`, `;` and `&`, waits, besides any `cd`, `echo`, `printf`, `true` or `date`: `sleep`
+    (`Start-Sleep`, `Get-Job`, `Wait-Job`, `Receive-Job` in PowerShell), `watch`, CI and deployment
+    checks (`gh run watch|view|list`, `gh pr checks|status`, `gh pr view --json
+    statusCheckRollup`, `gh workflow view`, `gh api` on runs, check runs, check suites or statuses,
+    `glab ci|pipeline status|view|list|trace`, `kubectl rollout status`, `kubectl wait`, `kubectl
+    get pods`), health checks (`curl` of a `/health` path, `curl -f` or `wget` of localhost),
+    looking at logs and processes (`tail … *.log`, `ps`, `pgrep`, `docker ps`, `docker compose
+    ps`, `lsof -i`). So `sleep 5 && npm test` is the test run, not a wait. A wait that changes files
+    (`sleep 5 && git pull`) is still a change. Codex polls a running command through `write_stdin`,
+    which fires no hooks, so it needs no entry.
+115. **An interrupt is no failure.** A tool call you stopped with Esc arrives as
+    PostToolUseFailure with `is_interrupt`; you are at the terminal, so the agent starts afresh, as
+    after a prompt.
+116. **Starting afresh forgets everything about the agent.** A prompt, the turn ending (Stop,
+    StopFailure, a Codex interrupt), the agent finishing (SubagentStop, a teammate's TeammateIdle),
+    its session starting again (startup, resume, clear) or ending (every agent of the session, in
+    the town and on the server) all clear the counts too, not just the alert: a loop is judged
+    within a stretch of work. A compaction carries on with the same work, so it keeps them. A
+    TeammateIdle the store could not match to a teammate lands on the lead and is not its turn
+    ending; on the server, one without an `agent_id` resets nobody.
+117. **One alert per agent, one episode while it lasts.** While any of its steps meets a rule the
+    episode goes on, keeping the time it started (its id, so a dismissal holds) and showing the
+    step run most recently, its count updated. When several rules hold, the words follow rule 1,
+    then 3, then 2: "nothing changed" says the most, and rule 2 only speaks for a step that does
+    not visibly fail. A success of the step restarts its failure count but not its run count, so a
+    flaky test run over and over with nothing changed still meets rule 2.
+118. **A stuck alert stands beside a wait.** An agent that asks you something while it is stuck has
+    both items, the question first: the loop is still there once you answer.
+119. **The stuck rules remember a bounded amount.** 200 agents (the one quiet the longest is
+    forgotten first, and its alert ends), 64 steps each (past that, the step run the longest ago
+    with no failure counting towards rule 1 or 3 goes first, so reads between attempts never push
+    out a failing step; with every step failing, the one run the longest ago goes, and its alert
+    ends), 12 failures per step. The server keeps its own copy, for this computer's events only,
+    and only while phone notes are on.
+120. **One phone note per episode, through the usual limits.** The note goes out when an episode
+    starts, at default priority (the agent is not blocked). One held back by the 30 s limit (two
+    crews stuck within half a minute) is dropped, not sent later: the town shows both.
+121. **The desktop and phone words follow the rule that started the episode, and name no step.**
+    Rules 1 and 3: "A crew seems stuck: the same step keeps failing"; rule 2, whose step may
+    succeed every time: "A crew seems stuck: it keeps repeating the same step" (desktop: "<crew>
+    seems stuck: …"). A note goes out once, so if the episode moves on to another rule its words
+    stay; the town's own words always name the rule. Screen readers hear of a new alert in the
+    town's words without the backticks that mark the command on screen, as of a new question, plan
+    or stop: a stuck agent's storm is in the town only.
+122. **In the town, the storm lasts as long as the alert.** Another step succeeding meanwhile does
+    not clear it (it used to clear an agent's rain), and a failed turn's storm, which comes with
+    the turn ending the alert, stays until the next prompt as before. The activity log gets one
+    line, level warn, when an episode starts.
+123. **Rule 3's "same error" is the first line that says something about the failure.** The whole
+    error text is read (as far as the server passes strings on, 2,000 characters), skipping blank
+    lines, lines that only say a command failed (`Exit code 1`, `Error`, `command failed`, `exit
+    status 1`), the command echoed back (`> pkg@1.0.0 test`, `> node --test`, `$ jest`, `+ npm
+    test`, or the command itself), npm's, pnpm's, yarn's and make's lines about a script failing
+    (`npm ERR! code ELIFECYCLE`, `npm error Lifecycle script … failed`, its code, path, workspace,
+    command and log lines, `ELIFECYCLE`, `ERR_PNPM_…`, `error Command failed with exit code 1`,
+    `make: *** …`), CI's `Process completed with exit code 1`, rules and banners (`=====`, `===
+    test session starts ===`), passing tests (`✔`, `✓`, `ok 1`, `PASS`), node's `▶` suite lines and
+    test runners' headers (vitest's `RUN v…`, pytest's platform, rootdir, configfile, plugins and
+    collected lines). Times in the line (`(1.2ms)`, `12ms`) are left out, as they differ from run to
+    run. A failure with no such line (Claude Code's bare `Exit code 1`, Codex's npm stderr) is left
+    out of rule 3; rules 1 and 2 still count it. Six red runs while writing tests rarely share
+    their first such line, since a different test fails; a TypeError that keeps coming back does.
+    The list goes past the design's "first error line" on the quiet side: a skipped line can hide a
+    loop from rule 3, never invent one.
+124. **The rules go by when each call happened.** Hooks reach Andary out of order, so each call
+    carries its hook's own time (the town's `e.ts`, the server's `hookTime`). Each agent keeps the
+    time of the latest change that counted for it; a call made before that and arriving after it
+    is not counted by rules 1 and 2 (and a late success does not restart a count), though rule 3,
+    which holds whatever changed, still takes its failure. Rule 3's failures are kept in time
+    order and its 20 minutes run back from the latest. A change arriving after failures made later
+    than it still clears them, which can hide a loop. An agent first seen after a change in its
+    folder knows nothing of it, so its calls made before that change count: that could invent a
+    loop, but only if its very first hooks arrive after another agent's later edit.
+125. **The context in use is shown in tokens, never as a share of a window, and raises no alert.**
+    It is what the newest reply's last executor iteration read (input, cache writes and cache
+    reads), as Claude Code's status line reads it: an advisor's or a compaction's iteration is not
+    the context, and neither is the top level, which adds up every executor iteration. Today's
+    default models run a 1M window with no `[1m]` in the model id and the user can move the
+    compaction point, so the window cannot be told from what Andary sees: a percentage would be a
+    guess. `/context` in Claude Code gives the whole picture; a percentage waits for exact numbers
+    from the status line (design §9).
+126. **The newest reading is the last message read from the agent's own transcript.** Lines are
+    written in order, so file order is time order; timestamps are not compared, since a clock
+    change could reorder them. A helper's transcript gives the helper's reading. A line marked
+    `isSidechain` in a lead's transcript (older Claude Code wrote helpers' messages there) is not
+    the lead's, and a message that read no tokens is no reading. A forked session's
+    (`--fork-session`) copy of an earlier message gives that session's reading though its usage
+    is not counted again (the new conversation holds it); a record with a reading and nothing
+    counted shows no cost, rather than "0 tokens".
+127. **A compaction makes the context unknown until the next message, cut at the hook's start
+    time.** `PostCompact` and `SessionStart` with `source: "compact"` drop the reading at once and
+    say when. `PreCompact` changes nothing: another hook can still stop the compaction then, and
+    the old count holds while it runs. The transcript is read a moment after a hook, so a message
+    written before the compaction may still be waiting: messages written before the latest
+    compaction hook started give no reading (their usage still counts). Both times come from this
+    computer's clock (the forwarder's start time, Claude Code's timestamps); a hook dated after the
+    server's clock counts as now. The first message after a compaction comes an API round trip
+    after `PostCompact`; should a hook start later than it, that one reading is skipped and the
+    next message brings one. A `compact_boundary` line in the transcript drops the reading too, at
+    its own time, for setups without those hooks.
+128. **A reading that no longer holds is hidden, or says what happened.** A finished helper's or
+    an ended crew's last reading describes a context that is gone, so it is hidden. After a
+    compaction the lead's row says "context compacted" and the inspector when, until the next
+    reading: a blank would look like a fault. The browser also treats a reading older than the last
+    compaction as gone, however it arrived. A lead that finished its turn keeps its reading: its
+    conversation is still there, and that is when the number helps most, before the next prompt.
+    "As of 2m ago" is how old the message that used it is; Andary reads it about a second after the
+    hook that follows it.
+129. **No context for Codex.** Andary reads no Codex usage yet (65), so there is nothing to count.
+    When its rollouts are read, the sum needs its own check: OpenAI's usage counts cached input
+    inside the input tokens, Claude's counts it apart.
+130. **After a restart, the context shows again with the next message.** Readings are not kept in
+    `usage.json`, like agent totals, and the tracker reads each transcript only from where it
+    stopped, so it does not see the last message again.
+131. **The crew's context sits on its lead's row, under the time.** In the crew's heading it shared
+    an auto-width column with the model and cost, so its width came off every crew's name (141 →
+    103 px at a 268 px panel). Under the time it widens only the time: the doing line below keeps
+    its width, and the lead with a reading is always the Foreman (a teammate's or a Codex crew has
+    no usage), whose name keeps its room at 268 px, beside a set-aside button too.
+132. **The demo's context is made up apart from its costs.** It starts at 18k (system prompt and
+    tools), grows by 0.6k–3.6k a step, starts again at 26k after a compaction (`PostCompact`), and
+    stops at 950k: a demo crew can go a long time without compacting, and Claude Code would compact
+    before a 1M window filled. The demo's costs are unchanged.
+133. **A reply's iterations are counted one by one, each at its own model's price.** The top level
+    of a reply's usage adds up its executor iterations alone. An advisor's iteration names its
+    model and is billed at that model's price, and a compaction's is billed at the message's model
+    (Anthropic's advisor tool and compaction documentation), so the tokens and cost add up every
+    listed iteration; a fallback model's iteration is priced at its own model when it names one. If
+    one of those models has no known price, the whole reply is unpriced, as a message from an
+    unknown model already was. A line Claude Code marks `isUnmetered` counts nothing. As before, a
+    later line of a split message adds only its extra output to the token totals (the cost
+    difference in full), so a reply whose later lines add iterations can count less input than it
+    used.
+134. **A helper's transcript may sit one folder down in `subagents/`.** When `agent-<id>.jsonl` is
+    not directly in its session's `subagents/` folder, the first folder there (of at most 50, links
+    not followed) that holds that name is read.
+135. **Two agents on the same files are compared by path, as written.** A path is made absolute
+    and tidied (backslashes become slashes, `.` and `..` are resolved, a relative path is joined
+    to the hook's folder, a drive letter is read in capitals), and nothing more: the browser
+    cannot resolve a symbolic link, a hard link or a mounted folder, or ask whether a disk ignores
+    case, so `src/App.ts` and `src/app.ts` stay two files and a conflict through a link is
+    missed. A path under `~` or a variable is not placed at all. Worktrees: a file in one is never
+    the same file as in another (other paths); for git commands, a worktree Claude Code makes
+    inside the repository (`<repo>/.claude/worktrees/<name>`, from `claude --worktree`, a helper's
+    `isolation: worktree` or the desktop app's parallel sessions) is a work tree of its own both
+    ways, though its folder is inside the checkout's. A worktree git makes elsewhere is just
+    another folder. Other nested worktree layouts are not known.
+136. **A file change is a successful file tool call: Edit, MultiEdit, NotebookEdit, Write, and a
+    Codex patch.** A Codex patch that deletes a file loses the other agent's work like a Write, so
+    it is an alert too ("deleted …"). Files changed by shell commands (`sed -i`, `rm`, formatters,
+    scripts, code generators) are not seen: a command line does not say which files it touched.
+    A failed call changes nothing.
+137. **"Active" means still in town; a helper's work outlives it.** A helper until its
+    SubagentStop, or, when it was interrupted and sends none, until the Agent call that started it
+    ends (a call launched in the background ends at once, so that one does not count) or its
+    lead's turn is interrupted (Codex says so; Claude Code sends nothing when you press Esc, so
+    such a helper stays until its half hour ends). A lead until its session ends: a lead whose turn
+    ended is still active, as its changes sit uncommitted in the tree. When a helper finishes, its
+    changes are not forgotten, as the design has it, but become its lead's: they sit uncommitted
+    in the tree, and most edits are helpers'. Of two changes of one file the newer stands, with
+    its time; a file either of them made stays a new one (145); what the helper staged waits for
+    the lead's commit; a hazard about the helper's changes now names the lead, and one the lead did
+    over them ends. A later helper of the same lead is handed them like the lead's own (138), and
+    the lead's own changes over them are silent. The hazards the helper did end, even a counted
+    alert you have not seen yet. A crew's changes are forgotten when its session ends. Teammates'
+    crews (a team town) are left out entirely: their files are on their own computers.
+138. **Any two agents count, also a lead and its own helper, except for what the lead handed on.**
+    Helpers share the lead's tree and may run in parallel, so a helper's Write over a change its
+    lead made while it worked can lose it. What the lead changed before the helper started
+    (SubagentStart) was handed to it, a draft to rewrite or edits to commit: the helper's edits,
+    writes and sweeping commands (`git add`/`git commit`) over it are no conflict, though a
+    command that throws changes away still counts it. The design names Writes; edits are left out
+    too, as the note would only say the hand-off happened. One hazard per pair of agents and file:
+    it goes on while the agent changes the file again, and becomes a new one when the other agent
+    changes it again or an edit turns into a write (the write replaces the note); a counted Write
+    alert is never turned back into a note. The order of two changes is that of their hooks' times,
+    whichever arrives first (147).
+139. **An edit's note is shown beside what the agents do, never instead of it, and cannot be set
+    aside.** It may last half an hour while both agents keep working, so on the crew row it is a
+    line of its own under what the agent is doing (and under Now in the inspector); it never
+    counts, pops up or is announced, and ends by itself. Every hazard's words name who did it,
+    with its crew's number, and the other agents, with theirs when of another crew ("Foreman
+    (crew 2) edited src/app.ts, which Foreman (crew 1) changed 4 min ago"), so each row, the
+    inspector, the button's "Next:" and the announcements read right. "4 min ago" is counted from
+    now, so the HUD redraws when the clock alone changes those words.
+140. **Git hazards are read from the command line, when the command starts.** Recognised, as
+    sweeping changes up: `git add <pathspec>|-A|-u|.` with a `git commit` later on the same line or
+    in a later call (144), `git commit -a` (also `-am`; not `-uall` or `-S<key>`, whose value is
+    written with them), `git commit <pathspec>` (`git commit .`, `git commit -m x src/`); as
+    throwing them away: `git stash` (also `push` and `save`, with or without a pathspec; not
+    `list`, `show`, `pop`, `apply`, `drop`, `clear`…), `git checkout .`, `git checkout [<tree>] --
+    <pathspec>`, `git checkout -f`, `git checkout <path>` without `--` when an agent changed that
+    file, or one in that folder, in the last half hour (else the word reads as a branch),
+    `git switch --discard-changes`/`-f`, `git restore <pathspec>` (not `--staged` alone), `git
+    reset --hard` and `git clean -f…` (not `-n`). Each counts only the changes under its
+    pathspecs (146), or in the whole work tree (`git clean` without one: its folder), and only
+    the files it touches (145). A `git add <file> && git commit` of your own files alerts only
+    when another agent changed those files too. Still missed: `git pull --autostash` and `git
+    rebase --autostash`, `git stash` inside a script, aliases (`git co`),
+    `--work-tree`/`--git-dir`, PowerShell's `pwsh -Command`, and anything run through `eval`, a
+    script, `make`, `xargs` or a shell two levels deep. A command refused before it ran (a
+    PermissionDenied hook, or Deny in the town) ends its alert, found by its call's id or its
+    input; one you deny in the terminal keeps it until you set it aside: Andary cannot see a "No"
+    there.
+141. **Which changes a git command acts on: the work tree the server finds on disk.** The browser
+    cannot look at the disk, so the server finds, for each tool hook from this computer, the top
+    of the work tree its folder is in: the nearest folder up that holds `.git` (a folder, or the
+    file of a linked worktree or a submodule), kept five minutes for each of at most 256 folders,
+    and sends it with the hook (`andary_root`). A command then counts what lies in that work tree,
+    and nothing outside it: a workspace of several repositories, sibling repositories and
+    worktrees anywhere are told apart. A folder the command moves to inside it keeps it (but a
+    worktree Claude Code made there, which is its own); a repository nested inside it (a
+    submodule) is not told apart. Elsewhere (a `cd` out of it, a teammate's hooks, an older
+    server, a folder in no repository) it is a guess, as before: a command with no pathspec takes
+    in the crew's session folder (where it started) when that holds the folder the command runs
+    in, else that folder, and also another agent's changes in the folder that agent worked in when
+    the command runs inside it. One alert per command names every other agent with changes there,
+    and how many files. The same command run again by the same agent in the same folder alerts
+    again only for changes made after the last time: what it swept up was seen.
+142. **Reading a command line.** It is read by `core/shell.js`, the reader every rule about what
+    an agent ran goes through. It is split at `&&`, `||`, `;`, `|`, `&`, newlines and
+    parentheses outside quotes; quotes, backslash escapes (a backtick in PowerShell, where a
+    backslash is a path separator), comments, redirections and their targets (`2>&1`, `> log`),
+    `$(…)` and here-document bodies are read as a shell would, so a commit message or a file
+    written with `cat <<'EOF'` that mentions `git reset --hard` is not that command. A shell's
+    `-c` script (`sh`, `bash`, `zsh`, `dash`, `ksh`; `bash -lc '…'` is how Codex sends commands)
+    is read one level deep. `NAME=value`, shell keywords (`if`, `then`, `do`…) and wrappers with
+    their own options (`sudo -u bob`, `env -i X=1`, `nice -n 10`, `timeout -k 5 30`, `nohup`,
+    `time`, `command`, `exec`, `stdbuf`, `ionice`) before a command are skipped. `cd`, `chdir`,
+    `pushd`/`popd` and PowerShell's `Set-Location`, `sl`, `Push-Location`, `Pop-Location` move the
+    folder, and `env -C dir` (also `--chdir`) for its own command only; `cd "$(git rev-parse
+    --show-toplevel)"` goes to the top of the work tree (141), and `…/src` after it on from there.
+    Beside a folder on a drive, Git Bash's `/c/Users/…` is read as `C:/Users/…`. A `cd` to `~`,
+    `-` or a variable leaves the folder unknown and the commands after it
+    unjudged (an absolute `cd` places it again), and so do more than 64 moves on one line, which
+    keeps a long line of `cd x;` cheap; so do more than 64 `git -C` on one call. A subshell's
+    `cd` in parentheses is taken to last past the subshell; a `cd` inside a shell's `-c` script
+    stays in that shell (`bash -c 'cd web' && git stash` stashes where the line started), as
+    the shared reader has it. Only the first 20,000 characters are read.
+143. **The desktop notification says only "Two agents in one folder" and the crew, by name and
+    number.** "api-server (crew 2) may be undoing another agent's work." fits a Write over another
+    agent's change and a git command about to run alike, names no file, command or other agent
+    (it can show on a locked screen), and the number tells apart crews that share a project
+    folder. The HUD shows the file or the command. An item's id is a notification's tag, so a
+    hazard's id carries the file's path hashed, as a dialog's carries its input.
+144. **A commit that went through takes its committer's changes out of harm's way.** When a
+    command line holding a `git commit` ends without an error, the committer's changes it took in
+    are forgotten: all of them in that work tree for `-a` or a whole-tree `git add`, else those
+    under the paths named by the commit or the `git add` before it. They then count neither for
+    git commands nor for another agent's Write. Only the committer's own are forgotten: another
+    agent's changes swept into the same commit still count, so a later command may name them again
+    (its alert for the commit already showed). A `git add` in one call and the `git commit` in a
+    later one count as one: each agent's successful adds are kept until its next commit in that
+    work tree that takes in what was staged (`git commit <path>` leaves the rest staged), at most
+    16 for each of 200 agents, so Claude Code's usual `git commit -m "$(cat <<'EOF' …)"` after a
+    `git add` both warns about another agent's work it sweeps up and takes the committer's own out.
+    What was staged otherwise (by you, before the town opened, or unstaged again by `git reset` or
+    `git restore --staged`, which are not followed) is not known. `git commit -a` leaves the
+    committer's new files in harm's way: git does not track them yet (145).
+145. **A file an agent made is untracked until a commit takes it in.** A Write that made the file
+    (Claude Code reports `type: "create"`) or a Codex patch that adds one marks it new, and so it
+    stays while agents change it again. `git clean` counts only such files; a stash without `-u`
+    or `-a`, a checkout, a restore, a switch, `git reset --hard`, `git commit -a`, `git add -u` and
+    `git commit <path>` only the others; `git add -A`, `.` or a path, and a stash with `-u`, both.
+    A new file another agent committed still reads as new, so a later `git clean` may name it; a
+    file made by a shell command is not seen at all (136).
+146. **Pathspecs are read with git's magic, up to 64 a command.** `:/x` and `:(top)x` are from the
+    top of the work tree. Exclusions (`:!x`, `:^x`, `:(exclude)x`) are left out: a command with
+    only exclusions counts as one without pathspecs (the whole work tree; for `git clean`,
+    `checkout` and `restore`, the folder it runs in), and one with paths and exclusions as the paths
+    alone. `glob`, `icase` and `literal` are read off; a glob stands for its folder, and a path under
+    `icase` is compared as written. The same path written twice counts once, and past 64 different
+    ones a command counts as having none, so a long line costs no more than a short one: each
+    remembered file is matched by its own folders.
+147. **Hooks that arrive out of order are judged by their own times.** Hooks reach the town on
+    their own, in the background, so a later one can arrive first. A change that arrives after
+    another agent's newer change of the file is judged the other way round: an older edit arriving
+    after a newer Write is that Write's alert. A change that arrives after a git command that
+    started later than it was made counts for that command too, in its alert or in a new one: the
+    last 50 commands are kept for half an hour (a refused one is dropped). Two changes at the same
+    time are judged once, in the order they arrive. An agent's older change arriving late leaves
+    its newer one standing.
+148. **Away counts only what is surely you, and only counted work as your crews working.** You are a
+     prompt, a `/compact` you ran (as "needs you" reads one, 89), a session you start, resume or
+     clear (`SessionStart` with `source` `startup`, `resume` or `clear`) or leave (`SessionEnd` with
+     `reason` `prompt_input_exit` or `clear`), a Codex turn you interrupted (its `Interrupt`, an
+     interrupted Stop), a request allowed or denied in the town, and one answered in the terminal
+     (resolved there, with proof that its tool ran or was denied). A request the agent moved on from
+     (`stopped`), an expiry or a release is nobody's answer, and a Claude Code interrupt arrives as
+     a failed tool, so none of them counts. "Crews kept working" means a local hook that adds to the
+     catch-up's counts (154 to 158) arrived after you were last seen (the doctor's probe aside): an
+     idle notification, an automatic compaction or a session ending on its own is not work. One turn
+     that finished just after you left is enough, so coming back to it offers a catch-up too. Until
+     you first do something, when the town started counts as when you were last seen.
+149. **An absence begins at the 20-minute mark, on a timer.** Not only at your return, so a town
+     left open on a second screen offers "Catch me up" before you type anything. Reading a long
+     answer for 20 minutes without typing counts as away too: the offer is a quiet button, not a
+     pop-up, and costs nothing to ignore.
+150. **The offer stays 30 minutes after you come back, or until you look.** Like a finished turn
+     (93), it would only be noise after that; `W` still works. When you last looked is kept per
+     browser (151), so the offer goes once this browser has opened Catch me up since you left (in
+     another tab, say); looking from your phone does not take it away on your computer. A button
+     that was offered when the dialog opened stays while it is open, so focus can go back to it, and
+     goes when it closes. Screen readers hear "Welcome back…" once per absence in each browser: the
+     absence announced is kept (`andary:welcomed-back`), so a reload does not say it again, and with
+     several tabs open each writes its claim there and only the tab whose claim is still there 150
+     ms later says it.
+151. **"Since you last looked" is the end of the last summary you saw, on the server's clock.** It
+     is kept in this browser per town (`andary:caught-up`) and shared by its tabs, and only ever
+     compared with the server's times. The offer's half hour is timed on the server's clock too: the
+     page adds the difference between the clocks it measured at `hello` (`serverTime`, the network's
+     delay ignored) to its own. You saw what happened before you left, so a period starts when you
+     last looked or when you left, whichever is later. The first look ever starts when you left if
+     the server knows of an absence, and otherwise covers everything it keeps: since it started, a
+     day at most.
+152. **Turns and rare things are counted to the moment; frequent ones by five minutes, and then
+     everything is counted from there.** Turns, failures, permissions asked and answered, commits,
+     pushes and stopped turns keep each one's time (the latest 200 of each kind per crew), and so do
+     the latest test result, the latest turn's words and each changed file: a period counts exactly
+     those since the time asked for, so a second look a moment after the first shows only what is
+     new, or "Nothing new since you last looked". Tool calls and helpers are counted in five-minute
+     buckets that know when they last counted something. When a bucket that began before the time
+     asked for counted something since, the whole summary counts from that bucket's start, exact
+     things too, so its counts are never mixed, and the period says so ("Since about 10:00 (you last
+     looked 3m ago)."). The server never counts before it started nor more than a day back; when you
+     ask for earlier, it answers from where it remembers and the dialog says so ("The town only
+     remembers since 09:12 (it restarted)." or "…the last day."), and with nothing to show after a
+     restart it says "No crew did anything since it restarted.". Hooks are timed by when they
+     reached the server, so one that arrives late is never lost between two looks.
+153. **Files changed are distinct files, kept per crew rather than per bucket.** A count per
+     bucket would make a file edited ten times ten files, and a set of paths per bucket would cost
+     far more memory. Each crew keeps up to 200 files (a short key of the path) with the time of
+     their latest change, which is exact for any period that ends now, as every summary does.
+     Files a shell command changes (`sed -i`, a formatter) cannot be known and are not counted.
+154. **"Tests passing" or "failing" is the latest test run's, only when the command's exit status is
+     that run's.** A `Bash` or `PowerShell` command line (or a Codex argument list, read as the line
+     it stands for) is read by the shared reader (142): quoted strings, heredoc bodies, comments and
+     redirections are text, a substitution stays whole inside its word (`echo $(git push)` runs no
+     push), and a test runner counts only in command position: at the start of a command after `&&`,
+     `||`, `;`, `&`, a pipe or a newline, behind `cd x &&`, assignments (`CI=1`), wrappers and
+     launchers such as `env`, `time`, `timeout`, `npx`, `npm exec`, `uv run`, `poetry run`, `bundle
+     exec` and `python -m` (core/shell.js lists them), or inside a shell's `-c` script, one level
+     deep (`bash -c 'bash -c "npm test"'` runs no test the catch-up sees). Program names are
+     compared in lower case. So `rg -n "vitest" package.json`, `npm install -D vitest`, `pip install
+     pytest`, `cat jest.config.js` and `sed -n '1,80p' tox.ini` run no tests. The runners are the
+     test runners (jest, vitest, mocha, ava, pytest, rspec, phpunit, tox, nox, `python -m
+     unittest`), a package's `test` script (`npm test`, `pnpm run test:unit`), a tool's `test`
+     subcommand (`go`, `cargo`, `deno`, `dotnet`, `mix`, `mvn`, `gradle`, `make`, `playwright`) and
+     `node --test`. Only the last item of the line (after its last `;`, `&` or newline) sets its
+     status, with no `||` in it; there every `&&` step must succeed, and a pipeline reports its last
+     command, or any command after `set -o pipefail`. Tests passed when the command succeeded and
+     every test run in it must have; they failed when it failed and a test run is the only thing
+     whose failure could show (besides commands that do not fail in practice: `cd`, `export`, `set`,
+     `echo`, `tail`, `head`, `tee` and a few more), with an error the town does not call a timeout.
+     So `npm test 2>&1 | tail -20` gives no result (its status is tail's), `npm test && git push`
+     passing is green tests but failing says nothing, and a timed-out run is no red tests. A test
+     command that may run no tests gives no result either way: one that lists or collects them
+     (`--list`, `--listTests`, `--list-…`, `-l`, a `list` argument, `--collect-only`, `--co`), only
+     builds them (`--no-run`), explains itself (`--help`, `-h`, `--version`), may find no script
+     (`--if-present`), or is `go test -run …`, which may select none and still pass. Other name
+     filters (`-k`, `-t`, `--grep`, `--testNamePattern`) still run tests, and most runners fail when
+     they match none, so they keep their result. A Codex command proves a result, a commit or a push
+     only when Codex reported its exit code (the adapter marks it `andary_exit_known`; a hook cannot
+     set any `andary_` field itself). The town's weather still reads a command by its strongest kind
+     (core/summaries.js); the catch-up is stricter because it states a result. A command sent to the
+     background has only started when its hook comes (its output is read later, by tools that do not
+     name it), so it brings no test result, commit or push: "tests passing" is never a guess.
+155. **A commit or a push is a `git commit` or `git push` that must have succeeded.** Read the same
+     way (154): git in command position, after its own options (`git -C repo commit`, `git -c
+     commit.gpgsign=false commit`, `--git-dir`, `--work-tree`…); not a dry run (`--dry-run`, or
+     push's `-n`), not an amend (`--amend` rewrites the last commit), and not a push that deletes
+     (`--delete`, `-d`, `:branch`) or that said "Everything up-to-date" (one less push for each time
+     it says so); each one counts, so `git commit -m a && git commit -m b` is two. A commit before a
+     `;` is not counted (it may have had nothing to commit while the line still succeeded), and
+     `echo "… git push later"` or `grep -rn "git commit" docs/` is neither. Commits read as pushed
+     ("1 commit pushed") only when a push came after the latest one; otherwise both are counted ("2
+     commits, 1 push").
+156. **Failed tool calls are counted; stopped turns keep their kind.** Agents fail and retry all
+     the time, red tests have words of their own (the test result) and an interrupt is you, so a
+     failed call only adds to a number. A stopped turn's kind (rate limit, overload, billing) says
+     what to do, so it is named: "stopped (rate limited)". Auto mode's `PermissionDenied` is not a
+     failure here.
+157. **"Permissions asked" leaves out questions and plans.** `AskUserQuestion` and `ExitPlanMode`
+     raise a PermissionRequest too, but they want an answer, not a permission, and "needs you"
+     already shows any that wait. A request counts as answered when it is allowed or denied in the
+     town, or when it ran or was denied in the terminal (its call's `PostToolUse`,
+     `PostToolUseFailure` or `PermissionDenied`: the broker's `proof` `ran` or `denied`), also after
+     it expired in the town. One resolved because the agent moved on (`proof: 'stopped'`: your
+     prompt, the turn or the session ending) may have been abandoned, so it is not counted, and a
+     turn or session ending after an expiry proves no answer either; neither does anything once the
+     broker has forgotten the request (it keeps the latest 50 settled ones).
+158. **A crew that only used tools still did something.** Its line says how many tool calls
+     ("14 tool calls") when nothing else counted. A crew with nothing counted in the period is
+     quiet; one that left town after doing something is still listed, by its folder.
+159. **Bounded, and in memory only.** 100 crews (the one quiet for longest is forgotten), a day of
+     five-minute buckets, 200 changed files and the latest 200 times of each rare count per crew,
+     and one last message per crew, cut to 200 characters on one line; it, the crew's id, folder
+     (1,000 characters at most) and title are copied, so the long strings they came from are not
+     kept alive. Measured at the very worst (100 crews busy in every bucket of a day, every list
+     full, a 2 KB message each turn): 8.7 MB. It holds your agents' last messages, which ADR 0006
+     keeps off the disk, so a restart forgets it, as it forgets the history.
+160. **Catch me up works in the demo.** The counting is a pure core module the demo shares, so `W`
+     tells the story's crews; nobody is ever away in a demo, so it is never offered there, and
+     what you looked at there is not kept.
+161. **In a team town, Catch me up is the host's.** A viewer is told nothing of the host's absences
+     and is told that only the host can catch up; teammates' crews are left out of the host's
+     counts, and their prompts never count as the host being here.
+162. **The open dialog follows "needs you", not the counts.** The crews that need you follow the
+     town as it changes (answered elsewhere, the button goes, and focus stays on the same crew's
+     line); the counts stay those the server gave when the dialog opened.
+163. **`W` opens Catch me up, any time.** It is free in the page: no browser uses a bare `W`, and
+     the 3D view's own keys are arrows, `+`/`-`, `Q`/`E`. Screen readers in browse mode keep
+     letters for themselves, as they do for the town's other shortcuts; the masthead's button
+     (while it is offered) and the help dialog's list of shortcuts lead there too.

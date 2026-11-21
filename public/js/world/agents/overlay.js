@@ -3,6 +3,7 @@
 // carries the same information as text. Text only ever goes in via textContent, and styles only
 // via classes and CSSOM properties (the CSP forbids inline style attributes).
 
+import { NEVER_SHOWN } from './bubbles.js';
 import { ensureContrastWithWhite } from './color.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -58,6 +59,13 @@ export class AgentTag {
     this.bubbleShown = false;
     this.bubbleW = 0;
     this.bubbleH = 0;
+    /** Shown but waiting for room: too many bubbles on screen (decided by tags.js each frame). */
+    this.bubbleMuted = false;
+    /** When the bubble became visible on screen (crowd ms), or -1; and when the last one stopped being. */
+    this.visibleSince = -1;
+    this.lastShown = NEVER_SHOWN;
+    /** Just unmuted: its de-overlap shift snaps into place instead of sliding from an old one. */
+    this.bubbleFresh = false;
     this.shift = 0;
     this.statusName = 'idle';
     this.depth = NaN;
@@ -144,7 +152,7 @@ export class AgentTag {
    */
   showBubble(text, tone, reducedMotion) {
     this.bubble.textContent = text;
-    this.bubble.className = `tt-bubble tt-bubble--${tone} is-visible`;
+    this.bubble.className = `tt-bubble tt-bubble--${tone} is-visible${this.bubbleMuted ? ' is-muted' : ''}`;
     this.bubbleShown = true;
     this.bubbleW = this.bubble.offsetWidth;
     this.bubbleH = this.bubble.offsetHeight;
@@ -156,10 +164,26 @@ export class AgentTag {
     }
   }
 
-  hideBubble() {
+  /** @param {number} [now] crowd ms */
+  hideBubble(now = 0) {
     this.bubble.classList.remove('is-visible');
     this.bubbleShown = false;
     this.setBubbleShift(0);
+    this.endVisible(now);
+  }
+
+  /** The bubble stopped being visible (hidden, muted, off screen). @param {number} now crowd ms */
+  endVisible(now) {
+    if (this.visibleSince < 0) return;
+    this.visibleSince = -1;
+    this.lastShown = now;
+  }
+
+  /** @param {boolean} on */
+  setBubbleMuted(on) {
+    if (on === this.bubbleMuted) return;
+    this.bubbleMuted = on;
+    this.bubble.classList.toggle('is-muted', on);
   }
 
   /**

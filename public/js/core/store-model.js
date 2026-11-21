@@ -1,8 +1,12 @@
 // The store's working memory (core/store.js): its state plus the indexes it keeps to attribute
-// events (recent spawns, role counters, hats handed out, retired helpers), and the limits on all
-// of them. Internal to the store's modules.
+// events (recent spawns, role counters, hats handed out, retired helpers), the open dialogs, the
+// stuck rules' memory, who changed which file (for two agents on the same files), and the limits
+// on all of them. Internal to the store's modules.
+import { createDialogs } from './dialogs.js';
 import { BUILDING_KEYS } from './catalog.js';
 import { createAchievementTracker } from './achievements.js';
+import { createConflicts } from './conflicts.js';
+import { createLoops } from './loops.js';
 
 /** @typedef {import('./store.js').BuildingKey} BuildingKey */
 /** @typedef {import('./store.js').StoreState} StoreState */
@@ -53,7 +57,11 @@ export function createModel(localHour, maxLog) {
   const model = {
     maxLog,
     /** @type {StoreState} */
-    state: { sessions: [], agents: {}, approvals: [], log: [], stats: freshStats(), achievements: [], usage: {}, usageDays: [] },
+    state: { sessions: [], agents: {}, approvals: [], dialogs: [], hazards: [], log: [], stats: freshStats(), achievements: [], usage: {}, usageDays: [] },
+    /** What agents asked you and had no answer to yet (dialogs.js); state.dialogs is its list. */
+    dialogs: createDialogs(),
+    /** Who changed which file lately (conflicts.js); state.hazards is what it found. */
+    conflicts: createConflicts(),
     /** @type {Map<string, Session>} */
     sessions: new Map(),
     /** @type {Map<string, Spawn[]>} recent Agent/Task calls per session, oldest first */
@@ -72,6 +80,8 @@ export function createModel(localHour, maxLog) {
     turnFailed: new Set(),
     /** @type {Map<string, number>} finished subagents → when; late async hooks for them are dropped */
     retired: new Map(),
+    /** the stuck rules' memory of each agent's recent steps (loops.js), behind AgentState.stuck */
+    loops: createLoops(),
     tracker: createAchievementTracker({ localHour }),
     view: /** @type {import('./achievements.js').TrackerView} */ (null),
   };

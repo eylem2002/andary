@@ -35,3 +35,32 @@ An independent architecture review (2026-11-20) found the design sound but the s
   "where to find things" table.
 - The server depends on a handful of browser-side core modules; the boundary check keeps that
   list explicit.
+
+## Update (2026-11)
+
+Modules that joined the server's list since this decision (`SERVER_CORE` in
+`scripts/check-boundaries.mjs` keeps the full list):
+
+- `dialogs` (`public/js/core/dialogs.js`), the one model of what an agent has asked you and had
+  no answer to. The phone notes, the approval broker and the town's "needs you" must agree on
+  when an agent waits for you and what the terminal answered, so that rule lives once, in core,
+  where all three read it.
+- `card-fields` (`public/js/core/card-fields.js`), the input fields an approval card shows for
+  each tool: the server holds a request only when the card shows every field of it, so the card
+  and that rule read one list.
+- `permission-rules` (`public/js/core/permission-rules.js`), which says which permission rules an
+  approval may offer to save with "Allow always". The server decides, and the demo plays the
+  server's part, so both read the same rule.
+- `loops` (`public/js/core/loops.js`), the rules that say when an agent seems stuck (the same
+  step failing or repeating with nothing changed). The town's alert and the phone's note must
+  agree on when an episode starts and ends, so the rules live once, in core, where both run them.
+- `shell` (`public/js/core/shell.js`), the one reader of shell command lines: segments, programs,
+  redirections, a shell's `-c` script, folder moves. `loops` reads commands through it, so the
+  server needs it too, and every other rule about what an agent ran reads commands the same way.
+- `summaries` (`public/js/core/summaries.js`), what a shell command or an error is about: the
+  catch-up reads a failed test run's error as the town does (a timeout is no red test), and
+  counts test runs, commits and pushes through `shell`, so a test result is stated only when the
+  line's exit status is that run's.
+- `digest` (`public/js/core/digest.js`), what each crew did, in five-minute buckets, for "Catch me
+  up". The server keeps the counts so they outlive a page reload, and the demo plays the
+  server's part, so both count the same way.

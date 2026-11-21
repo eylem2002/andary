@@ -1,8 +1,13 @@
-// The top of the screen: the town's street sign (brand + live counts) on the left, connection
-// status and settings on the right.
+// The top of the screen: the town's street sign (brand + live counts) on the left; on the right,
+// "3 need you" while agents wait for you (like a wanted level: it stays until you act, and a click
+// goes to the most urgent, the next click to the next one), "Catch me up" beside it when you come
+// back from time away (ui/catch-up.js), the connection status and settings. The page title
+// carries the same count for a background tab.
 import { h, setAttr, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { listJoin, plural } from './format.js';
+import { countedItems } from '../core/attention.js';
+import { needsYouLabel } from './needs-you.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -30,11 +35,35 @@ export function createMasthead(ctx) {
   const settingsButton = h('button', { type: 'button', class: 'hud-iconbtn hud-iconbtn--board', 'aria-label': 'Settings', 'data-testid': 'settings-button', on: { click: () => ctx.openDialog('settings') } },
     icon('settings'));
 
-  const el = h('header', { class: 'hud hud-masthead' }, sign, h('div', { class: 'hud-topright' }, setupButton, status, settingsButton));
+  const waitingCount = h('span', { class: 'hud-waiting__count' });
+  const waitingWords = h('span', { class: 'hud-waiting__words' });
+  const waiting = h('button', { type: 'button', class: 'hud-btn hud-btn--board hud-waiting', hidden: true, 'data-testid': 'waiting-for-you', 'aria-keyshortcuts': 'I', on: { click: () => ctx.run('needs-you') } },
+    icon('hourglass', { size: 18 }), waitingCount, waitingWords);
+  // Its name starts with its visible words, which phones keep too (they leave out the icon).
+  const catchUp = h('button', { type: 'button', class: 'hud-btn hud-btn--board hud-catchup-offer', hidden: true, 'data-testid': 'catch-up-button', 'aria-keyshortcuts': 'W', 'aria-label': 'Catch me up on what your crews did while you were away', on: { click: () => ctx.run('catch-up') } },
+    icon('clock', { size: 18 }), h('span', { class: 'hud-catchup-offer__words', text: 'Catch me up' }));
+
+  const el = h('header', { class: 'hud hud-masthead' }, sign, h('div', { class: 'hud-topright' }, waiting, catchUp, setupButton, status, settingsButton));
 
   /** @param {StoreState} state */
   function render(state) {
     setText(subtitle, subtitleFor(state, ctx.view));
+    const items = ctx.needsYou.items(state);
+    const counted = countedItems(items);
+    const n = counted.length;
+    // Answered elsewhere while the button had the keyboard: keep focus in the cluster.
+    if (n === 0 && document.activeElement === waiting) settingsButton.focus();
+    setHidden(waiting, n === 0);
+    setText(waitingCount, String(n));
+    setText(waitingWords, n === 1 ? 'needs you' : 'need you');
+    setAttr(waiting, 'aria-label', needsYouLabel(counted, ctx.needsYou.peek(items)));
+    // Yellow while an agent is blocked or stopped; quieter when crews only finished their turns.
+    setAttr(waiting, 'data-level', counted[0]?.level ?? null);
+    updateTitle(n);
+    const offered = ctx.catchUp.offered();
+    // Gone once you have looked (after the dialog closed): focus moves on to what is still there.
+    if (!offered && document.activeElement === catchUp) (focusFallback(waiting) ?? settingsButton).focus();
+    setHidden(catchUp, !offered);
     const key = ctx.view.connection;
     const info = STATUS[key] ?? STATUS.connecting;
     const text = key === 'demo' && ctx.view.paused ? 'Demo, paused' : info.text;
@@ -48,6 +77,28 @@ export function createMasthead(ctx) {
   }
 
   return { el, render };
+}
+
+/**
+ * Where focus goes when the masthead button it was on goes away: the "need you" button while it
+ * shows, else the toolbar's current button.
+ * @param {HTMLElement|null} [waiting]  the "need you" button (found in the page when not given)
+ * @returns {HTMLElement|null}
+ */
+export function focusFallback(waiting = document.querySelector('[data-testid="waiting-for-you"]')) {
+  if (waiting && !waiting.hidden) return waiting;
+  return document.querySelector('.hud-toolbar [tabindex="0"]');
+}
+
+/** "(2) Andary" while things need you, so a background tab shows it. @param {number} count */
+export function pageTitle(count) {
+  return count > 0 ? `(${count}) Andary` : 'Andary';
+}
+
+/** @param {number} count */
+export function updateTitle(count) {
+  const title = pageTitle(count);
+  if (document.title !== title) document.title = title;
 }
 
 /**

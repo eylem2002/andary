@@ -14,10 +14,11 @@ import { LOOK } from '../page.js';
 
 /**
  * A dialog shell with a title, a close button and a body. `scrollable` makes the body itself a
- * tab stop, for text-only dialogs that may need scrolling from the keyboard.
- * @param {{ id: string, title: string, body: HTMLElement[], wide?: boolean, scrollable?: boolean }} options
+ * tab stop, for text-only dialogs that may need scrolling from the keyboard. As it closes, focus
+ * goes back to what opened it, or to `fallback()` when that can no longer take it (hidden).
+ * @param {{ id: string, title: string, body: HTMLElement[], wide?: boolean, scrollable?: boolean, fallback?: () => HTMLElement|null }} options
  */
-export function createDialog({ id, title, body, wide = false, scrollable = false }) {
+export function createDialog({ id, title, body, wide = false, scrollable = false, fallback }) {
   const close = h('button', { type: 'button', class: 'hud-iconbtn', 'aria-label': 'Close' }, icon('close'));
   const content = h('div', { class: 'hud-dialog__body', tabindex: scrollable ? '0' : null, role: scrollable ? 'region' : null, 'aria-labelledby': scrollable ? `${id}-title` : null }, ...body);
   const dialog = /** @type {HTMLDialogElement} */ (h('dialog', { class: `hud hud-dialog${wide ? ' hud-dialog--wide' : ''}`, id, 'aria-labelledby': `${id}-title` },
@@ -34,7 +35,11 @@ export function createDialog({ id, title, body, wide = false, scrollable = false
   /** @type {HTMLElement|null} */
   let opener = null;
   dialog.addEventListener('close', () => {
+    // The close event comes a task later: opened again by then, focus stays in the dialog.
+    if (dialog.open) return;
     if (opener?.isConnected) opener.focus();
+    // What opened it has gone (hidden meanwhile): focus goes somewhere that is still there.
+    if (opener && document.activeElement !== opener) fallback?.()?.focus();
     opener = null;
   });
   return {
@@ -117,6 +122,8 @@ export function createSettingsDialog(ctx) {
   });
   const lookHelp = h('p', { class: 'hud-setting__help', role: 'status', text: 'The whole town, its sky and its sea. Rebuilding reloads the page.' });
   look.el.append(applyLook, lookHelp);
+  const placeNames = choice('hud-set-place-names', 'Place names', [['auto', 'On the buildings, where they fit'], ['always', 'Always'], ['off', 'Off (point at a building)']], ctx.prefs.placeNames, (value) => ctx.setPrefs({ placeNames: /** @type {any} */ (value) }));
+  placeNames.el.append(h('p', { class: 'hud-setting__help', text: 'Zoom in and more names fit. Agents always come first: a label fades while someone stands in front of it. Shortcut: P.' }));
   const quality = choice('hud-set-quality', 'Graphics', [['auto', 'Automatic'], ['high', 'High quality'], ['low', 'Low power']], ctx.prefs.quality, (value) => ctx.setPrefs({ quality: /** @type {any} */ (value) }));
 
   const volume = /** @type {HTMLInputElement} */ (h('input', { type: 'range', class: 'hud-range', id: 'hud-set-volume', min: '0', max: '100', step: '5', value: String(Math.round(ctx.prefs.volume * 100)) }));
@@ -162,7 +169,7 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [teamBlock, remoteBlock, look.el, theme.el, motion.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    body: [teamBlock, remoteBlock, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -195,6 +202,7 @@ export function createSettingsDialog(ctx) {
       theme.set(ctx.prefs.theme);
       motion.set(ctx.prefs.motion);
       quality.set(ctx.prefs.quality);
+      placeNames.set(ctx.prefs.placeNames);
       look.set(LOOK);
       applyLook.disabled = true;
       weather.checked = ctx.prefs.weather;
@@ -319,8 +327,18 @@ export function createSetupDialog(ctx) {
   const keepWatching = h('button', { type: 'button', class: 'hud-btn hud-btn--primary', autofocus: true }, 'Keep watching the demo');
   keepWatching.addEventListener('click', () => dialog.close());
   dialog.el.querySelector('.hud-dialog__body')?.append(h('div', { class: 'hud-dialog__actions' }, keepWatching));
-  dialog.el.addEventListener('close', () => ctx.setPrefs({ setupSeen: true }));
-  return dialog;
+  // Seen once, it is not offered again: kept as soon as it opens, not only when it closes (a
+  // dialog's close event comes a moment after it disappears, and the page may be gone by then).
+  return {
+    ...dialog,
+    open() {
+      dialog.open();
+      ctx.setPrefs({ setupSeen: true });
+    },
+    get isOpen() {
+      return dialog.isOpen;
+    },
+  };
 }
 
 /**

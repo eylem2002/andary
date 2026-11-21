@@ -1,18 +1,25 @@
 // The single source of truth the HUD renders and the director follows (CONTRACTS.md §5.1).
 // It applies TownEvents to crews (sessions), agents, todos/tasks, approvals, the activity log and
-// stats; works out who each event belongs to (subagent labels, teammate names); and unlocks
+// stats; works out who each event belongs to (subagent labels, teammate names); keeps what each
+// agent has asked you (store-dialogs.js) or waits for you on (waits.js), whether it seems stuck
+// (loops.js), and where two agents work on the same files (conflicts.js); and unlocks
 // achievements. The town may open mid-session, so every session or agent an event mentions is
 // created on first sight.
 
 import { ACHIEVEMENTS, achievementFor } from './achievements.js';
 import { BUILDINGS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
-import { LEAD_NAME, MAX_APPROVALS, MAX_RECENT, MAX_RETIRED, MAX_SPAWNS_PER_SESSION, boundedPush, createModel } from './store-model.js';
+import { LEAD_NAME, MAX_APPROVALS, MAX_RECENT, MAX_RETIRED, MAX_SPAWNS_PER_SESSION, boundedPush, createModel, helpersOf } from './store-model.js';
 import { agentFor, assignSpawn, attribute, dropAgent, place, pruneDoneHelpers, pruneEndedSessions, reconcileTeammate, repairGuesses, sessionFor, sessionStatus } from './crews.js';
 import { recordChange, rememberFile } from './changes.js';
+import { hazardText } from './conflicts.js';
 import { NO_SESSION, normalize } from './events.js';
+import { gitAddsOf, gitCommitsOf, gitHazardOf } from './git-commands.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
+import { rulesText } from './permission-rules.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
+import { dialogsAfterApproval, dialogsAfterEvent } from './store-dialogs.js';
+import { movesOn, stopLabel, waitAfter } from './waits.js';
 
 export { ACHIEVEMENTS };
 
@@ -58,7 +65,7 @@ export { ACHIEVEMENTS };
  * @property {string} agentKey
  * @property {string} agentName
  * @property {string} color
- * @property {string} kind     TownEvent kind, or 'approval' / 'achievement'
+ * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict'
  * @property {string} icon
  * @property {string} text
  * @property {'info'|'success'|'warn'|'error'} level
@@ -89,6 +96,9 @@ export { ACHIEVEMENTS };
  * @property {number} errors
  * @property {string} [lastMessage]
  * @property {string} [model]
+ * @property {import('./waits.js').Wait|null} wait  what it waits for you on, if anything (waits.js)
+ * @property {number} movedAt  when it last moved on (a prompt, a tool call…): a stop sent earlier is stale
+ * @property {import('./loops.js').Stuck|null} stuck  why it seems stuck, if it does (loops.js)
  */
 
 /**
@@ -100,11 +110,16 @@ export { ACHIEVEMENTS };
  * @property {string|null} agentId
  * @property {string} toolName
  * @property {any} toolInput
+ * @property {'claude'|'codex'} [source]  the agent that asked
  * @property {string} [cwd]
  * @property {number} createdAt
  * @property {number|null} expiresAt
  * @property {'town'|'terminal'|'timeout'} [decidedBy]
+ * @property {'ran'|'denied'|'stopped'} [proof]  resolved: what showed the terminal answered (the tool ran, was denied, or the agent stopped)
  * @property {string} [message]
+ * @property {string|null} [callKey]  the server's key for the call's input (§4.5), to find its dialog
+ * @property {import('./permission-rules.js').OfferedSuggestion[]} [suggestions]  rules an allow may save ("Allow always")
+ * @property {{ rules: import('./permission-rules.js').PermissionRule[], destination: string, at: number }} [always]  the rule an "Allow always" asked Claude Code to save, and when
  */
 
 /**
@@ -122,6 +137,8 @@ export { ACHIEVEMENTS };
  * @property {Session[]} sessions          in order first seen
  * @property {Record<string, AgentState>} agents
  * @property {Approval[]} approvals        pending first, then most recent
+ * @property {readonly import('./dialogs.js').Dialog[]} dialogs  open: asked and not answered yet, oldest first
+ * @property {readonly import('./conflicts.js').Hazard[]} hazards  two agents on the same files now, oldest first
  * @property {LogEntry[]} log              newest last
  * @property {Stats} stats
  * @property {Achievement[]} achievements
@@ -135,11 +152,14 @@ export { ACHIEVEMENTS };
  * @property {number} costUsd
  * @property {boolean} unpriced
  * @property {string|null} model
+ * @property {{ tokens: number, at: number }|null} context  the context its newest message used, and
+ *   when that was written; null until one is read and after a compaction (§4.8)
+ * @property {number|null} compactedAt  when it last compacted, as far as the server saw
  */
 
 /** @typedef {{ date: string, tokens: number, costUsd: number }} UsageDay */
 
-/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'reset'}} StoreChange */
+/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'reset'}} StoreChange */
 
 /**
  * @typedef {object} Store
@@ -196,14 +216,6 @@ function upsertTask(s, patch) {
 // Applying events. Each handler mutates state and returns a log line (or null for no log line).
 
 const SESSION_SOURCES = Object.freeze({ startup: 'Arrived for work', resume: 'Resumed', clear: 'Started fresh', fork: 'Forked a session' });
-const STOP_FAILURES = Object.freeze({
-  rate_limit: 'Rate limited',
-  overloaded: 'Servers overloaded',
-  authentication_failed: 'Authentication failed',
-  billing_error: 'Billing problem',
-  server_error: 'Server error',
-  max_output_tokens: 'Hit the output limit',
-});
 const SHIPPING_LOG = Object.freeze({
   test: ['✅', 'Tests passed'],
   'git-commit': ['📮', 'Committed'],
@@ -384,7 +396,7 @@ function applyTurnFail(m, e, s, a) {
   m.turnFailed.add(a.key);
   m.state.stats.failures += 1;
   place(a, null, 'facepalm');
-  const label = own(STOP_FAILURES, e.data.error) ?? `Stopped (${String(e.data.error).replace(/_/g, ' ')})`;
+  const label = stopLabel(e.data.error);
   const details = e.data.errorDetails ? `: ${clip(e.data.errorDetails, 120)}` : '';
   return { icon: '⛈️', text: `${label}${details}`, level: 'error' };
 }
@@ -577,12 +589,224 @@ function apply(m, input) {
   m.state.stats.events += 1;
   const handler = own(APPLY, e.kind);
   const draft = handler && a ? handler(m, e, s, a, relabels) : null;
+  if (a) setWait(a, e);
+  // A teammate's crew (a team town) is theirs to answer: its dialogs are not kept.
+  if (!s.member && dialogsAfterEvent(m.dialogs, e, a ? a.agentId : e.agentId)) m.state.dialogs = m.dialogs.list();
+  const newlyStuck = followLoops(m, e, s, a);
+  const hazards = followConflicts(m, e, s, a);
   if (relabels.length) e.data.relabels = relabels;
   s.lastActivity = Math.max(s.lastActivity, e.ts);
   if (a) a.lastActivity = Math.max(a.lastActivity, e.ts);
   if (s.status !== 'ended') s.status = sessionStatus(m, s);
   if (draft) pushLog(m, e, s, a, draft);
+  for (const change of newlyStuck) logStuck(m, e, s, change);
+  for (const hazard of hazards) logHazard(m, e, s, hazard);
   return e;
+}
+
+/**
+ * The activity log's line when an agent starts to seem stuck, after the line of the event that
+ * did it.
+ * @param {Model} m
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {import('./loops.js').LoopChange} change
+ */
+function logStuck(m, e, s, change) {
+  pushLog(m, { ...e, kind: 'stuck' }, s, m.state.agents[change.agent], { icon: '🔁', text: change.stuck?.text ?? '', level: 'warn' });
+}
+
+/** Events after which an agent starts afresh for the stuck rules: its turn ended, you sent a prompt, it finished. */
+const FRESH_STARTS = new Set(['prompt', 'turn.stop', 'turn.fail', 'subagent.stop']);
+/** Finished tool calls, for the stuck rules: a success, a failure, or a refusal (a failure too). */
+const FINISHED_CALLS = new Set(['tool.end', 'tool.fail', 'permission.denied']);
+
+/**
+ * Runs the stuck rules (loops.js) on an event and keeps every alert it starts, changes or ends on
+ * its agent: one agent's change can end another's alert. Returns the alerts that just started.
+ * @param {Model} m
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {AgentState|undefined} a
+ * @returns {import('./loops.js').LoopChange[]}
+ */
+function followLoops(m, e, s, a) {
+  /** @type {import('./loops.js').LoopChange[]} */
+  let changes = [];
+  // A session's end forgets all its agents, those it no longer lists too.
+  if (e.kind === 'session.end') changes = m.loops.resetAll((key) => key.startsWith(`${s.id}:`));
+  else if (!a) return [];
+  else if (startsAfresh(e, a)) changes = m.loops.reset(a.key);
+  else if (FINISHED_CALLS.has(e.kind)) changes = m.loops.record(loopCall(e, s, a));
+  for (const change of changes) {
+    const agent = m.state.agents[change.agent];
+    if (agent) agent.stuck = change.stuck;
+  }
+  return changes.filter((change) => change.started && m.state.agents[change.agent]);
+}
+
+/**
+ * @param {TownEvent} e
+ * @param {AgentState} a
+ */
+function startsAfresh(e, a) {
+  if (FRESH_STARTS.has(e.kind)) return true;
+  // A teammate going idle ends its turn; one the store cannot place lands on the lead: not its turn
+  // (as waits.js has it).
+  if (e.kind === 'teammate.idle') return a.role === 'teammate';
+  // A compaction carries on with the same work, loops and all.
+  if (e.kind === 'session.start') return e.data.source !== 'compact';
+  // You interrupted it, so you are at its terminal: like a prompt, not a failure.
+  return e.kind === 'tool.fail' && e.data.isInterrupt === true;
+}
+
+/**
+ * A finished tool call as the stuck rules read it.
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {AgentState} a
+ * @returns {import('./loops.js').LoopCall}
+ */
+function loopCall(e, s, a) {
+  const ok = e.kind === 'tool.end';
+  const error = e.kind === 'permission.denied' ? str(e.data.reason) || 'Permission denied' : str(e.data.errorText);
+  return { agent: a.key, folder: e.cwd || s.cwd, tool: e.data.tool, input: e.data.input, ok, error: ok ? '' : error, at: e.ts };
+}
+
+/**
+ * The agent's wait after an event (waits.js), and when it last moved on.
+ * @param {AgentState} a
+ * @param {TownEvent} e
+ */
+function setWait(a, e) {
+  const next = waitAfter(a, e);
+  if (next !== undefined) a.wait = next;
+  if (movesOn(e)) a.movedAt = Math.max(a.movedAt, e.ts);
+}
+
+/** Shell tools whose command line may hold a git command (git-commands.js). */
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
+/** Tools that start a helper: their call ending (unless launched in the background) ends it. */
+const SPAWN_TOOLS = new Set(['Agent', 'Task']);
+
+/** @typedef {import('./conflicts.js').Hazard} Hazard */
+/** @typedef {(m: Model, e: TownEvent, s: Session, a: AgentState) => Hazard[]} ConflictStep */
+
+/**
+ * What each event does to the same-file and git rules (conflicts.js): a file change or a git
+ * command may start a hazard, a refusal ends the command's, a commit that went through takes its
+ * committer's changes out of harm's way, and a helper finishing (also without its SubagentStop:
+ * its call ended, or the lead was interrupted) leaves its changes to its lead; its crew leaving
+ * ends them all.
+ * @type {Readonly<Record<string, ConflictStep>>}
+ */
+const CONFLICT_STEPS = Object.freeze({
+  'tool.start': commandStarted,
+  'tool.end': toolEnded,
+  'tool.fail': (m, e, s) => (SPAWN_TOOLS.has(e.data.tool) ? finishHelper(m, s, e.data.toolUseId, null) : []),
+  'permission.denied': (m, e, s, a) => (m.conflicts.refused({ agent: a.key, toolUseId: e.data.toolUseId, callKey: e.data.callKey }), []),
+  'spawn.result': (m, e, s) => (e.data.status === 'async_launched' ? [] : finishHelper(m, s, e.data.toolUseId, e.data.agentId)),
+  'subagent.stop': (m, e, s, a) => (m.conflicts.finished(a.key, leadOf(s, a)), []),
+  'turn.stop': (m, e, s, a) => (e.data.interrupted === true && a.role === 'lead' ? helpersOf(m, s.id).flatMap((h) => finishHelper(m, s, null, h.agentId)) : []),
+});
+
+/**
+ * Keeps the same-file and git rules' memory (conflicts.js) and the hazards they find on
+ * state.hazards; they also end after half an hour. A teammate's crew (a team town) works on their
+ * computer, so its files are left out.
+ * @param {Model} m
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {AgentState|undefined} a
+ * @returns {Hazard[]} the hazards that just started
+ */
+function followConflicts(m, e, s, a) {
+  if (s.member) return [];
+  const before = m.conflicts.list();
+  m.conflicts.expire(e.ts);
+  if (e.kind === 'session.end') m.conflicts.ended(s.id);
+  const step = a ? own(CONFLICT_STEPS, e.kind) : undefined;
+  const started = step && a ? step(m, e, s, a) : [];
+  const after = m.conflicts.list();
+  if (after.length !== before.length || after.some((hazard, i) => hazard !== before[i])) m.state.hazards = after;
+  return started;
+}
+
+/**
+ * Who did it, for the rules: a helper names its lead and when it started, as the lead's changes
+ * from before then were handed to it.
+ * @param {TownEvent} e @param {Session} s @param {AgentState} a
+ * @returns {import('./conflicts.js').Actor}
+ */
+function actorOf(e, s, a) {
+  return { agent: a.key, session: s.id, at: e.ts, lead: leadOf(s, a), since: a.startedAt };
+}
+
+/** A helper's lead, who keeps its changes when it finishes; null for a lead. @param {Session} s @param {AgentState} a */
+function leadOf(s, a) {
+  return a.role === 'lead' ? null : agentKeyOf(s.id, null);
+}
+
+/**
+ * Where a shell command runs: the hook's folder, where its crew started, and the top of the hook
+ * folder's work tree when the server found it on disk (`andary_root`, CONTRACTS §4.6).
+ * @param {TownEvent} e @param {Session} s
+ */
+function placeOf(e, s) {
+  return { folder: e.cwd || s.cwd, sessionFolder: s.cwd, root: e.data.root };
+}
+
+/** A shell command starting: a git hazard shows while it asks for permission or runs. @type {ConflictStep} */
+function commandStarted(m, e, s, a) {
+  if (!SHELL_TOOLS.has(e.data.tool)) return [];
+  const options = { powershell: e.data.tool === 'PowerShell', staged: m.conflicts.staged(a.key), known: (/** @type {string} */ path) => m.conflicts.knows(path) };
+  const git = gitHazardOf(e.data.input?.command, placeOf(e, s), options);
+  return git ? m.conflicts.command({ ...actorOf(e, s, a), ...git, toolUseId: e.data.toolUseId, callKey: e.data.callKey }) : [];
+}
+
+/**
+ * A tool that went through: a file change (a Write that made the file, or a Codex patch adding
+ * one, makes an untracked file), or a command whose commits took changes in and whose adds wait
+ * for the next commit.
+ * @type {ConflictStep}
+ */
+function toolEnded(m, e, s, a) {
+  if (!SHELL_TOOLS.has(e.data.tool)) {
+    const created = e.data.tool === 'Write' && (e.data.response?.type === 'create' || e.data.sourceTool === 'apply_patch');
+    return m.conflicts.changed({ ...actorOf(e, s, a), tool: e.data.tool, path: e.data.file, folder: e.cwd || s.cwd, created });
+  }
+  const options = { powershell: e.data.tool === 'PowerShell', staged: m.conflicts.staged(a.key) };
+  const place = placeOf(e, s);
+  for (const commit of gitCommitsOf(e.data.input?.command, place, options)) m.conflicts.committed({ agent: a.key, ...commit });
+  m.conflicts.added(a.key, s.id, gitAddsOf(e.data.input?.command, place, options));
+  return [];
+}
+
+/**
+ * A helper is done for the rules: the one an Agent call started (proven by its result, or else
+ * paired with it), or the one named.
+ * @param {Model} m @param {Session} s @param {string|null} toolUseId @param {string|null} agentId
+ * @returns {Hazard[]}
+ */
+function finishHelper(m, s, toolUseId, agentId) {
+  const spawn = toolUseId ? (m.spawns.get(s.id) ?? []).find((sp) => sp.toolUseId === toolUseId) : undefined;
+  const helper = agentId ? agentKeyOf(s.id, agentId) : spawn?.claimedBy;
+  if (helper) m.conflicts.finished(helper, agentKeyOf(s.id, null));
+  return [];
+}
+
+/**
+ * The activity log's line when two agents start to work on the same files, after the line of the
+ * event that did it: a warning for an alert, information for an edit's note.
+ * @param {Model} m
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {import('./conflicts.js').Hazard} hazard
+ */
+function logHazard(m, e, s, hazard) {
+  /** @type {LogDraft} */
+  const draft = { icon: '👥', text: hazardText(hazard, m.state, e.ts), level: hazard.kind === 'edit' ? 'info' : 'warn' };
+  pushLog(m, { ...e, kind: 'conflict' }, s, m.state.agents[hazard.agentKey], draft);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -622,6 +846,15 @@ const APPROVAL_LOG = Object.freeze({
 });
 
 /**
+ * The rules an "Allow always" asked Claude Code to save, on one line with hidden characters
+ * revealed ('' for any other answer). The approval crosses the network, so it is read defensively.
+ * @param {Approval} approval
+ */
+function savedRules(approval) {
+  return approval.status === 'allowed' && isObject(approval.always) ? clip(oneLine(rulesText(approval.always.rules)), 80) : '';
+}
+
+/**
  * A pending request parks its agent at the Permit Office; an answer sends it back to work.
  * @param {Model} m
  * @param {AgentState} a
@@ -650,15 +883,22 @@ function approvalChanged(m, approval, ts) {
   const key = agentKeyOf(approval.sessionId, normalizeAgentId(approval.agentId));
   const a = m.state.agents[key];
   const tool = str(approval.toolName) || 'Tool';
+  const summary = summarizeTool(tool, approval.toolInput, approval.cwd ?? s?.cwd ?? '');
   if (a) waitForAnswer(m, a, key, approval.status, tool);
+  dialogsAfterApproval(m.dialogs, approval, summary);
+  m.state.dialogs = m.dialogs.list();
   if (s && s.status !== 'ended') s.status = sessionStatus(m, s);
   const log = own(APPROVAL_LOG, approval.status);
   if (log) {
-    const summary = summarizeTool(tool, approval.toolInput, approval.cwd ?? s?.cwd ?? '');
+    const saved = savedRules(approval);
     const at = { ts, sessionId: approval.sessionId, agentKey: key, kind: 'approval' };
-    pushLog(m, at, s, a, { icon: log.icon, text: `${log.prefix}: ${summary}`, level: /** @type {LogDraft['level']} */ (log.level) });
+    pushLog(m, at, s, a, { icon: log.icon, text: saved ? `Allowed; asked to save ${saved}` : `${log.prefix}: ${summary}`, level: /** @type {LogDraft['level']} */ (log.level) });
   }
-  if (approval.status === 'denied') m.awaiting.delete(key);
+  if (approval.status === 'denied') {
+    m.awaiting.delete(key);
+    // A git command refused in the town runs nothing: its alert ends.
+    if (m.conflicts.refused({ agent: key, callKey: typeof approval.callKey === 'string' ? approval.callKey : null })) m.state.hazards = m.conflicts.list();
+  }
   return approval.status === 'allowed' ? countApproval(m, key, tool) : [];
 }
 
@@ -775,9 +1015,15 @@ export function createStore(options = {}) {
       sortApprovals(list);
       const ts = now();
       const ids = previous?.status === next.status ? [] : approvalChanged(m, next, ts);
+      // Handed back to the terminal without a new status (a release): its dialog is no longer held.
+      if (previous?.status === next.status && previous.held !== next.held) {
+        dialogsAfterApproval(m.dialogs, next, '');
+        m.state.dialogs = m.dialogs.list();
+      }
       const at = { ts, sessionId: str(next.sessionId), agentKey: agentKeyOf(str(next.sessionId), normalizeAgentId(next.agentId)) };
       const unlocked = unlock(ids, at);
-      emit({ type: 'approval', approval: next });
+      // The status before this change, so a reaction plays once (a late proof re-sends an expired one).
+      emit({ type: 'approval', approval: next, previous: previous ? str(previous.status) : null });
       for (const achievement of unlocked) emit({ type: 'achievement', achievement });
     },
     setUsage(record, days) {
@@ -822,8 +1068,22 @@ function readUsage(raw) {
       costUsd: amount(raw.costUsd),
       unpriced: raw.unpriced === true,
       model: typeof raw.model === 'string' ? raw.model : null,
+      context: readContext(raw.context),
+      compactedAt: amount(raw.compactedAt) || null,
     },
   };
+}
+
+/**
+ * A context reading, or null for anything that is not a token count with a time.
+ * @param {unknown} raw
+ * @returns {AgentUsage['context']}
+ */
+function readContext(raw) {
+  if (!isObject(raw)) return null;
+  const tokens = Math.round(amount(raw.tokens));
+  const at = amount(raw.at);
+  return tokens > 0 && at > 0 ? { tokens, at } : null;
 }
 
 /** @param {unknown[]} days @returns {UsageDay[]} */

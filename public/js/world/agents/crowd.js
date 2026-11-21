@@ -75,6 +75,8 @@ export class Crowd {
     this.agents = new Map();
     /** Present and leaving agents, for the frame loop. @type {Agent[]} */
     this.live = [];
+    /** figureBoxes() output, reused. @type {Agent['screen'][]} */
+    this.figures = [];
     this.clock = 0;
     /** @type {string|null} */
     this.selected = null;
@@ -153,7 +155,7 @@ export class Crowd {
     if (this.selected === id) this.select(null);
     if (this.hovered === id) this.hovered = null;
     const exit = ['portal', 'bus', 'poof'].includes(opts?.exit) ? opts.exit : 'poof';
-    return new Promise((resolve) => {
+    return /** @type {Promise<void>} */ (new Promise((resolve) => {
       this.exits.add(resolve);
       leave(this, agent, exit, () => {
         this.live.splice(this.live.indexOf(agent), 1);
@@ -161,7 +163,7 @@ export class Crowd {
         this.exits.delete(resolve);
         resolve();
       });
-    });
+    }));
   }
 
   /** @param {string} id */
@@ -462,6 +464,18 @@ export class Crowd {
     return { x: agent.screen.x, y: agent.screen.y, visible: agent.screen.visible };
   }
 
+  /**
+   * Where the figures were on screen last frame, head to feet, for the building labels to make
+   * way for them. The array is reused: read it right away, don't keep it.
+   * @returns {ReadonlyArray<{x: number, y: number, feet: number, half: number}>}
+   */
+  figureBoxes() {
+    const out = this.figures;
+    out.length = 0;
+    for (const agent of this.live) if (agent.screen.visible) out.push(agent.screen);
+    return out;
+  }
+
   /** Live position of an agent for camera follow (null once it is gone). @param {string} id */
   followPoint(id) {
     const agent = this.agents.get(id);
@@ -503,13 +517,13 @@ export class Crowd {
       this.emitBeat(agent);
       const change = tickBubble(agent.bubble, nowMs);
       if (change === 'show') this.showBubble(agent);
-      else if (change === 'hide') agent.tag.hideBubble();
+      else if (change === 'hide') agent.tag.hideBubble(nowMs);
     }
     this.weather.update(dt, this.clock, this.topOf, this.pillLift);
     this.planes.update(dt);
     this.effects.update(dt, view.faceYaw);
     this.updateMarkers();
-    layoutTags(live, view, dt);
+    layoutTags(live, view, dt, nowMs);
   }
 
   /** Effects some activities make on their beat (hammer sparks, zzz, steam). @param {Agent} agent */

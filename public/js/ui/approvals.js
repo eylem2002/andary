@@ -3,10 +3,14 @@
 // its countdown runs out, with an optional reason for a denial that goes back to the agent.
 // Requests that are not held show "Answer in your terminal". Commands and paths are shown
 // verbatim in the mono face, as text only, and a file change in full: a Write's content, an
-// Edit's diff, with hidden characters revealed, so nothing is approved unseen.
+// Edit's diff, with hidden characters revealed, so nothing is approved unseen. When Claude Code
+// suggested a rule this project or session may keep, "Allow always" also asks it to save the
+// rule. The card names that rule first, literally and with what it allows, between Allow / Deny
+// and the button, so a tap that misses Allow lands on words; the button has no key of its own.
 import { h, renderList, setAttr, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { approvalChange, describeApproval, formatCountdown } from './format.js';
+import { alwaysLine, approvalHint, offeredSuggestion, savedText } from './approval-rules.js';
 import { diffView } from './diff-view.js';
 import { diffStats } from './diff.js';
 import { approvalAgentKey, crewNumber, findSession, kbd, roundel, updateRoundel } from './parts.js';
@@ -21,9 +25,10 @@ export const MAX_REASON_CHARS = 500;
 
 /**
  * New requests are listed first, so a card can slide under the pointer just as the viewer clicks
- * the one they read (and a settled card above can move away). A click on Allow / Deny only counts
- * once its card has stayed in place this long, like the input delay of browser permission prompts.
- * Keyboard answers are not delayed: focus stays on the card the viewer chose.
+ * the one they read (and a settled card above can move away, or shrink when it goes back to the
+ * terminal). A click on Allow, Allow always or Deny only counts once its card has stayed in place
+ * on the page this long, like the input delay of browser permission prompts. Keyboard answers are
+ * not delayed: focus stays on the card the viewer chose.
  */
 export const ANSWER_DELAY_MS = 1000;
 
@@ -37,25 +42,83 @@ export function answerReady(armedAt, now) {
 }
 
 /**
- * Restarts the answer delay when a card appears or changes place in the list: its buttons read as
- * unavailable (aria-disabled, not disabled, so focus is never lost) until the delay is over.
+ * Restarts the answer delay when a card appears or changes place in the list.
  * @param {any} p the card's parts
  * @param {number} index its place in the list now
  */
 function armCard(p, index) {
   if (p.index === index) return;
   p.index = index;
+  restartDelay(p);
+}
+
+/**
+ * Starts a card's answer delay over: its buttons read as unavailable (aria-disabled, not
+ * disabled, so focus is never lost) until the delay is over.
+ * @param {any} p the card's parts
+ */
+function restartDelay(p) {
   p.armedAt = performance.now();
-  for (const button of [p.allow, p.deny]) setAttr(button, 'aria-disabled', 'true');
+  for (const button of [p.allow, p.always, p.deny]) setAttr(button, 'aria-disabled', 'true');
   clearTimeout(p.armTimer);
   p.armTimer = setTimeout(() => {
-    for (const button of [p.allow, p.deny]) setAttr(button, 'aria-disabled', null);
+    for (const button of [p.allow, p.always, p.deny]) setAttr(button, 'aria-disabled', null);
   }, ANSWER_DELAY_MS);
 }
 
 /**
- * Whether a click on Allow / Deny counts. event.detail is 0 for Enter / Space: keyboard answers go
- * to the focused card, so only pointer clicks wait for the delay.
+ * Restarts a card's answer delay whenever it moves on the page, whatever moved it: a card above
+ * that was answered or went back to the terminal (its buttons and countdown hide), a hint, a card
+ * added or removed, or the panel shown again after requests arrived while it was hidden. Its place
+ * in the list stays the same in all of these. A ResizeObserver reports after layout and before
+ * paint, so a card is armed before it shows in its new place. The side boards sliding back on
+ * screen (they were put away, not hidden) move no card in its panel: `restartAll` is for that.
+ * @param {HTMLElement} list
+ * @param {WeakMap<HTMLElement, any>} parts
+ */
+function watchMoves(list, parts) {
+  /** @type {Set<HTMLElement>} */
+  const watched = new Set();
+  // A hidden panel has no layout: its cards are nowhere, so showing it moves even the first one.
+  const topOf = (/** @type {HTMLElement} */ item) => (item.offsetParent ? item.offsetTop : -1);
+  const watcher = new ResizeObserver(() => {
+    const items = /** @type {HTMLElement[]} */ ([...list.children]);
+    // Every position is read before any card is armed again, so the page is laid out only once.
+    const tops = items.map(topOf);
+    items.forEach((item, i) => {
+      const p = parts.get(item);
+      if (!p || p.top === tops[i]) return;
+      p.top = tops[i];
+      restartDelay(p);
+    });
+  });
+  return {
+    /** @param {HTMLElement} item a new card */
+    watch(item) {
+      watched.add(item);
+      watcher.observe(item);
+    },
+    /** Stops watching the cards that left the list. */
+    sweep() {
+      for (const item of watched) {
+        if (item.isConnected) continue;
+        watched.delete(item);
+        watcher.unobserve(item);
+      }
+    },
+    /** Starts every card's delay over: what the panel shows is new to the viewer. */
+    restartAll() {
+      for (const item of list.children) {
+        const p = parts.get(/** @type {HTMLElement} */ (item));
+        if (p) restartDelay(p);
+      }
+    },
+  };
+}
+
+/**
+ * Whether a click on Allow, Allow always or Deny counts. event.detail is 0 for Enter / Space:
+ * keyboard answers go to the focused card, so only pointer clicks wait for the delay.
  * @param {MouseEvent} event
  * @param {any} p the card's parts
  */
@@ -71,8 +134,10 @@ function clickCounts(event, p) {
 export function resultText(approval, mode) {
   const where = approval.decidedBy === 'terminal' ? 'in the terminal' : 'from the town';
   switch (approval.status) {
-    case 'allowed':
-      return `Allowed ${where}`;
+    case 'allowed': {
+      const saved = savedText(approval);
+      return saved ? `Allowed; asked Claude Code to save ${saved}` : `Allowed ${where}`;
+    }
     case 'denied':
       return approval.message ? `Denied ${where}: “${approval.message}”` : `Denied ${where}`;
     case 'expired':
@@ -101,6 +166,8 @@ function buildCard(id, approvalId) {
   const crew = h('span', { class: 'hud-approval__crew' });
   const tool = h('code', { class: 'hud-approval__tool hud-mono' });
   const detail = h('code', { class: 'hud-approval__detail hud-mono', id: `${id}-detail` });
+  // What the request cannot say that allowing it grants (a Codex command may leave its sandbox).
+  const grants = h('p', { class: 'hud-approval__grants', id: `${id}-grants`, 'data-testid': 'approval-grants' });
   const changeNote = h('p', { class: 'hud-approval__change-note' });
   const changeBody = h('div', { class: 'hud-approval__change-body' });
   const change = h('div', { class: 'hud-approval__change', 'data-testid': 'approval-change' }, changeNote, changeBody);
@@ -111,14 +178,76 @@ function buildCard(id, approvalId) {
   const timer = h('div', { class: 'hud-approval__timer' }, h('span', { class: 'hud-approval__track', 'aria-hidden': 'true' }, bar), countdown);
   const allow = h('button', { type: 'button', class: 'hud-btn hud-btn--allow', 'data-testid': 'approve' }, icon('check', { size: 18 }), 'Allow', kbd('A'));
   const deny = h('button', { type: 'button', class: 'hud-btn hud-btn--deny', 'data-testid': 'deny' }, icon('cross', { size: 18 }), 'Deny', kbd('D'));
-  const actions = h('div', { class: 'hud-approval__actions' }, allow, deny);
+  const { alwaysRow, always, alwaysNote } = buildAlways(id);
+  const actions = h('div', { class: 'hud-approval__actions' }, allow, deny, alwaysRow);
   const terminal = h('p', { class: 'hud-approval__terminal' }, icon('terminal', { size: 16 }), h('span', { text: 'Answer in your terminal.' }));
+  const hint = h('p', { class: 'hud-approval__hint', 'data-testid': 'approval-hint' });
   const result = h('p', { class: 'hud-approval__result' });
-  const card = h('article', { class: 'hud-approval', 'data-testid': 'approval-card', 'data-approval-id': approvalId, 'aria-labelledby': `${id}-who`, 'aria-describedby': `${id}-detail` },
+  const card = h('article', { class: 'hud-approval', 'data-testid': 'approval-card', 'data-approval-id': approvalId, 'aria-labelledby': `${id}-who`, 'aria-describedby': `${id}-detail ${id}-grants` },
     h('header', { class: 'hud-approval__head' }, mark, h('div', {}, who, h('p', { class: 'hud-approval__meta' }, crew, tool))),
-    h('pre', { class: 'hud-approval__code' }, detail), change, timer, reasonRow, actions, terminal, result);
+    h('pre', { class: 'hud-approval__code' }, detail), grants, change, timer, reasonRow, actions, terminal, hint, result);
   const item = h('li', { class: 'hud-approvals__item' }, card);
-  return { item, parts: { mark, who, crew, tool, detail, change, changeNote, changeBody, changeKey: '', reason, reasonRow, timer, bar, countdown, actions, allow, deny, terminal, result, card, index: -1, armedAt: 0, armTimer: 0 } };
+  const parts = { mark, who, crew, tool, detail, grants, change, changeNote, changeBody, changeKey: '', reason, reasonRow, timer, bar, countdown, actions, allow, deny,
+    always, alwaysRow, alwaysNote, offer: null, offerKey: '', terminal, hint, hintKey: '', result, card, index: -1, armedAt: 0, armTimer: 0 };
+  return { item, parts };
+}
+
+/**
+ * "Allow always", on a row of its own under Allow and Deny: first the line that names the rule it
+ * saves, what that allows and where (the button's description), then, set apart, the button.
+ * @param {string} id prefix for the ids the card's aria attributes point at
+ */
+function buildAlways(id) {
+  const alwaysNote = h('p', { class: 'hud-approval__always-note', id: `${id}-always`, 'data-testid': 'approve-always-rule' });
+  const always = h('button', { type: 'button', class: 'hud-btn hud-btn--always', 'data-testid': 'approve-always', 'aria-describedby': `${id}-always` }, icon('key', { size: 18 }), 'Allow always');
+  return { alwaysRow: h('div', { class: 'hud-approval__always' }, alwaysNote, always), always, alwaysNote };
+}
+
+/**
+ * The "Allow always" row on a card that can be answered here. The rule shown is the one a click
+ * saves: both come from `p.offer`, set here.
+ * @param {any} p the card's parts
+ * @param {Approval} approval
+ * @param {boolean} busy an answer is being sent
+ */
+function showOffer(p, approval, busy) {
+  p.offer = approval.status === 'pending' && approval.held ? offeredSuggestion(approval) : null;
+  // The row is about to disappear under keyboard focus: keep it on the card.
+  if (!p.offer && p.alwaysRow.contains(document.activeElement)) p.card.focus();
+  setHidden(p.alwaysRow, !p.offer);
+  p.always.disabled = busy;
+  // A request's offer never changes, so its line is written once.
+  const key = p.offer ? `${approval.id} ${p.offer.index}` : '';
+  if (!p.offer || p.offerKey === key) return;
+  p.offerKey = key;
+  p.alwaysNote.replaceChildren(...alwaysLine(p.offer).map((part) => ('code' in part ? h('code', { class: 'hud-mono', text: part.code }) : part.text)));
+}
+
+/**
+ * The card's hint, worked out when the request arrives and again only when it goes to the
+ * terminal or is answered: a hint that came and went while the viewer reads would move the cards
+ * below it under the pointer.
+ * @param {any} p the card's parts
+ * @param {Approval} approval
+ * @param {StoreState} state
+ */
+function showHint(p, approval, state) {
+  const key = `${approval.id} ${approval.status} ${approval.held}`;
+  if (p.hintKey === key) return;
+  p.hintKey = key;
+  const hint = approvalHint(approval, state.approvals, Date.now());
+  setText(p.hint, hint);
+  setHidden(p.hint, !hint);
+}
+
+/**
+ * What the announcer says once an answer is on its way.
+ * @param {'allow'|'deny'} decision
+ * @param {number|undefined} always
+ */
+function sentWords(decision, always) {
+  if (decision === 'deny') return 'Denied.';
+  return always === undefined ? 'Allowed.' : 'Allowed, and asked to save the rule.';
 }
 
 /**
@@ -130,12 +259,14 @@ function buildCard(id, approvalId) {
 function describeRequest(p, approval, state) {
   const session = findSession(state, approval.sessionId);
   const agent = state.agents[approvalAgentKey(approval)];
-  const { action, detail } = describeApproval(approval, { exact: true });
+  const { action, detail, note = '' } = describeApproval(approval, { exact: true });
   updateRoundel(p.mark, crewNumber(state, approval.sessionId), session?.color);
   setText(p.who, `${agent?.name ?? 'An agent'} wants to ${action}`);
   setText(p.crew, session ? `in ${session.project}` : '');
   setText(p.tool, approval.toolName || 'Tool');
   setText(p.detail, detail || approval.toolName);
+  setText(p.grants, note);
+  setHidden(p.grants, !note);
   showChange(p, approval);
 }
 
@@ -153,7 +284,7 @@ function showChange(p, approval) {
     p.changeBody.replaceChildren();
     return;
   }
-  const { added, removed } = diffStats(change.hunks);
+  const { added, removed } = diffStats(change.hunks, { exact: true });
   setText(p.changeNote, `${change.note}: ${added} ${added === 1 ? 'line' : 'lines'} added, ${removed} removed`);
   p.changeBody.replaceChildren(...change.hunks.map((hunk, index) => diffView(hunk, { index, count: change.hunks.length, exact: true, compact: true })));
 }
@@ -171,21 +302,23 @@ export function createApprovalsPanel(ctx) {
   const sending = new Map();
   /** @type {WeakMap<HTMLElement, any>} */
   const parts = new WeakMap();
+  const moves = watchMoves(list, parts);
 
   /**
    * @param {Approval} approval
    * @param {'allow'|'deny'} decision
    * @param {string} [reason] sent with a denial only
+   * @param {number} [always] with an allow: the index of the suggestion to save
    */
-  function decide(approval, decision, reason = '') {
+  function decide(approval, decision, reason = '', always = undefined) {
     if (sending.has(approval.id) || approval.status !== 'pending' || !approval.held) return;
     const message = decision === 'deny' ? reason.trim().slice(0, MAX_REASON_CHARS) : '';
-    if (!ctx.controls.decide(approval.id, decision, message || undefined)) {
+    if (!ctx.controls.decide(approval.id, decision, message || undefined, always)) {
       ctx.toasts.show({ tone: 'error', icon: 'warning', title: 'Not connected to Andary', body: 'Answer this request in your terminal.' });
       return;
     }
     sending.set(approval.id, decision);
-    ctx.announcer.polite(decision === 'allow' ? 'Allowed.' : 'Denied.');
+    ctx.announcer.polite(sentWords(decision, always));
     ctx.refresh();
   }
 
@@ -195,7 +328,9 @@ export function createApprovalsPanel(ctx) {
   function createCard(first) {
     const { item, parts: p } = buildCard(`hud-approval-${++cards}`, first.id);
     parts.set(item, p);
+    moves.watch(item);
     p.allow.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'allow'));
+    p.always.addEventListener('click', (event) => clickCounts(event, p) && p.offer && decide(p.approval, 'allow', '', p.offer.index));
     p.deny.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'deny', p.reason.value));
     // Enter in the reason field denies with that reason; typing there never answers by itself.
     p.reason.addEventListener('keydown', (event) => {
@@ -225,6 +360,8 @@ export function createApprovalsPanel(ctx) {
     if (approval.status !== 'pending') sending.delete(approval.id);
     describeRequest(p, approval, state);
     showAnswerState(p, approval);
+    showOffer(p, approval, sending.has(approval.id));
+    showHint(p, approval, state);
     tickCard(item, Date.now());
   }
 
@@ -272,6 +409,7 @@ export function createApprovalsPanel(ctx) {
   function render(state) {
     const shown = state.approvals.slice(0, MAX_CARDS);
     renderList(list, shown, (approval) => approval.id, createCard, (item, approval, index) => updateCard(item, approval, state, index));
+    moves.sweep();
     setHidden(empty, shown.some((approval) => approval.status === 'pending'));
     renderNote();
   }
@@ -294,12 +432,30 @@ export function createApprovalsPanel(ctx) {
     for (const item of list.children) tickCard(/** @type {HTMLElement} */ (item), now);
   }
 
-  /** Focuses the first card waiting for an answer, if any. */
-  function focusFirstPending() {
-    const card = /** @type {HTMLElement|null} */ (list.querySelector('.hud-approval[data-status="pending"][tabindex="0"]'));
-    card?.focus();
-    return Boolean(card);
-  }
+  return {
+    el,
+    render,
+    tick,
+    /** Focuses the first card waiting for an answer, if any. */
+    focusFirstPending: () => focusCard(list, null),
+    /** One request's card (from "need you"); the first pending one if it is gone. @param {string} id */
+    focusApproval: (id) => focusCard(list, id),
+    /** The side boards came back on screen: no card takes a click at once. */
+    shown: () => moves.restartAll(),
+  };
+}
 
-  return { el, render, tick, focusFirstPending };
+/**
+ * Focuses a request's card, or the first pending one.
+ * @param {HTMLElement} list
+ * @param {string|null} id
+ * @returns {boolean} whether a card took the focus
+ */
+function focusCard(list, id) {
+  const wanted = id ? list.querySelector(`.hud-approval[data-approval-id="${CSS.escape(id)}"]`) : null;
+  // A card asked for by name may be far down the list: bring it just into view, then focus it.
+  wanted?.scrollIntoView({ block: 'nearest' });
+  const card = /** @type {HTMLElement|null} */ (wanted ?? list.querySelector('.hud-approval[data-status="pending"][tabindex="0"]'));
+  card?.focus();
+  return Boolean(card);
 }

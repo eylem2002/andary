@@ -59,6 +59,8 @@ export const NO_SESSION = 'unknown';
  * @property {CommandKind|null} commandKind  what a shell command does, for reactions/achievements
  * @property {string|null} mcpServer
  * @property {string|null} file        raw file path the tool touches, if any
+ * @property {string|null} callKey     the server's key for the call's input (andary_key), if any
+ * @property {string|null} root        the top of the hook folder's work tree, found on disk by the server (andary_root), if any
  */
 
 /** @type {Readonly<Record<string, TownEventKind>>} */
@@ -84,7 +86,12 @@ const KIND_BY_HOOK = Object.freeze({
   PostModelSwitch: 'model.switch',
 });
 
+/** The hook each town event kind came from (core/dialogs.js reads hooks by name). */
+export const HOOK_BY_KIND = Object.freeze(Object.fromEntries(Object.entries(KIND_BY_HOOK).map(([hook, kind]) => [kind, hook])));
+
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
+/** A failure's text is kept this far (the server cuts every string there too). */
+const MAX_ERROR_TEXT = 2000;
 
 // ---------------------------------------------------------------------------------------------
 // Per-kind data.
@@ -110,6 +117,10 @@ function toolData(p, cwd) {
     commandKind: command ? classifyCommand(command) : null,
     mcpServer: str(p.mcp_server) || mcpServerOf(tool),
     file: str(input.file_path ?? input.notebook_path) || null,
+    // The server's key for this call's input, read before sanitising cut anything (§4.6).
+    callKey: str(p.andary_key) || null,
+    // Where the hook folder's work tree starts, as the server found it on disk (§4.6).
+    root: str(p.andary_root) || null,
   };
 }
 
@@ -126,6 +137,8 @@ function failData(p, cwd) {
   return {
     ...data,
     error,
+    // Every line, for the stuck rules (loops.js): the first line is often only `Exit code 1`.
+    errorText: clip(textOf(p.error), MAX_ERROR_TEXT),
     isInterrupt,
     errorKind: classifyError(error, isInterrupt, data.commandKind),
     durationMs: finite(p.duration_ms),
@@ -182,6 +195,8 @@ const DATA = Object.freeze({
   }),
   'turn.stop': (p) => ({
     lastMessage: lastMessageOf(p),
+    // Codex's interrupt arrives as an interrupted Stop.
+    interrupted: str(p.stop_reason) === 'interrupted',
     stopHookActive: p.stop_hook_active === true,
     backgroundTasks: listOf(p.background_tasks),
     sessionCrons: listOf(p.session_crons),

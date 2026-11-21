@@ -180,6 +180,46 @@ describe('director: crews arrive, work and leave', () => {
     assert.deepEqual(calls('weather').at(-1), ['weather', MAIN, null]);
   });
 
+  it('an agent that seems stuck has a storm over it until the alert ends, whatever else works meanwhile', async () => {
+    const { send, ready, calls, store, clock, world } = setup();
+    await ready();
+    for (const id of ['t1', 't2']) {
+      await send(pre('Bash', { command: 'npm test' }, id));
+      await send(fail('Bash', { command: 'npm test' }, id, 'Exit code 1'));
+      await clock.advance(1500);
+    }
+    assert.deepEqual(calls('weather').at(-1), ['weather', MAIN, 'rain'], 'two red runs: rain, not yet stuck');
+    await send(pre('Bash', { command: 'npm test' }, 't3'));
+    await send(fail('Bash', { command: 'npm test' }, 't3', 'Exit code 1'));
+    assert.ok(store.getState().agents[MAIN].stuck);
+    assert.deepEqual(calls('weather').at(-1), ['weather', MAIN, 'storm']);
+    await clock.advance(1500);
+    world.clear();
+    await send(pre('Bash', { command: 'ls' }, 'l1'));
+    await send(post('Bash', { command: 'ls' }, 'l1'));
+    await clock.advance(1500);
+    assert.ok(calls('effect').some((c) => c[1] === 'check' && c[2].agent === MAIN), 'the success was shown');
+    assert.deepEqual(calls('weather'), [], 'another step working is no way out: the storm stays');
+    // A helper's edit in the same folder is progress: the lead's alert ends, and its storm with it.
+    const helper = { agent: { id: 'h1', type: 'general-purpose' } };
+    await send(pre('Edit', { file_path: `${CWD}/src/a.ts` }, 'e1', helper));
+    await send(post('Edit', { file_path: `${CWD}/src/a.ts`, old_string: 'a', new_string: 'b' }, 'e1', helper));
+    assert.equal(store.getState().agents[MAIN].stuck, null);
+    assert.deepEqual(calls('weather').filter((c) => c[1] === MAIN).at(-1), ['weather', MAIN, null]);
+  });
+
+  it("a failed turn's storm outlasts the stuck alert its end cleared", async () => {
+    const { send, ready, calls, store } = setup();
+    await ready();
+    for (const id of ['t1', 't2', 't3']) await send(fail('Bash', { command: 'npm test' }, id, 'Exit code 1'));
+    assert.deepEqual(calls('weather').at(-1), ['weather', MAIN, 'storm']);
+    await send(FIXTURES.StopFailure);
+    assert.equal(store.getState().agents[MAIN].stuck, null, 'the turn ended');
+    assert.deepEqual(calls('weather').at(-1), ['weather', MAIN, 'storm'], 'the turn failing has its own storm');
+    await send(FIXTURES.UserPromptSubmit);
+    assert.deepEqual(calls('weather').at(-1), ['weather', MAIN, null]);
+  });
+
   it('turn over: celebrate, then coffee at the café, then a nap after two idle minutes', async () => {
     const { send, ready, calls, says, clock, world } = setup();
     await ready();
@@ -382,6 +422,22 @@ describe('director: permits, compaction, models, board, shipping', () => {
     assert.deepEqual(calls('setStatus').at(-1), ['setStatus', MAIN, 'working']);
     await clock.advance(200_000);
     assert.ok(!says().some((s) => s.startsWith('[wait.')), 'no nagging once answered');
+  });
+
+  it('an expiry reacts once: the late proof that sends it again plays nothing', async () => {
+    const { send, ready, store, says, calls, clock } = setup();
+    await ready();
+    await send(FIXTURES.PermissionRequest);
+    await clock.advance(2000);
+    const approval = { id: 'a1', status: 'pending', held: true, sessionId: SESSION, agentId: null, toolName: 'Bash', toolInput: {}, createdAt: 1, expiresAt: null };
+    store.setApproval(/** @type {any} */ (approval));
+    store.setApproval(/** @type {any} */ ({ ...approval, status: 'expired', held: false }));
+    await clock.advance(5000);
+    const expiries = () => [says().filter((s) => s === '[permission.expired]').length, calls('emote').filter((c) => c[2] === '⌛').length];
+    assert.deepEqual(expiries(), [1, 1]);
+    store.setApproval(/** @type {any} */ ({ ...approval, status: 'expired', held: false, proof: 'ran' }));
+    await clock.advance(5000);
+    assert.deepEqual(expiries(), [1, 1], 'no second ⌛ or quip after the tool ran');
   });
 
   it('compaction: a held visit to the spa, steam, then a bright idea', async () => {

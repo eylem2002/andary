@@ -55,6 +55,14 @@ test('a module the server shares may only bring other shared modules with it', (
   assert.deepEqual(found.map((v) => `${v.file} ${v.spec}`), ['public/js/core/text.js ./catalog.js']);
 });
 
+test('the server runs the stuck rules the town runs (core/loops.js), and nothing they do not bring', () => {
+  const found = violations([
+    { file: 'server/notify.mjs', text: "import { createLoops } from '../public/js/core/loops.js';" },
+    { file: 'public/js/core/loops.js', text: "import { clip } from './text.js';\nimport { describeTool } from './catalog.js';" },
+  ]);
+  assert.deepEqual(found.map((v) => `${v.file} ${v.spec}`), ['public/js/core/loops.js ./catalog.js']);
+});
+
 test('the page load is read in page.js: the HUD and the town may read it, core may not', () => {
   const found = violations([
     { file: 'public/js/ui/hud.js', text: "import { LOOK } from '../page.js';" },

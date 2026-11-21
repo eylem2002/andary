@@ -9,11 +9,13 @@ const MAX_LINES = 400;
 /**
  * @param {string} before
  * @param {string} after
+ * @param {{ exact?: boolean }} [options]  exact: only a newline ends a line, so a carriage return
+ *   stays in its line and an approval card can show it (the file gets it, not a line break)
  * @returns {DiffLine[]}
  */
-export function lineDiff(before, after) {
-  const a = splitLines(before);
-  const b = splitLines(after);
+export function lineDiff(before, after, { exact = false } = {}) {
+  const a = splitLines(before, exact);
+  const b = splitLines(after, exact);
   if (a.length > MAX_LINES || b.length > MAX_LINES) {
     return [...a.map((text) => ({ op: /** @type {const} */ ('del'), text })), ...b.map((text) => ({ op: /** @type {const} */ ('add'), text }))];
   }
@@ -46,10 +48,10 @@ export function lineDiff(before, after) {
   return out;
 }
 
-/** @param {string} text */
-function splitLines(text) {
+/** @param {string} text @param {boolean} exact */
+function splitLines(text, exact) {
   if (!text) return [];
-  const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+  const lines = (exact ? String(text) : String(text).replace(/\r\n?/g, '\n')).split('\n');
   if (lines.at(-1) === '') lines.pop();
   return lines;
 }
@@ -57,12 +59,13 @@ function splitLines(text) {
 /**
  * How many lines a change adds and removes, over all its hunks.
  * @param {{ before: string, after: string }[]} hunks
+ * @param {{ exact?: boolean }} [options]  as lineDiff's
  */
-export function diffStats(hunks) {
+export function diffStats(hunks, options = {}) {
   let added = 0;
   let removed = 0;
   for (const hunk of hunks) {
-    for (const line of lineDiff(hunk.before, hunk.after)) {
+    for (const line of lineDiff(hunk.before, hunk.after, options)) {
       if (line.op === 'add') added += 1;
       else if (line.op === 'del') removed += 1;
     }

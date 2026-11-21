@@ -57,7 +57,7 @@ describe('normalize: one TownEvent per hook (CONTRACTS §4.2 → §5)', () => {
     assert.equal(event.agentKey, MAIN);
     assert.equal(event.agentId, null);
     assert.equal(event.agentType, null);
-    assert.deepEqual(event.data, { lastMessage: 'All done.', stopHookActive: false, backgroundTasks: [], sessionCrons: [] });
+    assert.deepEqual(event.data, { lastMessage: 'All done.', interrupted: false, stopHookActive: false, backgroundTasks: [], sessionCrons: [] });
   });
 
   it('attributes subagent events to the subagent, stripping the agent- prefix', () => {

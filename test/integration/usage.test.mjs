@@ -36,6 +36,37 @@ describe('Token usage from transcripts', () => {
     await closeBrowser(later);
   });
 
+  it('sends the context in use with the totals, drops it at a compaction, and has it in hello', async () => {
+    const project = join(dirname(town.home), 'claude', 'projects', '-work-demo-app');
+    mkdirSync(project, { recursive: true });
+    const transcript = join(project, 'session-c.jsonl');
+    const message = (/** @type {string} */ id, /** @type {Record<string, number>} */ usage, /** @type {string} */ timestamp) =>
+      `${JSON.stringify({ type: 'assistant', isSidechain: false, sessionId: 'session-c', timestamp, requestId: `req_${id}`, message: { id, role: 'assistant', model: 'claude-opus-5-5', usage } })}\n`;
+    const written = new Date(Date.now() - 60_000).toISOString();
+    writeFileSync(transcript, message('msg_c1', { input_tokens: 4, cache_creation_input_tokens: 1520, cache_read_input_tokens: 180_816, output_tokens: 312 }, written));
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    const hook = (/** @type {string} */ name, /** @type {Record<string, unknown>} */ extra = {}) => postHook(town, hookPayload(name, { session_id: 'session-c', transcript_path: transcript, ...extra }));
+    await hook('PostToolUse', { tool_name: 'Bash', tool_use_id: 'tu-1', tool_input: { command: 'npm test' }, tool_response: {} });
+    const first = await waitForMessage(browser, (m) => m?.t === 'usage' && m.u.sessionId === 'session-c', 5000);
+    assert.deepEqual(first.u.context, { tokens: 182_340, at: Date.parse(written) });
+    assert.equal(first.u.compactedAt, null);
+    // A compaction: unknown at once, before the next read of the transcript, and when it was.
+    const before = Date.now();
+    await hook('PostCompact', { trigger: 'manual', compact_summary: 'Fixed the flaky test.' });
+    const compacted = await waitForMessage(browser, (m) => m?.t === 'usage' && m.u.sessionId === 'session-c' && m.u.context === null, 2000);
+    assert.ok(compacted.u.compactedAt >= before && compacted.u.compactedAt <= Date.now());
+    await new Promise((r) => setTimeout(r, 20));
+    writeFileSync(transcript, message('msg_c2', { input_tokens: 9, cache_creation_input_tokens: 23_000, cache_read_input_tokens: 8000, output_tokens: 40 }, new Date().toISOString()), { flag: 'a' });
+    await hook('Stop', { last_assistant_message: 'done', stop_hook_active: false });
+    await waitForMessage(browser, (m) => m?.t === 'usage' && m.u.context?.tokens === 31_009, 5000);
+    await closeBrowser(browser);
+    const later = await connectBrowser(town);
+    const hello = await waitForMessage(later, (m) => m?.t === 'hello');
+    assert.equal(hello.usage.agents.find((/** @type {any} */ r) => r.sessionId === 'session-c')?.context?.tokens, 31_009);
+    await closeBrowser(later);
+  });
+
   it('ignores a transcript outside Claude Code\'s projects folder', async () => {
     const outside = join(town.home, '..', 'elsewhere.jsonl');
     writeFileSync(outside, `${JSON.stringify({ type: 'assistant', message: { id: 'x', model: 'claude-opus-5-5', usage: { input_tokens: 5 } } })}\n`);

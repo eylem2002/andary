@@ -1,11 +1,14 @@
 // The agent inspector: everything known about the selected agent — role, crew, status, what it is
-// doing, its brief, which tools it used how often, recent files and activity, its last message.
+// doing (or waiting for you on, or why it seems stuck, and since when; and a note when another
+// agent changed a file it edits), its brief, its context in use and what it cost, which tools it
+// used how often, recent files and activity, its last message.
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { doingText, formatAgo, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
 import { changeSummary } from './changes.js';
-import { usageSentence } from './usage.js';
+import { contextSentence, hasCounted, liveContext, usageSentence } from './usage.js';
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
+import { isNote, waitedText } from './needs-you.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -36,17 +39,19 @@ export function createInspector(ctx) {
   const chip = statusChip('idle', { labelled: true });
   const since = h('span', { class: 'hud-inspector__since' });
   const now = h('p', { class: 'hud-inspector__now' });
+  const need = createNeedLine(ctx, name);
+  const note = h('p', { class: 'hud-inspector__note', 'data-testid': 'inspector-note', hidden: true });
   const brief = h('p', { class: 'hud-inspector__brief' });
   const tools = h('ul', { class: 'hud-bars' });
   const files = h('ul', { class: 'hud-files' });
   const changes = h('ul', { class: 'hud-changes', 'data-testid': 'agent-changes' });
   const recent = h('ol', { class: 'hud-recent' });
   const message = h('p', { class: 'hud-inspector__message' });
-  const usage = h('p', { class: 'hud-inspector__usage', 'data-testid': 'agent-usage' });
+  const usage = createUsageLines();
   const sections = {
-    now: section('Now', now),
+    now: section('Now', h('div', {}, now, need.el, note)),
     brief: section('Brief', brief),
-    usage: section('Usage', usage),
+    usage: section('Usage', usage.el),
     tools: section('Tools used', tools),
     changes: section('Changes', changes),
     files: section('Recent files', files),
@@ -112,10 +117,14 @@ export function createInspector(ctx) {
     setText(role, `${roleLabel(agent)}${session ? ` in ${session.project}` : ''}`);
     updateStatusChip(chip, agent.status);
     const asking = state.approvals.find((approval) => approval.status === 'pending' && approvalAgentKey(approval) === agent.key);
+    const items = ctx.needsYou.items(state).filter((item) => item.agentKeys.includes(agent.key));
+    need.update(items.find((item) => !isNote(item)) ?? null);
+    // A note sits under what the agent does: the newest one.
+    const newest = items.filter(isNote).sort((a, b) => b.since - a.since)[0];
+    setText(note, newest?.text ?? '');
+    setHidden(note, !newest);
     renderSections(agent, session?.cwd, asking);
-    const spent = state.usage?.[agent.key];
-    setText(usage, spent ? usageSentence(spent) : '');
-    setHidden(sections.usage, !spent);
+    setHidden(sections.usage, !usage.update(state, agent.key, Date.now()));
     setAttr(follow, 'aria-pressed', String(ctx.view.follow));
     tick(Date.now());
   }
@@ -126,7 +135,7 @@ export function createInspector(ctx) {
    * @param {import('./types.js').Approval} [asking]
    */
   function renderSections(agent, cwd, asking) {
-    const doing = doingText(agent, asking);
+    const doing = need.item ? need.item.text : doingText(agent, asking);
     setText(now, doing);
     now.classList.toggle('hud-mono', isCommandText(doing));
     setText(brief, agent.description ?? '');
@@ -154,6 +163,8 @@ export function createInspector(ctx) {
     if (!agent) return;
     const end = agent.status === 'done' ? agent.lastActivity : nowMs;
     setText(since, `Started ${formatAgo(agent.startedAt, nowMs)}, on the job for ${formatDuration(end - agent.startedAt)}`);
+    need.tick(nowMs);
+    usage.tick(nowMs);
     for (const item of recent.children) {
       const time = item.querySelector('time');
       if (time) setText(time, formatAgo(Number(/** @type {HTMLElement} */ (item).dataset.ts), nowMs, { short: true }));
@@ -175,6 +186,80 @@ function changeItem(change, open) {
   button.setAttribute('aria-label', `Show changes to ${change.path}, ${changeSummary(change)}`);
   button.addEventListener('click', open);
   return h('li', {}, button);
+}
+
+/**
+ * Under the Now line while the agent waits for you or seems stuck: since when, and a Set aside
+ * button for a finished turn, a stop or a stuck alert.
+ * @param {HudContext} ctx
+ * @param {HTMLElement} focusAfter  where the keyboard goes when the button goes
+ */
+function createNeedLine(ctx, focusAfter) {
+  const waited = h('span', { class: 'hud-inspector__waited' });
+  const setAside = h('button', { type: 'button', class: 'hud-btn hud-btn--small', 'data-testid': 'inspector-dismiss' }, 'Set aside');
+  const el = h('p', { class: 'hud-inspector__need', hidden: true }, waited, setAside);
+  /** @type {import('../core/attention.js').AttentionItem|null} */
+  let item = null;
+  setAside.addEventListener('click', () => {
+    if (!item?.dismissable) return;
+    ctx.needsYou.dismiss(item.id);
+    focusAfter.focus();
+    ctx.announcer.polite(`Set aside: ${item.text}`);
+    ctx.refresh();
+  });
+  return {
+    el,
+    get item() {
+      return item;
+    },
+    /** @param {import('../core/attention.js').AttentionItem|null} next */
+    update(next) {
+      item = next;
+      setHidden(el, !item);
+      if (!item?.dismissable && document.activeElement === setAside) focusAfter.focus();
+      setHidden(setAside, !item?.dismissable);
+    },
+    /** @param {number} now */
+    tick(now) {
+      if (!item) return;
+      const { long } = waitedText(item, now);
+      setText(waited, long.charAt(0).toUpperCase() + long.slice(1));
+    },
+  };
+}
+
+/**
+ * The Usage section's lines: the context in use while it can still be true, or that it was
+ * compacted, with how long ago (that ages, so it is redrawn every second), then what the agent
+ * has used and cost so far.
+ */
+function createUsageLines() {
+  const context = h('p', { class: 'hud-inspector__context', 'data-testid': 'agent-context', hidden: true });
+  const totals = h('p', { class: 'hud-inspector__usage', 'data-testid': 'agent-usage' });
+  /** @type {import('./usage.js').ContextView|null} */
+  let reading = null;
+  /** @param {number} now */
+  const tick = (now) => {
+    if (reading) setText(context, contextSentence(reading, now));
+  };
+  return {
+    el: h('div', { class: 'hud-inspector__lines' }, context, totals),
+    tick,
+    /**
+     * @param {StoreState} state @param {string} agentKey @param {number} now
+     * @returns {boolean} whether there is anything to show
+     */
+    update(state, agentKey, now) {
+      const spent = state.usage?.[agentKey];
+      const sentence = spent && hasCounted(spent) ? usageSentence(spent) : '';
+      setText(totals, sentence);
+      setHidden(totals, !sentence);
+      reading = liveContext(state, agentKey);
+      setHidden(context, !reading);
+      tick(now);
+      return Boolean(sentence || reading);
+    },
+  };
 }
 
 /** @param {string} title @param {HTMLElement} content */

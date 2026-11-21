@@ -40,6 +40,9 @@ const KIND_ICONS = {
   'message.send': 'mail',
   approval: 'shield',
   achievement: 'medal',
+  stuck: 'repeat',
+  // Two agents on the same files (core/conflicts.js).
+  conflict: 'users',
 };
 
 /** The store marks log lines with emoji (a building's sign emoji for tool calls). */

@@ -17,8 +17,9 @@ import { HOME } from './corpus.js';
  * @property {import('./random.js').Random} rng
  * @property {(ms: number) => Promise<void>} sleep          story milliseconds
  * @property {(payload: Record<string, any>) => Promise<unknown>} send
- * @property {(payload: Record<string, any>) => Promise<'allow'|'deny'|'none'>} ask
+ * @property {(payload: Record<string, any>) => Promise<'allow'|'always'|'deny'|'none'>} ask  'always': allowed, rule saved
  * @property {{helpers: number}} census                      live subagents + teammates, all crews
+ * @property {Set<string>} savedRules                         rules allowed always, per project ("<project> <rule>")
  */
 
 /**
@@ -243,19 +244,28 @@ export class Crew {
 
   /**
    * PermissionRequest carries no tool_use_id. Without a decision from the town the terminal
-   * asks instead (Notification), and the simulated user approves there after a moment.
+   * asks instead (Notification), and the simulated user approves there after a moment. A rule
+   * allowed always is kept for the project (its suggestion's localSettings), and Claude Code does
+   * not ask for it again.
    * @param {SimAgent|null} agent
    * @param {string} name
    * @param {Record<string, any>} input
+   * @returns {Promise<'allow'|'deny'>}
    */
   async askPermission(agent, name, input) {
     const rule = name === 'Bash' ? input.command : name;
+    const saved = `${this.project.name} ${name}(${rule})`;
+    if (this.sim.savedRules.has(saved)) return 'allow';
     const decision = await this.sim.ask({
       ...this.base('PermissionRequest', agent),
       tool_name: name,
       tool_input: input,
       permission_suggestions: [{ type: 'addRules', rules: [{ toolName: name, ruleContent: rule }], behavior: 'allow', destination: 'localSettings' }],
     });
+    if (decision === 'always') {
+      this.sim.savedRules.add(saved);
+      return 'allow';
+    }
     if (decision !== 'none') return decision;
     await this.notify('permission_prompt', `Claude needs your permission to use ${name}`, agent);
     await this.think(1.5, 4);

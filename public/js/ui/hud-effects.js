@@ -1,6 +1,7 @@
 // Side effects of store changes: toasts, sounds and announcements. Changes are queued as they
 // arrive and played once per rendered frame. Only fresh changes count: history replayed to a
 // late-joining browser renders in the panels but never toasts or rings.
+import { INTERACTIVE_TOOLS } from '../core/dialogs.js';
 import { describeApproval, truncate } from './format.js';
 import { approvalAgentKey, crewNumber, findSession } from './parts.js';
 
@@ -11,7 +12,8 @@ import { approvalAgentKey, crewNumber, findSession } from './parts.js';
 /** Events older than this are history: they render but don't toast. */
 export const FRESH_MS = 15_000;
 const MAX_QUEUED = 20;
-const MAX_TOASTS_PER_FRAME = 3;
+/** As many as the toast list shows (toasts.js MAX_VISIBLE): more in one frame would push each other out. */
+const MAX_TOASTS_PER_FRAME = 2;
 
 /**
  * @typedef {{ type: 'session', sessionId: string }
@@ -32,6 +34,8 @@ export function effectFor(change, seenApprovals, now) {
   if (change.type === 'approval') {
     const { approval } = change;
     if (approval.status !== 'pending' || seenApprovals.has(approval.id)) return null;
+    // A question or a plan is not a permission to grant: "needs you" tells of it in its words.
+    if (Object.hasOwn(INTERACTIVE_TOOLS, approval.toolName)) return null;
     seenApprovals.add(approval.id);
     return now - approval.createdAt < FRESH_MS * 4 ? { type: 'approval', approval } : null;
   }
@@ -89,7 +93,7 @@ function showToast(ctx, effect, state) {
   if (effect.type === 'session') return crewArrived(ctx, effect.sessionId, state);
   if (effect.type === 'approval') return approvalArrived(ctx, effect.approval, state);
   const { achievement } = effect;
-  ctx.toasts.show({ tone: 'achievement', icon: 'medal', title: achievement.title, body: achievement.description });
+  ctx.toasts.show({ tone: 'achievement', icon: 'medal', title: achievement.title, body: achievement.description, group: 'achievement' });
   ctx.sound.play('chime');
   ctx.announcer.polite(`Achievement unlocked: ${achievement.title}.`);
   return undefined;
@@ -112,6 +116,7 @@ function crewArrived(ctx, sessionId, state) {
   const number = crewNumber(state, session.id);
   ctx.toasts.show({
     tone: 'crew',
+    group: 'crew',
     number,
     color: session.color,
     title: `New crew in ${session.project}`,

@@ -102,6 +102,54 @@ describe('WebSocket protocol', () => {
     await closeBrowser(browser);
   });
 
+  it('says in hello when you were last away: never, in a town just started', async () => {
+    const browser = await connectBrowser(town);
+    const hello = await waitForMessage(browser, (m) => m?.t === 'hello');
+    assert.equal(hello.away, null);
+    await closeBrowser(browser);
+  });
+
+  it('answers { t: "digest", since } with what each crew did, to the browser that asked only', async () => {
+    const crew = (/** @type {string} */ name, /** @type {Record<string, unknown>} */ extra = {}) => hookPayload(name, { session_id: 'catch-up-crew', cwd: '/work/api-server', ...extra });
+    const edit = { file_path: '/work/api-server/src/app.ts', old_string: 'a', new_string: 'b' };
+    for (const event of [
+      crew('UserPromptSubmit', { prompt: 'Ship the fix' }),
+      crew('PreToolUse', { tool_name: 'Edit', tool_use_id: 'e1', tool_input: edit }),
+      crew('PostToolUse', { tool_name: 'Edit', tool_use_id: 'e1', tool_input: edit, tool_response: {} }),
+      crew('PostToolUse', { tool_name: 'Bash', tool_use_id: 'b1', tool_input: { command: 'npm test' }, tool_response: { stdout: 'ok' } }),
+      crew('PostToolUse', { tool_name: 'Bash', tool_use_id: 'b2', tool_input: { command: 'git commit -am "Fix" && git push' }, tool_response: {} }),
+      crew('Stop', { last_assistant_message: 'Fixed and pushed.' }),
+    ]) assert.equal((await postHook(town, event)).status, 200);
+    const asker = await connectBrowser(town);
+    const other = await connectBrowser(town);
+    await waitForMessage(other, (m) => m?.t === 'hello');
+    await waitForMessage(asker, (m) => m?.t === 'hello');
+    asker.send(JSON.stringify({ t: 'digest', since: 0 }));
+    const { d: digest } = await waitForMessage(asker, (m) => m?.t === 'digest');
+    assert.ok(digest.since <= digest.until && Math.abs(digest.until - Date.now()) < 5000, 'times on the server\'s clock');
+    const ours = digest.crews.find((/** @type {any} */ c) => c.sessionId === 'catch-up-crew');
+    assert.deepEqual(
+      { cwd: ours.cwd, turns: ours.turns, lastMessage: ours.lastMessage, tests: ours.tests, commits: ours.commits, pushes: ours.pushes, allPushed: ours.allPushed, files: ours.files, toolCalls: ours.toolCalls },
+      { cwd: '/work/api-server', turns: 1, lastMessage: 'Fixed and pushed.', tests: 'passed', commits: 1, pushes: 1, allPushed: true, files: 1, toolCalls: 1 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok(!other.messages.some((m) => m?.t === 'digest'), 'the other browser asked nothing');
+    await Promise.all([closeBrowser(asker), closeBrowser(other)]);
+  });
+
+  it('refuses a digest request without a time in milliseconds, and keeps the connection', async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    for (const since of ['yesterday', -1, null, true, '1700000000000']) browser.send(JSON.stringify({ t: 'digest', since }));
+    browser.send(JSON.stringify({ t: 'digest' }));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const errors = browser.messages.filter((m) => m?.t === 'error').map((m) => m.message);
+    assert.deepEqual(errors, Array(6).fill('digest.since must be a time in milliseconds'));
+    assert.ok(!browser.messages.some((m) => m?.t === 'digest'));
+    assert.ok(browser.isOpen);
+    await closeBrowser(browser);
+  });
+
   it('closes a browser that floods it with messages (1008)', async () => {
     const browser = await connectBrowser(town);
     await waitForMessage(browser, (m) => m?.t === 'hello');

@@ -3,7 +3,7 @@
 
 /**
  * @typedef {'follow'|'escape'|'rotate-left'|'rotate-right'|'zoom-in'|'zoom-out'|'reset-view'|
- *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|'director'|'toggle-panels'|'usage'|'leaderboard'|`crew-${number}`} ShortcutAction
+ *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|'director'|'toggle-panels'|'usage'|'leaderboard'|'place-names'|'needs-you'|'catch-up'|`crew-${number}`} ShortcutAction
  */
 
 /**
@@ -19,9 +19,12 @@ export const SHORTCUT_HELP = Object.freeze([
   { keys: ['+', '−'], label: 'Zoom in and out' },
   { keys: ['0'], label: 'Reset the view' },
   { keys: ['N'], label: 'Switch between day, sunset, night and the local clock' },
+  { keys: ['P'], label: 'Place names: on the buildings where they fit, always, or off' },
   { keys: ['M'], label: 'Sound on or off' },
   { keys: ['U'], label: 'Usage: tokens and estimated cost, today and the last 14 days' },
   { keys: ['L'], label: 'Leaderboard: the town\'s growth, records and the busiest agents' },
+  { keys: ['I'], label: 'Go to what needs you, most urgent first (again for the next one)' },
+  { keys: ['W'], label: 'Catch me up: what your crews did since you last looked' },
   { keys: ['A'], label: 'Go to approvals' },
   { keys: ['1', '9'], label: 'Jump to crew 1 to 9' },
   { keys: ['Space'], label: 'Pause or resume the demo', demoOnly: true },
@@ -54,6 +57,12 @@ const KEY_ACTIONS = {
   U: 'usage',
   l: 'leaderboard',
   L: 'leaderboard',
+  p: 'place-names',
+  P: 'place-names',
+  i: 'needs-you',
+  I: 'needs-you',
+  w: 'catch-up',
+  W: 'catch-up',
   '?': 'help',
 };
 

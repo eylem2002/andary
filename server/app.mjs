@@ -6,6 +6,8 @@ import { createApprovalBroker } from './approvals.mjs';
 import { createUsageTracker } from './usage.mjs';
 import { createProgress } from './progress.mjs';
 import { createNotifier } from './notify.mjs';
+import { createWorkTrees } from './work-trees.mjs';
+import { createTownDigest } from './digest.mjs';
 import { announceTeam, createHub, handleUpgrade } from './browsers.mjs';
 import { createTeamHost, createTeamRelay, lanAddresses, teamSecret } from './team.mjs';
 import { DEFAULT_APPROVAL_TIMEOUT_MS, DEFAULT_HOST, DEFAULT_PORT, LIMITS, PUBLIC_DIR, readVersion, resolveClaudeConfigDir, resolveHome } from './config.mjs';
@@ -27,6 +29,8 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {string} [publicDir]
  * @property {boolean} [remoteApprovals]
  * @property {string|null} [notifyUrl]    ntfy topic URL for phone notifications (null: off)
+ * @property {number} [notifyDelayMs]      how long a dialog's phone note waits (DIALOG_DELAY_MS); for tests, no CLI flag
+ * @property {number} [awayMs]             how long without you counts as away (AWAY_MS); for tests, no CLI flag
  * @property {string} [claudeDir]          Claude Code's config folder, for reading token usage from transcripts
  * @property {boolean} [team]              host a team town: teammates' Andarys may send their events here
  * @property {string[]} [teamHosts]        names teammates reach a team host by (a VPN name), besides its addresses
@@ -52,6 +56,8 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {ReturnType<typeof createUsageTracker>} usage
  * @property {ReturnType<typeof createProgress>} progress
  * @property {ReturnType<typeof createNotifier>} notifier
+ * @property {import('./work-trees.mjs').WorkTrees} [workTrees]  where local hooks' work trees start (andary_root)
+ * @property {ReturnType<typeof createTownDigest>} digest   what your crews did while you were away
  * @property {import('./browsers.mjs').Hub} hub
  * @property {ReturnType<typeof createTeamHost>|null} team    set on a team host
  * @property {ReturnType<typeof createTeamRelay>|null} relay  set when sharing to a team host
@@ -179,6 +185,9 @@ function createHttpServer(ctx, tls) {
  */
 function createContext(config, options) {
   const hub = createHub(LIMITS.wsClients);
+  const notifier = createNotifier({ url: options.notifyUrl ?? null, log: config.log, delayMs: options.notifyDelayMs });
+  // Your absences are yours: only signed-in browsers hear of them.
+  const digest = createTownDigest({ awayMs: options.awayMs, onAway: (away) => hub.broadcastOwners({ t: 'away', away }) });
   /** @type {TownContext} */
   const ctx = {
     version: readVersion(),
@@ -193,9 +202,16 @@ function createContext(config, options) {
       timeoutMs: config.approvalTimeoutMs,
       maxPending: LIMITS.pendingApprovals,
       maxSettled: LIMITS.settledApprovals,
-      onChange: (approval) => hub.broadcastOwners({ t: 'approval', a: approval }),
+      onChange: (approval) => {
+        hub.broadcastOwners({ t: 'approval', a: approval });
+        // Links a request to its dialog; one decided in the town needs no phone note.
+        notifier.approvalChanged(approval);
+        // A decision in the town is you being here, and an answer for the crew's catch-up.
+        digest.approvalChanged(approval);
+      },
     }),
     hub,
+    digest,
     team: options.team
       ? createTeamHost({
           secret: /** @type {string} */ (teamSecret(config.home)),
@@ -211,7 +227,8 @@ function createContext(config, options) {
       stateFile: config.writeState ? join(config.home, 'usage.json') : null,
       onChange: (record, days) => hub.broadcastOwners({ t: 'usage', u: record, days }),
     }),
-    notifier: createNotifier({ url: options.notifyUrl ?? null, log: config.log }),
+    notifier,
+    workTrees: createWorkTrees(),
     progress: createProgress({
       stateFile: config.writeState ? join(config.home, 'progress.json') : null,
       onChange: (progress) => hub.broadcast({ t: 'progress', p: progress }),
@@ -252,6 +269,9 @@ function listen(server, port, host) {
 async function stopServer(ctx, listener, config) {
   if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
   if (ctx.hostTimer) clearInterval(ctx.hostTimer);
+  // First, so no phone note goes out while the server stops: whoever stops it is at the computer.
+  ctx.notifier.dispose();
+  ctx.digest.dispose();
   ctx.broker.releaseAll();
   // Last events to the team host, but never hold up shutdown for long.
   if (ctx.relay) await Promise.race([ctx.relay.flush(), new Promise((resolve) => setTimeout(resolve, 1500).unref())]);

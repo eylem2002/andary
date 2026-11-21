@@ -1,5 +1,5 @@
 // Browsers connect over /ws (CONTRACTS §4.5). This module accepts them (after the Host, Origin and
-// sign-in checks), sends the hello snapshot, and handles their decide/settings/ping messages.
+// sign-in checks), sends the hello snapshot, and handles their decide/settings/digest/ping messages.
 // On a team host (§4.11) a browser is either the owner (signed in) or a teammate watching with
 // the view link: viewers get the town but not the owner's prompts, costs, settings or topic.
 import { WS_PROTOCOL, browserRole, offersAndaryProtocol } from './auth.mjs';
@@ -214,6 +214,8 @@ function attachBrowser(ctx, connection, role) {
     usage: owner ? ctx.usage.snapshot() : { agents: [], days: [] },
     progress: ctx.progress.snapshot(),
     notifyUrl: owner ? ctx.notifier.url : null,
+    // The latest time the owner was away: a page opened after one offers to catch up.
+    away: owner ? ctx.digest.away() : null,
   });
   const limiter = createTokenBucket({ ratePerSecond: LIMITS.wsMessagesPerSecond, burst: LIMITS.wsMessageBurst });
   connection.on('message', (text) => {
@@ -248,7 +250,7 @@ function handleBrowserMessage(ctx, connection, text) {
   }
   switch (message?.t) {
     case 'decide': {
-      const result = ctx.broker.decide(message.id, message.decision, message.message);
+      const result = ctx.broker.decide(message.id, message.decision, message.message, message.always);
       if (!result.ok) sendError(ctx, connection, result.error);
       return;
     }
@@ -257,6 +259,9 @@ function handleBrowserMessage(ctx, connection, text) {
       return;
     case 'notify-test':
       void ctx.notifier.test().then((ok) => ctx.hub.send(connection, { t: 'notify-test', ok }));
+      return;
+    case 'digest':
+      sendDigest(ctx, connection, message.since);
       return;
     case 'ping':
       return;
@@ -282,6 +287,22 @@ function applySettings(ctx, connection, settings) {
   ctx.hub.broadcastOwners({ t: 'settings', settings: publicSettings(ctx) });
   // Nobody may answer from the town any more: give waiting prompts back to the terminal.
   if (!settings.remoteApprovals) ctx.broker.releaseAll();
+}
+
+/**
+ * Answers `{ t: 'digest', since }` with what each of the owner's crews did since then, to the
+ * browser that asked only (a viewer never gets this far). `since` is a time in milliseconds on
+ * the server's clock; 0 asks for everything kept.
+ * @param {import('./app.mjs').TownContext} ctx
+ * @param {import('./websocket.mjs').WsConnection} connection
+ * @param {unknown} since
+ */
+function sendDigest(ctx, connection, since) {
+  if (typeof since !== 'number' || !Number.isFinite(since) || since < 0) {
+    sendError(ctx, connection, 'digest.since must be a time in milliseconds');
+    return;
+  }
+  ctx.hub.send(connection, { t: 'digest', d: ctx.digest.summary(since) });
 }
 
 /**

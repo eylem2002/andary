@@ -23,7 +23,8 @@ export const MAX_SESSIONS = 3;
  * @typedef {object} SimulationOptions
  * @property {number} [seed]
  * @property {number} [speed]  1 = real time; 2 = twice as fast
- * @property {(payload: Record<string, any>) => void|Promise<{decision?: 'allow'|'deny'}|void>} emit
+ * @property {(payload: Record<string, any>) => void|Promise<{decision?: 'allow'|'deny', updatedPermissions?: unknown[]}|void>} emit
+ *   an allow with updatedPermissions saved the request's suggested rule ("Allow always")
  * @property {import('./clock.js').Scheduler} [scheduler]  timers (tests inject a fake one)
  */
 
@@ -40,9 +41,14 @@ function isThenable(value) {
   return value != null && typeof (/** @type {any} */ (value).then) === 'function';
 }
 
-/** @param {unknown} answer @returns {'allow'|'deny'|'none'} */
+/**
+ * The answer to a permission request: 'always' is an allow that saved the suggested rule.
+ * @param {unknown} answer
+ * @returns {'allow'|'always'|'deny'|'none'}
+ */
 function decisionOf(answer) {
-  const decision = /** @type {any} */ (answer)?.decision;
+  const { decision, updatedPermissions } = /** @type {any} */ (answer) ?? {};
+  if (decision === 'allow' && Array.isArray(updatedPermissions) && updatedPermissions.length > 0) return 'always';
   return decision === 'allow' || decision === 'deny' ? decision : 'none';
 }
 
@@ -69,7 +75,7 @@ export function createSimulation(options) {
     }
   }
 
-  /** @param {Record<string, any>} payload @returns {Promise<'allow'|'deny'|'none'>} */
+  /** @param {Record<string, any>} payload @returns {Promise<'allow'|'always'|'deny'|'none'>} */
   async function ask(payload) {
     await clock.whenRunning();
     let answer;
@@ -87,7 +93,7 @@ export function createSimulation(options) {
   }
 
   /** @type {import('./crew.js').SimRuntime} */
-  const runtime = { rng, sleep: (ms) => clock.sleep(ms), send, ask, census };
+  const runtime = { rng, sleep: (ms) => clock.sleep(ms), send, ask, census, savedRules: new Set() };
 
   /** @param {() => Promise<void>} story */
   function run(story) {

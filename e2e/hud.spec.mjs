@@ -68,6 +68,23 @@ test.describe('keyboard', () => {
     await expect(page.getByTestId('connection-status')).not.toContainText('paused');
   });
 
+  test('P cycles the place names and Settings keeps the choice', async ({ page }) => {
+    await openDemo(page);
+    const modes = async () => (await worldCalls(page)).filter(([method]) => method === 'setPlaceNames').map(([, mode]) => mode);
+    const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem('andary:prefs') ?? '{}').placeNames);
+    await page.keyboard.press('p');
+    await expect.poll(modes).toContain('always');
+    await page.keyboard.press('p');
+    await expect.poll(modes).toContain('off');
+    expect(await saved()).toBe('off');
+    await page.getByTestId('settings-button').click();
+    const select = page.locator('#hud-set-place-names');
+    await expect(select).toHaveValue('off');
+    await select.selectOption('auto');
+    await expect.poll(async () => (await modes()).at(-1)).toBe('auto');
+    expect(await saved()).toBe('auto');
+  });
+
   test('1–9 jump to a crew, F follows, Escape lets go', async ({ page }) => {
     await openDemo(page);
     await page.keyboard.press('1');
@@ -231,6 +248,20 @@ test.describe('keyboard', () => {
     await page.keyboard.press('d');
     await expect(card).toHaveAttribute('data-status', 'denied');
     await expect(card).toContainText('Denied from the town');
+  });
+
+  test('Allow always works from the keyboard, and focus stays on the card once it is answered', async ({ page }) => {
+    await openDemo(page);
+    const pending = page.locator('[data-testid="approval-card"][data-status="pending"]').first();
+    await expect(pending).toBeAttached({ timeout: 60_000 });
+    const id = await pending.getAttribute('data-approval-id');
+    await page.keyboard.press('a');
+    const card = page.locator(`[data-approval-id="${id}"]`);
+    await card.getByTestId('approve-always').focus();
+    await page.keyboard.press('Enter');
+    await expect(card).toHaveAttribute('data-status', 'allowed');
+    await expect(card).toContainText('Allowed; asked Claude Code to save');
+    await expect(card).toBeFocused();
   });
 });
 

@@ -1,12 +1,19 @@
 // The Crews panel: every Claude Code session is a line on a metro map (its colour and number),
 // and its agents are the stations along it. A station shows the agent's status, what it is doing
-// and for how long; clicking it selects the agent and points the camera at it.
-import { crewUsage, usageShort } from './usage.js';
+// and for how long; clicking it selects the agent and points the camera at it. An agent that waits
+// for you or seems stuck ("needs you", core/attention.js) says what for and since when instead,
+// and a finished turn, a stop, a stuck alert or two agents on the same files can be set aside from
+// its row. A note (an edit of a file another agent changed) goes on a line of its own under what
+// the agent does. The lead's row also shows the crew's context in use, under its time, where it
+// takes no room from the crew's name.
+import { contextShort, crewUsage, liveContext, usageShort } from './usage.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from './dom.js';
 import { icon } from './icons.js';
 import { modelLabel } from '../core/catalog.js';
+import { agentKeyOf } from '../core/ids.js';
 import { doingText, formatDuration, isCommandText, plural, truncate } from './format.js';
 import { approvalAgentKey, roundel, setCurrent, statusChip, updateRoundel, updateStatusChip } from './parts.js';
+import { itemsByAgent, notesByAgent, waitedText } from './needs-you.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -83,9 +90,9 @@ export function createCrewsPanel(ctx) {
    * @param {Session} session
    * @param {StoreState} state
    * @param {number} number
-   * @param {Map<string, import('./types.js').Approval>} asking  pending approvals by agent
+   * @param {RowFacts} facts
    */
-  function updateLine(line, session, state, number, asking) {
+  function updateLine(line, session, state, number, facts) {
     const p = parts.get(line);
     setCrewColor(line, session.color);
     updateRoundel(p.mark, number, session.color);
@@ -106,7 +113,7 @@ export function createCrewsPanel(ctx) {
     setHidden(p.goal, !session.goal || ended);
     const showAll = unfolded.has(session.id);
     const shown = ended ? [] : visibleAgents(session, state, showAll);
-    renderList(p.stations, shown, (agent) => agent.key, (agent) => createStation(ctx, parts, agent), (item, agent) => updateStation(ctx, parts, item, agent, asking.get(agent.key)));
+    renderList(p.stations, shown, (agent) => agent.key, (agent) => createStation(ctx, parts, agent), (item, agent) => updateStation(ctx, parts, item, agent, facts));
     const hiddenCount = Math.max(0, countFinished(session, state) - FINISHED_SHOWN);
     setHidden(p.more, ended || hiddenCount === 0);
     setText(p.more, showAll ? 'Hide finished agents' : `Show ${plural(hiddenCount, 'more finished agent')}`);
@@ -120,11 +127,17 @@ export function createCrewsPanel(ctx) {
     setText(count, active.length ? `${active.length} active` : '');
     setText(empty, emptyText(ctx));
     setHidden(empty, state.sessions.length > 0);
-    const asking = new Map();
+    const now = Date.now();
+    /** @type {RowFacts} */
+    const facts = { needs: itemsByAgent(state, ctx.needsYou, now), notes: notesByAgent(state, ctx.needsYou, now), asking: new Map(), contexts: new Map() };
     for (const approval of state.approvals) {
-      if (approval.status === 'pending' && !asking.has(approvalAgentKey(approval))) asking.set(approvalAgentKey(approval), approval);
+      if (approval.status === 'pending' && !facts.asking.has(approvalAgentKey(approval))) facts.asking.set(approvalAgentKey(approval), approval);
     }
-    renderList(lines, [...active, ...ended], (session) => session.id, createLine, (line, session) => updateLine(line, session, state, session.number, asking));
+    for (const session of active) {
+      const lead = agentKeyOf(session.id, null);
+      facts.contexts.set(lead, contextShort(liveContext(state, lead)));
+    }
+    renderList(lines, [...active, ...ended], (session) => session.id, createLine, (line, session) => updateLine(line, session, state, session.number, facts));
     applyCollapsed();
   }
 
@@ -143,6 +156,14 @@ export function createCrewsPanel(ctx) {
 }
 
 /**
+ * @typedef {object} RowFacts  what the rows show besides each agent's own state, by agent key
+ * @property {Map<string, import('../core/attention.js').AttentionItem>} needs  their "needs you" item
+ * @property {Map<string, import('../core/attention.js').AttentionItem>} notes  their newest note (needs-you.js isNote)
+ * @property {Map<string, import('./types.js').Approval>} asking  their pending approval
+ * @property {Map<string, string>} contexts  a lead's context in use ("182k in context")
+ */
+
+/**
  * One agent's station on its crew's line.
  * @param {HudContext} ctx
  * @param {WeakMap<HTMLElement, any>} parts
@@ -151,14 +172,29 @@ export function createCrewsPanel(ctx) {
 function createStation(ctx, parts, agent) {
   const chip = statusChip(agent.status);
   const name = h('span', { class: 'hud-station__name' });
-  const time = h('span', { class: 'hud-station__time' });
+  const clock = h('span', {});
+  const clockWords = srOnly('');
+  // A lead's: on its own line under the time, so it widens the time a little, never the name.
+  const context = h('span', { class: 'hud-station__context', 'data-testid': 'crew-context', hidden: true });
+  const time = h('span', { class: 'hud-station__time' }, clock, clockWords, context);
   const doing = h('span', { class: 'hud-station__doing' });
+  const note = h('span', { class: 'hud-station__note', 'data-testid': 'agent-note', hidden: true });
   const button = h('button', { type: 'button', class: 'hud-station', 'data-testid': 'agent-row', 'data-agent-key': agent.key },
-    h('span', { class: 'hud-station__mark' }, chip), name, time, doing);
+    h('span', { class: 'hud-station__mark' }, chip), name, time, doing, note);
   // detail is 0 for keyboard activation: then focus follows into the inspector.
   button.addEventListener('click', (event) => ctx.select({ type: 'agent', id: agent.key }, { camera: true, focus: event.detail === 0 }));
-  const item = h('li', { class: 'hud-stations__item' }, button);
-  parts.set(item, { chip, name, time, doing, button });
+  const dismiss = h('button', { type: 'button', class: 'hud-iconbtn hud-station__dismiss', hidden: true, 'data-testid': 'dismiss-need' }, icon('close', { size: 16 }));
+  const item = h('li', { class: 'hud-stations__item' }, button, dismiss);
+  dismiss.addEventListener('click', () => {
+    const need = parts.get(item)?.need;
+    if (!need) return;
+    ctx.needsYou.dismiss(need.id);
+    // The row stays; its button goes, so the keyboard moves to the station itself.
+    button.focus();
+    ctx.announcer.polite(`Set aside: ${need.text}`);
+    ctx.refresh();
+  });
+  parts.set(item, { chip, name, clock, clockWords, context, doing, note, button, dismiss });
   return item;
 }
 
@@ -167,27 +203,49 @@ function createStation(ctx, parts, agent) {
  * @param {WeakMap<HTMLElement, any>} parts
  * @param {HTMLElement} item
  * @param {AgentState} agent
- * @param {import('./types.js').Approval} [approval]  what the agent is waiting on, if anything
+ * @param {RowFacts} facts
  */
-function updateStation(ctx, parts, item, agent, approval) {
+function updateStation(ctx, parts, item, agent, facts) {
   const p = parts.get(item);
+  const need = facts.needs.get(agent.key) ?? null;
   updateStatusChip(p.chip, agent.status);
   setText(p.name, agent.name);
-  const doing = doingText(agent, approval);
+  const doing = need ? truncate(need.text, 90) : doingText(agent, facts.asking.get(agent.key));
   setText(p.doing, doing);
   p.doing.classList.toggle('hud-mono', isCommandText(doing));
+  const inContext = facts.contexts.get(agent.key) ?? '';
+  setText(p.context, inContext);
+  setHidden(p.context, !inContext);
+  const note = facts.notes.get(agent.key);
+  setText(p.note, note ? truncate(note.text, 90) : '');
+  setHidden(p.note, !note);
   setAttr(p.button, 'data-status', agent.status);
+  setAttr(p.button, 'data-need', need?.level ?? null);
   setCurrent(p.button, ctx.view.selection?.type === 'agent' && ctx.view.selection.id === agent.key);
+  const dismissable = Boolean(need?.dismissable);
+  // Its button is about to go: keep the keyboard on the row.
+  if (!dismissable && document.activeElement === p.dismiss) p.button.focus();
+  setHidden(p.dismiss, !dismissable);
+  setAttr(p.dismiss, 'aria-label', dismissable ? `Set aside: ${agent.name}, ${need?.text}` : null);
+  item.classList.toggle('has-dismiss', dismissable);
   p.agent = agent;
+  p.need = need;
   tickStation(parts, item, Date.now());
 }
 
-/** Elapsed time on the job, frozen when the agent finished. @param {WeakMap<HTMLElement, any>} parts @param {HTMLElement} item @param {number} now */
+/**
+ * How long the agent has waited for you; otherwise its time on the job, frozen when it finished.
+ * @param {WeakMap<HTMLElement, any>} parts @param {HTMLElement} item @param {number} now
+ */
 function tickStation(parts, item, now) {
   const p = parts.get(item);
   if (!p?.agent) return;
+  // Screen readers hear "waiting for 4m 05s" rather than a bare time.
+  const waited = p.need ? waitedText(p.need, now) : null;
   const end = p.agent.status === 'done' ? p.agent.lastActivity : now;
-  setText(p.time, formatDuration(end - p.agent.startedAt));
+  setText(p.clock, waited ? waited.short : formatDuration(end - p.agent.startedAt));
+  setAttr(p.clock, 'aria-hidden', waited ? 'true' : null);
+  setText(p.clockWords, waited ? `, ${waited.long}` : '');
 }
 
 /**

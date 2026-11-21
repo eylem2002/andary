@@ -61,7 +61,9 @@ simulation, and `andary simulate` sends simulated sessions through the real pipe
 - **Translation, on the server:** a multi-file `apply_patch` becomes one edit per file (so the
   inspector shows each diff), `spawn_agent` an Agent call, a command with a non-zero exit code a
   failure, `Interrupt` the end of the turn. Permission requests are passed on exactly as Codex
-  sent them, and Codex reads the town's allow/deny answer in the same format as Claude Code.
+  sent them, and Codex reads the town's allow/deny answer in the same format as Claude Code. A
+  request does not say whether the command asks to leave Codex's sandbox, so its card says that
+  allowing it may let it run outside the sandbox, with network access.
 - **Not covered yet:** token costs (read from Claude Code transcripts only).
 
 ### What the installer does
@@ -183,7 +185,8 @@ that data as private.
   text, and object fields with credential-like names.
 - **Nothing on disk by default.** Events stay in memory (the last 2,000, at most 32 Mi characters,
   for browsers that join late). Only `--record` writes them, to `<ANDARY_HOME>/recordings/*.jsonl` (mode `0600`),
-  already sanitized.
+  already sanitized. The catch-up's counts (a day of them, with each crew's latest message, from
+  sanitized events) stay in memory too, and only signed-in owners can ask for them.
 - **Quiet logs.** The console shows lifecycle and counts only, never payloads or the secret. The
   startup banner prints the sign-in link: that is its purpose.
 - **Headers.** A strict Content-Security-Policy (`default-src 'self'`; scripts only from the

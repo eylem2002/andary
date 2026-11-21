@@ -86,7 +86,8 @@ them** (or open `/hooks` in Codex). Untrusted hooks do not run, and the town sta
   (`apply_patch`) appear as edits to each file they touch, with diffs in the inspector; commands
   that fail bring rain; helpers that Codex starts join the crew; and remote approvals work the
   same way.
-- **Not yet:** Codex's token costs. The cost meter reads Claude Code's transcripts only.
+- **Not yet:** Codex's token costs and context in use. The cost meter reads Claude Code's
+  transcripts only.
 
 Using both? Install both. Each agent's events arrive marked with where they came from, so one
 town shows them all side by side.
@@ -127,8 +128,10 @@ out of the address bar. Other tabs on the same town are signed in too.
 | Worktree Grove | grow a tree per git worktree | worktrees |
 | Bus Stop | arrive and leave | session start and end |
 
-Hats show the model (a crown for Opus, a beret for Sonnet, a sun hat for Haiku, a cap for OpenAI
-models). Click any agent for its details, including a diff of every file it changed, or any
+Each building carries a small sign: its icon, and its name when there is room for it (zoom in to
+see more names, or press `P`). Signs fade while an agent stands in front of them, so they never
+hide anyone. Hats show the model (a crown for Opus, a beret for Sonnet, a sun hat for Haiku, a cap
+for OpenAI models). Click any agent for its details, including a diff of every file it changed, or any
 building to see who is inside.
 
 ### Keyboard
@@ -140,8 +143,11 @@ building to see who is inside.
 | `F` / `Esc` | Follow the selected agent / stop following, close the open panel |
 | `[` `]` · `+` `−` · `0` | Rotate · zoom · reset the view |
 | `N` | Day, sunset, night or your clock |
+| `P` | Place names: on the buildings where they fit (zoom in for more), always, or off |
 | `M` | Sound on or off |
 | `U` · `L` | Usage (tokens and estimated cost) · Leaderboard |
+| `I` | Go to what needs you, most urgent first (again for the next) |
+| `W` | Catch me up: what your crews did since you last looked |
 | `A` | Go to approvals |
 | `1`–`9` | Jump to crew 1 to 9 |
 | `?` | All shortcuts |
@@ -152,17 +158,89 @@ Off by default. Turn on **Remote approvals** in Settings (or start with
 `andary start --remote-approvals`). A permission request then gets **Allow** and **Deny** buttons
 and a countdown; if nobody answers within two minutes, the normal prompt appears in your
 terminal. The card shows the exact request, and for a file change the change itself: a new
-file's content, or an edit as a diff. To tell the agent why you said no, type a reason before
-**Deny** (or press Enter in the reason field). A request the town cannot show in full (a secret
-was masked, a long value was cut) is never held there and goes straight to your terminal.
+file's content, or an edit as a diff. Anything that draws nothing (an unusual space, a
+zero-width or direction mark, a run of blank lines) shows as a marker such as `⟨U+00A0⟩`, so
+nothing can hide in what you approve. To tell the agent why you said no, type a reason before
+**Deny** (or press Enter in the reason field). When Claude Code suggests a rule for the request,
+**Allow always** also asks it to save that rule for this project (only you) or for the session,
+and the card shows the exact rule first, such as `Bash(npm run build)`, with what it allows in
+words. Only a rule the card can say exactly is offered: one command, Bash commands starting with a
+prefix, fetches from one web host, or one MCP tool. A request the town cannot show in full (a
+secret was masked, a long value was cut, or it has an option the card does not show, such as
+running a command outside the sandbox) is never held there and goes straight to your terminal; so
+does one from an older copy of Andary's hook (the card says how to update it). Codex does not say
+whether a command asks to leave its sandbox, so a Codex command's card says that allowing it may.
+
+### See what needs you
+
+When an agent stops for you (a permission request, a question, a plan to approve, a turn that
+stopped on an error, or a finished turn nobody answered for a minute), its row in **Crews** says
+what for and how long it has waited, the browser tab reads **(2) Andary**, and a **2 need you**
+button sits at the top right: yellow while an agent is blocked, stopped or stuck, quieter when
+crews only finished their turns. Click it (or press `I`) to go to the most urgent: a request the
+town can answer opens its card in Approvals, anything else selects the agent; click again for the
+next. A stop, a stuck alert or a finished turn can be set aside from its row or the agent's
+details, and so can a request still waiting after five minutes, in case it is stale. With
+notifications on (Settings), each new one also pops up while the tab is in the background.
+
+An agent that **seems stuck** counts too: one whose step failed three times with nothing changed
+in between, ran five times with nothing changed whatever its exit code (`npm test 2>&1 | tail`
+reports tail's exit code, not the tests'), or failed six times in 20 minutes with the same error
+(the first line that says something, not `Exit code 1` or npm's own lines). A step is the command
+and the folder it runs in, so `cd packages/a && npm test` and `cd packages/b && npm test` are two.
+Its row says so ("Seems stuck: `npm test` failed 3 times, nothing changed"), a storm gathers over
+it in the town, and the activity log notes when it started. An edit by any agent in the same
+folder is progress and ends the alert, and so is a command that writes files (`sed -i`, a
+formatter, `cat > file`, a script that writes); so do your next prompt, the turn ending, and, for a
+step that kept failing, the step working at last. Steps that wait by nature (reading a background
+task's output, `sleep` loops, `gh run watch` and other CI checks, health checks, `ps` or `docker
+ps`) never count.
+
+**Two agents on the same files.** Several sessions in one repository can undo each other's work.
+When an agent writes a whole file over a change another agent made in the last half hour, or runs
+a git command that sweeps up or throws away another agent's uncommitted changes in that work tree
+(`git add -A` with a commit, `git commit -a`, `git stash`, `git checkout .`, `git restore`,
+`git reset --hard`, `git clean -f`), the rows of everyone involved say so ("Foreman (crew 2) wrote
+over src/auth.ts, which Foreman (crew 1) changed 4 min ago", "Builder 1 (crew 2) runs git stash in
+api-server, where Foreman (crew 1) has changed 3 files") and it counts in **need you** until you set
+it aside. A git command shows as soon as it starts, while it may still ask for your permission, and
+counts only what it acts on: a `git restore src/a.ts` is not about another agent's `src/b.ts`.
+Committed work no longer counts (also when the `git add` came in an earlier call), a helper
+finishing what its lead handed it is no conflict, and what a finished helper left uncommitted is
+still its lead's. Andary finds where each repository starts on disk, so several repositories in
+one workspace, and worktrees, are told apart; `git clean` counts only new files. A command you
+deny in the town ends its alert. An edit of such a
+file is only a note under both rows, as an edit must match what is in the file. It lasts half an
+hour, or until the agents finish. Andary compares paths as written: a symbolic link, or a disk that
+ignores case, can hide one.
+
+### Catch up
+
+Away for a while? If 20 minutes pass with nothing from you in any session while your crews keep
+working, the town counts you as away. Anything of yours ends it: a prompt or a `/compact` you
+run, a session you start, resume, clear or leave, an interrupt in Codex, or a request you
+answer, in the town or in the terminal. Then, and when you open the town within half an hour, a
+**Catch me up** button sits beside the "need you" one. It shows one line per crew, such as
+"api-server: 3 turns, tests passing, 1 commit pushed, 2 files changed", with what each one's
+latest turn said: crews that need you first (a click goes to what they need), quiet ones in a
+line at the end. Press `W` any time for what happened since you last looked. The server keeps
+the counts for the last day, in memory only: a page reload loses nothing, a restart of Andary
+forgets them (the dialog then says it only remembers since the restart). A teammate's crews in a
+team town are theirs and left out.
 
 ### Everything else
 
 - **Cost and tokens:** each crew shows what it has cost so far, estimated at API list prices from
   Claude Code's own transcripts (on a Pro or Max plan, a measure of value, not a bill). `U` opens
   today's total and the last 14 days.
+- **Context in use:** each crew's lead shows how much context it is using, under its time
+  ("182k in context"): what its latest request read, the way Claude Code's status line counts it.
+  An agent's details give the exact count and how old it is ("as of 2m ago"), for helpers too.
+  There is no percentage: Andary cannot tell how large the window is or where you set compaction
+  (`/context` in Claude Code shows the full picture). After a compaction it says "context
+  compacted" until the agent's next message. Not for Codex yet.
 - **Weather:** rain when commands fail, a storm when they keep failing, a rainbow when tests pass
-  again, fog while a crew thinks for a long time.
+  again, fog while a crew thinks for a long time; a storm cloud over an agent that seems stuck.
 - **The town grows:** finished turns and tasks earn points, and points build landmarks, from
   bunting at 10 to a golden dome on the Town Hall at 500. `L` shows how far the town has come.
 - **Town looks:** Settings → Town look: the sunset coast, a snowy village, a neon city, a desert
@@ -172,7 +250,13 @@ was masked, a long value was cut) is never held there and goes straight to your 
 - **Notifications:** on this computer (Settings, while the tab is in the background), or on your
   phone with `andary start --notify` through the free [ntfy](https://ntfy.sh) app, no account.
   Phone messages say only what happened ("A crew needs your permission"), never your project,
-  files or commands.
+  files or commands. A note for a permission request, a question, a plan or an MCP server's form
+  waits ten seconds, and none is sent if Andary sees the answer first: a decision in the town, the
+  tool finishing after your answer in the terminal, or your next prompt. Andary sees a yes for a
+  longer command only when it finishes, and a "No" only at your next prompt, so those can still
+  send one. An agent that seems stuck sends one note each time it gets stuck ("A crew seems
+  stuck: the same step keeps failing", or "…: it keeps repeating the same step" for a step run
+  over and over that need not fail).
 
 ![The town's five looks](docs/media/andary-looks.webp)
 

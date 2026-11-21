@@ -9,7 +9,7 @@ import { busiestAgent, sameSelection } from '../../../public/js/ui/hud-actions.j
 import { effectFor, FRESH_MS } from '../../../public/js/ui/hud-effects.js';
 import { noticeKind } from '../../../public/js/ui/hud.js';
 import { topTools } from '../../../public/js/ui/inspector.js';
-import { subtitleFor } from '../../../public/js/ui/masthead.js';
+import { pageTitle, subtitleFor } from '../../../public/js/ui/masthead.js';
 
 /**
  * Test data only needs the fields a helper reads.
@@ -56,6 +56,8 @@ describe('activity log', () => {
     assert.equal(iconForEntry({ kind: 'prompt', icon: '💬', level: 'info' }), 'message');
     assert.equal(iconForEntry({ kind: 'tool.fail', icon: '❌', level: 'error' }), 'warning');
     assert.equal(iconForEntry({ kind: 'achievement', icon: '🤷', level: 'success' }), 'medal');
+    assert.equal(iconForEntry({ kind: 'stuck', icon: '🔁', level: 'warn' }), 'repeat');
+    assert.equal(iconForEntry({ kind: 'conflict', icon: '👥', level: 'warn' }), 'users', 'two agents on the same files');
     assert.equal(iconForEntry({ kind: 'mystery', icon: '', level: 'info' }), 'spark');
   });
 
@@ -82,6 +84,12 @@ describe('approvals', () => {
     assert.equal(resultText(fixture({ status: 'denied', decidedBy: 'town', message: 'use the staging db' }), 'live'), 'Denied from the town: “use the staging db”');
     assert.equal(resultText(fixture({ status: 'resolved' }), 'live'), 'Answered in the terminal');
     assert.equal(resultText(fixture({ status: 'pending' }), 'live'), '');
+  });
+
+  test('result wording for "Allow always" says what happened: allowed, and the rule Claude Code was asked to save', () => {
+    const always = { rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], destination: 'localSettings', at: 1 };
+    assert.equal(resultText(fixture({ status: 'allowed', decidedBy: 'town', always }), 'live'), 'Allowed; asked Claude Code to save Bash(npm test:*) for this project, only you');
+    assert.equal(resultText(fixture({ status: 'allowed', decidedBy: 'town', always: { ...always, destination: 'session' } }), 'demo'), 'Allowed; asked Claude Code to save Bash(npm test:*) until this session ends');
   });
 
   test('pending count', () => {
@@ -142,6 +150,13 @@ describe('effects', () => {
     assert.equal(effectFor({ type: 'reset' }, seen, now), null);
   });
 
+  test('a question or a plan is no permission to grant: no approval toast (needs-you tells of it)', () => {
+    const seen = new Set();
+    for (const toolName of ['AskUserQuestion', 'ExitPlanMode']) {
+      assert.equal(effectFor({ type: 'approval', approval: fixture({ id: toolName, status: 'pending', toolName, createdAt: now }) }, seen, now), null);
+    }
+  });
+
   test('each pending approval is announced once', () => {
     const seen = new Set();
     const approval = fixture({ id: 'x', status: 'pending', createdAt: now - 1000 });
@@ -179,6 +194,11 @@ describe('inspector and masthead', () => {
     assert.equal(subtitleFor(fixture({ sessions: [], agents: {}, stats: { toolCalls: 0 } }), fixture(view)), 'Waiting for Claude Code');
     assert.equal(subtitleFor(fixture({ sessions: [], agents: {}, stats: { toolCalls: 0 } }), fixture({ mode: 'live', connection: 'signin' })), 'Sign in to see your crews');
     assert.equal(subtitleFor(fixture({ sessions: [], agents: {}, stats: { toolCalls: 0 } }), fixture({ mode: 'demo', connection: 'demo' })), 'The demo crews are on their way');
+  });
+
+  test('the page title says how many things need you', () => {
+    assert.equal(pageTitle(0), 'Andary');
+    assert.equal(pageTitle(2), '(2) Andary');
   });
 
   test('notices: sign in, waiting for Claude Code, or nothing', () => {

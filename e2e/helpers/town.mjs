@@ -25,8 +25,9 @@ const START_TIMEOUT_MS = 15_000;
  * @property {() => string} output  everything the server printed so far
  * @property {(pattern: RegExp, timeoutMs?: number) => Promise<string>} waitForOutput
  *   resolves with the output once it matches `pattern`
- * @property {(payload: unknown, options?: { input?: string, timeoutMs?: number, args?: string[] }) => Promise<{ code: number|null, stdout: string, stderr: string }>} sendHook
- *   runs the real hooks/hook.mjs with the payload on stdin (args ['codex']: as Codex runs it)
+ * @property {(payload: unknown, options?: { input?: string, timeoutMs?: number, args?: string[], env?: NodeJS.ProcessEnv }) => Promise<{ code: number|null, stdout: string, stderr: string }>} sendHook
+ *   runs the real hooks/hook.mjs with the payload on stdin (args ['codex']: as Codex runs it; env:
+ *   its whole environment instead of the town's)
  * @property {() => Promise<void>} stop  stops the server and deletes the temporary folders
  */
 
@@ -86,7 +87,9 @@ export async function startTown({ remoteApprovals = false, args = [], env = {} }
     pid: state.pid,
     output: () => output,
     waitForOutput,
-    sendHook: (payload, options = {}) => runHookScript({ payload, env: { ...childEnv }, ...options }),
+    // A permission request waits for the test to click: on a slow CI runner that can take longer
+    // than the runner's default 10 s, after which the hook would be killed with no answer.
+    sendHook: (payload, options = {}) => runHookScript({ payload, env: { ...childEnv }, timeoutMs: 60_000, ...options }),
     async stop() {
       if (stopped) return;
       stopped = true;

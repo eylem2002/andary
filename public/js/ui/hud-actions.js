@@ -2,6 +2,7 @@
 // toolbar / keyboard actions. Each function takes the HUD (its context and components).
 import { timeOfDayFor } from './appearance.js';
 import { directorActive } from './cinema.js';
+import { nextPlaceNames } from '../core/place-names.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').Selection} Selection */
@@ -13,8 +14,11 @@ import { directorActive } from './cinema.js';
  * @property {ReturnType<typeof import('./board.js').createBoard>} board
  * @property {ReturnType<typeof import('./inspector.js').createInspector>} inspector
  * @property {ReturnType<typeof import('./building-card.js').createBuildingCard>} place
- * @property {Record<'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard', { open(): void, close(): void, isOpen: boolean }>} dialogs
+ * @property {ReturnType<typeof import('./approvals.js').createApprovalsPanel>} approvals
+ * @property {Record<DialogName, { open(): void, close(): void, isOpen: boolean }>} dialogs
  */
+
+/** @typedef {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'catchUp'} DialogName */
 
 /** @typedef {{ ctx: HudContext, ui: HudParts }} Hud */
 
@@ -99,7 +103,7 @@ export function setFollow(hud, on = !hud.ctx.view.follow) {
 
 /**
  * @param {Hud} hud
- * @param {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'} name
+ * @param {DialogName} name
  */
 export function openDialog({ ui }, name) {
   for (const [key, dialog] of Object.entries(ui.dialogs)) if (key !== name && dialog.isOpen) dialog.close();
@@ -143,15 +147,51 @@ export function runAction(hud, action) {
       world?.resetCamera();
     }),
     'cycle-time': () => cycleTime(ctx),
+    'place-names': () => cyclePlaceNames(ctx),
     'toggle-quality': () => ctx.setPrefs({ quality: ctx.prefs.quality === 'low' ? 'high' : 'low' }),
     'toggle-sound': () => toggleSound(ctx),
     pause: () => togglePause(ctx),
     'cycle-speed': () => cycleSpeed(ctx),
+    'needs-you': () => goToNextNeed(hud),
+    'catch-up': () => openDialog(hud, 'catchUp'),
     help: () => openDialog(hud, 'help'),
     usage: () => openDialog(hud, 'usage'),
     leaderboard: () => openDialog(hud, 'leaderboard'),
   };
   actions[action]?.();
+}
+
+/**
+ * Goes to what needs the viewer, most urgent first; again goes on to the next one.
+ * @param {Hud} hud
+ */
+function goToNextNeed(hud) {
+  const { ctx } = hud;
+  const item = ctx.needsYou.next(ctx.needsYou.items(ctx.store.getState()));
+  if (!item) {
+    ctx.announcer.polite('Nothing needs you right now.');
+    return;
+  }
+  goToNeed(hud, item);
+}
+
+/**
+ * Goes to one thing that needs the viewer (from the "need you" button, or a crew's line in Catch
+ * me up). A request the town can answer opens its card in Approvals (the full change is shown
+ * there); anything else is answered in the terminal, so the agent is selected and the camera
+ * points at it.
+ * @param {Hud} hud
+ * @param {import('../core/attention.js').AttentionItem} item
+ */
+export function goToNeed(hud, item) {
+  const { ctx, ui } = hud;
+  if (item.approvalId) {
+    ctx.showTab('approvals');
+    ui.approvals.focusApproval(item.approvalId);
+  } else {
+    ui.crews.reveal(item.sessionId);
+    select(hud, { type: 'agent', id: item.agentKey }, { camera: true, focus: true });
+  }
 }
 
 /**
@@ -188,6 +228,19 @@ function cycleTime(ctx) {
   ctx.setPrefs({ timeMode: /** @type {any} */ (NEXT_TIME[ctx.prefs.timeMode]) });
   ctx.world()?.setTimeOfDay(timeOfDayFor(ctx.prefs.timeMode));
   ctx.announcer.polite(TIME_SPOKEN[ctx.prefs.timeMode]);
+}
+
+/** What screen readers hear after the "P" key. */
+const PLACE_NAMES_SPOKEN = Object.freeze({
+  auto: 'Place names on the buildings where they fit. Zoom in to see more.',
+  always: 'Place names always shown.',
+  off: 'Place names off. Point at a building to see its name.',
+});
+
+/** @param {HudContext} ctx */
+function cyclePlaceNames(ctx) {
+  ctx.setPrefs({ placeNames: nextPlaceNames(ctx.prefs.placeNames) });
+  ctx.announcer.polite(PLACE_NAMES_SPOKEN[ctx.prefs.placeNames]);
 }
 
 /** Runs inside a click or key handler, which is what lets the browser start audio. @param {HudContext} ctx */

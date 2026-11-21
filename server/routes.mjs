@@ -2,12 +2,14 @@
 // name one of our own hosts.
 import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, PROOF_HEADER, browserRole, hasHookSecret, proveServer, safeEqual, signHookReply } from './auth.mjs';
 import { TEAM_HEADER, verifyMemberKey } from './team.mjs';
+import { offeredSuggestions } from './approvals.mjs';
 import { sourceOf } from './adapters/index.mjs';
 import { ingestHook, ingestTeam } from './ingest.mjs';
 import { APP_ID, LIMITS } from './config.mjs';
 import { publicSettings } from './browsers.mjs';
 import { BAD_TOKEN_PAGE, HttpError, readBody, sendHtml, sendJson, sendText } from './http-util.mjs';
 import { isAllowedHost } from './security.mjs';
+import { cardShowsAll } from '../public/js/core/card-fields.js';
 import { isObject } from '../public/js/core/text.js';
 
 /**
@@ -287,7 +289,7 @@ async function handleHook(ctx, req, res) {
   }
   const request = ingestHook(ctx, body).find((envelope) => envelope.event.hook_event_name === 'PermissionRequest');
   if (request) {
-    await answerPermissionRequest(ctx, req, res, request.event, shownInFull(body.event.tool_input, request.event.tool_input));
+    await answerPermissionRequest(ctx, req, res, request.event, { ...body, at: request.ts });
     return;
   }
   sendHookReply(ctx, req, res, null);
@@ -315,9 +317,11 @@ function sendHookReply(ctx, req, res, output) {
 }
 
 /**
- * Validates the forwarder's body: {"v":1,"ts":<ms>,"source"?:"codex","event":{…}}.
+ * Validates the forwarder's body: {"v":1,"ts":<ms>,"source"?:"codex","caps"?:[…],"event":{…}}.
+ * `caps` says what the forwarder does (CONTRACTS §4.3): it marks a body it shortened, it can pass
+ * a saved rule on; an older forwarder sends fewer, or none.
  * @param {Buffer} raw
- * @returns {{ ts: number, source: import('./adapters/index.mjs').Source, event: Record<string, any> }}
+ * @returns {{ ts: number, source: import('./adapters/index.mjs').Source, event: Record<string, any>, caps: string[] }}
  */
 export function parseHookBody(raw) {
   let body;
@@ -329,24 +333,57 @@ export function parseHookBody(raw) {
   if (!isObject(body) || body.v !== 1 || !isObject(body.event)) {
     throw new HttpError(400, 'Body must look like {"v":1,"ts":<ms>,"event":{...}}');
   }
-  return { ts: Number.isFinite(body.ts) ? body.ts : Date.now(), source: sourceOf(body.source), event: body.event };
+  // What the forwarder can do (a later one adds more): an older one sends none.
+  const caps = Array.isArray(body.caps) ? body.caps.filter((cap) => typeof cap === 'string') : [];
+  return { ts: Number.isFinite(body.ts) ? body.ts : Date.now(), source: sourceOf(body.source), event: body.event, caps };
 }
 
 /** Why a request the town could otherwise answer goes to the terminal (Approval.message). */
-const NOT_SHOWN_IN_FULL = 'The town cannot show this request in full (it is very long or holds credentials)';
+const NOT_SHOWN_IN_FULL = 'The town cannot show this request in full (it is very long, holds credentials, or has options the card does not show)';
+/** A forwarder that does not say when it shortened a body: the town cannot know what it holds. */
+const OLD_FORWARDER = "This agent's Andary hook is from an older version: run andary install (or update the plugin) to answer here";
+/**
+ * Requests that a plain allow or deny cannot answer: a plan to approve, a question to answer. They
+ * wait in the terminal, never in the town, and their card always says so.
+ */
+const TERMINAL_ONLY = new Map([
+  ['ExitPlanMode', 'Plans are approved in the terminal'],
+  ['AskUserQuestion', 'Questions are answered in the terminal'],
+]);
 
 /**
- * Whether sanitizing left a tool input exactly as Claude Code sent it. Redaction and truncation
- * hide text, and hidden text can run: `TOKEN="$(curl … | sh)"` is shown as `TOKEN=[redacted]`, and
- * a command padded past 2,000 characters loses its tail. Such a request must not be approved from
- * a card that does not show it.
- * @param {unknown} raw
- * @param {unknown} sanitized
+ * Whether the town shows a request's tool input exactly as the agent will run it. The forwarder
+ * marks a body it had to shorten (`truncated`), and past its last step it drops the input
+ * altogether; the input must be an object (anything else shows as the tool's name alone);
+ * sanitizing must leave it as it came; and the card must show every field of it
+ * (core/card-fields.js). Redaction and truncation hide text, and hidden text can run:
+ * `TOKEN="$(curl … | sh)"` is shown as `TOKEN=[redacted]`, a command padded past 2,000 characters
+ * loses its tail, and Bash's `dangerouslyDisableSandbox` is no part of `$ command`. Such a request
+ * must not be approved from a card that does not show it.
+ * @param {Record<string, any>} raw        the event as the forwarder sent it
+ * @param {Record<string, any>} sanitized  its town payload, sanitized
  * @returns {boolean}
  */
 function shownInFull(raw, sanitized) {
-  return JSON.stringify(raw ?? null) === JSON.stringify(sanitized ?? null);
+  if (raw.truncated) return false;
+  if (JSON.stringify(raw.tool_input) !== JSON.stringify(sanitized.tool_input ?? null)) return false;
+  // False too for an input that is not an object: the card shows that as the tool's name alone.
+  return cardShowsAll(typeof raw.tool_name === 'string' ? raw.tool_name : '', raw.tool_input);
 }
+
+/**
+ * Why a request the town could have held goes to the terminal, if it does.
+ * @param {boolean} current the forwarder marks a body it shortened
+ * @param {boolean} exact   see shownInFull
+ * @returns {string|undefined}
+ */
+function whyNotHeld(current, exact) {
+  if (!current) return OLD_FORWARDER;
+  return exact ? undefined : NOT_SHOWN_IN_FULL;
+}
+
+/** The capability a forwarder declares when it can pass a saved rule on (CONTRACTS §4.3). */
+const SAVES_RULES = 'updatedPermissions';
 
 /**
  * Holds the response for the town to decide when remote approvals are on and someone is
@@ -354,13 +391,25 @@ function shownInFull(raw, sanitized) {
  * @param {TownContext} ctx
  * @param {Request} req
  * @param {Response} res
- * @param {Record<string, any>} event
- * @param {boolean} exact the tool input reached the town unchanged (see shownInFull)
+ * @param {Record<string, any>} event  the request as the town sees it (sanitized)
+ * @param {{ caps: string[], event: Record<string, any>, at: number }} body  as the forwarder sent
+ *   it; caps: what the forwarder declared it does; at: when the agent sent the request (its
+ *   envelope's `ts`)
  */
-async function answerPermissionRequest(ctx, req, res, event, exact) {
+async function answerPermissionRequest(ctx, req, res, event, body) {
+  const raw = body.event;
+  // The tool input reached the town unchanged and whole (see shownInFull).
+  const exact = shownInFull(raw, event);
   const wanted = ctx.settings.remoteApprovals && ctx.hub.owners > 0;
-  const hold = wanted && exact;
-  const { approval, response } = ctx.broker.create(event, { hold, message: wanted && !exact ? NOT_SHOWN_IN_FULL : undefined });
+  const terminalOnly = TERMINAL_ONLY.get(String(event.tool_name));
+  // Only a forwarder that marks a body it shortened can be trusted to have sent it whole.
+  const current = body.caps.includes('truncated');
+  const hold = wanted && exact && current && !terminalOnly;
+  const why = terminalOnly ?? (wanted ? whyNotHeld(current, exact) : undefined);
+  // No rule is offered for a plan or a question (answered in the terminal), nor through a
+  // forwarder that would drop it: the card would claim a rule was saved when it was not.
+  const offers = terminalOnly || !body.caps.includes(SAVES_RULES) ? [] : offeredSuggestions(raw, event);
+  const { approval, response } = ctx.broker.create(event, { hold, message: why, at: body.at, offers });
   if (hold) {
     // The forwarder went away (Claude Code cancelled the hook): Claude asks in the terminal now.
     res.on('close', () => {

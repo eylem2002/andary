@@ -10,6 +10,13 @@
 // took over the port of a server that is gone receives nothing. Self-contained (Node built-ins only),
 // because `andary install` copies it to <ANDARY_HOME>/hook.mjs and the plugin runs it in
 // place from its own folder.
+//
+// The decision is rebuilt, never copied: an allow, or a deny with a message. An allow may also
+// save one permission rule ("Allow always"), but only a rule Claude Code itself suggested in this
+// very hook's input, only an allow rule for this project (only you) or this session that allows
+// no more than it reads, and it is printed from that input, never from the server's reply. Every
+// body says this forwarder can do that (`caps`): the server offers "Allow always" only then, so an
+// older copy, which prints a plain allow, never leaves the town claiming a rule was saved.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { request } from 'node:http';
@@ -17,7 +24,10 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ts = Date.now();
+// When the agent started this hook: the time this process started, which no import or start-up
+// work below can delay. Two hooks started a millisecond apart keep their order this way (the
+// clock read here would not: Node's start-up time varies by more than that).
+const ts = Math.floor(performance.timeOrigin);
 /** Who runs this hook: Codex passes `codex`; Claude Code passes nothing. */
 const SOURCE = process.argv[2] === 'codex' ? 'codex' : null;
 const EVENT_TIMEOUT_MS = 1500;
@@ -29,6 +39,20 @@ const MAX_BODY_BYTES = 1024 * 1024 - 1024;
 const RAW_PREVIEW_CHARS = 4000;
 /** A deny reason is at most 500 characters plus our prefix; anything longer did not come from us. */
 const MAX_DENY_MESSAGE_CHARS = 1000;
+/**
+ * What this forwarder does, so the server knows what to trust (CONTRACTS §4.3): `truncated`, it
+ * marks a body it shortened (a server holds a request for the town only from a forwarder that
+ * does); `updatedPermissions`, it can pass a saved rule on (the server offers "Allow always" only
+ * then).
+ */
+const CAPS = Object.freeze(['truncated', 'updatedPermissions']);
+/** Where an allow may save a rule: `.claude/settings.local.json` (this project, only you) or the session. */
+const LOCAL_DESTINATIONS = new Set(['localSettings', 'session']);
+/** Tools whose rule content is a command line: a rule without a wildcard is one command. */
+const COMMAND_TOOLS = new Set(['Bash', 'PowerShell']);
+/** The fields of a rule, and of an `addRules` update; anything else is refused, as the town does. */
+const RULE_FIELDS = new Set(['toolName', 'ruleContent']);
+const UPDATE_FIELDS = new Set(['type', 'rules', 'behavior', 'destination']);
 
 /**
  * Exits 0, after flushing `text` to stdout if there is any.
@@ -100,7 +124,8 @@ function readStdin() {
     const done = () => resolveText(Buffer.concat(chunks).toString('utf8'));
     const timer = setTimeout(done, STDIN_TIMEOUT_MS);
     timer.unref();
-    process.stdin.on('data', (chunk) => {
+    // No encoding is set, so stdin delivers Buffers.
+    process.stdin.on('data', (/** @type {Buffer} */ chunk) => {
       size += chunk.length;
       if (size <= MAX_STDIN_BYTES) chunks.push(chunk);
     });
@@ -130,7 +155,9 @@ function parsePayload(text) {
 }
 
 /**
- * Shortens long strings and arrays (the server would cut them anyway) so the body fits.
+ * Shortens long strings and arrays (the server would cut them anyway) so the body fits. A body
+ * shortened this way says so (`truncated: true`): the server cannot see what was cut (a list
+ * ends at 50 items either way), and must never let the town approve a request it cannot show.
  * @param {unknown} value
  * @param {number} depth
  * @returns {unknown}
@@ -148,14 +175,15 @@ function shrink(value, depth = 0) {
  * @returns {string}
  */
 function buildBody(event) {
-  const source = SOURCE ? { source: SOURCE } : {};
-  const body = JSON.stringify({ v: 1, ts, ...source, event });
+  const head = { v: 1, ts, ...(SOURCE ? { source: SOURCE } : {}), caps: CAPS };
+  const body = JSON.stringify({ ...head, event });
   if (Buffer.byteLength(body) <= MAX_BODY_BYTES) return body;
-  const smaller = JSON.stringify({ v: 1, ts, ...source, event: shrink(event) });
+  const shortened = /** @type {Record<string, unknown>} */ (shrink(event));
+  const smaller = JSON.stringify({ ...head, event: { ...shortened, truncated: true } });
   if (Buffer.byteLength(smaller) <= MAX_BODY_BYTES) return smaller;
   // Still too big (a huge object): keep the identifying fields only.
   const essentials = Object.entries(event).filter(([, value]) => typeof value !== 'object');
-  return JSON.stringify({ v: 1, ts, ...source, event: { ...Object.fromEntries(essentials.map(([k, v]) => [k, shrink(v)])), truncated: true } });
+  return JSON.stringify({ ...head, event: { ...Object.fromEntries(essentials.map(([k, v]) => [k, shrink(v)])), truncated: true } });
 }
 
 /**
@@ -259,16 +287,98 @@ function signedByServer(state, nonce, reply) {
 }
 
 /**
- * The PermissionRequest decision from a signed reply, rebuilt from the two shapes the town sends
- * (allow, or deny with a message), as JSON; '' for anything else. Fields such as updatedInput,
- * updatedPermissions or additionalContext are never passed on: the town does not send them, so
- * their presence means the answer did not come from it.
+ * A value as JSON text with the keys of every object in sorted order, so two values that differ
+ * only in the order of their keys give the same text.
+ * @param {unknown} value  parsed JSON
+ * @returns {string}
+ */
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  const object = /** @type {Record<string, unknown>} */ (value);
+  return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(',')}}`;
+}
+
+/**
+ * Whether a value is an object with no field outside `fields`.
+ * @param {unknown} value
+ * @param {Set<string>} fields
+ * @returns {value is Record<string, any>}
+ */
+function hasOnly(value, fields) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every((key) => fields.has(key));
+}
+
+/**
+ * Whether a rule allows no more than the town can say exactly: one command (Bash, PowerShell),
+ * commands starting with a prefix (Bash only: `npm test:*` or `npm test *`), fetches from one
+ * host (WebFetch `domain:example.com`), or one MCP tool. Never a whole built-in tool (no content,
+ * an empty content, which Claude Code saves as the bare tool, or `*`), any other wildcard, a path
+ * rule (a gitignore pattern), an MCP rule with content, or another tool's rule. The same test as
+ * ruleReach in public/js/core/permission-rules.js, which decides what the town offers.
+ * @param {unknown} rule
+ * @returns {boolean}
+ */
+function isNarrowRule(rule) {
+  if (!hasOnly(rule, RULE_FIELDS)) return false;
+  const { toolName: tool, ruleContent: content } = rule;
+  if (typeof tool !== 'string' || !/^[A-Za-z][\w-]*$/.test(tool)) return false;
+  if (content === undefined) return /^mcp__[\w-]+__[\w-]+$/.test(tool);
+  if (typeof content !== 'string' || content.trim() === '') return false;
+  if (tool === 'WebFetch') return /^domain:[A-Za-z0-9][A-Za-z0-9.-]*$/.test(content);
+  if (!COMMAND_TOOLS.has(tool)) return false;
+  if (!content.includes('*')) return true;
+  const prefix = tool === 'Bash' ? /^([^*]+?)(?::\*| \*)$/.exec(content) : null;
+  return prefix !== null && prefix[1].trim() !== '';
+}
+
+/**
+ * Whether a permission update adds allow rules for this project (only you) or this session, each
+ * allowing no more than it reads, with no field the town does not know. Rules for the shared
+ * project settings or every project, modes and folders are never saved.
+ * @param {unknown} update
+ * @returns {boolean}
+ */
+function isLocalAllowRule(update) {
+  if (!hasOnly(update, UPDATE_FIELDS) || update.type !== 'addRules' || update.behavior !== 'allow') return false;
+  if (!LOCAL_DESTINATIONS.has(update.destination)) return false;
+  return Array.isArray(update.rules) && update.rules.length > 0 && update.rules.every(isNarrowRule);
+}
+
+/**
+ * The permission rule an allow may save: the reply's updatedPermissions must hold exactly one
+ * update, equal (whatever the order of keys) to one of the suggestions in this hook's own input,
+ * and that suggestion must be a local allow rule. Returns that suggestion from the input, never
+ * the reply's copy; null for anything else, which saves nothing.
+ * @param {unknown} updates      the reply's decision.updatedPermissions
+ * @param {unknown} suggestions  this hook's own permission_suggestions
+ * @returns {object|null}
+ */
+function savedRule(updates, suggestions) {
+  if (!Array.isArray(updates) || updates.length !== 1 || !Array.isArray(suggestions)) return null;
+  try {
+    const wanted = canonicalJson(updates[0]);
+    const own = suggestions.find((suggestion) => canonicalJson(suggestion) === wanted);
+    return own !== undefined && isLocalAllowRule(own) ? own : null;
+  } catch {
+    // Nested too deeply to compare (the stack ran out): save nothing.
+    return null;
+  }
+}
+
+/**
+ * The PermissionRequest decision from a signed reply, rebuilt from the shapes the town sends
+ * (allow, allow that saves one rule, or deny with a message), as JSON; '' for anything else.
+ * Fields such as updatedInput or additionalContext are never passed on: the town does not send
+ * them, so their presence means the answer did not come from it. updatedPermissions passes only
+ * as one of this hook's own suggestions (savedRule); any other value gives a plain allow.
  * @param {State} state
  * @param {string} nonce
  * @param {{ text: string, signature: string } | null} reply
+ * @param {Record<string, any>} event  this hook's own input
  * @returns {string}
  */
-function decisionFrom(state, nonce, reply) {
+function decisionFrom(state, nonce, reply, event) {
   if (!reply || !signedByServer(state, nonce, reply)) return '';
   let output;
   try {
@@ -279,7 +389,11 @@ function decisionFrom(state, nonce, reply) {
   const specific = output?.hookSpecificOutput;
   const decision = specific?.decision;
   if (specific?.hookEventName !== 'PermissionRequest') return '';
-  if (decision?.behavior === 'allow') return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
+  if (decision?.behavior === 'allow') {
+    const rule = savedRule(decision.updatedPermissions, event.permission_suggestions);
+    const allow = rule ? { behavior: 'allow', updatedPermissions: [rule] } : { behavior: 'allow' };
+    return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: allow } });
+  }
   if (decision?.behavior !== 'deny' || typeof decision.message !== 'string') return '';
   const message = decision.message.slice(0, MAX_DENY_MESSAGE_CHARS);
   return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message } } });
@@ -298,7 +412,7 @@ async function main() {
   const nonce = randomBytes(16).toString('base64url');
   const reply = await post(state, buildBody(event), nonce, timeoutMs);
   // Only a permission prompt takes an answer from the town; other events print nothing.
-  return isPermission ? decisionFrom(state, nonce, reply) : '';
+  return isPermission ? decisionFrom(state, nonce, reply, event) : '';
 }
 
 process.on('uncaughtException', () => finish());

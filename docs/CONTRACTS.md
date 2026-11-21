@@ -41,8 +41,14 @@ public/index.html            The app shell (import map, fonts, HUD markup roots)
 public/css/*.css             HUD styles (app.css) and in-world overlay styles (world.css)
 public/js/page.js            What the page was opened with (the town look), read once at load
 public/js/core/              Pure logic, no DOM, no I/O: events (normalize), store (+ crews, changes,
-                             store-model), director (+ director-queue), catalog, text, summaries,
-                             ids, dates, looks, prices, growth, records, town-weather, humor
+                             store-model, store-dialogs), director (+ director-queue), catalog,
+                             text, summaries, ids, dates, looks, prices, growth, records,
+                             town-weather, humor, dialogs (open dialogs), waits, attention,
+                             card-fields (what an approval card shows), permission-rules (what
+                             "Allow always" may save), loops (when an agent seems stuck), shell
+                             (shell command lines read as a shell reads them, for every rule),
+                             conflicts (two agents on the same files, + git-commands, paths),
+                             digest (what each crew did, for Catch me up)
 public/js/sources/           Where events come from: live.js (WebSocket) and demo.js (simulation),
                              one TownSource shape (types.js)
 public/js/world/layout.js    Town plan (shared, pure data)
@@ -184,7 +190,9 @@ shows up as a crew of its own.
 
 ### 4.3 The forwarder (`hooks/hook.mjs`)
 
-1. Records `ts = Date.now()` first thing.
+1. Records `ts` first thing: the time its process started (`performance.timeOrigin`, whole ms),
+   which no import or start-up work delays, so hooks started a moment apart keep their order
+   (a clock read once Node is running would not: its start-up time varies by more than that).
 2. Reads `<ANDARY_HOME>/server.json`; if missing, unreadable, or its `pid` is not a live process of
    the same user (a stale file whose port someone else may now hold), exits 0 immediately.
 3. Reads stdin fully, parses JSON (on failure sends `{hook_event_name: 'Unknown', raw: <first 4000 chars>}`).
@@ -195,14 +203,29 @@ shows up as a crew of its own.
    within 1.5 s the forwarder exits 0 having sent nothing: a recycled pid of a dead server whose
    port someone else now holds learns neither the event nor the secret.
 4. `POST http://127.0.0.1:<port>/api/hook` with headers `x-andary-secret: <secret>` and
-   `x-andary-nonce: <16 random bytes, base64url>` and body `{"v":1,"ts":<ts>,"event":<payload>}`;
-   run with the argument `codex`, the body also has `"source":"codex"` (§4.12). Codex reads the
-   same PermissionRequest decision format, so step 5 is the same for both.
+   `x-andary-nonce: <16 random bytes, base64url>` and body
+   `{"v":1,"ts":<ts>,"caps":["truncated","updatedPermissions"],"event":<payload>}`; run with the
+   argument `codex`, the body also has `"source":"codex"` (§4.12). `caps` says what this forwarder
+   does (strings; the server ignores any it does not know): `truncated`, it marks a body it had to
+   shorten (§4.6), and `updatedPermissions`, it can pass a saved rule on (step 5). The server
+   holds a request for the town only from a forwarder that declares `truncated`, and offers "Allow
+   always" only for a request whose body declares `updatedPermissions` (§4.5): an older copy, such
+   as a plugin's own, prints a plain allow. `andary replay` and `andary simulate` post the same
+   body, `truncated` included, as they never shorten one; only `andary simulate`, whose story
+   keeps a saved rule, declares `updatedPermissions`. Codex reads the same PermissionRequest
+   decision format, so step 5 is the same for both.
    Timeout 1.5 s, or `approvalTimeoutMs + 5000` for `PermissionRequest`.
 5. Only for `PermissionRequest`: if the reply carries a valid `x-andary-signature`
-   (`base64url(HMAC-SHA256(responseKey, nonce + "\n" + body))`) and its `output` is a plain allow
-   or deny decision, prints that decision (rebuilt: `{behavior:'allow'}` or
-   `{behavior:'deny', message}`; any other field is dropped) as JSON on stdout. Nothing else is
+   (`base64url(HMAC-SHA256(responseKey, nonce + "\n" + body))`) and its `output` is an allow or
+   deny decision, prints that decision as JSON on stdout, rebuilt: `{behavior:'allow'}`,
+   `{behavior:'deny', message}`, or an allow that saves one rule ("Allow always", §4.5):
+   `{behavior:'allow', updatedPermissions:[s]}`. That last one only when the reply's
+   `updatedPermissions` is an array of exactly one element that equals, whatever the order of
+   keys, an element `s` of the hook's own stdin `permission_suggestions`, `s` is `addRules` with
+   `behavior: 'allow'` and `destination` `localSettings` or `session` and no other field, and each
+   of its rules is one the town offers (§4.5: one command, a Bash prefix, one web host or one MCP
+   tool, with no other field). `s` is printed from the hook's own input, never from the reply. Any
+   other `updatedPermissions` gives a plain allow; any other field is dropped. Nothing else is
    ever printed.
 6. **Always exits 0** and never prints anything else. Any error → exit 0 silently.
 
@@ -257,25 +280,31 @@ shows up as a crew of its own.
 Server → browser:
 
 ```js
-{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs }, history: Envelope[], approvals: Approval[], usage: { agents: UsageRecord[], days: UsageDay[] }, progress: { points, days }, notifyUrl: string|null }
+{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs }, history: Envelope[], approvals: Approval[], usage: { agents: UsageRecord[], days: UsageDay[] }, progress: { points, days }, notifyUrl: string|null, away: Away|null }
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
 { t: 'settings', settings: {...} }
 { t: 'usage', u: UsageRecord, days: UsageDay[] }   // §4.8, when an agent's totals change
 { t: 'progress', p: { points, days: string[] } }   // §4.9, when a point or a busy day is added
 { t: 'notify-test', ok: boolean }                  // §4.10, the answer to a test
+{ t: 'away', away: Away }                          // §4.13, owners: an absence began or ended
+{ t: 'digest', d: Digest }                         // §4.13, the answer to a digest request
 { t: 'error', message }
-// Envelope = { id: number /* server sequence */, ts: number /* hook start, ms */, rx: number /* server receive */, event: object /* sanitized payload */ }
+// Envelope = { id: number /* server sequence */, ts: number /* hook start, ms, never after rx nor more than an hour before it (a teammate's: §7) */, rx: number /* server receive */, event: object /* sanitized payload */ }
 // Approval = { id, status: 'pending'|'allowed'|'denied'|'expired'|'resolved', held: boolean, sessionId, agentId: string|null,
-//              toolName, toolInput, cwd, createdAt, expiresAt: number|null, decidedBy?: 'town'|'terminal'|'timeout', message? }
+//              toolName, toolInput, callKey: string|null /* the request's andary_key, §4.6 */, source: 'claude'|'codex',
+//              cwd, createdAt, expiresAt: number|null, decidedBy?: 'town'|'terminal'|'timeout', proof?: 'ran'|'denied'|'stopped', message?,
+//              suggestions: { index, rules: { toolName, ruleContent? }[], destination: 'localSettings'|'session' }[],
+//              always?: { rules, destination, at } /* the rule an "Allow always" asked Claude Code to save, and when (server time) */ }
 ```
 
 Browser → server:
 
 ```js
-{ t: 'decide', id, decision: 'allow'|'deny', message?: string /* ≤ 500 chars */ }
+{ t: 'decide', id, decision: 'allow'|'deny', message?: string /* ≤ 500 chars */, always?: number /* allow only: a suggestion's index */ }
 { t: 'settings', settings: { remoteApprovals: boolean } }
 { t: 'notify-test' }   // sends a test phone notification (rate limits apply)
+{ t: 'digest', since: number }   // §4.13: what each crew did since then (ms, the server's clock; 0: all kept)
 { t: 'ping' }
 ```
 
@@ -285,14 +314,93 @@ until a `decide` arrives or `approvalTimeoutMs` (default 120 s) passes; it then 
 `{"output":{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}}`
 or `{"behavior":"deny","message":"Denied from Andary"}`, or `{"output":null}` on timeout (the
 normal terminal prompt then appears). If remote approvals are off, the server answers at once with
-`null` and broadcasts the approval with `held: false` ("answer in your terminal"). A non-held
-approval becomes `resolved` (`decidedBy: 'terminal'`) when the same session + agent + tool next
-reports PostToolUse, PostToolUseFailure, PermissionDenied, Stop or SessionEnd (the tool matches
-by `tool_name` or, for a call an adapter renamed, `andary_tool`, §4.12). At most 50 pending.
-A request whose `tool_input` was changed by sanitising (a value redacted or cut) is never held,
-because the town could not show what would run: it is answered at once with `null` and its
-approval has `held: false` and `message: "The town cannot show this request in full (…)"`. In the
-browser, Allow/Deny ignore pointer clicks for 1 s after a card appears or changes place.
+`null` and broadcasts the approval with `held: false` ("answer in your terminal"). Every request is
+a dialog in the broker's own tracker (§4.6, at most 500): a non-held pending approval becomes
+`resolved` (`decidedBy: 'terminal'`) when its dialog closes, and `proof` says what showed it:
+`'ran'` (its `PostToolUse` or `PostToolUseFailure`), `'denied'` (its `PermissionDenied`) or
+`'stopped'` (anything else: your prompt, the turn or the session ending, the same agent asking a
+new question or plan). A held approval is not resolved by the terminal while the town holds it.
+Released, it waits in the terminal like any other and is resolved when its dialog closes, or at
+once if its dialog closed while it was held (its turn or session ended; `proof` says by what). An
+expired one stays expired, but its dialog shows in the terminal now, so your next prompt answers
+it; when its dialog then closes on `'ran'` or `'denied'` (answered in the terminal after all) it
+gets that `proof`, once, and is broadcast again. `callKey` is the request's call key (§4.6): the
+phone notes and the town find the approval's own dialog by it (§4.10, §5.1), as a parallel call
+of the same tool may be open beside it. At most 50 pending.
+`ExitPlanMode` and `AskUserQuestion` requests are never held: a plain allow or deny cannot approve
+a plan or answer a question, so they are answered with `null` at once (`held: false`) and their
+`message` always says they are answered in the terminal. A request is held only when its card
+shows every field of its `tool_input` as the agent will receive it, so never one whose
+`tool_input` is missing or not an object, was changed by sanitising (a value redacted or cut), or
+that the forwarder had to shorten (`truncated`, §4.6). `public/js/core/card-fields.js` lists, per
+tool with a view of its own on the card (Bash, PowerShell, Write, Edit, MultiEdit, NotebookEdit,
+Read, WebFetch, WebSearch), the fields that view shows, with the values it shows as they are,
+and the fields the card adds as `name: value` lines below it, with the values they may hold there
+(such as Bash's `description`, `timeout`, `run_in_background`, and `dangerouslyDisableSandbox`
+when `false`); a field it does not list (an option a later Claude Code adds), a value the view or
+a line would not show as it is (`dangerouslyDisableSandbox: true`, an edit with a field the diff
+leaves out), or a view with nothing to show (a MultiEdit with no edits) keeps the request from
+being held. The card of any other tool lists every field. Such a request is answered at once with
+`null`; when the town would otherwise have held it (remote approvals on, a browser signed in), its
+approval has `held: false` and `message: "The town cannot show this request in full (…)"`. Nor is
+a request held from a forwarder that does not declare `caps: ["truncated"]` (§4.3; an older copy):
+its `message` asks to run `andary install` or update the plugin. A Codex command's card
+(`source: 'codex'`, Bash or PowerShell) adds a line its request cannot carry, as Codex does not
+say whether it asks to leave its sandbox: "Codex did not say what this needs: allowing may let it
+run outside its sandbox, with network access." (`cardNote()`, `core/card-fields.js`). The card
+shows the request as the agent will receive it (`revealHidden()`, `core/text.js`): every space but
+the plain one and every character that draws nothing (controls, format characters such as
+bidirectional overrides and zero-width characters, private-use characters, every default-ignorable
+code point, assigned or not, the Braille blank, Hangul fillers, the Khitan filler U+16FE4,
+variation selectors) as a marker such as `⟨U+00A0⟩`; a run of them as one marker naming them (at
+most three, then "N more") and its length (`⟨U+00A0 ×1900⟩`, `⟨U+00A0 U+3000 ×2000⟩`); more than
+three combining marks on one base as `⟨N combining marks⟩`; and three or more lines in a row that
+show nothing (blank, or only spaces, tabs, such characters and combining marks) as one
+`⟨N blank lines with U+00A0⟩` marker (`… and combining marks` when they hold any), in the command
+and in a diff alike. A run that holds a character some reader takes for a line break is followed
+by a line break (one per run), so the lines on the card are the lines it reads: U+2028 and U+2029
+(line breaks in JavaScript and in Python's `str.splitlines()`), NEL (in `splitlines()` and some
+editors, not in JavaScript), and a carriage return that is neither part of a CRLF nor the last
+character of its line (a line break in JavaScript, in Python source and in most editors:
+`// note\rconsole.log("RAN")` runs its second line). In a diff only a newline ends a row, so a
+carriage return in file content is shown as `⟨U+000D⟩`, and a run of blank-looking rows is
+collapsed whatever its rows' kinds; a run of more than one kind counts each
+(`⟨120 blank lines: 80 added, 40 removed⟩`). In the browser, Allow, Allow always and Deny ignore
+pointer clicks for 1 s after a card appears or moves on the page: its place in the list changed, a
+card above it changed size (it was answered or went back to the terminal), or the panel was shown
+after it arrived (its tab opened, or the side boards came back on screen).
+
+**Allow always.** `Approval.suggestions` lists the request's `permission_suggestions` the town
+offers to save, each with its `index` in that list: `addRules` with `behavior: 'allow'`,
+`destination` `localSettings` (this project, only you) or `session` (until the session ends), and
+a non-empty `rules` of `{toolName, ruleContent?}` objects, with no field the town does not know on
+the suggestion or its rules, each one the card can say exactly in words: one command (Bash or
+PowerShell, no `*`: "only this command"), commands starting with a prefix (Bash only, `npm test:*`
+or `npm test *`: "commands starting with “npm test”"), fetches from one host (WebFetch
+`domain:example.com`, no wildcard: "only fetches from “example.com”") or one MCP tool
+(`mcp__<server>__<tool>`, no content: "every use of this tool"). Never an empty content (Claude
+Code saves it as the bare tool), `*`, a whole built-in tool, any other wildcard, a PowerShell prefix
+(its matching ignores case and expands aliases), a path rule (Read, Edit, Write, Glob, Notebook…,
+Cd: Claude Code reads it as a gitignore pattern, so `Edit(src)` covers every file under any
+`src/`), an MCP rule with content, or a rule of any other tool. Only suggestions sanitising left
+unchanged are offered, only when the hook's body declares `updatedPermissions` in `caps` (§4.3),
+and none for Codex, `ExitPlanMode` or `AskUserQuestion` (`public/js/core/permission-rules.js`,
+`offeredSuggestions` in `server/approvals.mjs`). The suggestions themselves stay on the server.
+`decide` with `always` is accepted only for a held, pending approval, with `decision: 'allow'` and
+the `index` of one of its suggestions; anything else answers `{t:'error'}` and changes nothing.
+The hook then gets
+`{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[<that suggestion, exactly as it arrived>]}}}`,
+which the forwarder checks again against its own input (§4.3), and the approval records
+`always: { rules, destination, at }`. Whether Claude Code saved the rule is not known, so the card
+says what happened: "Allowed; asked Claude Code to save Bash(npm test) for this project, only
+you". The card offers one suggestion (the first `localSettings` one, else the first `session`
+one): under Allow and Deny, a line says "Allow always asks Claude Code to save the rule …" with
+the rule as Claude Code writes it (a backslash and parentheses escaped with a backslash, hidden
+characters revealed), what it allows in words and where it is kept, and then, set apart, the
+**Allow always** button, which has no key of its own. A short hint says how often the same rule was
+allowed today in the same project (allowed in the town, or resolved with `proof: 'ran'`), or that
+a rule asked to be saved for this project came back in the same session (the rule may not have
+taken) (`public/js/ui/approval-rules.js`). The demo does the same (`sources/demo.js`).
 
 ### 4.6 Implementation notes (server)
 
@@ -302,7 +410,8 @@ Settled during implementation; they refine §4.3–§4.5.
   server in the background). `--approval-timeout` is capped at 140 s because Claude Code kills the
   hook at 150 s. An explicit `--host` address is added to the Host allowlist. A sign-in link
   opened on another `/<page>.html` (the lab pages, which do not read the fragment) only loses its
-  token: the redirect has no `#signin=`.
+  token: the redirect has no `#signin=`. `andary simulate` also declares `updatedPermissions` in
+  `caps` (its story keeps a rule allowed always, §7); `andary replay` declares only `truncated`.
 - HTTPS (ADR 0016, `server/listener.mjs`): with `--tls-cert`/`--tls-key` one port takes both;
   a connection whose first byte is `0x16` (a TLS handshake) gets HTTPS (TLS 1.2 or newer,
   10 s handshake limit), any other gets plain HTTP only from this computer (a loopback peer, or a
@@ -312,13 +421,89 @@ Settled during implementation; they refine §4.3–§4.5.
   `serverOrigin` (the bound address, or `127.0.0.1` for a wildcard). With `--host`, `start` also
   prints an `https://` sign-in link for other computers. WebSocket `Origin` may be `http://` or
   `https://` with an allowed host. Stopping ends every connection, stalled ones included.
-- The forwarder shrinks payloads over 1 MiB instead of dropping them, and also looks for
+- The forwarder shrinks payloads over 1 MiB instead of dropping them (strings to 2,000 characters,
+  lists to 50 items, 8 levels deep; if that is not enough, only the top-level fields that are not
+  objects) and marks such a body `truncated: true` (after either step), so the server never holds
+  what it was not sent in full; every body declares so (`caps`, §4.3). It also looks for
   `server.json` next to itself (plugin installs).
-- Approvals: `SubagentStop` also resolves that subagent's terminal-answered approvals; approval
-  `agentId` has no `agent-` prefix. A held approval goes back to the terminal (`held: false`,
-  still pending) when remote approvals are switched off, no browser has been connected for 5 s,
-  the hook disconnects, or the server shuts down. Beyond 50 pending, the oldest expires. A deny
-  with a typed reason reads "Denied from Andary: <reason>".
+- **Call keys** (`server/hook-steps.mjs`): in ingest, before anything reads it, every
+  PermissionRequest, PreToolUse, PostToolUse, PostToolUseFailure and PermissionDenied payload gets
+  `andary_key`: `inputKey()` (`core/dialogs.js`) of its `tool_input` as it arrived, before
+  sanitising, so a request and its result match however long they are. The key leaves out the
+  `description` of every Codex call (`andary_source: "codex"`, whatever the tool: Codex adds its
+  reason for asking to a request only, never to the call's `PreToolUse` or result) and of a
+  Claude Code `Bash` or `PowerShell` call (it changes nothing that runs); any other Claude Code
+  tool's, such as an MCP tool's, is part of the call. It reads a command given as an argument
+  list as one line. An adapter that renames a call (`andary_tool`,
+  §4.12) sets the key itself, from the original call's input, on every payload it makes of it; a
+  key from a teammate's server is kept (§4.11). A forwarder's never arrives (its `andary_` fields
+  are dropped, §4.12). A renamed call without a key (from an older teammate's server) gets null and
+  goes by name. Other hooks lose any `andary_key`. Sanitising keeps it: envelopes carry it.
+- **Work-tree tops** (`server/work-trees.mjs`): in ingest, the same tool hooks from this computer
+  get `andary_root`, the top of the git work tree their `cwd` is in: the nearest folder up that
+  holds `.git` (a folder, or a linked worktree's or submodule's file), looked up again after five
+  minutes, kept for at most 256 folders; none when the `cwd` is in no repository or not absolute.
+  Any `andary_root` that arrived is dropped first, and a teammate's hooks get none (their folders
+  are on their computer). The town's git rules use it (§5.1), and guess without it.
+- **Open dialogs** (`public/js/core/dialogs.js`): what an agent has asked you and had no answer to,
+  one dialog per call. The phone notes (§4.10), the approval broker (§4.5) and the town (§5.1)
+  each keep their own tracker and follow one table, `afterHook()`, at each hook's own time (`hookTime()`,
+  `server/hook-steps.mjs`): the forwarder's `ts` (the envelope's), kept between an hour before
+  its arrival (`MAX_HOOK_AGE_MS`; an older stamp counts as `arrival − 1 h`) and its arrival. The
+  stamp is this computer's own clock, and a computer that sleeps or suspends can hold a hook back
+  for minutes, which must still find its own dialog. A
+  `PermissionRequest` is sent at once and a `PreToolUse` or a `Notification` in the background, so
+  a later hook can arrive first. Each forwarder stamps its own `ts`, so two hooks sent a moment
+  apart may carry theirs the wrong way round: "before" and "after" leave `ORDER_SLACK_MS` (250 ms,
+  `core/dialogs.js`) between them, as below. Nothing that proves an answer comes that soon (asking
+  again takes your answer and a model turn).
+  - A dialog opens with a `PermissionRequest`, or with the `PreToolUse` of a question
+    (`AskUserQuestion`) or a plan (`ExitPlanMode`), whose own `PermissionRequest` then joins it
+    (the newest of that agent's it has not joined yet; with none, it opens one). A request that
+    overtook its `PreToolUse` opened the dialog itself: the `PreToolUse` joins it (the newest of
+    that agent's of the kind it has not joined yet, opened no more than `ORDER_SLACK_MS` before the
+    `PreToolUse`'s time, or after it). A new question or plan closes that agent's older ones of its
+    kind (opened more than `ORDER_SLACK_MS` before it): it cannot ask again while one waits, and a
+    "No, keep planning" sends nothing else. Known limit: when a plan's or question's request never
+    reaches the town (a 429, a failed proof, a restart) and the next one's request overtakes its
+    `PreToolUse`, that request joins the older dialog and its `PreToolUse` then closes it: the
+    broker resolves the new request `stopped` while it still waits in the terminal (it was never
+    held, so only its card goes early); the phone notes still send the new one's note, for the
+    dialog its `PreToolUse` opened. A `Notification` (`permission_prompt`) opens one,
+    naming no tool, only when nothing of its session is open (its request never reached the town: a
+    429, a failed proof, a restart). An MCP server's form (`Notification` with
+    `elicitation_dialog`, `elicitation_url_dialog` or `agent_needs_input`) opens a question naming
+    no tool, unless the session has one open. Neither opens when it was sent `ORDER_SLACK_MS` or
+    more before the newest call the session's lead has started (its newest non-question, non-plan
+    `PreToolUse` time; each tracker keeps it for as many sessions as it keeps dialogs, the least
+    recent giving way, and forgets it when the session ends or is interrupted): it arrived after
+    the call that showed it was answered.
+  - It closes only on proof of an answer: that very call reporting back (`PostToolUse`,
+    `PostToolUseFailure` or `PermissionDenied` from the same agent, with a tool name in common and
+    the same call key; a side without one, a question or a plan, goes by name);
+    the town deciding the request it held for it; your prompt or `/compact` (`UserPromptSubmit`, a
+    manual `PreCompact`: every dialog of the session, whoever asked, except one whose request the
+    town holds right now: nobody can type while a dialog shows in the terminal, and a held one is
+    not there); the agent's turn ending (`Stop` for the lead and the session's notices;
+    `SubagentStop`, `StopFailure`, or `TeammateIdle` with an agent id for that agent); the session
+    ending (`SessionEnd`) or a Codex interrupt (the `Stop` with `stop_reason: "interrupted"`). A
+    session's notice or form also closes when the lead starts a new call after it (one whose
+    `PreToolUse` was sent `ORDER_SLACK_MS` or more after it, whenever it arrives), never on a tool
+    result.
+  - Each tracker knows which requests the town holds: `link(call, approvalId, held)` with the
+    approval's `held` when it is created, and `toTerminal(approvalId)` when it goes back to the
+    terminal (released or expired), after which your next prompt answers it and no later call of
+    the same tool takes it for its own.
+  - No proof: a new request (parallel calls each ask on their own; a question or plan aside,
+    above), a request that expired or was released (the agent waits in its terminal), any tool
+    result for a dialog that names no tool.
+  - Codex names a helper only on `SubagentStart` and `SubagentStop`, never on its tool calls
+    (§4.12), so Codex's dialogs cannot be told apart by agent: a helper's request is the lead's to
+    the model, and the lead's `Stop` closes it too.
+- Approvals: approval `agentId` has no `agent-` prefix. A held approval goes back to the terminal
+  (`held: false`, still pending) when remote approvals are switched off, no browser has been
+  connected for 5 s, the hook disconnects, or the server shuts down. Beyond 50 pending, the oldest
+  expires. A deny with a typed reason reads "Denied from Andary: <reason>".
 - Redaction covers more than §4.4 lists (including fields named like `password`/`api_key`); every
   pattern is length-bounded so a 1 MiB payload cannot trigger quadratic regex time.
 - The installer records each settings file's state in `<ANDARY_HOME>/installs.json`, so
@@ -329,29 +514,71 @@ Settled during implementation; they refine §4.3–§4.5.
 ### 4.8 Token usage and cost
 
 `server/usage.mjs`. Every hook's `transcript_path` (and, for a subagent, `agent_transcript_path`
-or `<transcript without .jsonl>/subagents/agent-<id>.jsonl`) is read 0.8 s after the first hook
+or `<transcript without .jsonl>/subagents/agent-<id>.jsonl`, else the first folder of `subagents/`
+that holds that file name) is read 0.8 s after the first hook
 that asks for it (later hooks in that window share the read: a throttle, not a debounce), from
 where the last read of that file stopped (at most 16 MB at a time, whole lines only; a single
 line longer than that is skipped). Only regular `.jsonl` files whose real path is inside
 `<CLAUDE_CONFIG_DIR or ~/.claude>/projects` are read, opened without following links or blocking,
 and offsets are kept per real path. Each `type: "assistant"` line's `message.usage` is counted
 once per `message.id` + `requestId` across all transcripts (Claude Code splits one message over
-several lines, and a resumed session copies earlier messages into its new file); a later line of
-the same message reporting more output tokens adds the difference. It is priced with
+several lines, and a forked session, `--fork-session`, copies earlier messages into its new
+file); a later line of the same message reporting more output tokens adds the difference. A line
+with `isUnmetered: true` counts nothing (Claude Code skips it too). It is priced with
 `public/js/core/prices.js` (API list prices; 5-minute cache writes 1.25× input, 1-hour 2×,
 Haiku 5.5's long-prompt rate over 100,000 tokens) and added to its agent and to the local day of
-its `timestamp`. Day totals (last 30), read offsets by transcript path and the newest 4,000
+its `timestamp`. A reply that lists its sampling iterations (`usage.iterations`) is counted as
+their sum, each priced at the model it names (an advisor's) or else the message's: the top level
+adds up the executor's iterations (`message`, `fallback_message`) alone, leaving out an advisor's
+(`advisor_message`, billed at its own model's price) and a compaction's (`compaction`). One with
+a model without a known price makes the whole reply unpriced. Day totals (last 30), read offsets
+by transcript path and the newest 4,000
 message ids are kept in `<ANDARY_HOME>/usage.json` (mode 0600; numbers, ids and transcript paths,
 which name your project folders) so a restart counts nothing twice; agent totals live in memory.
 
 ```js
 UsageRecord { sessionId, agentId: string|null, tokens: { input, output, cacheRead, cacheWrite },
-              costUsd /* estimated */, unpriced: boolean /* a model without a known price */, model }
+              costUsd /* estimated */, unpriced: boolean /* a model without a known price */, model,
+              context: { tokens, at /* ms: when that message was written */ } | null,
+              compactedAt: number|null /* when it last compacted, as far as the tracker saw */ }
 UsageDay { date: 'YYYY-MM-DD', tokens, costUsd }
 ```
 
-The browser store keeps `usage` (agentKey → totals) and `usageDays`; the demo makes up repeatable
-numbers (`public/js/sources/demo-usage.js`).
+**Context in use** (docs/design/agent-health.md §5). A message's context is what its last
+executor iteration read, `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`
+(output is not in it yet), as Claude Code's status line reads it: the last `message` or
+`fallback_message` entry of `usage.iterations`, never an `advisor_message` or a `compaction`, and
+the top level when the list is missing or empty (the top level alone would be twice too high
+after a reply that consulted an advisor: each executor iteration re-sends the whole context).
+`context` is the agent's newest reading: the last message read from its own transcript (lines
+are read in the order they were written, so a later line wins), its `timestamp` as `at`. A
+subagent's transcript gives the subagent's reading. Not a reading: a message whose three counts
+add up to 0, an unmetered line, and, for a lead, a line with `isSidechain: true` (older Claude
+Code wrote helpers' messages into the session's transcript). A message counted before still gives
+one: a forked session's copies are its context. A compaction makes it `null` until the agent's
+next message and sets `compactedAt`: a `PostCompact` or a `SessionStart` with
+`source: "compact"` hook does so at once (a `usage` message goes out), and messages written
+before the latest such hook started (its `ts`, §4.3, at most the server's clock) give no reading,
+so a read already due cannot bring an old one back; a `type: "system", subtype: "compact_boundary"`
+line in the transcript does so too, at its `timestamp`. `PreCompact` changes nothing: another hook
+can still stop the compaction then. No window size is assumed, so there is no percentage and no
+alert: today's default models run a 1M window with no `[1m]` in the model id, and the user may
+move the compaction point. Readings are not kept in `usage.json`: after a restart an agent has one
+again from its next message. Codex sends no usage the tracker reads (§4.12), so its crews have
+none.
+
+The browser store keeps `usage` (agentKey → totals, `context` read defensively: a positive token
+count and a positive time, else `null`; `compactedAt` a positive time or `null`) and `usageDays`;
+the demo makes up repeatable numbers (`public/js/sources/demo-usage.js`), and a context that grows
+with each step and is `null`, with `compactedAt`, from a `PostCompact` to the next step. The HUD
+shows a context only while it can still be true (`liveContext`, `public/js/ui/usage.js`): not for
+a finished helper, nor for an ended crew, whose agents leave the store; a reading from before
+`compactedAt` shows as "context compacted" until the next one. The lead's row in Crews shows it
+under its time, where it takes no room from the crew's name ("182k in context",
+`[data-testid="crew-context"]`); the inspector's Usage section shows any agent's exact count and
+how old the message that used it is ("182,340 tokens in context, as of 2m ago.", or "Context
+compacted 1m ago; the new count comes with the next message.", `[data-testid="agent-context"]`). A
+record with a reading but nothing counted shows no cost.
 
 ### 4.9 The town's growth
 
@@ -366,16 +593,68 @@ demo keeps its points in `localStorage['andary:demo-progress']`, starting at 92.
 
 Phone (`server/notify.mjs`), opt-in: `--notify` uses a random ntfy.sh topic kept in
 `<ANDARY_HOME>/notify.json` (0600); `--notify-url <url>` or `ANDARY_NOTIFY_URL` names any http(s)
-ntfy topic (no credentials in the URL). A `PermissionRequest` or `Notification`
-(`permission_prompt`) hook posts "A crew needs your permission." (priority high), `idle_prompt`
-"Claude is waiting for your next prompt.", the main agent's `Stop` "A crew finished its turn.",
-`StopFailure` a limit or error note. The body never names a project, file or command. At most
-one of a kind per 30 s and 30 an hour; a failed post is logged once. `settings.notify` (also in the
-unauthenticated `/api/hello`) is a boolean; the topic URL is only in the WebSocket `hello`.
+ntfy topic (no credentials in the URL). The body never names a project, file, command or tool. At
+most one note of a kind per 30 s and 30 an hour (test notes aside); a failed post is logged once.
+`settings.notify` (also in the unauthenticated `/api/hello`) is a boolean; the topic URL is only in
+the WebSocket `hello`. Only this computer's events count (§4.11).
+
+- **Open dialogs** follow the one table of §4.6 (`core/dialogs.js`, `afterHook()`). The notifier
+  keeps its own tracker (at most 100), reads each call by its `andary_key`, and links the town's
+  requests to their dialogs by `callKey` as the broker reports them, with whether the town holds
+  them (a release reports `held: false`; an expiry hands it back too). Only the town's decision
+  (`allowed`, `denied`) closes a dialog from the broker: `resolved` follows from the same events,
+  which the notifier has already seen.
+- **Dialog notes** (priority high): due 10 s after the dialog opens (when its hook was sent), sent
+  if it is still open: "A crew needs your permission.", "A crew has a question for you." (an MCP
+  server's form too) or "A crew has a plan for you to approve." (a revised plan has a note of its
+  own). Dialogs due together make one note with a crew count ("3 crews need your permission."; of
+  mixed kinds "3 crews need you."), and a note covers every dialog its crews have open then. One
+  30 s limit holds for all dialog notes: while it holds one back, the dialogs wait and go out when
+  it allows; past the hour's limit they count as noted, unsent. A noted dialog stays open until its
+  proof, at most 30 minutes after it opened (a crashed session sends no `SessionEnd`), so a later
+  `permission_prompt` for it sends nothing. At most 100 dialogs are kept; the oldest give way.
+
+  What cannot be seen: a yes in the terminal shows only when the tool finishes (approve a 30 s
+  `npm test` in 1 s and the note still goes out); a "No" sends no event before your next prompt or
+  the agent's turn ending; a diff you change in your IDE before accepting it reports back with
+  another input, so it is not taken for the answer. Any of these can still send a note.
+- **Waiting**: "A crew is waiting for your next prompt.", for Claude Code's `idle_prompt`. Codex
+  sends no `Notification` events: a Codex lead's `Stop` (an interrupt too) starts a 60 s wait
+  (`CODEX_IDLE_MS`) that ends in the same note, once per `Stop`. Codex marks no helper on its tool
+  calls, so the session's tools pause the minute while they run: a `PreToolUse` or
+  `PermissionRequest` pauses it; a `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`,
+  `SubagentStop` or the lead's next `Stop` starts it again; only `UserPromptSubmit`,
+  `SessionStart` or `SessionEnd` ends the wait, or its note: the session is then forgotten until
+  the lead's next `Stop`. At most 100 sessions wait at once; the oldest gives way. Andary cannot
+  see you typing in Codex, so a reply that takes over a minute still sends the note.
+- **Stopped**: `StopFailure` posts a limit or an error note.
+- **Stuck**: "A crew seems stuck: the same step keeps failing." (rules 1 and 3) or "A crew seems
+  stuck: it keeps repeating the same step." (rule 2), by the rule that started the episode, once
+  per episode of the stuck rules (§5.1, `public/js/core/loops.js`, `stuckWords`), which the
+  notifier runs on this computer's events, at each hook's own time (`hookTime`), with a memory of
+  its own: the note goes out when an episode starts, through the usual limits. One held back by
+  the 30 s limit is dropped, not sent later, and the episode sends nothing more.
+- A finished turn posts nothing by itself. Stopping the server drops every note still waiting.
 
 This computer (`public/js/ui/notifications.js`), opt-in in Settings (`prefs.desktopNotify`, after
-the browser's permission): while the page is hidden, a fresh pending approval, the main agent's
-finished turn or a failed turn becomes a system notification naming the crew.
+the browser's permission), follows "needs you" (§5.1): while the page is hidden, each new counted
+item becomes one system notification naming the crew (its title, or its project's folder), never
+a command or a file, a request's, a stuck step's or another agent's ("Permission needed",
+"Question for you", "Plan to approve", "Turn stopped", "Crews stopped", "Seems stuck", "Two agents
+in one folder", "Turn finished"; a stuck crew's says "<crew> seems stuck: the same step keeps
+failing." or, for rule 2, "<crew> seems stuck: it keeps repeating the same step."). Two agents on
+the same files (a Write over another agent's change, or a git command over others' changes)
+read "<crew> (crew 2) may be undoing another agent's work." (crews in one folder share a project
+name, so the number tells which); an Edit's note is not counted, so it never pops up. An item's id is the notification's tag, so no id holds a path or a command: a file goes in
+hashed. An item the viewer could already see (the page in front, or notifications off) never pops
+up later, nor one that started to count more than two minutes ago (a reconnect or a page opened
+in the background); changes that arrive together (a reconnect's history) are checked once. A
+permission request waits until its request reaches the town (or three seconds), so it is worded
+right the first time. No "Turn finished" while only one of your crews is in town, and nothing for
+someone watching a team town with its view link. The same watcher keeps the page title's count
+current in a background tab, redraws the HUD when the clock alone changes what the list says (a
+note's "4 min ago" too), and tells screen readers of new questions, plans, stops, stuck agents and
+agents on the same files, in the item's words without backticks.
 
 ### 4.11 Team town
 
@@ -409,11 +688,12 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
   read) and at most 4 bodies read at once answer 429. Each event is ingested like
   a hook (sanitized again) with `andary_member: <name>` and `session_id: "<name>~<id>"`, its
   `ts` kept within the last hour and not in the future; it counts towards the town's growth
-  (§4.9) but not usage, notifications or approvals: a teammate answers their own prompts.
+  (§4.9) but not usage, notifications, approvals or the catch-up (§4.13): a teammate answers
+  their own prompts.
   A local `/api/hook` event never keeps an `andary_member` field.
 - **Browsers** are `owner` (the UI token) or `viewer` (the view token, team hosts only); `/api/hello` reports `authenticated: true` for both. A viewer's `hello` has no
-  approvals, empty usage, `notifyUrl: null` and `remoteApprovals: false`; `approval`, `usage` and
-  `settings` broadcasts go to owners only; a viewer's messages other than `ping` get
+  approvals, empty usage, `notifyUrl: null`, `away: null` and `remoteApprovals: false`;
+  `approval`, `usage`, `away` and `settings` broadcasts go to owners only; a viewer's messages other than `ping` get
   `{t:'error', message:'Viewers can only watch…'}`. Viewers never use the last 4 connections, and
   held prompts wait only while an owner is connected. On a team host `settings.team` is
   `{ role, members }` (members: names seen since start); when a new member's first batch
@@ -431,7 +711,8 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
 Every agent's payloads are translated on the server, before ingest, into the one event contract
 the rest of the town reads: the Claude Code hook payload (§4.2). `server/adapters/index.mjs`
 picks the adapter by the body's `source` (`claude` when absent) and drops every `andary_` field
-from what arrived (`andary_member`, `andary_source`, `andary_tool`: only the server sets them).
+from what arrived (`andary_member`, `andary_source`, `andary_tool`, `andary_key`: only the server
+sets them).
 
 - **Claude Code**: unchanged.
 - **Codex** (`server/adapters/codex.mjs`): Codex's hooks use Claude Code's event and field names,
@@ -443,9 +724,10 @@ from what arrived (`andary_member`, `andary_source`, `andary_tool`: only the ser
     the new path), a deleted file stays `apply_patch {command, file_path}`. Paths are joined to
     `cwd`. The first keeps the `tool_use_id`, the others get `<id>#2`, `<id>#3`…
   - `spawn_agent` becomes `Agent {description, prompt, subagent_type}`.
-  - Both keep Codex's own tool name in `andary_tool` (`apply_patch`, `spawn_agent`): a permission
-    request asked under that name settles when the renamed call runs (§4.5), and the browser's
-    `ToolData.sourceTool` carries it.
+  - Both keep Codex's own tool name in `andary_tool` (`apply_patch`, `spawn_agent`) and the call
+    key of the original call's input in `andary_key` (on every payload made of it, §4.6): a
+    permission request asked under that name settles when the renamed call runs (§4.5), and the
+    browser's `ToolData.sourceTool` carries the name.
   - `Bash` with `tool_input.command` as a list: joined with spaces, each argument quoted the way a
     shell would need it (`['rm', 'a b']` → `rm 'a b'`). The approval card quotes a list the same way. A `PostToolUse` whose
     `tool_response` (or the payload) has a non-zero `exit_code`/`exitCode`/`metadata.exit_code`
@@ -454,10 +736,101 @@ from what arrived (`andary_member`, `andary_source`, `andary_tool`: only the ser
   - An event it already translated passes through unchanged, so `andary replay` sends a recorded
     Codex event (one with `andary_source: "codex"`) as Codex's again and it keeps its mark.
   - `PermissionRequest` is never split or rewritten: the town shows exactly what it would approve.
-- Token usage is read from Claude Code transcripts only (Codex rollouts are not read yet).
+    It does not say whether the command asks to leave Codex's sandbox or reach the network, so the
+    card says that allowing may (§4.5). Its `tool_input` may carry a `description`, Codex's reason for asking, for any tool,
+    which the call's `PreToolUse` and `PostToolUse` do not: every Codex call's key leaves it out
+    (§4.6).
+  - Codex names a helper (`agent_id`) only on `SubagentStart` and `SubagentStop`: its other
+    events, tool calls included, read as the lead's (§4.6, §4.10).
+- Token usage is read from Claude Code transcripts only (Codex rollouts are not read yet), so a
+  Codex crew shows no cost and no context in use (§4.8).
 - The browser reads `andary_source` into `TownEvent.source` and `Session.source`
   (`'claude'|'codex'`); a Codex crew has a `crew-agent` badge, OpenAI model ids get a cap and a
   label such as "GPT-5.3 Codex", and `apply_patch`/`spawn_agent` map to the Workshop/Town Hall.
+
+### 4.13 Catch me up
+
+`server/digest.mjs` with `public/js/core/digest.js` and `public/js/core/shell.js`
+(docs/design/agent-health.md §7). Only this computer's hooks count (ingest's policy: a teammate's
+crews are theirs, and so are their prompts), and only owners hear of it: a viewer's `hello` has
+`away: null`, gets no `away` message, and a `digest` request gets the viewer error (§4.11). All of
+it is kept in memory, never on disk (it holds your agents' last messages); a restart forgets it.
+
+- **Away** (`createAwayWatch`): nothing from you in any local session for `AWAY_MS` (20 minutes)
+  or more, while crews kept working. You are a prompt (`UserPromptSubmit`, or a manual
+  `PreCompact`, as the dialog model reads your prompt, §4.6), a `SessionStart` with `source`
+  `startup`, `resume` or `clear`, a `SessionEnd` with `reason` `prompt_input_exit` or `clear`, an
+  interrupted `Stop` (Codex's `Interrupt`), a decision (an approval `allowed` or `denied` with
+  `decidedBy: 'town'`), and an answer in the terminal (an approval `resolved` with
+  `decidedBy: 'terminal'` and `proof` `'ran'` or `'denied'`). Crews kept working: a
+  hook that adds to the counts below (`tallyOf` is not null) arrived since you were last seen (the
+  doctor's probe aside). Before you first do something, the town's start counts as when you were
+  last seen. An absence begins at the 20-minute mark (on a timer) or with the first counted hook
+  after it, and the next thing you do ends it. A request the agent moved on from
+  (`proof: 'stopped'`), an expiry and a release are not counted as you.
+
+  ```js
+  Away { since /* the last thing you did before it */, until: number|null /* the first thing after it; null while away */ }
+  ```
+
+  `hello.away` is the latest absence, going on or over (null when there has been none), and owners
+  get `{ t: 'away', away }` when one begins and when it ends.
+- **Counts** (`createDigest({ startedAt })`; the demo keeps its own the same way): per crew, timed by
+  when each hook arrived (`envelope.rx`), from the sanitized payload, for the last 24 hours
+  (`KEEP_MS`) and never before the server started.
+
+  | Hook | Counts as |
+  | --- | --- |
+  | `Stop` | a finished turn (`turns`, by its time), and the latest turn's `last_assistant_message`, one line, ≤ 200 characters (`lastMessage`, null when that turn said nothing); not with `stop_reason: "interrupted"`; with `stop_hook_active: true` its words only, as the same turn goes on |
+  | `StopFailure` | a stop, by its `error` (`stops: { rate_limit: 2 }`) |
+  | `PreToolUse` | a tool call (`toolCalls`); a Codex patch's later files (`andary_tool: 'apply_patch'`, `tool_use_id` ending in `#2`, `#3`…) are the same call |
+  | `PostToolUseFailure` | a failed tool call (`failures`), unless `is_interrupt`; a test run that alone could have failed it and runs tests, with an error that is not a timeout (`classifyError`): `tests: 'failed'` |
+  | `PostToolUse` | a file changed (`files`: distinct paths of `Edit`, `MultiEdit`, `Write`, `NotebookEdit`, and a Codex `apply_patch` that deletes one); test runs that all must have succeeded and run tests: `tests: 'passed'`; each new commit and each push that sends something, that must have succeeded; from Codex (`andary_source: 'codex'`), these only with `andary_exit_known` (its adapter found the exit code) |
+  | `PermissionRequest` | a permission asked for (`asked`); not for `AskUserQuestion` or `ExitPlanMode` |
+  | `SubagentStart`, `SubagentStop` | a helper started (`helpersStarted`), finished (`helpersFinished`) |
+  | an approval settling `allowed` or `denied`, or `resolved` or `expired` with `proof` `'ran'` or `'denied'` (the broker's `onChange`; `'stopped'` is not an answer) | a permission answered (`answered`) |
+
+  A `Bash` or `PowerShell` command (a line, or a Codex argument list) is read by `shellCommands`
+  (core/shell.js, the shared reader) as a shell runs it: quoted strings, heredoc bodies, comments
+  and redirections are text, and a substitution stays whole in its word; each simple command's
+  program (lower case) is found behind assignments, wrappers and launchers (`cd x &&` is a command
+  of its own; `env`, `time`, `timeout`, `npx`, `npm exec`, `uv run`, `poetry run`, `bundle exec`,
+  `python -m`…), and a shell's `-c` script is read inside, one level deep. Each command `succeeded`
+  when the line succeeding proves it (it is in the line's last item, with no `||` and not sent off
+  with `&`, and is the last of its pipeline, or any of it after `set -o pipefail`), and `decides`
+  when the line failing proves it failed (it succeeded in that sense and every other such command
+  is one that does not fail in practice: `cd`, `export`, `set`, `echo`, `tail`, `head`, `tee`…). A
+  test run is `isTestRun` (a runner, a package's `test` script, a tool's `test` subcommand); it runs
+  no tests with `--no-run`, `--collect-only`, `--co`, `--list…`, `-l`, a `list` argument, `--help`,
+  `-h`, `--version`, `--if-present`, or as `go test -run`, and then gives no result. A commit or a
+  push is `gitAction` (git in command position after its own options such as `-C` and `-c`; not
+  `--dry-run` or push's `-n`); a commit with `--amend` is not a new one, a push with `--delete`,
+  `-d` or a `:branch` refspec sends nothing, and each "Everything up-to-date" in the tool's output
+  is one push less. `allPushed` says a push came after the latest commit. A
+  command sent to the background (`run_in_background`) has only started when its hook comes, so it
+  is a tool call and nothing more.
+
+  Tool calls and helpers are kept in five-minute buckets (`BUCKET_MS`), each with the time of the
+  latest thing it counted; turns, failures, permissions asked and answered, commits, pushes and
+  stops keep each one's time (the latest 200 of each per crew), and changed files (200 per crew,
+  by a short key of the path), the latest message and the latest test result keep theirs. Bounds:
+  100 crews (the one quiet for longest gives way), a day of buckets each.
+- **The request** `{ t: 'digest', since }`: `since` must be a number ≥ 0 (otherwise
+  `{ t: 'error', message: 'digest.since must be a time in milliseconds' }`). The answer goes to the
+  browser that asked only. The period starts at `since`, or later when the town remembers no
+  further back (`max(server start, now − 24 h)`, and `limit` says which); one after now counts from
+  now. Everything is counted from `from`: `since`, or the start of the bucket `since` falls in when
+  any crew's bucket began before `since` and counted something since then (up to five minutes
+  earlier), so the counts are never mixed:
+
+  ```js
+  Digest { since /* the period's start */, from /* where every count starts: since, or a bucket's start before it */,
+           until /* now, the server's clock */, limit: 'started'|'day'|null /* why since is later than asked */,
+           crews: CrewDigest[] /* those that did something, the most recently active first */ }
+  CrewDigest { sessionId, cwd, title: string|null, lastAt /* its latest hook */, turns, lastMessage: string|null,
+               stops: Record<string, number>, failures, tests: 'passed'|'failed'|null, commits, pushes,
+               allPushed: boolean, files, asked, answered, helpersStarted, helpersFinished, toolCalls }
+  ```
 
 ## 5. Browser: events, store, director
 
@@ -468,8 +841,12 @@ from what arrived (`andary_member`, `andary_source`, `andary_tool`: only the ser
 `subagent.start`, `subagent.stop`, `turn.stop`, `turn.fail`, `task.created`, `task.completed`,
 `teammate.idle`, `compact.start`, `compact.end`, `model.switch`, `todos.set`, `task.upsert`,
 `spawn.request`, `spawn.result`, `message.send`, `unknown`. `tool.start` carries
-`{toolUseId, tool, input, building, activity, summary}` where `summary` is a short human string
-("Read src/auth/login.ts", "$ npm test", "grep \"TODO\" in src").
+`{toolUseId, tool, input, building, activity, summary, callKey, root}` where `summary` is a short
+human string ("Read src/auth/login.ts", "$ npm test", "grep \"TODO\" in src"), `callKey` the
+server's key for the call's input (`andary_key`, §4.6), or null, and `root` the top of the hook
+folder's work tree as the server found it (`andary_root`, §4.6), or null. `tool.fail` adds
+`error` (its first line) and `errorText` (every line, up to 2,000 characters, for the stuck
+rules). `turn.stop` carries `interrupted` (Codex's interrupt).
 
 `store.js` keeps sessions (crews), agents, tasks/todos, approvals, the activity log (ring buffer)
 and stats, and emits change notifications. `director.js` turns TownEvents into world calls and
@@ -504,12 +881,17 @@ StoreState {
   sessions: Session[]                            // in order first seen
   agents: Record<agentKey, AgentState>
   approvals: Approval[]                          // pending first, then most recent
+  dialogs: Dialog[]                              // open: asked and not answered yet, oldest first
+  hazards: Hazard[]                              // two agents on the same files now, oldest first
   log: LogEntry[]                                // newest last, capped at maxLog
   stats: { events, toolCalls, failures, approvals, subagents, byBuilding: Record<BuildingKey, number> }
   achievements: Achievement[]
   usage: Record<agentKey, AgentUsage>            // §4.8
   usageDays: UsageDay[]
 }
+AgentUsage { tokens: { input, output, cacheRead, cacheWrite }, costUsd, unpriced: boolean, model: string|null,
+             context: { tokens, at } | null /* §4.8: the newest reading; null when unknown */,
+             compactedAt: number|null /* §4.8: when it last compacted */ }
 Session { id, number /* the crew's number: lowest free when it arrived, never changed */,
           project /* cwd basename */, cwd, title?, color, model?, permissionMode?,
           member?: string|null /* §4.11 */, source?: 'claude'|'codex' /* §4.12 */,
@@ -522,13 +904,279 @@ AgentState { key, sessionId, agentId: string|null, name, role: 'lead'|'subagent'
              currentTool?, summary?, description?, startedAt, lastActivity,
              toolCounts: Record<string, number>, files: string[] /* recent unique, ≤ 30 */,
              changes: FileChange[] /* finished Edit/MultiEdit/Write/NotebookEdit, ≤ 20, newest last */,
-             recent: LogEntry[] /* ≤ 30 */, errors: number, lastMessage? }
-LogEntry { id, ts, sessionId, agentKey, agentName, color, kind, icon, text,
-           level: 'info'|'success'|'warn'|'error' }
+             recent: LogEntry[] /* ≤ 30 */, errors: number, lastMessage?,
+             wait: Wait|null /* what it waits for you on, below */,
+             movedAt /* hook time it last moved on: a prompt, a tool call… */,
+             stuck: Stuck|null /* why it seems stuck, below */ }
+Wait { kind: 'finished'|'stopped', since /* hook time */, text /* one line */,
+       idleAt: number|null /* finished: when idle_prompt said nobody answered */,
+       cause: string|null /* stopped: StopFailure's error code */ }
+Dialog { id, sessionId, agentId: string|null, kind: 'permission'|'question'|'plan'|'unknown',
+         tools: string[], input: string|null /* inputKey() of the call */, at /* hook time */,
+         approvalId: string|null, held: boolean /* the town holds its request now */,
+         requested: boolean /* its permission request came */,
+         begun: boolean /* its PreToolUse came */, text /* what it is about */ }
+         // StoreState.dialogs: open ones
+Stuck { rule: 1|2|3, step /* short, for display: "npm test" */,
+        since /* when the episode started */, count /* failures (rules 1, 3) or runs (rule 2) */,
+        text /* "Seems stuck: `npm test` failed 3 times, nothing changed" */ }
+Hazard { id /* one per episode: kind:agentKey:at, and for a file the other's key and the path hashed */,
+         kind: 'edit'|'write'|'git', sessionId, agentKey /* who changed the file or ran the command */,
+         others: { key, sessionId, files /* how many of its changed files */, at /* its latest */ }[]
+           /* whose changes it is about: one for a file, one or more for a command */,
+         at /* hook time */, folder /* where: the hook's cwd, or the command's after cd or git -C */,
+         path: string|null /* edit, write: the file, absolute */, tool: string|null /* edit, write */,
+         command: string|null /* git: "git stash", "git add -A && git commit" */,
+         toolUseId: string|null, callKey: string|null /* git: the call's ids, to end it when refused */ }
+LogEntry { id, ts, sessionId, agentKey, agentName, color, kind /* a TownEvent kind, 'approval',
+           'achievement', 'stuck' or 'conflict' */, icon, text, level: 'info'|'success'|'warn'|'error' }
 Achievement { id, title, description, icon, unlockedAt }
 FileChange { id, path /* relative to the crew's folder */, tool, ts, whole: boolean /* Write */,
              hunks: { before: string, after: string }[] /* from tool_input, ≤ 4,000 characters each */ }
 ```
+
+**Needs you** (`core/dialogs.js`, `core/waits.js`, `core/attention.js`, all pure;
+docs/design/agent-health.md §3). `StoreState.dialogs` lists what agents asked you and had no answer
+to, in the model the phone notes and the broker share (§4.6, `core/dialogs.js`, whose `afterHook`
+table says what each hook does, at the event's own `ts`, as hooks may arrive out of order): a dialog
+per call, opened by a `PermissionRequest`, an `AskUserQuestion` or `ExitPlanMode` call (the
+permission request Claude Code sends for one joins it, whichever arrives first; asking again closes
+the older one), an MCP server's form (`elicitation_dialog`, `elicitation_url_dialog`,
+`agent_needs_input`), or a session's `permission_prompt` notice when nothing of that session is
+known to be open; closed only by that very call reporting back (same tool and input; questions and
+plans by name), the town deciding its request, your prompt or a manual `/compact` (every dialog of
+the session the town is not holding: nothing showed in your terminal if you could type), the agent's
+turn ending (also in an error, or a teammate going idle) or the session ending; a notice or a form
+closes when the lead starts a new call after it. A request sent back to the terminal, a new request
+and guesses are no proof. `core/store-dialogs.js` feeds it from events (with the server's `callKey`
+when it sent one) and approval changes: an approval links to its dialog by its `callKey` and says
+whether the town holds it; one with no dialog (older than the history kept) opens one; `allowed`,
+`denied` and `resolved` close it (the broker resolves by the same table). A teammate's crew keeps no
+dialogs.
+`AgentState.wait` is the rest: a lead's finished turn or a failed turn. A prompt, a tool call, a new
+session, a helper finishing or a manual `/compact` ends it; `TeammateIdle` ends only a teammate's
+own. A hook sent before the wait began, or before the agent last moved on (`movedAt`: its newest
+prompt, tool call, new session or helper finishing), changes nothing when it arrives late: a
+`PreToolUse` of the turn does not end the wait, and a `Stop` that arrives after the prompt you
+queued behind it starts none.
+`attentionItems(state, now, { dismissed? }) → AttentionItem[]`, most urgent first:
+
+```js
+AttentionItem { id /* one per episode: dialog:agentKey:at:input, kind:agentKey:since, limit:since,
+                      conflict:<Hazard id> */,
+                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'finished',
+                level: 'blocked'|'stopped'|'alert'|'ready', sessionId, agentKey,
+                agentKeys: string[] /* everyone it stands for */,
+                approvalId: string|null /* a request the town holds */, since, countedSince,
+                text, counted: boolean, dismissable: boolean, crews: number,
+                settled: boolean /* false: a permission dialog whose request has not reached the town yet */ }
+```
+
+A permission dialog is an `approval` item while the town holds its request, else `terminal`;
+its id stays the same either way. A dialog the town does not hold can be set aside once it has
+waited `STALE_DIALOG_MS` (five minutes): it may be stale, as an interrupted helper sends nothing. An
+agent's `stuck` is a `stuck` item of its own (level `alert`, counted, dismissable, settled; its id
+carries the episode's start), also while the agent waits for you on something else. A finished turn
+is listed at once and counted from `idle_prompt` (Codex: `CODEX_IDLE_MS`, a minute) for `READY_MS`
+(30 minutes). Stops by one rate limit (`cause: 'rate_limit'`) within ten minutes merge into one
+item for all their agents (two crews at least: a lead and its helper are one crew). A hazard
+(below) is a `conflict` item of level `alert`, listed for every agent it names (`agentKeys`: the
+one who did it, then the others): a `write` or `git` hazard is counted and dismissable, an `edit`
+one is a note, neither counted nor dismissable. It is left out once `CONFLICT_MS` (30 minutes) old,
+or when the crew or agent that did it is gone or done; others that are, are left out of it. Ended
+sessions and teammates' crews are left out. `ui/needs-you.js` adds the viewer's dismissals (stops, stuck alerts, finished turns and
+conflicts, kept in `localStorage["andary:dismissed"]` for a day and shared with the town's other
+tabs; someone watching a team town with its view link gets no items, as they can answer nothing)
+and drives the masthead button (its name: the visible words, then where a click goes), the `I`
+key, the page title, the crew rows, the inspector and the desktop notifications. A note
+(`isNote`: an alert that is not counted) never takes the place of what an agent does: the crew row
+shows it on a line of its own under it (`[data-testid="agent-note"]`), the inspector under its Now
+line. A crew row says how long: "waiting for 4m 05s", "finished 4m 05s ago", "stuck for 4m 05s",
+and "4m 05s ago" for a conflict.
+
+**Shell** (`core/shell.js`, pure, shared with the server): the one reader of Bash and
+PowerShell command lines. `readShell(command, { powershell?, folder?, root?, resolve? }) →
+{ segments, pipefail, truncated }` reads a string or a Codex argument list (at most
+`MAX_SHELL_CHARS`, 20,000) into segments, one per simple command, each `{ text, argv, words,
+program, redirects, separator, pipeline, condition, succeeded, decides, depth, folder }`: its text
+as written; its words with quotes resolved, redirections and leading keywords left out; its program
+behind assignments, wrappers and launchers (`programOf`); its redirections `{ op, fd, target,
+body }` with here-document bodies; the separator after it (`&&`, `||`, `;`, `|`, `|&`, `&`, '');
+its pipeline; what the line's exit status proves of it (pipes, `||`, `&`, conditions, `set -o
+pipefail`); 1 inside a shell's `-c` script, which is read in its place one level deep; and, given a
+starting folder, where it runs after `cd`, `pushd`/`popd` (`Set-Location`, `sl`, `Push-Location`,
+`Pop-Location`), `env -C` and `cd "$(git rev-parse --show-toplevel)"` (with `root`), unknown
+(`null`) for `~`, `$VAR`, `cd -` or past `MAX_MOVES` (64) moves. `shellCommands(command, options)
+→ { words, succeeded, decides }[]` is the short form; `isTestRun(words)` and `gitAction(words)`
+read a program's words; `normalizedPath(path)` drops `.` and `..`. It never throws.
+
+**Stuck** (`core/loops.js`, pure; docs/design/agent-health.md §4). The store runs it after each
+event and keeps the result on `AgentState.stuck` (and a `stuck` log line, level `warn`, when an
+episode starts); the server's notifier runs the same module for its phone note (§4.10), and the
+boundary check lists it among the core modules the server may import. Each side maps its events
+to the module's own input: a finished call `{ agent, folder, tool, input, ok, error, at }`
+(PostToolUse; PostToolUseFailure and PermissionDenied are failures; shell commands are read
+through `core/shell.js`, PowerShell's in its mode; `error` is the whole error
+text, `tool.fail`'s `data.errorText` in the town, or a refusal's reason; `at` is the hook's own
+time, `e.ts` in the town, `hookTime` on the server) or a fresh start, `reset(agent)`, and
+`resetAll(belongs)` when a session ends.
+
+- **The same step**: a shell command read inside one level of `bash|sh|zsh -c|-lc '…'`, with
+  whitespace collapsed, a leading `sleep N &&` and a trailing `2>&1`, `| tail …`, `| head …`
+  dropped, and a trailing `| grep …` too after a test or build run; leading `cd <dir> &&` are
+  followed, from the hook's cwd, to the folder the command runs in, which is part of the step
+  (`cd packages/a && npm test` is not `cd packages/b && npm test`; a `cd` into the cwd or `.` is
+  nothing); file tools by tool and path (`Read` adds offset and limit); `Grep`/`Glob` by tool,
+  pattern and path; anything else by tool and its input as JSON with sorted keys; each key cut at
+  300 characters.
+- **A change** (progress): a successful Edit, MultiEdit, Write, NotebookEdit or `apply_patch`, or
+  a successful shell command that changes files, judged by the command (`sed -i`, `perl -i`,
+  `--write`/`--fix`/`-w`, formatters, scripts named for format, fix, codegen, generate or
+  `build:types`, `node|python scripts/…`, git commands that rewrite the work tree or the index,
+  `patch`, package installs, `rm`/`mv`/`cp`/`mkdir`/`touch`, `>`/`>>`/`tee` to a file that is not
+  a log or temporary one, an inline python/node/ruby/perl/shell script that writes a file). It
+  counts for the agent that made it, every agent of any crew working in the same folder, and every
+  agent whose folder holds the changed file.
+- **Rules**, per agent: (1) the same step failed 3 times with no change in between; (2) the
+  identical step ran 5 times with no change in between, whatever its exit code; (3) the same step
+  failed 6 times within 20 minutes with the same error, changes or not: its first line that says
+  something (`errorSignature`: not blank, not `Exit code N`, not the command echoed back, not
+  npm's, pnpm's, yarn's, make's or CI's lines about a script failing, not a banner, a passing test
+  or a runner's header; times left out); a failure with no such line is left out of rule 3. A
+  success of the step ends 1 and 3, a change ends 1 and 2. When several hold, the words follow 1,
+  then 3, then 2.
+- **Order**: hooks arrive out of order, so each agent keeps the time of the latest change that
+  counted for it; a call made before it counts for rule 3 only; rule 3's window is in time order,
+  20 minutes back from the latest failure.
+- **A fresh start** forgets everything about the agent and ends its alert: a prompt, the turn
+  ending (`Stop`, `StopFailure`, a Codex interrupt), an interrupt (`is_interrupt`: you are at the
+  terminal, so it is no failure), the agent finishing (`SubagentStop`, a teammate's
+  `TeammateIdle`), its session starting again (not after a compaction) or ending.
+- **Steps that wait or poll by nature** are never counted, under any rule: `BashOutput`,
+  `TaskOutput`, `Monitor`, `ScheduleWakeup`, `WaitForMcpServers`, `TaskList`, `TaskGet`; a `Read`
+  (or a shell command) of a background task's output file (`…/tasks/<id>.output`); shell commands
+  that loop with `sleep`; and shell commands (read inside `bash -lc '…'`) whose every part waits,
+  besides `cd` and `echo`: `sleep`, `watch`, CI and deployment checks (`gh run watch|view|list`,
+  `gh pr checks|status`, `gh pr view --json statusCheckRollup`, `gh api` on runs and checks,
+  `glab ci`, `kubectl rollout status|wait`, `kubectl get pods`), health checks (`curl …/health`,
+  `curl -f` or `wget` of localhost), logs and processes (`tail … *.log`, `ps`, `pgrep`, `docker
+  ps`, `docker compose ps`, `lsof -i`). `sleep 5 && npm test` is the test run.
+- **One alert per agent**: while any of its steps stays stuck the episode goes on (`since` kept,
+  the step run most recently shown, its count updated). Memory is bounded: 200 agents (the one
+  quiet the longest goes first, its alert ending with it), 64 steps each (one that has not failed
+  goes first, else the one run the longest ago), 12 failures per step.
+
+**Same files** (`core/conflicts.js` with `core/git-commands.js` and `core/paths.js`, all pure;
+docs/design/agent-health.md §6). The store keeps their memory in its model, runs them after each
+event and keeps what they find on `StoreState.hazards`, with a `conflict` log line (`warn`, or
+`info` for an edit) when one starts. Its words name who did it with its crew's number, and the
+others with theirs when of another crew (every lead is a Foreman), so every row, the inspector,
+the button's "Next:" and the announcements read right: "Foreman (crew 2) wrote over src/auth.ts,
+which Foreman (crew 1) changed 4 min ago" (the time counted from now), "… edited …", "…
+deleted …", "Builder 1 (crew 2) runs git stash in api-server, where Foreman (crew 1) and Scout 1
+have changed 5 files" (two names, or the first and "N others").
+
+- **A file change** is a successful (`PostToolUse`) Edit, MultiEdit, NotebookEdit or Write, or a
+  Codex patch: an added file is a Write, an updated one an Edit or MultiEdit, a deleted one stays
+  `apply_patch` and counts as a write ("deleted"). It is remembered by its path, normalised
+  (`normalizePath`: backslashes to slashes, `.` and `..` resolved, a relative path joined to the
+  hook's `cwd`, a drive letter in capitals, Git Bash's `/c/…` as `C:/…` beside a folder on a drive;
+  nothing else, so case and links are compared as given; a path under `~` or a variable is not
+  placed), with its agent, crew, folder (the `cwd`), time, kind (edit or write) and whether it made
+  the file (`created`: a Write whose `tool_response.type` is `create`, or a Codex patch adding it),
+  which stays so until a commit takes it in. An agent's older change arriving late leaves its newer
+  one standing.
+- **Same file**: an agent changes a path another agent changed at most 30 minutes before. An Edit
+  (also MultiEdit, NotebookEdit) is an `edit` hazard, a Write (or a deletion) a `write` one. One
+  per pair of agents and file: the episode goes on while the agent changes it again; a new one
+  replaces it when the other changes it again or an edit turns into a write. A `write` stays
+  counted until it ends: an edit after it adds nothing. A change that arrives after another
+  agent's strictly newer change of the file is judged the other way round (that one is over it).
+- **Git hazard**: when a Bash or PowerShell call starts (`PreToolUse`, so it shows while the
+  command asks for permission or runs), `gitHazardOf(command, { folder, sessionFolder, root },
+  { staged, known })` reads its line for the first command that sweeps changes up (`effect:
+  'sweep'`: `git add …` and a `git commit` later on the line, or a `git commit` after the agent's
+  earlier adds there (`staged`), `git commit -a`, `git commit <pathspec>`) or throws them away
+  (`'discard'`: `git stash` [push|save] [`--` pathspec], `git checkout .|-- <pathspec>|-f`, `git
+  checkout <path>` when `known(path)` says an agent changed it or a file in it, `git switch
+  --discard-changes|-f`, `git restore <pathspec>` (not `--staged` alone), `git reset --hard`,
+  `git clean -f…` (not `-n`)), with what it acts on: its pathspecs made absolute (`:/x` from the
+  top; exclusions left out; a glob stands for its folder; only exclusions, or more than 64
+  different ones, count as none), or with none the whole work tree (`git clean`, `checkout`,
+  `restore`: the folder), and which files (`files`: `tracked` for stash without `-u`, checkout,
+  switch, restore, reset, `commit -a`, `add -u`, `commit <path>`; `untracked` for clean; else
+  `all`). The line is read by `readShell` (**Shell**, below): a segment whose program is `git` is a
+  git call, in the segment's `folder`, given the hook's folder, `root` (the top of the work tree,
+  for `cd "$(git rev-parse --show-toplevel)[/more]"`) and `resolve` (`core/paths.js`: Git Bash's
+  `/c/…` as `C:/…` beside a folder on a drive; `~` or a variable: unknown, and that call is not
+  judged). `git -C` then moves the folder, up to 64 times a call.
+- **The work tree** (`core/paths.js` `workTreeOf`): the top the server found for the hook's folder
+  (`root`, from `andary_root`, §4.6) holds for any folder inside it, but a worktree Claude Code
+  makes inside a repository (`…/.claude/worktrees/<name>`), which is one of its own, both ways
+  (`exact: true`). Otherwise the top is guessed as that worktree, else the crew's session folder
+  (where it started) when that holds the command's folder, else that folder (`exact: false`). A
+  command counts another agent's change only in the same work tree and of the files it takes:
+  under its pathspecs (each file matched by its own folders against them), or, with none, under
+  that top, or, with a guessed top, in the folder the other agent worked in when the command runs
+  inside it. One `git` hazard per command names every other agent with such changes in the last
+  30 minutes. The same command in the same place by the same agent is a new hazard only for newer
+  changes. The last 50 commands are kept for half an hour: a change that arrives after one that
+  started later counts for it too, in its hazard or a new one.
+- **Refused**: a `PermissionDenied` for the call (by `toolUseId`), or its approval denied in the
+  town (by `callKey`), ends the command's hazard.
+- **Committed work**: when a Bash or PowerShell call succeeds (`PostToolUse`), `gitCommitsOf`
+  says what each `git commit` on it took in, and the committer's changes there are forgotten: all
+  of them in that work tree for `-a` or a whole-tree add, else those under the paths it or the
+  `git add` before it named, on the line or in the agent's earlier calls; with `-a`, `add -u` or a
+  pathspec (`tracked`), not the files it made. `gitAddsOf` says what the line left staged, kept
+  for the agent (`staged`, at most 16 for each of 200 agents) until a commit there takes it in.
+- **A hand-off**: what a helper's lead changed before the helper started (its `SubagentStart`) does
+  not count for the helper's file changes or its sweeping commands; a command that throws changes
+  away still counts it.
+- **Active** agents only: a crew leaving (`SessionEnd`) forgets its changes and ends its hazards
+  (a git hazard about several goes on without it). A helper finishing ends the hazards it did, and
+  leaves its changes and what it staged to its lead (`finished(helper, lead)`): the newer of two
+  changes of one file stands, a file either made stays new, and hazards about them name the lead
+  (one the lead did over them ends). A helper finishes with its
+  `SubagentStop`, with the end of the Agent call that started it (`PostToolUseFailure`, or a
+  `PostToolUse` not `async_launched`), or with its lead's interrupted `Stop`; a lead whose turn
+  ended is still at work. A hazard ends 30 minutes after it started. Teammates' crews (a team
+  town) are left out: their files are on their computers. Agents of different crews in one folder
+  count, and so do a lead and its own helper.
+- **Bounds**: 1,000 files (the one changed the longest ago goes first), 8 agents per file (the
+  latest), 100 hazards (the oldest note gives way, a new note too, else the oldest alert), 50
+  commands, 16 adds for each of 200 agents, 64 pathspecs a command; a command line is read up to
+  20,000 characters.
+
+**Catch me up** (`ui/catch-up.js`, §4.13). The source asks
+(`TownSource.requestDigest(since) → boolean`: live sends `{ t: 'digest', since }`; the demo answers
+from its own `createDigest({ startedAt })`) and the answer comes back through the source's
+`onDigest`; live's `onAway(away, offset)` also gives the server's clock minus the page's, measured
+at `hello` (`serverTime`). A period starts when you last looked (the `until` of the last summary
+shown, in the server's time, kept in `localStorage["andary:caught-up"]` and shared with the town's
+other tabs) or when you left (`away.since`), whichever is later: the first look ever (nothing kept)
+asks for `away.since` when an absence is known, and `since: 0` (everything kept) otherwise. The
+period's words follow the answer: "Since you last looked, 25m ago."; "Since about 10:00 (you last
+looked 3m ago)." when `from` is before `since` (every count is from `from`); "Nothing new since you
+last looked, …" when no crew did anything since; "… The town only remembers since 09:12 (it
+restarted)." or "… the last day." when `limit` is set, with "No crew did anything since it
+restarted." under it when `limit` is `'started'` and no crew did anything (times of day on this
+computer's clock, from the server's times and the offset); the first look: "Everything the town
+remembers: since 09:12, when it started." (or "the last day"). The masthead's "need you" area
+offers **Catch me up** while you are away and for `OFFER_MS` (30 minutes, on the server's clock)
+after you came back, unless this browser has looked since you left, and keeps it while the dialog
+is open if it was offered when it opened; when it goes, focus on it moves to the "need you" button,
+or else the toolbar's. Screen readers hear "Welcome back…" once per absence in a browser: each tab
+that hears of your return writes its claim (`<since>:<tab>`) in
+`localStorage["andary:welcomed-back"]`, and only the one whose claim is still there 150 ms later
+says it; a tab that finds that absence's `since` already there says nothing. `W` opens it any time.
+One line per crew ("api-server: 3 turns, tests passing, 1 commit pushed, 2 files changed", then
+"Last turn:" and the latest turn's words, when it said something): crews with a counted "needs you"
+item first, the most urgent first, each with a button that goes to that item as the "need you"
+button does; then the crews that did something, the most recently active first (one that has left
+town too, named by its folder); then your other crews in one line ("Quiet: web-app and
+docs-site."). Someone watching a team town with its view link is told that only the host can catch
+up.
 
 `director.js`: `createDirector({ world, store, backlog?, humor?, random? }) → { dispose() }`
 subscribes to the store and drives the world. `recordChanges(store) → { stop() }` keeps the
@@ -563,6 +1211,7 @@ changing it reloads the page, so the facade has no method for it.
 ```js
 export async function createWorld(container: HTMLElement, options?: {
   quality?: 'auto'|'high'|'low', reducedMotion?: boolean, timeOfDay?: number|'auto',
+  placeNames?: 'auto'|'always'|'off',
   envFactory?: (args) => Env   // testing only: inject a stub environment
 }): Promise<World>
 
@@ -573,6 +1222,7 @@ World {
   setTimeOfDay(h: number|'auto'): void           // hours 0–24; 'auto' follows the local clock
   getTimeOfDay(): number
   setReducedMotion(on: boolean): void
+  setPlaceNames(mode: 'auto'|'always'|'off'): void // labels on the buildings (ADR 0017); also an option of createWorld
 
   focusAgent(id, opts?: { follow?: boolean, zoom?: number }): void  // zoom: eases there (1 = whole town)
   setLandmarks(ids: string[], opts?: { grow?: boolean }): void  // landmarks earned (§4.9); grow: rise into place
@@ -585,7 +1235,7 @@ World {
   rotateCamera(dir: 1|-1): void                   // 90° steps, animated
   zoomBy(factor: number): void                     // > 1 zooms in
 
-  setBuildingStat(key, text: string|null): void   // small counter on the building sign, e.g. "42 reads"
+  setBuildingStat(key, text: string|null): void   // stat chip on the building's label, e.g. "42 reads"
   pulseBuilding(key, color?: string): void
   setBoard(items: {text: string, status: 'pending'|'in_progress'|'completed'}[], title?: string): void
   setNodeModules(level: number): void              // 0–5: size of the node_modules box pile
@@ -602,7 +1252,9 @@ World {
   say(id, text: string, opts?: { ms?: number, tone?: 'speech'|'thought'|'shout'|'code' }): void
   emote(id, emoji: string): void
   setBadge(id, text: string|null): void            // chip beside the name, e.g. "×4"
-  weather(id, kind: 'rain'|'storm'|null): void     // personal cloud over an agent
+  weather(id, kind: 'rain'|'storm'|null): void     // personal cloud over an agent: the director
+    // sends rain after failures, and a storm for a failed turn or while the agent seems stuck
+    // (AgentState.stuck; another step succeeding meanwhile does not clear it)
 
   effect(kind: EffectKind, at: {agent: string}|{building: BuildingKey}, opts?: { color?: string }): void
   sendMessage(fromId: string, to: {agent: string}|{building: BuildingKey}): Promise<void>  // paper plane
@@ -642,17 +1294,23 @@ Env {
   buildings: Record<BuildingKey, { key, center: THREE.Vector3, height: number, root: THREE.Object3D, signAnchor: THREE.Vector3 }>
   anchor(key: BuildingKey, name?: string): THREE.Vector3   // named effect anchors, e.g. terminal 'chimney', web 'dish', hall 'portal', post 'garage', harbor 'pier', station 'bus'
   pickBuilding(raycaster: THREE.Raycaster): BuildingKey|null
-  highlightBuilding(key: BuildingKey|null): void
+  highlightBuilding(key: BuildingKey|null): void  // the selection: lit up, and its label shows its name
+  hoverBuilding(key: BuildingKey|null): void      // under the pointer: its label shows its name
+  setPlaceNames(mode: 'auto'|'always'|'off'): void
   setBuildingStat, pulseBuilding, setBoard, setNodeModules, addWorktree, removeWorktree  // as in World
   vehicle(kind, action): void
   setPedestrians(occupied: (x, z, reach) => boolean): void  // the crowd's query, from the facade:
                                                   // cars and the mail truck wait for people in their lane
+  setFigures(figures: () => {x, y, feet, half}[]): void  // the crowd's screen boxes (px, last frame):
+                                                  // a label with a figure in front of it fades
   dispose(): void
 }
 ```
 
-Building signs are DOM pills (white, icon + name, like the reference image), created by the
-environment in an overlay element it appends to `container`.
+Place labels are DOM elements the environment keeps in an overlay it appends to `container`
+(ADR 0017): a small dark plate on each building, inside its outline, showing the building's icon
+and, when it fits at the current zoom (or the mode says so), its name and stat chip. The rules
+(fit, nearer wins, figures first) live in `env/sign-layout.js`.
 
 ### 6.2 Implementation notes (world)
 
@@ -683,13 +1341,14 @@ Pure ESM, no DOM, deterministic with a seed. Used by the UI's demo mode and by
 
 ```js
 export function createSimulation({ seed?: number, speed?: number,
-  emit: (payload: object /* raw hook payload */) => void | Promise<{decision?: 'allow'|'deny'} | void>
+  emit: (payload: object /* raw hook payload */) => void | Promise<{decision?: 'allow'|'deny', updatedPermissions?: object[]} | void>
 }): { start(): void, stop(): void, setSpeed(n: number): void, running: boolean }
 ```
 
 `emit` receives raw hook payloads exactly as Claude Code would send them (§4.2). For
 `PermissionRequest` the simulation awaits the promise and continues according to the decision
-(no decision within 25 s at speed 1 → treated as allow).
+(no decision within 25 s at speed 1 → treated as allow). An allow with `updatedPermissions` saved
+the request's suggested rule: like Claude Code, the project's crews do not ask for it again.
 
 ### 7.1 Implementation notes (simulation)
 
@@ -704,9 +1363,12 @@ decision is treated as "answered in the terminal" and the story carries on as al
 - `npm run test:e2e` runs Playwright. In containers without Playwright's browser set
   `CHROME_PATH=/usr/bin/google-chrome`.
 - `e2e/helpers/town.mjs`:
-  `startTown({ remoteApprovals?, args? }) → { baseUrl, loginUrl, port, home, secret, uiToken,
+  `startTown({ remoteApprovals?, args?, env? }) → { baseUrl, loginUrl, port, home, secret, uiToken,
   sendHook(payload) → Promise<{code, stdout}>, stop() }` — starts a real server on a free port with
   a temporary `ANDARY_HOME`; `sendHook` runs the real `hooks/hook.mjs` with the payload on stdin.
+- `ANDARY_AWAY_MS` (tests only, read by `andary start`; not a setting): how long without you
+  counts as away (§4.13), a whole number of milliseconds from 100 on, so a test can start an
+  absence in a second.
 - `node scripts/shot.mjs <url> <out.png> [--wait=ms] [--size=WxH]` takes a screenshot with WebGL
   enabled, for visual checks.
 - Pages: `public/index.html` (the app), `public/world-lab.html` (full world + scripted scenario),
@@ -728,11 +1390,15 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="login-hint"]` | shown when a server is running but the browser has no valid token |
 | `[data-testid="demo-button"]` | starts the simulation (shown when there is nothing live to watch) |
 | `[data-testid="crew-list"]` | crews panel; children `[data-testid="crew"][data-session-id]` |
-| `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects |
-| `[data-testid="agent-inspector"]` | details drawer for the selected agent |
+| `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects; `data-need` is the level of what it needs you for; a lead's row holds its context in use in `[data-testid="crew-context"]` (hidden without one, §4.8); `[data-testid="agent-note"]` inside it, a note (an edit of a file another agent changed) |
+| `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn, stop, stuck alert or conflict aside; `[data-testid="agent-context"]` holds the exact context in use (§4.8); `[data-testid="inspector-note"]`, its newest note |
+| `[data-testid="waiting-for-you"]` | the masthead's "N need you" button (`data-level` is the most urgent level); click goes to the next item |
+| `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn, a stop, a stuck alert or a conflict aside |
+| `[data-testid="catch-up-button"]` | the masthead's "Catch me up", offered after time away (`W` opens the dialog any time) |
+| `[data-testid="catch-up"]` | the Catch me up dialog: `[data-testid="catch-up-period"]`, one `[data-testid="catch-up-crew"][data-session-id]` per crew (with `[data-testid="catch-up-need"]` when it needs you), `[data-testid="catch-up-quiet"]` |
 | `[data-testid="activity-log"]` | log; children `[data-testid="log-entry"]` |
 | `[data-testid="tasks-panel"]` | goals/tasks; children `[data-testid="task-item"]` |
-| `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]` |
+| `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]`, and, when a rule can be saved, `[data-testid="approve-always"]` with the rule in `[data-testid="approve-always-rule"]`; a hint in `[data-testid="approval-hint"]` |
 | `[data-testid="remote-approvals-toggle"]` | checkbox/switch for remote approvals (live mode) |
 | `[data-testid="settings-button"]` | opens the settings dialog (holds the remote approvals switch) |
 | `[data-testid="director-caption"]` | the director camera's caption (plain text, not a live region); shown while it has a shot, hidden while you hold the camera or an agent is selected |

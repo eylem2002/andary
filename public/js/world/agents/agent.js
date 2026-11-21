@@ -99,7 +99,8 @@ export class Agent {
     this.bubble = createBubbleSlot();
     /** Head-top point in world space, refreshed every frame (pill anchor, icon effects). */
     this.top = new THREE.Vector3();
-    this.screen = { x: 0, y: 0, visible: false };
+    /** Last frame's place on screen (px): head top (x, y), feet (`feet`) and half the figure's width. */
+    this.screen = { x: 0, y: 0, feet: 0, half: 0, visible: false };
     /** @type {{key: import('../../core/catalog.js').BuildingKey, pace: string}|null} goTo received while entering */
     this.pendingGo = null;
   }
