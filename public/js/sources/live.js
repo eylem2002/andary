@@ -114,7 +114,7 @@ export function socketUrl(pageUrl) {
  * @property {(progress: unknown) => void} [onProgress]  the town's growth and busy days (§4.9)
  * @property {(ok: boolean) => void} [onNotifyTest]  the answer to notifyTest()
  * @property {(digest: unknown) => void} [onDigest]   the answer to requestDigest(): what each crew did
- * @property {(away: unknown) => void} [onAway]       the latest time you were away, from hello and as it changes
+ * @property {(away: unknown, offset: number) => void} [onAway]  the latest time you were away, from hello and as it changes, with how far the server's clock is ahead of this browser's (from hello)
  * @property {new (url: string, protocols?: string[]) => WebSocket} [WebSocketImpl]
  * @property {() => import('./credentials.js').Credentials} [credentials]
  * @property {() => Promise<Hello|null>} [hello]
@@ -122,7 +122,7 @@ export function socketUrl(pageUrl) {
  */
 
 /**
- * @typedef {Required<Pick<LiveOptions, 'onSettings'|'onError'|'onProgress'|'onNotifyTest'|'onDigest'|'onAway'>> & { store: LiveOptions['store'], ingest: (envelope: unknown) => void }} Sinks
+ * @typedef {Required<Pick<LiveOptions, 'onSettings'|'onError'|'onProgress'|'onNotifyTest'|'onDigest'|'onAway'>> & { store: LiveOptions['store'], ingest: (envelope: unknown) => void, clock: { offset: number } }} Sinks
  */
 
 /**
@@ -142,7 +142,7 @@ const MESSAGES = Object.freeze({
   progress: (m, to) => to.onProgress(m.p),
   'notify-test': (m, to) => to.onNotifyTest(m.ok === true),
   digest: (m, to) => to.onDigest(m.d),
-  away: (m, to) => to.onAway(m.away ?? null),
+  away: (m, to) => to.onAway(m.away ?? null, to.clock.offset),
   error: (m, to) => to.onError(String(m.message ?? 'The server reported an error.')),
 });
 
@@ -176,7 +176,7 @@ export function connectLive({
   /** @type {ReturnType<typeof setInterval>|null} */
   let pingTimer = null;
   /** Where the server's messages go (MESSAGES). @type {Sinks} */
-  const sinks = { store, ingest, onSettings, onError, onProgress, onNotifyTest, onDigest, onAway };
+  const sinks = { store, ingest, onSettings, onError, onProgress, onNotifyTest, onDigest, onAway, clock: { offset: 0 } };
 
   /** @param {LinkStatus} next */
   function setStatus(next) {
@@ -241,8 +241,10 @@ export function connectLive({
     // Whole values, so nothing is left over from before a restart (a town that no longer hosts a team).
     onSettings({ ...(message.settings ?? {}), team: message.settings?.team ?? null, notifyUrl: typeof message.notifyUrl === 'string' ? message.notifyUrl : null });
     if (message.progress) onProgress(message.progress);
+    // The server's clock against this one (for the catch-up's half hour; the trip is ignored).
+    sinks.clock.offset = Number.isFinite(message.serverTime) ? message.serverTime - Date.now() : 0;
     // Always, so an absence from before a restart is not offered again.
-    onAway(message.away ?? null);
+    onAway(message.away ?? null, sinks.clock.offset);
     setStatus('live');
     startPing();
   }

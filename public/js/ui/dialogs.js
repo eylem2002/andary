@@ -14,10 +14,11 @@ import { LOOK } from '../page.js';
 
 /**
  * A dialog shell with a title, a close button and a body. `scrollable` makes the body itself a
- * tab stop, for text-only dialogs that may need scrolling from the keyboard.
- * @param {{ id: string, title: string, body: HTMLElement[], wide?: boolean, scrollable?: boolean }} options
+ * tab stop, for text-only dialogs that may need scrolling from the keyboard. As it closes, focus
+ * goes back to what opened it, or to `fallback()` when that can no longer take it (hidden).
+ * @param {{ id: string, title: string, body: HTMLElement[], wide?: boolean, scrollable?: boolean, fallback?: () => HTMLElement|null }} options
  */
-export function createDialog({ id, title, body, wide = false, scrollable = false }) {
+export function createDialog({ id, title, body, wide = false, scrollable = false, fallback }) {
   const close = h('button', { type: 'button', class: 'hud-iconbtn', 'aria-label': 'Close' }, icon('close'));
   const content = h('div', { class: 'hud-dialog__body', tabindex: scrollable ? '0' : null, role: scrollable ? 'region' : null, 'aria-labelledby': scrollable ? `${id}-title` : null }, ...body);
   const dialog = /** @type {HTMLDialogElement} */ (h('dialog', { class: `hud hud-dialog${wide ? ' hud-dialog--wide' : ''}`, id, 'aria-labelledby': `${id}-title` },
@@ -35,6 +36,8 @@ export function createDialog({ id, title, body, wide = false, scrollable = false
   let opener = null;
   dialog.addEventListener('close', () => {
     if (opener?.isConnected) opener.focus();
+    // What opened it has gone (hidden meanwhile): focus goes somewhere that is still there.
+    if (opener && document.activeElement !== opener) fallback?.()?.focus();
     opener = null;
   });
   return {

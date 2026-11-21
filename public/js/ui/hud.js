@@ -125,10 +125,11 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       ctx.refresh();
     },
     /**
-     * The latest time you were away, from the server (Catch me up).
-     * @param {unknown} away
+     * The latest time you were away, from the server (Catch me up), and how far the server's clock
+     * is ahead of this browser's.
+     * @param {unknown} away @param {number} [offset]
      */
-    setAway: (away) => ctx.catchUp.setAway(away),
+    setAway: (away, offset) => ctx.catchUp.setAway(away, offset),
     /**
      * What each crew did in the period Catch me up asked about, from the server or the demo.
      * @param {unknown} digest

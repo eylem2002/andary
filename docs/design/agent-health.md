@@ -223,17 +223,21 @@ time, both for files and for git commands; a command refused before it ran ends 
 ## 7. Catch me up
 
 **When you were away** is decided by the server, which sees every prompt and every answer you
-give: away means no prompt and no decision from you in any local session for 20 minutes or more
-while crews kept working.
+give: away means nothing from you (a prompt, a session you start, resume, clear or leave, a
+decision in the town) in any local session for 20 minutes or more while crews kept working (hooks
+that add to the counts).
 
-**What**: `server/digest.mjs` keeps per-crew counters in five-minute buckets for the last 24 hours
-(turns finished with the last message, failures and stops, approvals asked and answered, files
-changed, the last test result, commits and pushes, helpers started and finished), so a summary for
-any period survives a page reload and does not depend on the history the server keeps for late
-tabs. The browser asks `{ t: 'digest', since }` and shows it. The counting is a pure core module
-(`core/digest.js`), so the demo can play the server's part.
+**What**: `server/digest.mjs` keeps per-crew counts for the last 24 hours (turns finished with the
+last message, failures and stops, approvals asked and answered, files changed, the last test
+result, commits and pushes, helpers started and finished): the frequent ones in five-minute
+buckets, the rare ones with each one's time, so a summary for any period survives a page reload,
+does not depend on the history the server keeps for late tabs, and says where it starts. A test
+run, a commit or a push is read from the command line as a shell runs it (`core/shell.js`), so a
+runner or `git push` named in an argument is not one. The browser asks `{ t: 'digest', since }`
+and shows it. The counting is a pure core module (`core/digest.js`), so the demo can play the
+server's part.
 
-**Where**: when you come back (your first prompt or decision after an absence, or opening the town
+**Where**: when you come back (the first thing you do after an absence, or opening the town
 after one), the masthead's "need you" area offers "Catch me up"; `W` opens it any time, for the
 period since you last looked. One line per crew that did something, crews that need you first;
 quiet crews in one line at the end.

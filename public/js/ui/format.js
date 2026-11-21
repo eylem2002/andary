@@ -41,6 +41,15 @@ export function formatAgo(ts, now, { short = false } = {}) {
 }
 
 /**
+ * A time of day on this computer's clock, as "09:05".
+ * @param {number} ts
+ */
+export function formatClock(ts) {
+  const d = new Date(ts);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/**
  * Countdown as m:ss, rounded up so "0:00" only shows once time is really up.
  * @param {number} msLeft
  */

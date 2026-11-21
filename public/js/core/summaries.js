@@ -1,7 +1,8 @@
 // Tool calls in a few words ("Read src/auth/login.ts", "$ npm test"), and what a shell command or
 // an error is about (tests, installs, pushes; not found, permission, timeout). Used by the event
-// normaliser, the approvals and the director, and by the server's catch-up (core/digest.js), so a
-// test run or a push is read the same way in both. Pure, defensive, never throws.
+// normaliser, the approvals and the director, and by the server's catch-up (core/digest.js), which
+// reads a failed test run's error as the town does (a timeout is no red test). Pure, defensive,
+// never throws.
 
 import { clip, hostPath, isObject, listOf, oneLine, own, quoted, shortCommand, shortPath, str } from './text.js';
 
@@ -139,24 +140,16 @@ const COMMAND_KINDS = Object.freeze([
 ]);
 
 /**
- * What a shell command does, by its strongest kind (the first that matches).
  * @param {unknown} command
  * @returns {CommandKind|null}
  */
 export function classifyCommand(command) {
-  return commandKinds(command)[0] ?? null;
-}
-
-/**
- * Every kind a shell command matches, strongest first: "git commit -m x && git push" both commits
- * and pushes, which the catch-up counts apart (core/digest.js). Shared with the server.
- * @param {unknown} command
- * @returns {CommandKind[]}
- */
-export function commandKinds(command) {
   const c = str(command);
-  if (!c.trim()) return [];
-  return COMMAND_KINDS.filter(([, pattern]) => pattern.test(c)).map(([kind]) => kind);
+  if (!c.trim()) return null;
+  for (const [kind, pattern] of COMMAND_KINDS) {
+    if (pattern.test(c)) return kind;
+  }
+  return null;
 }
 
 const TIMED_OUT = /timed?\s*out|timeout|etimedout/i;

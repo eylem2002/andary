@@ -39,7 +39,7 @@ export function createMasthead(ctx) {
   const waitingWords = h('span', { class: 'hud-waiting__words' });
   const waiting = h('button', { type: 'button', class: 'hud-btn hud-btn--board hud-waiting', hidden: true, 'data-testid': 'waiting-for-you', 'aria-keyshortcuts': 'I', on: { click: () => ctx.run('needs-you') } },
     icon('hourglass', { size: 18 }), waitingCount, waitingWords);
-  // Its name starts with its visible words, which phones leave out (the icon stays).
+  // Its name starts with its visible words, which phones keep too (they leave out the icon).
   const catchUp = h('button', { type: 'button', class: 'hud-btn hud-btn--board hud-catchup-offer', hidden: true, 'data-testid': 'catch-up-button', 'aria-keyshortcuts': 'W', 'aria-label': 'Catch me up on what your crews did while you were away', on: { click: () => ctx.run('catch-up') } },
     icon('clock', { size: 18 }), h('span', { class: 'hud-catchup-offer__words', text: 'Catch me up' }));
 
@@ -61,7 +61,8 @@ export function createMasthead(ctx) {
     setAttr(waiting, 'data-level', counted[0]?.level ?? null);
     updateTitle(n);
     const offered = ctx.catchUp.offered();
-    if (!offered && document.activeElement === catchUp) settingsButton.focus();
+    // Gone once you have looked (after the dialog closed): focus moves on to what is still there.
+    if (!offered && document.activeElement === catchUp) (focusFallback(waiting) ?? settingsButton).focus();
     setHidden(catchUp, !offered);
     const key = ctx.view.connection;
     const info = STATUS[key] ?? STATUS.connecting;
@@ -76,6 +77,17 @@ export function createMasthead(ctx) {
   }
 
   return { el, render };
+}
+
+/**
+ * Where focus goes when the masthead button it was on goes away: the "need you" button while it
+ * shows, else the toolbar's current button.
+ * @param {HTMLElement|null} [waiting]  the "need you" button (found in the page when not given)
+ * @returns {HTMLElement|null}
+ */
+export function focusFallback(waiting = document.querySelector('[data-testid="waiting-for-you"]')) {
+  if (waiting && !waiting.hidden) return waiting;
+  return document.querySelector('.hud-toolbar [tabindex="0"]');
 }
 
 /** "(2) Andary" while things need you, so a background tab shows it. @param {number} count */

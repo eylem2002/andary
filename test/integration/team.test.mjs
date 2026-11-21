@@ -25,7 +25,8 @@ describe('Team town', () => {
 
   before(async () => {
     // --host keeps the test off the network; a real host leaves it out and listens on the LAN.
-    host = await startTown({ args: ['--team', '--host', '127.0.0.1', '--team-host', 'andary-host.tailnet.example'] });
+    // A short wait for an absence (tests only), so the host's absences can be seen.
+    host = await startTown({ args: ['--team', '--host', '127.0.0.1', '--team-host', 'andary-host.tailnet.example'], env: { ANDARY_AWAY_MS: '300' } });
     secret = /** @type {string} */ (teamSecret(host.home, { create: false }));
     // The key by environment, as the invite prints it.
     member = await startTown({ args: ['--share-to', host.baseUrl], env: { ANDARY_TEAM_KEY: memberKey(secret, 'Lina') } });
@@ -119,6 +120,35 @@ describe('Team town', () => {
     assert.ok(ids.includes('host-crew'), ids.join(', '));
     assert.ok(!ids.some((/** @type {string} */ id) => id.startsWith('Lina~')), ids.join(', '));
     await closeBrowser(owner);
+  });
+
+  it("tells only the host of their absences: never a viewer, and a teammate's prompt is not the host", async () => {
+    const protocols = `andary, andary.view.${viewToken(secret)}`;
+    const owner = await connectBrowser(host);
+    const viewer = await connectBrowser(host, { protocols });
+    await Promise.all([waitForMessage(owner, (m) => m?.t === 'hello'), waitForMessage(viewer, (m) => m?.t === 'hello')]);
+    // The host is here (a prompt), then their crew works on alone: away 300 ms later.
+    await postHook(host, { ...hookPayload('UserPromptSubmit', { prompt: 'Go on without me' }), session_id: 'host-away' });
+    await postHook(host, { ...hookPayload('Stop', { last_assistant_message: 'Done' }), session_id: 'host-away' });
+    const { away } = await waitForMessage(owner, (m) => m?.t === 'away' && m.away.until === null);
+    // A teammate's prompt is theirs: the host is still away.
+    const relayed = waitForMessage(owner, (m) => m?.t === 'hook' && m.e.event.session_id === 'Lina~away-test', 10_000);
+    await postHook(member, { ...hookPayload('UserPromptSubmit', { prompt: 'Mine' }), session_id: 'away-test' });
+    await relayed;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(owner.messages.filter((m) => m?.t === 'away' && m.away.since === away.since).length, 1, 'not ended by a teammate');
+    // Joining now, the owner hears of it in hello; a viewer does not.
+    const [ownerAgain, viewerAgain] = await Promise.all([connectBrowser(host), connectBrowser(host, { protocols })]);
+    const [ownerHello, viewerHello] = await Promise.all([waitForMessage(ownerAgain, (m) => m?.t === 'hello'), waitForMessage(viewerAgain, (m) => m?.t === 'hello')]);
+    assert.deepEqual(ownerHello.away, away);
+    assert.equal(viewerHello.away, null);
+    // The host's next prompt ends it, for owners only.
+    await postHook(host, { ...hookPayload('UserPromptSubmit', { prompt: 'Back' }), session_id: 'host-away' });
+    const back = await waitForMessage(ownerAgain, (m) => m?.t === 'away' && m.away.until !== null);
+    assert.equal(back.away.since, away.since);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    for (const browser of [viewer, viewerAgain]) assert.ok(!browser.messages.some((m) => m?.t === 'away'), 'a viewer never hears of an absence');
+    await Promise.all([owner, viewer, ownerAgain, viewerAgain].map(closeBrowser));
   });
 
   it('invites print the key for the environment, the view link, and what the link shows', () => {

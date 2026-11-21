@@ -77,9 +77,9 @@ broker and the town's "needs you" follow one model), what an approval card shows
 (card fields), which permission rules an approval may offer to save (permission rules; the demo
 plays the server's part there), when an agent seems stuck (the town's alert and the phone's
 note follow one set of rules), how a shell command line reads (`core/shell.js`, the one reader
-of Bash and PowerShell commands that every rule about what an agent ran goes through), what a
-shell command is about (summaries: a test run, a commit, a push) and what each crew did, for the
-catch-up (digest; the demo keeps the same counts).
+of Bash and PowerShell commands that every rule about what an agent ran goes through: the
+catch-up's test runs, commits and pushes too), what an error is about (summaries) and what each
+crew did, for the catch-up (digest; the demo keeps the same counts).
 
 **The world behind a facade.** The app talks to the 3D world only through `world/world.js`
 (CONTRACTS §6). Inside it, the town (`env/`) and the people (`agents/`) never import each other;
@@ -113,7 +113,7 @@ references may cross.
 | how another agent's events are translated | `server/adapters/` |
 | what happens to an event on the server | `server/ingest.mjs` |
 | when an agent waits for you, and what each hook proves | `public/js/core/dialogs.js` (`afterHook`), `server/hook-steps.mjs` |
-| when you were away, and what your crews did meanwhile (Catch me up) | `server/digest.mjs`, `public/js/core/digest.js`, `public/js/ui/catch-up.js` |
+| when you were away, and what your crews did meanwhile (Catch me up) | `server/digest.mjs`, `public/js/core/digest.js`, `public/js/core/shell.js`, `public/js/ui/catch-up.js` |
 | who may connect, and what they may do | `server/auth.mjs`, `server/browsers.mjs`, `server/security.mjs` |
 | the team town | `server/team.mjs`, `ingestTeam` in `server/ingest.mjs` |
 | how a hook becomes town events | `public/js/core/events.js`, `summaries.js` |

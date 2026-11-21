@@ -30,6 +30,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {boolean} [remoteApprovals]
  * @property {string|null} [notifyUrl]    ntfy topic URL for phone notifications (null: off)
  * @property {number} [notifyDelayMs]      how long a dialog's phone note waits (DIALOG_DELAY_MS); for tests, no CLI flag
+ * @property {number} [awayMs]             how long without you counts as away (AWAY_MS); for tests, no CLI flag
  * @property {string} [claudeDir]          Claude Code's config folder, for reading token usage from transcripts
  * @property {boolean} [team]              host a team town: teammates' Andarys may send their events here
  * @property {string[]} [teamHosts]        names teammates reach a team host by (a VPN name), besides its addresses
@@ -186,7 +187,7 @@ function createContext(config, options) {
   const hub = createHub(LIMITS.wsClients);
   const notifier = createNotifier({ url: options.notifyUrl ?? null, log: config.log, delayMs: options.notifyDelayMs });
   // Your absences are yours: only signed-in browsers hear of them.
-  const digest = createTownDigest({ onAway: (away) => hub.broadcastOwners({ t: 'away', away }) });
+  const digest = createTownDigest({ awayMs: options.awayMs, onAway: (away) => hub.broadcastOwners({ t: 'away', away }) });
   /** @type {TownContext} */
   const ctx = {
     version: readVersion(),

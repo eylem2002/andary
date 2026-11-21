@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { createStore } from '../../../public/js/core/store.js';
-import { OFFER_MS, catchUpOffered, catchUpRows, catchUpStart, crewWords, periodText, readAway, readDigest } from '../../../public/js/ui/catch-up.js';
+import { OFFER_MS, catchUpOffered, catchUpRows, catchUpStart, crewWords, nothingNew, periodText, readAway, readDigest } from '../../../public/js/ui/catch-up.js';
 import { createNeedsYou } from '../../../public/js/ui/needs-you.js';
 import { SESSION, envelope, hook } from '../core/helpers.mjs';
 
@@ -54,12 +54,39 @@ describe('a crew\'s line', () => {
   });
 });
 
+/**
+ * A summary of a period, with nothing in it unless a test says.
+ * @param {Partial<import('../../../public/js/core/digest.js').Digest>} fields
+ * @returns {import('../../../public/js/core/digest.js').Digest}
+ */
+const digestOf = (fields) => ({ since: 0, from: fields.since ?? 0, until: 0, limit: null, crews: [crew({ turns: 1 })], ...fields });
+/** A time of day, as the dialog shows one: minutes from midnight, here. @param {number} ts */
+const clock = (ts) => `${Math.floor(ts / MINUTE)}min`;
+
 describe('the period', () => {
   test('since you left, since you last looked, or everything the town remembers', () => {
-    assert.equal(periodText('left', 0, 72 * MINUTE), 'Since you left, 1h ago.');
-    assert.equal(periodText('looked', 0, 25 * MINUTE), 'Since you last looked, 25m ago.');
-    assert.equal(periodText('looked', 0, 5000), 'Since you last looked, a moment ago.');
-    assert.equal(periodText('all', 0, 1), 'Everything the town remembers, up to a day back.');
+    assert.equal(periodText('left', 0, digestOf({ until: 72 * MINUTE }), clock), 'Since you left, 1h ago.');
+    assert.equal(periodText('looked', 0, digestOf({ until: 25 * MINUTE }), clock), 'Since you last looked, 25m ago.');
+    assert.equal(periodText('looked', 0, digestOf({ until: 5000 }), clock), 'Since you last looked, a moment ago.');
+    assert.equal(periodText('all', 0, digestOf({ since: 9 * MINUTE, until: 99 * MINUTE, limit: 'started' }), clock), 'Everything the town remembers: since 9min, when it started.');
+    assert.equal(periodText('all', 0, digestOf({ since: 9 * MINUTE, until: 99 * MINUTE, limit: 'day' }), clock), 'Everything the town remembers: the last day.');
+  });
+
+  test('says when the town remembers less than the time asked for', () => {
+    // You last looked two days ago; the server restarted at minute 2900 meanwhile, or keeps a day.
+    const twoDays = 2 * 24 * 60 * MINUTE;
+    assert.equal(periodText('looked', 0, digestOf({ since: 2900 * MINUTE, until: twoDays, limit: 'started' }), clock), 'Since you last looked, 2d ago. The town only remembers since 2900min (it restarted).');
+    assert.equal(periodText('looked', 0, digestOf({ since: twoDays / 2, until: twoDays, limit: 'day' }), clock), 'Since you last looked, 2d ago. The town only remembers the last day.');
+    assert.equal(periodText('looked', 0, digestOf({ since: 2900 * MINUTE, until: twoDays, limit: 'started', crews: [] }), clock), 'Since you last looked, 2d ago. The town only remembers since 2900min (it restarted).', 'not "nothing new": the town cannot know');
+  });
+
+  test('says when a five-minute count reaches back before it, and when nothing came since you last looked', () => {
+    assert.equal(periodText('looked', 63 * MINUTE, digestOf({ since: 63 * MINUTE, from: 60 * MINUTE, until: 66 * MINUTE }), clock), 'Since about 60min (you last looked 3m ago).');
+    assert.equal(periodText('left', 63 * MINUTE, digestOf({ since: 63 * MINUTE, from: 60 * MINUTE, until: 130 * MINUTE }), clock), 'Since about 60min (you left 1h ago).');
+    const none = digestOf({ since: 63 * MINUTE, until: 63 * MINUTE + 4000, crews: [] });
+    assert.equal(periodText('looked', 63 * MINUTE, none, clock), 'Nothing new since you last looked, a moment ago.');
+    assert.equal(nothingNew('looked', none), true);
+    assert.equal(nothingNew('left', none), false, 'since you left: the note under the period says nothing happened');
   });
 
   test('starts when you last looked or when you left, whichever is later; the first time, as far back as it goes', () => {
@@ -88,7 +115,9 @@ describe('what comes from the network', () => {
   test('a summary is read defensively', () => {
     assert.equal(readDigest(null), null);
     assert.equal(readDigest({ since: 0, until: 1 }), null);
-    const digest = readDigest({ since: 0, until: 1, crews: [null, { sessionId: 7 }, { sessionId: 's', turns: -2, files: 2.7, stops: { rate_limit: 'x', server_error: 1 }, tests: 'maybe', title: '' }] });
+    const digest = readDigest({ since: 5, until: 9, from: 7, limit: 'later', crews: [null, { sessionId: 7 }, { sessionId: 's', turns: -2, files: 2.7, stops: { rate_limit: 'x', server_error: 1 }, tests: 'maybe', title: '' }] });
+    assert.deepEqual([digest?.since, digest?.from, digest?.limit], [5, 5, null], 'never after since; an unknown limit is none');
+    assert.deepEqual([readDigest({ since: 5, until: 9, from: 2, limit: 'started', crews: [] })?.from, readDigest({ since: 5, until: 9, from: 2, limit: 'started', crews: [] })?.limit], [2, 'started']);
     assert.equal(digest?.crews.length, 1);
     const [only] = digest?.crews ?? [];
     assert.deepEqual([only.turns, only.files, only.stops, only.tests, only.title, only.lastMessage], [0, 2, { rate_limit: 0, server_error: 1 }, null, null, null]);
@@ -123,7 +152,9 @@ describe('the lines', () => {
     const items = createNeedsYou({ storage: null, now: () => T0 + 5000 }).items(state);
     const digest = {
       since: 0,
+      from: 0,
       until: T0 + 5000,
+      limit: null,
       crews: [
         crew({ sessionId: OTHER, cwd: '/home/dev/code/web-app', turns: 1, lastMessage: 'Shipped.', lastAt: T0 + 2000 }),
         crew({ sessionId: 'gone-crew', cwd: '/home/dev/code/old-tool', turns: 2, lastAt: T0 }),
@@ -146,7 +177,7 @@ describe('the lines', () => {
   test('a crew that needs you is listed even when it did nothing since you looked', () => {
     const state = town();
     const items = createNeedsYou({ storage: null, now: () => T0 + 5000 }).items(state);
-    const { rows, quiet } = catchUpRows(state, { since: 0, until: T0, crews: [] }, items);
+    const { rows, quiet } = catchUpRows(state, { since: 0, from: 0, until: T0, limit: null, crews: [] }, items);
     assert.deepEqual(rows.map((r) => [r.name, r.words]), [['api-server', '']]);
     assert.deepEqual(quiet, ['web-app', 'docs-site']);
   });

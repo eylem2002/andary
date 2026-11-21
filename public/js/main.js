@@ -108,7 +108,7 @@ async function boot() {
       onProgress: (progress) => hud.setProgress(progress),
       onNotifyTest: (ok) => hud.notify(ok ? { icon: 'bell', title: 'Test notification sent', body: 'Check the ntfy app on your phone.' } : { tone: 'error', icon: 'warning', title: 'The test notification was not sent', body: 'The server could not reach ntfy, or sent one a moment ago.' }),
       onDigest: (digest) => hud.setDigest(digest),
-      onAway: (away) => hud.setAway(away),
+      onAway: (away, offset) => hud.setAway(away, offset),
     });
   }
 

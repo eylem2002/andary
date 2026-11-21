@@ -845,47 +845,87 @@ section.
     last 50 commands are kept for half an hour (a refused one is dropped). Two changes at the same
     time are judged once, in the order they arrive. An agent's older change arriving late leaves
     its newer one standing.
-148. **Away counts only what is surely you: a prompt, or a request answered in the town.** A
-     `/compact` you ran is a prompt too, as "needs you" already reads one (89). A yes in the
+148. **Away counts only what is surely you, and only counted work as your crews working.** You are a
+     prompt, a `/compact` you ran (as "needs you" reads one, 89), a session you start, resume or
+     clear (`SessionStart` with `source` `startup`, `resume` or `clear`) or leave (`SessionEnd` with
+     `reason` `prompt_input_exit` or `clear`), or a request answered in the town. A yes in the
      terminal shows only when the tool finishes (and another hook could have answered it), an
      interrupt arrives as a failed tool or a Codex Stop, and an expiry or a release is nobody's
-     answer, so none of them counts. "Crews kept working" means any local hook other than a prompt
-     arrived after you were last seen (the doctor's probe aside): one turn that finished just
-     after you left is enough, so coming back to it offers a catch-up too. Until your first
-     prompt, when the town started counts as when you were last seen.
+     answer, so none of them counts. "Crews kept working" means a local hook that adds to the
+     catch-up's counts (154 to 158) arrived after you were last seen (the doctor's probe aside): an
+     idle notification, an automatic compaction or a session ending on its own is not work. One turn
+     that finished just after you left is enough, so coming back to it offers a catch-up too. Until
+     you first do something, when the town started counts as when you were last seen.
 149. **An absence begins at the 20-minute mark, on a timer.** Not only at your return, so a town
      left open on a second screen offers "Catch me up" before you type anything. Reading a long
      answer for 20 minutes without typing counts as away too: the offer is a quiet button, not a
      pop-up, and costs nothing to ignore.
 150. **The offer stays 30 minutes after you come back, or until you look.** Like a finished turn
-     (93), it would only be noise after that; `W` still works. It is not offered when you have
-     opened Catch me up since you left (from your phone during the meeting, say). Screen readers
-     hear "Welcome back…" once per return.
+     (93), it would only be noise after that; `W` still works. When you last looked is kept per
+     browser (151), so the offer goes once this browser has opened Catch me up since you left (in
+     another tab, say); looking from your phone does not take it away on your computer. A button
+     that was offered when the dialog opened stays while it is open, so focus can go back to it, and
+     goes when it closes. Screen readers hear "Welcome back…" once per absence in each browser: the
+     absence announced is kept (`andary:welcomed-back`), so a reload does not say it again.
 151. **"Since you last looked" is the end of the last summary you saw, on the server's clock.** It
-     is kept in this browser per town (`andary:caught-up`) and shared by its tabs, and the page
-     never compares its own clock with the server's. You saw what happened before you left, so a
-     period starts when you last looked or when you left, whichever is later. The first look
-     ever starts when you left if the server knows of an absence, and otherwise covers everything
-     it keeps: since it started, a day at most.
-152. **A period starts at its five-minute bucket.** The counts are kept in buckets, so a summary
-     counts every bucket that ends after the time asked for: it can repeat up to five minutes
-     you already saw, but never miss any. Hooks are timed by when they reached the server, so one
-     that arrives late is never lost between two looks.
+     is kept in this browser per town (`andary:caught-up`) and shared by its tabs, and only ever
+     compared with the server's times. The offer's half hour is timed on the server's clock too: the
+     page adds the difference between the clocks it measured at `hello` (`serverTime`, the network's
+     delay ignored) to its own. You saw what happened before you left, so a period starts when you
+     last looked or when you left, whichever is later. The first look ever starts when you left if
+     the server knows of an absence, and otherwise covers everything it keeps: since it started, a
+     day at most.
+152. **Rare things are counted to the moment; frequent ones by five minutes, and the period says
+     so.** Failures, permissions asked and answered, commits, pushes and stopped turns keep each
+     one's time (the latest 200 of each kind per crew), and so do the latest test result, the latest
+     turn's words and each changed file: a period counts exactly those since the time asked for, so
+     a second look a moment after the first shows nothing it showed already ("Nothing new since you
+     last looked"). Turns, tool calls and helpers are counted in five-minute buckets that know when
+     they last counted something: a bucket counts when it counted anything since the time asked for,
+     all of it, and the period then says it starts earlier ("Since about 10:00 (you last looked 3m
+     ago)."). The server never counts before it started nor more than a day back; when you ask for
+     earlier, it answers from where it remembers and the dialog says so ("The town only remembers
+     since 09:12 (it restarted)." or "…the last day."). Hooks are timed by when they reached the
+     server, so one that arrives late is never lost between two looks.
 153. **Files changed are distinct files, kept per crew rather than per bucket.** A count per
      bucket would make a file edited ten times ten files, and a set of paths per bucket would cost
      far more memory. Each crew keeps up to 200 files (a short key of the path) with the time of
      their latest change, which is exact for any period that ends now, as every summary does.
      Files a shell command changes (`sed -i`, a formatter) cannot be known and are not counted.
-154. **The test result is the latest test command's, read as the town reads a test run.** A
-     `Bash` or `PowerShell` command whose strongest kind is a test (core/summaries.js, which the
-     server now shares) passed with its `PostToolUse` and failed with its `PostToolUseFailure`
-     (unless interrupted). `npm test && git push` is a push, as in the weather and the records,
-     and `npm test | tail` reports tail's exit, as everywhere in the town. A command sent to the
-     background has only started when its hook comes (its output is read later, by tools that do
-     not name it), so it brings no test result, commit or push: "tests passing" is never a guess.
-155. **A commit or a push is any successful command with `git commit` or `git push` in it.** One
-     command can be both. Commits read as pushed ("1 commit pushed") only when a push came after
-     the latest one; otherwise both are counted ("2 commits, 1 push").
+154. **"Tests passing" or "failing" is the latest test run's, only when the command's exit status is
+     that run's.** A `Bash` or `PowerShell` command line (or a Codex argument list, read as the line
+     it stands for) is read by the shared reader (142): quoted strings, heredoc bodies, comments and
+     redirections are text, a substitution stays whole inside its word (`echo $(git push)` runs no
+     push), and a test runner counts only in command position: at the start of a command after `&&`,
+     `||`, `;`, `&`, a pipe or a newline, behind `cd x &&`, assignments (`CI=1`), wrappers and
+     launchers such as `env`, `time`, `timeout`, `npx`, `npm exec`, `uv run`, `poetry run`, `bundle
+     exec` and `python -m` (core/shell.js lists them), or inside a shell's `-c` script, one level
+     deep (`bash -c 'bash -c "npm test"'` runs no test the catch-up sees). Program names are
+     compared in lower case. So `rg -n "vitest" package.json`, `npm install -D vitest`, `pip install
+     pytest`, `cat jest.config.js` and `sed -n '1,80p' tox.ini` run no tests. The runners are the
+     test runners (jest, vitest, mocha, ava, pytest, rspec, phpunit, tox, nox, `python -m
+     unittest`), a package's `test` script (`npm test`, `pnpm run test:unit`), a tool's `test`
+     subcommand (`go`, `cargo`, `deno`, `dotnet`, `mix`, `mvn`, `gradle`, `make`, `playwright`) and
+     `node --test`. Only the last item of the line (after its last `;`, `&` or newline) sets its
+     status, with no `||` in it; there every `&&` step must succeed, and a pipeline reports its last
+     command, or any command after `set -o pipefail`. Tests passed when the command succeeded and
+     every test run in it must have; they failed when it failed and a test run is the only thing
+     whose failure could show (besides commands that do not fail in practice: `cd`, `export`, `set`,
+     `echo`, `tail`, `head`, `tee` and a few more), with an error the town does not call a timeout.
+     So `npm test 2>&1 | tail -20` gives no result (its status is tail's), `npm test && git push`
+     passing is green tests but failing says nothing, and a timed-out run is no red tests. The
+     town's weather still reads a command by its strongest kind (core/summaries.js); the catch-up is
+     stricter because it states a result. A command sent to the background has only started when its
+     hook comes (its output is read later, by tools that do not name it), so it brings no test
+     result, commit or push: "tests passing" is never a guess.
+155. **A commit or a push is a `git commit` or `git push` that must have succeeded.** Read the same
+     way (154): git in command position, after its own options (`git -C repo commit`, `git -c
+     commit.gpgsign=false commit`, `--git-dir`, `--work-tree`…); not a dry run (`--dry-run`, or
+     push's `-n`); each one counts, so `git commit -m a && git commit -m b` is two. A commit before
+     a `;` is not counted (it may have had nothing to commit while the line still succeeded), and
+     `echo "… git push later"` or `grep -rn "git commit" docs/` is neither. Commits read as pushed
+     ("1 commit pushed") only when a push came after the latest one; otherwise both are counted ("2
+     commits, 1 push").
 156. **Failed tool calls are counted; stopped turns keep their kind.** Agents fail and retry all
      the time, red tests have words of their own (the test result) and an interrupt is you, so a
      failed call only adds to a number. A stopped turn's kind (rate limit, overload, billing) says
@@ -894,15 +934,20 @@ section.
 157. **"Permissions asked" leaves out questions and plans.** `AskUserQuestion` and `ExitPlanMode`
      raise a PermissionRequest too, but they want an answer, not a permission, and "needs you"
      already shows any that wait. A request counts as answered when it is allowed or denied in the
-     town or answered in the terminal; an expired one is not, and a later answer to it in the
-     terminal cannot be seen.
+     town or answered in the terminal, and when one that expired in the town then ran or was denied
+     (its call's `PostToolUse`, `PostToolUseFailure` or `PermissionDenied`: the broker marks it with
+     that `proof`). A turn or session ending after an expiry proves no answer; neither does anything
+     once the broker has forgotten the request (it keeps the latest 50 settled ones).
 158. **A crew that only used tools still did something.** Its line says how many tool calls
      ("14 tool calls") when nothing else counted. A crew with nothing counted in the period is
      quiet; one that left town after doing something is still listed, by its folder.
 159. **Bounded, and in memory only.** 100 crews (the one quiet for longest is forgotten), a day of
-     buckets and 200 files per crew, a turn's last message cut to 200 characters on one line: a
-     few megabytes at the very worst. It holds your agents' last messages, which ADR 0006 keeps
-     off the disk, so a restart forgets it, as it forgets the history.
+     five-minute buckets, 200 changed files and the latest 200 times of each rare count per crew,
+     and one last message per crew, cut to 200 characters on one line and copied, so the long
+     message it came from is not kept alive. Measured at the very worst (100 crews busy in every
+     bucket of a day, every list full, a 2 KB message each turn): 8.6 MB. It holds your agents' last
+     messages, which ADR 0006 keeps off the disk, so a restart forgets it, as it forgets the
+     history.
 160. **Catch me up works in the demo.** The counting is a pure core module the demo shares, so `W`
      tells the story's crews; nobody is ever away in a demo, so it is never offered there, and
      what you looked at there is not kept.

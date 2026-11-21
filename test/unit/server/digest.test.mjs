@@ -1,5 +1,5 @@
-// When you were away (server/digest.mjs): no prompt and no decision from you for 20 minutes while
-// crews kept working; and the server's digest, fed by hooks and the approval broker.
+// When you were away (server/digest.mjs): nothing from you for 20 minutes while crews kept working;
+// and the server's digest, fed by hooks and the approval broker.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { AWAY_MS, createAwayWatch, createTownDigest } from '../../../server/digest.mjs';
@@ -8,11 +8,11 @@ import { FIXTURES, createFakeClock, hook } from '../core/helpers.mjs';
 const MINUTE = 60_000;
 
 /** An away watch on a fake clock whose timers fire at their time; `changes` lists what it said. */
-function watch() {
+function watch({ awayMs = AWAY_MS } = {}) {
   const clock = createFakeClock(0);
   /** @type {any[]} */
   const changes = [];
-  const away = createAwayWatch({ now: clock.now, onChange: (a) => changes.push(a), setTimer: (fn, ms) => clock.setTimeout(fn, ms), clearTimer: (id) => clock.clearTimeout(id) });
+  const away = createAwayWatch({ awayMs, now: clock.now, onChange: (a) => changes.push(a), setTimer: (fn, ms) => clock.setTimeout(fn, ms), clearTimer: (id) => clock.clearTimeout(id) });
   return {
     away,
     changes,
@@ -24,7 +24,7 @@ function watch() {
   };
 }
 
-describe('away: no prompt and no decision for 20 minutes while crews kept working', () => {
+describe('away: nothing from you for 20 minutes while crews kept working', () => {
   test('crews working after your prompt: away from the 20-minute mark, back with your next prompt', async () => {
     const { away, changes, at, send } = watch();
     await at(1 * MINUTE);
@@ -75,8 +75,53 @@ describe('away: no prompt and no decision for 20 minutes while crews kept workin
   test('before your first prompt, the town\'s start counts as when you were last seen', async () => {
     const { changes, at, send } = watch();
     await at(5 * MINUTE);
-    send(FIXTURES.SessionStart);
+    send(FIXTURES.Stop);
     await at(AWAY_MS);
+    assert.deepEqual(changes, [{ since: 0, until: null }]);
+  });
+
+  test('a session you start, resume, clear or leave is you, like a prompt', async () => {
+    /** @type {Record<string, any>[]} */
+    const you = [
+      FIXTURES.SessionStart,
+      { ...FIXTURES.SessionStart, source: 'resume' },
+      { ...FIXTURES.SessionStart, source: 'clear' },
+      FIXTURES.SessionEnd,
+      { ...FIXTURES.SessionEnd, reason: 'clear' },
+    ];
+    for (const event of you) {
+      const { changes, at, send } = watch();
+      send(FIXTURES.PreToolUse);
+      await at(25 * MINUTE);
+      send(event);
+      assert.deepEqual(changes.at(-1), { since: 0, until: 25 * MINUTE }, `${event.hook_event_name} ${event.source ?? event.reason}`);
+    }
+  });
+
+  test('only hooks that count are work: an idle notification, a compaction or a session ending on its own is not', async () => {
+    const { away, changes, at, send } = watch();
+    send(FIXTURES.UserPromptSubmit);
+    await at(1 * MINUTE);
+    for (const event of [
+      { ...FIXTURES.Notification, notification_type: 'idle_prompt', message: 'Claude is waiting for your input' },
+      { ...FIXTURES.SessionStart, source: 'compact' },
+      { ...FIXTURES.SessionEnd, reason: 'other' },
+      FIXTURES.PreCompact,
+      hook('Stop', { stop_reason: 'interrupted' }),
+    ]) send(event);
+    await at(90 * MINUTE);
+    assert.deepEqual(changes, []);
+    assert.equal(away.current(), null);
+    send(FIXTURES.SubagentStart);
+    assert.deepEqual(changes, [{ since: 0, until: null }], 'a helper starting is work: away at once, 20 minutes after your prompt');
+  });
+
+  test('a shorter wait for tests (ANDARY_AWAY_MS)', async () => {
+    const { changes, at, send } = watch({ awayMs: 500 });
+    send(FIXTURES.PreToolUse);
+    await at(499);
+    assert.deepEqual(changes, []);
+    await at(500);
     assert.deepEqual(changes, [{ since: 0, until: null }]);
   });
 
@@ -99,7 +144,7 @@ describe('away: no prompt and no decision for 20 minutes while crews kept workin
     assert.deepEqual(changes.at(-1), { since: 40 * MINUTE, until: null });
   });
 
-  test('a /compact you ran is a prompt, as the dialog model reads one; an automatic one is work', async () => {
+  test('a /compact you ran is a prompt, as the dialog model reads one; an automatic one is not you', async () => {
     const { changes, at, send } = watch();
     send(FIXTURES.PreToolUse);
     await at(19 * MINUTE);
@@ -146,6 +191,17 @@ describe('the town digest', () => {
     const [crew] = digest.summary(0).crews;
     assert.deepEqual([crew.asked, crew.answered, crew.turns, crew.lastMessage], [1, 1, 1, 'Shipped.']);
     assert.equal(digest.summary(Date.now() + 1e9).since <= clock.now(), true, 'a time after now counts from now');
+    digest.dispose();
+  });
+
+  test('counts from the server\'s start: a period from before it says the town only remembers since then', async () => {
+    const clock = createFakeClock(50 * MINUTE);
+    const digest = createTownDigest({ now: clock.now, setTimer: (fn, ms) => clock.setTimeout(fn, ms), clearTimer: (id) => clock.clearTimeout(id) });
+    digest.observe(FIXTURES.Stop);
+    await clock.advance(MINUTE);
+    const { since, limit, crews } = digest.summary(10 * MINUTE);
+    assert.deepEqual([since, limit, crews.length], [50 * MINUTE, 'started', 1]);
+    assert.equal(digest.summary(50 * MINUTE).limit, null);
     digest.dispose();
   });
 });

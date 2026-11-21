@@ -3147,21 +3147,23 @@ body {
     max-width: calc(100vw - 190px - 72px);
   }
 
-  /* Catch me up keeps its clock on a phone; its name still says what it does. */
+  /* Catch me up keeps its words on a phone (a bare clock would read as the time of day) and
+     leaves out its icon instead. */
   .hud-catchup-offer {
-    padding-inline: 10px;
+    padding-inline: 8px;
+    font-size: 13px;
   }
 
-  .hud-catchup-offer__words {
+  .hud-catchup-offer .hud-icon {
     display: none;
   }
 
   .hud-masthead:has(.hud-catchup-offer:not([hidden])) .hud-sign {
-    max-width: calc(100vw - 190px - 50px);
+    max-width: calc(100vw - 190px - 68px);
   }
 
   .hud-masthead:has(.hud-waiting:not([hidden])):has(.hud-catchup-offer:not([hidden])) .hud-sign {
-    max-width: calc(100vw - 190px - 122px);
+    max-width: calc(100vw - 190px - 127px);
   }
 
   .hud-status {

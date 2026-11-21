@@ -432,7 +432,7 @@ test('catch me up: W shows what each crew did, crews that need you first, and re
   await page.keyboard.press('w');
   const dialog = page.getByTestId('catch-up');
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByTestId('catch-up-period')).toHaveText('Everything the town remembers, up to a day back.');
+  await expect(dialog.getByTestId('catch-up-period')).toHaveText(/^Everything the town remembers: since \d\d:\d\d, when it started\.$/);
   const lines = dialog.getByTestId('catch-up-crew');
   await expect(lines).toHaveCount(2);
   // The crew that needs you first, with the way to what it needs; then what the other one did.
@@ -444,12 +444,94 @@ test('catch me up: W shows what each crew did, crews that need you first, and re
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
 
-  // The browser remembers what you saw: the next look starts there.
+  // The browser remembers what you saw: the next look starts there, and nothing came since.
   await page.keyboard.press('W');
-  await expect(dialog.getByTestId('catch-up-period')).toHaveText('Since you last looked, a moment ago.');
+  await expect(dialog.getByTestId('catch-up-period')).toHaveText('Nothing new since you last looked, a moment ago.');
+  await expect(lines.nth(0)).toContainText('web-app: nothing new');
   await lines.nth(0).getByTestId('catch-up-need').click();
   await expect(dialog).toBeHidden();
   await expect(page.locator('[data-testid="agent-row"][data-agent-key="e2e-other:main"]')).toHaveAttribute('aria-current', 'true');
+});
+
+/**
+ * Keeps what the page tells screen readers, so a test can see every announcement, not the last.
+ * @param {import('@playwright/test').Page} page
+ */
+async function recordAnnouncements(page) {
+  await page.addInitScript(() => {
+    /** @type {string[]} */
+    const said = [];
+    Object.assign(window, { __said: said });
+    new MutationObserver(() => {
+      for (const region of document.querySelectorAll('.hud-sr[aria-live]')) if (region.textContent && said.at(-1) !== region.textContent) said.push(region.textContent);
+    }).observe(document, { subtree: true, childList: true, characterData: true });
+  });
+}
+
+/** @param {import('@playwright/test').Page} page @returns {Promise<string[]>} */
+const announced = (page) => page.evaluate(() => /** @type {any} */ (window).__said);
+
+/**
+ * A town that counts you away after a second (ANDARY_AWAY_MS, tests only): you prompt, your crew
+ * works on alone, and the town says you are away.
+ * @param {import('@playwright/test').Page} page
+ */
+async function goAway(page) {
+  await town.stop();
+  town = await startTown({ env: { ANDARY_AWAY_MS: '1000' } });
+  await signIn(page);
+  const api = (/** @type {string} */ name, /** @type {Record<string, unknown>} */ extra = {}) => hook(name, { session_id: 'e2e-away', cwd: '/work/api-server', ...extra });
+  expect(await town.sendHook(api('UserPromptSubmit', { prompt: 'Run the tests while I am out' }))).toMatchObject({ code: 0 });
+  expect(await town.sendHook(api('PostToolUse', { tool_name: 'Bash', tool_use_id: 'b1', tool_input: { command: 'npm test' }, tool_response: {} }))).toMatchObject({ code: 0 });
+  expect(await town.sendHook(api('Stop', { last_assistant_message: 'All tests pass.' }))).toMatchObject({ code: 0 });
+  // Offered while you are away, as an open town should.
+  await expect(page.getByTestId('catch-up-button')).toBeVisible();
+  return api;
+}
+
+test('after time away: the masthead offers Catch me up, says welcome back once, and keeps focus when it goes', async ({ page }) => {
+  await recordAnnouncements(page);
+  const api = await goAway(page);
+  expect(await town.sendHook(api('UserPromptSubmit', { prompt: 'I am back' }))).toMatchObject({ code: 0 });
+  await expect.poll(() => announced(page)).toContainEqual(expect.stringMatching(/^Welcome back\. Catch me up, or press W/));
+  // A reload within the half hour offers it still, but says nothing again.
+  await page.reload();
+  await expect(page.getByTestId('connection-status')).toContainText('Live');
+  const button = page.getByTestId('catch-up-button');
+  await expect(button).toBeVisible();
+  await page.waitForTimeout(500);
+  expect((await announced(page)).filter((text) => text.startsWith('Welcome back'))).toEqual([]);
+
+  await button.click();
+  const dialog = page.getByTestId('catch-up');
+  // The finished turn is counted in a five-minute count that began before you left: "about".
+  await expect(dialog.getByTestId('catch-up-period')).toHaveText(/^Since (you left, (a moment|\d+s) ago|about \d\d:\d\d \(you left (a moment|\d+s) ago\))\.$/);
+  await expect(dialog.getByTestId('catch-up-crew')).toContainText('api-server: 1 turn, tests passing');
+  // The button that opened it stays until it closes, so focus has somewhere to go back to.
+  await expect(button).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(button).toBeHidden();
+  // Then focus moves on to what is still there: the "need you" button (the finished turn), or the toolbar.
+  await expect.poll(() => page.evaluate(() => {
+    const active = /** @type {HTMLElement|null} */ (document.activeElement);
+    if (!active || active === document.body || !active.checkVisibility()) return 'lost';
+    return active.closest('.hud-toolbar') ? 'toolbar' : active.getAttribute('data-testid');
+  })).toMatch(/^(waiting-for-you|toolbar)$/);
+});
+
+test('the offer ends half an hour after you came back, timed on the server\'s clock', async ({ page }) => {
+  // This browser's clock is two hours ahead of the server's: the half hour must still be the server's.
+  await page.clock.install({ time: Date.now() + 2 * 60 * 60_000 });
+  const api = await goAway(page);
+  expect(await town.sendHook(api('UserPromptSubmit', { prompt: 'I am back' }))).toMatchObject({ code: 0 });
+  const button = page.getByTestId('catch-up-button');
+  await page.waitForTimeout(500);
+  await expect(button).toBeVisible();
+  await page.clock.fastForward('29:00');
+  await expect(button).toBeVisible();
+  await page.clock.fastForward('02:00');
+  await expect(button).toBeHidden();
 });
 
 test('with --notify-url, Settings shows the phone topic and sends a test', async ({ page }) => {

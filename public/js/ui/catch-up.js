@@ -6,13 +6,15 @@
 // quiet ones in one line.
 //
 // "Since you last looked" is kept in this browser (localStorage, per town): the end of the last
-// summary you saw, in the server's time, so the two clocks never need to agree. You saw what
-// happened before you left, so a time you were away starts the period too, whichever is later.
-// The first look ever covers everything the town remembers (a day at most).
+// summary you saw, in the server's time, so it is compared with the server's times only. You saw
+// what happened before you left, so a time you were away starts the period too, whichever is
+// later. The first look ever covers everything the town remembers (since it started, a day at
+// most). The offer's half hour is timed on the server's clock too, from the offset hello gives.
 import { createDialog } from './dialogs.js';
 import { h, setHidden, setText } from './dom.js';
-import { formatAgo, listJoin, plural } from './format.js';
+import { formatAgo, formatClock, listJoin, plural } from './format.js';
 import { icon } from './icons.js';
+import { focusFallback } from './masthead.js';
 import { roundel } from './parts.js';
 import { projectName } from '../core/store-model.js';
 import { stopWords } from '../core/waits.js';
@@ -27,6 +29,8 @@ import { stopWords } from '../core/waits.js';
 /** @typedef {'looked'|'left'|'all'} Reason  where a period starts: when you last looked, when you left, or as far back as the town remembers */
 
 export const CAUGHT_UP_KEY = 'andary:caught-up';
+/** The absence (its `since`) this browser last said "Welcome back" for, so a reload does not say it again. */
+export const WELCOMED_KEY = 'andary:welcomed-back';
 /** After you come back, the masthead offers to catch you up for this long, or until you look. */
 export const OFFER_MS = 30 * 60_000;
 /** A summary that has not come by then will not: the dialog says so. */
@@ -113,14 +117,28 @@ export function crewWords(crew) {
   return parts.join(', ');
 }
 
+/** Nothing came since you last looked, and the town remembers all of that time. @param {Reason} reason @param {Digest} digest */
+export const nothingNew = (reason, digest) => reason === 'looked' && digest.limit === null && digest.crews.length === 0;
+
 /**
- * The period a catch-up covers, in words: "Since you last looked, 25m ago.".
- * @param {Reason} reason @param {number} since @param {number} until
+ * The period a catch-up covers, in words: "Since you last looked, 25m ago." It says when the town
+ * remembers less than that ("The town only remembers since 09:12 (it restarted)."), when a
+ * five-minute count reaches back before it ("Since about 10:00 (you last looked 3m ago)."), and
+ * when nothing came since you last looked.
+ * @param {Reason} reason
+ * @param {number} since  the start asked for (the server's clock)
+ * @param {Digest} digest
+ * @param {(ts: number) => string} clock  a time on the server's clock as a time of day here
  */
-export function periodText(reason, since, until) {
-  if (reason === 'all') return 'Everything the town remembers, up to a day back.';
-  const ago = formatAgo(since, until);
-  return `${reason === 'left' ? 'Since you left' : 'Since you last looked'}, ${ago === 'just now' ? 'a moment ago' : ago}.`;
+export function periodText(reason, since, digest, clock) {
+  if (reason === 'all') return digest.limit === 'day' ? 'Everything the town remembers: the last day.' : `Everything the town remembers: since ${clock(digest.since)}, when it started.`;
+  const ago = formatAgo(since, digest.until).replace('just now', 'a moment ago');
+  const you = reason === 'left' ? 'you left' : 'you last looked';
+  if (digest.limit === 'day') return `Since ${you}, ${ago}. The town only remembers the last day.`;
+  if (digest.limit === 'started') return `Since ${you}, ${ago}. The town only remembers since ${clock(digest.since)} (it restarted).`;
+  if (nothingNew(reason, digest)) return `Nothing new since you last looked, ${ago}.`;
+  if (digest.from < digest.since) return `Since about ${clock(digest.from)} (${you} ${ago}).`;
+  return `Since ${you}, ${ago}.`;
 }
 
 /** @param {unknown} value */
@@ -158,7 +176,9 @@ export function readDigest(raw) {
   const value = /** @type {any} */ (raw);
   if (!value || !Number.isFinite(value.since) || !Number.isFinite(value.until) || !Array.isArray(value.crews)) return null;
   const crews = value.crews.filter((/** @type {any} */ crew) => crew && typeof crew === 'object' && typeof crew.sessionId === 'string');
-  return { since: value.since, until: value.until, crews: crews.map(readCrew) };
+  const from = Number.isFinite(value.from) ? Math.min(value.from, value.since) : value.since;
+  const limit = value.limit === 'started' || value.limit === 'day' ? value.limit : null;
+  return { since: value.since, from, until: value.until, limit, crews: crews.map(readCrew) };
 }
 
 /**
@@ -242,24 +262,38 @@ function safeStorage() {
 }
 
 /**
+ * A time kept in this browser under a key, or null.
+ * @param {Pick<Storage, 'getItem'|'setItem'>|null} storage @param {string} key
+ */
+function readTime(storage, key) {
+  try {
+    const value = Number(storage?.getItem(key) ?? Number.NaN);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** @param {Pick<Storage, 'getItem'|'setItem'>|null} storage @param {string} key @param {number} value */
+function writeTime(storage, key, value) {
+  try {
+    storage?.setItem(key, String(value));
+  } catch {
+    // storage full or disabled: remembered until the page reloads
+  }
+}
+
+/**
  * When you last looked, per mode: the live town's is kept in this browser and shared with its
  * other tabs; the demo's story has its own clock and nobody to catch up, so its is not kept.
  * @param {Pick<Storage, 'getItem'|'setItem'>|null} storage
  * @param {() => void} onChange  another tab of this town caught up
  */
 function createLooked(storage, onChange) {
-  const read = () => {
-    try {
-      const value = Number(storage?.getItem(CAUGHT_UP_KEY) ?? Number.NaN);
-      return Number.isFinite(value) && value > 0 ? value : null;
-    } catch {
-      return null;
-    }
-  };
-  const looked = { live: read(), demo: /** @type {number|null} */ (null) };
+  const looked = { live: readTime(storage, CAUGHT_UP_KEY), demo: /** @type {number|null} */ (null) };
   globalThis.addEventListener?.('storage', (event) => {
     if (event.key !== CAUGHT_UP_KEY) return;
-    looked.live = read();
+    looked.live = readTime(storage, CAUGHT_UP_KEY);
     onChange();
   });
   return {
@@ -272,11 +306,7 @@ function createLooked(storage, onChange) {
         return;
       }
       looked.live = Math.max(looked.live ?? 0, until);
-      try {
-        storage?.setItem(CAUGHT_UP_KEY, String(looked.live));
-      } catch {
-        // storage full or disabled: remembered until the page reloads
-      }
+      writeTime(storage, CAUGHT_UP_KEY, looked.live);
     },
   };
 }
@@ -320,17 +350,18 @@ function createLines(onGo) {
     },
     /**
      * @param {{ rows: CatchUpRow[], quiet: string[] }} lines
-     * @param {HTMLElement|null} fallback  takes focus when the focused crew no longer needs you
+     * @param {{ fallback: HTMLElement|null, said: boolean }} options  fallback: takes focus when the
+     *   focused crew no longer needs you; said: the period already says nothing happened
      */
-    draw({ rows, quiet: names }, fallback) {
-      const key = JSON.stringify([rows.map((r) => [r.sessionId, r.name, r.words, r.said, r.item?.id, r.number]), names]);
+    draw({ rows, quiet: names }, { fallback, said }) {
+      const key = JSON.stringify([rows.map((r) => [r.sessionId, r.name, r.words, r.said, r.item?.id, r.number]), names, said]);
       if (key === drawn) return;
       drawn = key;
       const active = document.activeElement;
       const focusedId = active instanceof HTMLElement && list.contains(active) ? active.closest('.hud-catchup__crew')?.getAttribute('data-session-id') : null;
       list.replaceChildren(...rows.map((row) => rowElement(row, onGo)));
       if (focusedId) (/** @type {HTMLElement|null} */ (list.querySelector(`[data-session-id="${CSS.escape(focusedId)}"] button`)) ?? fallback)?.focus();
-      setHidden(empty, rows.length > 0);
+      setHidden(empty, rows.length > 0 || said);
       setText(quiet, names.length ? `Quiet: ${listJoin(names)}.` : '');
       setHidden(quiet, names.length === 0);
     },
@@ -345,10 +376,14 @@ function createLines(onGo) {
 export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } = {}) {
   /** @type {Away|null} */
   let away = null;
+  /** The server's clock minus this browser's, from hello. */
+  let offset = 0;
   /** The period asked for, until its summary comes. @type {{ since: number, reason: Reason }|null} */
   let asked = null;
   /** The summary on show, with the period it was asked for. @type {{ digest: Digest, since: number, reason: Reason }|null} */
   let shown = null;
+  /** The offer stays while the dialog it opened is open, so focus can go back to it. */
+  let offerKept = false;
   /** @type {ReturnType<typeof setTimeout>|undefined} */
   let answerTimer;
   /** @type {ReturnType<typeof setTimeout>|undefined} */
@@ -356,7 +391,9 @@ export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } =
 
   const live = () => ctx.view.mode === 'live';
   const viewOnly = () => ctx.view.serverSettings.team?.role === 'viewer';
+  const serverNow = () => now() + offset;
   const looked = createLooked(storage, () => ctx.refresh());
+  const offeredNow = () => live() && !viewOnly() && catchUpOffered(away, looked.get(true), serverNow());
 
   const period = h('p', { class: 'hud-dialog__lead', 'data-testid': 'catch-up-period' });
   const lines = createLines((item) => {
@@ -365,12 +402,15 @@ export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } =
     dialog.close();
   });
   const content = h('div', { class: 'hud-catchup' }, period, ...lines.els);
-  const dialog = createDialog({ id: 'hud-catchup', title: 'Catch me up', scrollable: true, body: [content] });
+  const dialog = createDialog({ id: 'hud-catchup', title: 'Catch me up', scrollable: true, body: [content], fallback: focusFallback });
   const body = /** @type {HTMLElement|null} */ (dialog.el.querySelector('.hud-dialog__body'));
   dialog.el.setAttribute('data-testid', 'catch-up');
   dialog.el.addEventListener('close', () => {
     clearTimeout(answerTimer);
     asked = null;
+    // Focus is back on the offer by now: the masthead hides it next, and moves focus on.
+    offerKept = false;
+    ctx.refresh();
   });
 
   /** @param {string} words */
@@ -384,8 +424,9 @@ export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } =
   function render() {
     if (!dialog.isOpen || !shown) return;
     const state = ctx.store.getState();
-    setText(period, periodText(shown.reason, shown.since, shown.digest.until));
-    lines.draw(catchUpRows(state, shown.digest, ctx.needsYou.items(state)), body);
+    const { digest, since, reason } = shown;
+    setText(period, periodText(reason, since, digest, (ts) => formatClock(ts - offset)));
+    lines.draw(catchUpRows(state, digest, ctx.needsYou.items(state)), { fallback: body, said: nothingNew(reason, digest) });
     content.removeAttribute('aria-busy');
   }
 
@@ -393,8 +434,15 @@ export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } =
   function scheduleOfferEnd() {
     clearTimeout(offerTimer);
     if (away?.until == null) return;
-    const left = away.until + OFFER_MS - now();
+    const left = away.until + OFFER_MS - serverNow();
     if (left > 0) offerTimer = setTimeout(() => ctx.refresh(), left + 1000);
+  }
+
+  /** "Welcome back", once per absence in this browser, however often the page reloads. */
+  function welcome() {
+    if (!away || readTime(storage, WELCOMED_KEY) === away.since) return;
+    writeTime(storage, WELCOMED_KEY, away.since);
+    ctx.announcer.polite('Welcome back. Catch me up, or press W, to see what your crews did while you were away.');
   }
 
   return {
@@ -407,6 +455,7 @@ export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } =
     /** Opens the dialog and asks the town what happened since you last looked. */
     open() {
       const start = catchUpStart(looked.get(live()), live() ? away : null);
+      offerKept = offeredNow();
       asked = start;
       shown = null;
       content.setAttribute('aria-busy', 'true');
@@ -431,18 +480,23 @@ export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } =
       looked.set(live(), digest.until);
       ctx.refresh();
     },
-    /** The latest time you were away, from the server (none in the demo). @param {unknown} raw */
-    setAway(raw) {
+    /**
+     * The latest time you were away, from the server (none in the demo), and how far the server's
+     * clock is ahead of this browser's.
+     * @param {unknown} raw @param {number} [serverOffset]
+     */
+    setAway(raw, serverOffset = 0) {
       const next = live() ? readAway(raw) : null;
       const back = next?.until != null && (next.since !== away?.since || next.until !== away?.until);
       away = next;
+      offset = Number.isFinite(serverOffset) ? serverOffset : 0;
       scheduleOfferEnd();
-      if (back && catchUpOffered(away, looked.get(true), now())) ctx.announcer.polite('Welcome back. Catch me up, or press W, to see what your crews did while you were away.');
+      if (back && offeredNow()) welcome();
       ctx.refresh();
     },
-    /** Whether the masthead offers to catch you up now. */
+    /** Whether the masthead offers to catch you up now: also while the dialog it opened is open. */
     offered() {
-      return live() && !viewOnly() && catchUpOffered(away, looked.get(true), now());
+      return offerKept || offeredNow();
     },
   };
 }

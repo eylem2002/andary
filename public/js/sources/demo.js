@@ -55,7 +55,7 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
   const waiting = new Map();
   const usage = createDemoUsage(store, now);
   const progress = onProgress ? createDemoProgress(onProgress, now) : () => {};
-  const digest = createDigest();
+  const digest = createDigest({ startedAt: now() });
 
   /** @param {any} payload */
   function emit(payload) {

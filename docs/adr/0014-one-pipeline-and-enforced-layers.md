@@ -57,8 +57,10 @@ Modules that joined the server's list since this decision (`SERVER_CORE` in
 - `shell` (`public/js/core/shell.js`), the one reader of shell command lines: segments, programs,
   redirections, a shell's `-c` script, folder moves. `loops` reads commands through it, so the
   server needs it too, and every other rule about what an agent ran reads commands the same way.
-- `summaries` (`public/js/core/summaries.js`), what a shell command is about: the catch-up counts
-  test runs, commits and pushes, and must read a test run as the town's weather and records do.
+- `summaries` (`public/js/core/summaries.js`), what a shell command or an error is about: the
+  catch-up reads a failed test run's error as the town does (a timeout is no red test), and
+  counts test runs, commits and pushes through `shell`, so a test result is stated only when the
+  line's exit status is that run's.
 - `digest` (`public/js/core/digest.js`), what each crew did, in five-minute buckets, for "Catch me
   up". The server keeps the counts so they outlive a page reload, and the demo plays the
   server's part, so both count the same way.

@@ -147,6 +147,7 @@ async function runForeground(settings, home, io) {
       approvalTimeoutMs: settings.approvalTimeoutMs,
       tls: settings.tls ? { cert: settings.tls.cert, key: settings.tls.key } : null,
       record: settings.record,
+      awayMs: testAwayMs(io.env),
       log: (message) => io.out(`[${new Date().toLocaleTimeString()}] ${message}`),
     });
   } catch (error) {
@@ -162,6 +163,18 @@ async function runForeground(settings, home, io) {
   io.out('Stopping Andary…');
   await server.stop();
   return 0;
+}
+
+/**
+ * For tests only (CONTRACTS §8), not a setting: ANDARY_AWAY_MS shortens how long without you counts
+ * as away (server/digest.mjs), so a test can start an absence in a second. Anything but a whole
+ * number of milliseconds from 100 on is ignored.
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {number|undefined}
+ */
+function testAwayMs(env) {
+  const ms = Number(env.ANDARY_AWAY_MS);
+  return Number.isInteger(ms) && ms >= 100 ? ms : undefined;
 }
 
 /**
