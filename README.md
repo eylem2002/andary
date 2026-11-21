@@ -173,7 +173,8 @@ what for and how long it has waited, the browser tab reads **(2) Andary**, and a
 button sits at the top right: yellow while an agent is blocked or stopped, quieter when crews only
 finished their turns. Click it (or press `I`) to go to the most urgent: a request the town can
 answer opens its card in Approvals, anything else selects the agent; click again for the next.
-A stop or a finished turn can be set aside from its row or the agent's details. With
+A stop or a finished turn can be set aside from its row or the agent's details, and so can a
+request still waiting after five minutes, in case it is stale. With
 notifications on (Settings), each new one also pops up while the tab is in the background.
 
 ### Everything else

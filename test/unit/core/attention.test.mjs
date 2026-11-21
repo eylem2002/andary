@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { CODEX_IDLE_MS, READY_MS, attentionItems, countedItems } from '../../../public/js/core/attention.js';
+import { CODEX_IDLE_MS, READY_MS, STALE_DIALOG_MS, attentionItems, countedItems } from '../../../public/js/core/attention.js';
 import { createStore } from '../../../public/js/core/store.js';
 import { CODEX_IDLE_MS as PHONE_CODEX_IDLE_MS } from '../../../server/notify.mjs';
 import { SESSION, envelope, hook } from './helpers.mjs';
@@ -237,5 +237,69 @@ describe('attentionItems', () => {
     t.send('Stop', {}, T0);
     t.send('PreToolUse', { tool_name: 'ExitPlanMode', tool_input: {}, tool_use_id: 'p' }, T0, { session: 's-plan' });
     assert.deepEqual(countedItems(t.items(T0 + 1)).map((i) => i.kind), ['plan']);
+  });
+});
+
+describe('open dialogs: the cases a second review found', () => {
+  test("a Codex patch answered in the terminal reports back renamed, and closes its request", () => {
+    const t = town();
+    t.store.ingest(envelope({ ...hook('PermissionRequest', { tool_name: 'apply_patch', tool_input: { patch: '*** Begin Patch' } }), andary_source: 'codex' }, T0));
+    assert.equal(t.items().length, 1);
+    t.store.ingest(envelope({ ...hook('PostToolUse', { tool_name: 'Edit', andary_tool: 'apply_patch', tool_input: { file_path: 'a.js', old_string: 'x', new_string: 'y' }, tool_response: {} }), andary_source: 'codex' }, T0 + 1));
+    assert.deepEqual(t.items(), []);
+  });
+
+  test("the server's key for a call wins over its sanitised input", () => {
+    const t = town();
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'long … [cut]' }, andary_key: 'K1' }, T0);
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'long … [cut differently]' }, andary_key: 'K1', tool_response: {} }, T0 + 1);
+    assert.deepEqual(t.items(), []);
+  });
+
+  test('a reload after "No" and a prompt: the broker resolved it, so it does not come back', () => {
+    const t = town();
+    t.store.reset();
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'rm -rf dist' } }, T0);
+    t.send('UserPromptSubmit', { prompt: 'no, keep dist' }, T0 + 5000);
+    t.store.setApproval(approvalOf({ held: false, status: 'resolved', decidedBy: 'terminal', toolInput: { command: 'rm -rf dist' } }));
+    assert.deepEqual(t.items(), []);
+  });
+
+  test('the broker proving an answer closes a dialog the history no longer shows the end of', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1);
+    t.store.setApproval(approvalOf({ held: false, toolInput: { command: 'npm test' } }));
+    assert.equal(t.items().length, 1, 'a request older than the history: its approval opens it');
+    t.store.setApproval(approvalOf({ held: false, status: 'resolved', decidedBy: 'terminal', toolInput: { command: 'npm test' } }));
+    assert.deepEqual(t.items(), []);
+  });
+
+  test('a dialog the town does not hold can be set aside once it has waited a while; a held one never', () => {
+    const t = town();
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm test' } }, T0);
+    t.store.setApproval(approvalOf({ held: false, toolInput: { command: 'npm test' } }));
+    assert.equal(t.items(T0 + STALE_DIALOG_MS - 1)[0].dismissable, false);
+    const [stale] = t.items(T0 + STALE_DIALOG_MS);
+    assert.equal(stale.dismissable, true);
+    assert.deepEqual(t.items(T0 + STALE_DIALOG_MS, new Set([stale.id])), []);
+    const h = town();
+    h.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm publish' } }, T0);
+    h.store.setApproval(approvalOf());
+    assert.equal(h.items(T0 + 60 * 60_000)[0].dismissable, false, 'answer it in the town');
+  });
+
+  test("a teammate's crew is theirs: its requests are not kept", () => {
+    const t = town();
+    t.store.ingest(envelope({ ...hook('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'x' } }), andary_member: 'sam', session_id: 'sam~s9' }, T0));
+    assert.deepEqual(t.store.getState().dialogs, []);
+  });
+
+  test('a lead and its helper stopped by one limit are one crew, not a merged "1 crews" item', () => {
+    const t = town();
+    const helper = { agent: { id: 'agent-h1', type: 'Explore' } };
+    t.send('SubagentStart', { agent_id: 'agent-h1', agent_type: 'Explore' }, T0, helper);
+    t.send('StopFailure', { error: 'rate_limit' }, T0 + 1, helper);
+    t.send('StopFailure', { error: 'rate_limit' }, T0 + 2);
+    assert.deepEqual(t.items().map((i) => i.text), ['Rate limited', 'Rate limited']);
   });
 });

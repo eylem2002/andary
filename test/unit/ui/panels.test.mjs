@@ -142,6 +142,13 @@ describe('effects', () => {
     assert.equal(effectFor({ type: 'reset' }, seen, now), null);
   });
 
+  test('a question or a plan is no permission to grant: no approval toast (needs-you tells of it)', () => {
+    const seen = new Set();
+    for (const toolName of ['AskUserQuestion', 'ExitPlanMode']) {
+      assert.equal(effectFor({ type: 'approval', approval: fixture({ id: toolName, status: 'pending', toolName, createdAt: now }) }, seen, now), null);
+    }
+  });
+
   test('each pending approval is announced once', () => {
     const seen = new Set();
     const approval = fixture({ id: 'x', status: 'pending', createdAt: now - 1000 });

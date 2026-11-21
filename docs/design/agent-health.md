@@ -110,7 +110,8 @@ out; a view-only viewer gets no attention items.
   Approvals; everything else selects the agent and points the camera); the next click goes to the
   next one. `I` does the same.
 - The tab title is "(3) Andary".
-- Dismiss (alerts, stops and finished turns) is on the agent's row and in the inspector;
+- Dismiss (alerts, stops and finished turns; a dialog the town does not hold once it has waited
+  five minutes, as it may be stale) is on the agent's row and in the inspector;
   dismissals are kept in local storage.
 - **Desktop notifications** (opt-in) follow the model: one per new counted item, never for
   replayed history, and no "finished" notice while only one local crew is active (you are

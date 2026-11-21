@@ -431,11 +431,14 @@ section.
 94. **A finished Codex turn counts after a minute without a prompt.** Codex sends no
     `idle_prompt`; a minute matches Claude Code's, and the phone's Codex note waits as long.
 95. **Crews stopped by one rate limit within ten minutes are one item.** One cause, one thing to
-    do: "Rate limited: 3 crews stopped".
-96. **Only stops and finished turns can be set aside, until the situation changes and for a day
-    at most.** A question or a permission request blocks the agent, so it stays until answered.
-    An item's id carries the time it started, so a new stop is a new item; dismissals are kept in
-    this browser's local storage and forgotten after 24 hours.
+    do: "Rate limited: 3 crews stopped". It takes two crews: a lead and its helper stopped by the
+    same limit are one crew's two stops.
+96. **Stops and finished turns can be set aside, until the situation changes and for a day at
+    most; a request, question or plan only once it has waited five minutes, and never while the
+    town holds it.** A waiting dialog blocks the agent, so it stays until answered, unless it may
+    be stale: an interrupted helper sends no hook at all, and only you can tell. An item's id
+    carries the time it started, so a new stop is a new item; dismissals are kept in this
+    browser's local storage and forgotten after 24 hours.
 97. **Desktop notifications are for news only.** An item pops up once, only while the town is in
     a background tab, and only if it started to count within the last two minutes: a reconnect or
     a page opened in the background shows older items in the town without popping them up.

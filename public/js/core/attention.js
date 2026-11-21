@@ -45,6 +45,11 @@ export const READY_MS = 30 * 60_000;
 export const CODEX_IDLE_MS = 60_000;
 /** Turns stopped by the same limit within this window are one item. */
 const SHARED_STOP_MS = 10 * 60_000;
+/**
+ * A dialog the town does not hold can be set aside once it has waited this long: it may be stale
+ * (an interrupted helper sends nothing), and only you can tell.
+ */
+export const STALE_DIALOG_MS = 5 * 60_000;
 const LEVEL_ORDER = Object.freeze({ blocked: 0, stopped: 1, alert: 2, ready: 3 });
 
 /**
@@ -59,7 +64,7 @@ export function attentionItems(state, now, { dismissed } = {}) {
   /** @type {AttentionItem[]} */
   const items = [];
   for (const dialog of state.dialogs ?? []) {
-    if (yours.has(dialog.sessionId)) items.push(dialogItem(dialog, dialog.approvalId ? approvals.get(dialog.approvalId) : undefined));
+    if (yours.has(dialog.sessionId)) items.push(dialogItem(dialog, dialog.approvalId ? approvals.get(dialog.approvalId) : undefined, now));
   }
   /** @type {AttentionItem[]} */
   const limited = [];
@@ -81,9 +86,10 @@ export function attentionItems(state, now, { dismissed } = {}) {
 /**
  * @param {Dialog} dialog
  * @param {Approval|undefined} approval  the town's request for it, when it has reached the town
+ * @param {number} now
  * @returns {AttentionItem}
  */
-function dialogItem(dialog, approval) {
+function dialogItem(dialog, approval, now) {
   const agentKey = agentKeyOf(dialog.sessionId, dialog.agentId);
   const held = approval?.status === 'pending' && approval.held === true;
   /** @type {AttentionKind} */
@@ -100,7 +106,8 @@ function dialogItem(dialog, approval) {
     countedSince: dialog.at,
     text: dialogText(kind, dialog.text),
     counted: true,
-    dismissable: false,
+    // Held in the town: answer it there. Otherwise, past a few minutes it may be stale.
+    dismissable: !held && now - dialog.at >= STALE_DIALOG_MS,
     crews: 1,
     // A request reaches the town a moment after its hook: until then a permission dialog may
     // still turn out to be held there. Questions, plans and notices never are.
@@ -194,8 +201,9 @@ function mergeSharedStops(items, limited) {
   /** @type {AttentionItem[]} */
   const merged = [];
   for (const group of groups) {
-    if (group.length < 2) continue;
     const crews = new Set(group.map((g) => g.sessionId)).size;
+    // A lead and its helper stopped by the same limit are still one crew's own stop.
+    if (crews < 2) continue;
     for (const stop of group) absorbed.add(stop);
     merged.push({ ...group[0], id: `limit:${group[0].since}`, agentKeys: group.map((g) => g.agentKey), text: `Rate limited: ${crews} crews stopped`, crews });
   }

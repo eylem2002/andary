@@ -636,8 +636,10 @@ sets them).
 `subagent.start`, `subagent.stop`, `turn.stop`, `turn.fail`, `task.created`, `task.completed`,
 `teammate.idle`, `compact.start`, `compact.end`, `model.switch`, `todos.set`, `task.upsert`,
 `spawn.request`, `spawn.result`, `message.send`, `unknown`. `tool.start` carries
-`{toolUseId, tool, input, building, activity, summary}` where `summary` is a short human string
-("Read src/auth/login.ts", "$ npm test", "grep \"TODO\" in src").
+`{toolUseId, tool, input, building, activity, summary, callKey}` where `summary` is a short human
+string ("Read src/auth/login.ts", "$ npm test", "grep \"TODO\" in src") and `callKey` the server's
+key for the call's input (`andary_key`, §4.6), or null. `turn.stop` carries `interrupted` (Codex's
+interrupt).
 
 `store.js` keeps sessions (crews), agents, tasks/todos, approvals, the activity log (ring buffer)
 and stats, and emits change notifications. `director.js` turns TownEvents into world calls and
@@ -713,8 +715,11 @@ Code sends for those joins it) or a session's `permission_prompt` notice when no
 session is known to be open; closed only by that very call reporting back (same tool and input;
 questions and plans by name), the town deciding its request, your prompt (the lead's dialogs), the
 agent's turn ending or the session ending. A request sent back to the terminal, a new request and
-the broker's `resolved` are no proof. `core/store-dialogs.js` feeds it from events and approval
-changes; an approval with no dialog (older than the history kept) opens one.
+the broker's guesses are no proof. `core/store-dialogs.js` feeds it through the model's one table
+of what each hook does (`afterHook`, which the server's notifier and broker follow too), with the
+server's `callKey` when it sent one; an approval links to its dialog by its `callKey`, an approval
+with no dialog (older than the history kept) opens one, and `allowed`, `denied` and `resolved`
+close it (the broker resolves by the same table). A teammate's crew keeps no dialogs.
 `AgentState.wait` is the rest: a lead's finished turn, a failed turn, or a session's question
 (`agent_needs_input`, elicitation). A prompt, a tool call, a new session, a helper finishing or a
 manual `/compact` ends it; `TeammateIdle` ends only a teammate's own.
@@ -731,9 +736,11 @@ AttentionItem { id /* one per episode: dialog:agentKey:at:input, kind:agentKey:s
 ```
 
 A permission dialog is an `approval` item while the town holds its request, else `terminal`;
-its id stays the same either way. A finished turn is listed at once and counted from
+its id stays the same either way. A dialog the town does not hold can be set aside once it has
+waited `STALE_DIALOG_MS` (five minutes): it may be stale, as an interrupted helper sends nothing. A finished turn is listed at once and counted from
 `idle_prompt` (Codex: `CODEX_IDLE_MS`, a minute) for `READY_MS` (30 minutes). Stops by one rate
-limit (`cause: 'rate_limit'`) within ten minutes merge into one item for all their agents. Ended
+limit (`cause: 'rate_limit'`) within ten minutes merge into one item for all their agents (two
+crews at least: a lead and its helper are one crew). Ended
 sessions and teammates' crews are left out. `ui/needs-you.js` adds the viewer's dismissals
 (stops and finished turns, kept in `localStorage["andary:dismissed"]` for a day and shared with the
 town's other tabs; someone watching a team town with its view link gets no items, as they can

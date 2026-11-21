@@ -109,6 +109,7 @@ export { ACHIEVEMENTS };
  * @property {number|null} expiresAt
  * @property {'town'|'terminal'|'timeout'} [decidedBy]
  * @property {string} [message]
+ * @property {string|null} [callKey]  the server's key for the call's input (§4.5), to find its dialog
  */
 
 /**
@@ -575,7 +576,8 @@ function apply(m, input) {
   const handler = own(APPLY, e.kind);
   const draft = handler && a ? handler(m, e, s, a, relabels) : null;
   if (a) setWait(a, waitAfter(a, e));
-  if (dialogsAfterEvent(m.dialogs, e, a ? a.agentId : e.agentId)) m.state.dialogs = m.dialogs.list();
+  // A teammate's crew (a team town) is theirs to answer: its dialogs are not kept.
+  if (!s.member && dialogsAfterEvent(m.dialogs, e, a ? a.agentId : e.agentId)) m.state.dialogs = m.dialogs.list();
   if (relabels.length) e.data.relabels = relabels;
   s.lastActivity = Math.max(s.lastActivity, e.ts);
   if (a) a.lastActivity = Math.max(a.lastActivity, e.ts);

@@ -175,6 +175,7 @@ function goToNextNeed(hud) {
     ctx.showTab('approvals');
     ui.approvals.focusApproval(item.approvalId);
   } else {
+    ui.crews.reveal(item.sessionId);
     select(hud, { type: 'agent', id: item.agentKey }, { camera: true, focus: true });
   }
 }
