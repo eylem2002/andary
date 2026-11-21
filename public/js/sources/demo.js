@@ -2,13 +2,28 @@
 // payloads to the store exactly as the server would (wrapped as envelopes). A PermissionRequest becomes a held approval that the HUD
 // can answer; the simulation waits on it and continues with the decision, or after 25 seconds of
 // story time without one (so the card's countdown runs faster at 2× and 4×, like the story, and
-// stands still while the demo is paused).
+// stands still while the demo is paused). Like the server, an approval offers the permission
+// rules the server would offer, and "Allow always" hands the chosen one back with the allow.
 
 import { normalizeAgentId } from '../core/ids.js';
+import { offerableSuggestions } from '../core/permission-rules.js';
 import { createDemoUsage } from './demo-usage.js';
 import { createDemoProgress } from './demo-progress.js';
 
 /** @typedef {import('../core/store.js').Approval} Approval */
+/** @typedef {import('../core/permission-rules.js').OfferedSuggestion} OfferedSuggestion */
+
+/**
+ * What the simulation hears back, shaped like a hook's decision: an allow that saves a rule
+ * carries it as updatedPermissions, so the simulated session stops asking for it.
+ * @param {'allowed'|'denied'|'expired'} status
+ * @param {unknown} saved  the suggestion an "Allow always" saved, as the session sent it
+ */
+function answerFor(status, saved) {
+  if (status === 'denied') return { decision: 'deny' };
+  if (status !== 'allowed') return {};
+  return saved ? { decision: 'allow', updatedPermissions: [saved] } : { decision: 'allow' };
+}
 
 export const DEMO_APPROVAL_MS = 25_000;
 
@@ -29,9 +44,9 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
   let currentSpeed = speed;
   let paused = false;
   /**
-   * Requests waiting for an answer. `left` is set while the demo is paused: the time the request
-   * still had when the story stopped.
-   * @type {Map<string, { approval: Approval, resolve: (value: object) => void, timer: ReturnType<typeof setTimeout>|undefined, left?: number }>}
+   * Requests waiting for an answer, with the payload that asked. `left` is set while the demo is
+   * paused: the time the request still had when the story stopped.
+   * @type {Map<string, { approval: Approval, payload: any, resolve: (value: object) => void, timer: ReturnType<typeof setTimeout>|undefined, left?: number }>}
    */
   const waiting = new Map();
   const usage = createDemoUsage(store, now);
@@ -63,9 +78,11 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
       cwd: payload.cwd,
       createdAt: ts,
       expiresAt: ts + wait,
+      // What the server would offer: the story's own suggestions are never changed by sanitizing.
+      suggestions: offerableSuggestions(payload.permission_suggestions),
     };
     return new Promise((resolve) => {
-      const entry = { approval, resolve, timer: undefined, left: paused ? wait : undefined };
+      const entry = { approval, payload, resolve, timer: undefined, left: paused ? wait : undefined };
       waiting.set(approval.id, entry);
       if (paused) store.setApproval({ ...approval, expiresAt: null });
       else {
@@ -105,15 +122,17 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
    * @param {'allowed'|'denied'|'expired'} status
    * @param {'town'|'timeout'} decidedBy
    * @param {string} [message] why, for a denial
+   * @param {OfferedSuggestion} [offer] the rule an "Allow always" saves
    */
-  function settle(id, status, decidedBy, message = '') {
+  function settle(id, status, decidedBy, message = '', offer = undefined) {
     const entry = waiting.get(id);
     if (!entry) return false;
     waiting.delete(id);
     clearTimeout(entry.timer);
     const note = String(message).trim().slice(0, 500);
-    store.setApproval({ ...entry.approval, status, decidedBy, ...(note ? { message: note } : {}) });
-    entry.resolve(status === 'allowed' ? { decision: 'allow' } : status === 'denied' ? { decision: 'deny' } : {});
+    const always = offer ? { always: { rules: offer.rules, destination: offer.destination, at: now() } } : {};
+    store.setApproval({ ...entry.approval, status, decidedBy, ...(note ? { message: note } : {}), ...always });
+    entry.resolve(answerFor(status, offer ? entry.payload.permission_suggestions[offer.index] : null));
     return true;
   }
 
@@ -140,10 +159,18 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
       simulation.setSpeed(value);
     },
     /**
+     * Like the server: "Allow always" (`always`, the index of a suggestion the approval offers)
+     * goes with an allow only; anything else changes nothing.
      * @param {string} id
      * @param {'allow'|'deny'} decision
+     * @param {string} [message]
+     * @param {number} [always]
      */
-    decide: (id, decision, message) => settle(id, decision === 'allow' ? 'allowed' : 'denied', 'town', decision === 'deny' ? message : ''),
+    decide(id, decision, message, always) {
+      if (always === undefined) return settle(id, decision === 'allow' ? 'allowed' : 'denied', 'town', decision === 'deny' ? message : '');
+      const offer = waiting.get(id)?.approval.suggestions?.find((suggestion) => suggestion.index === always);
+      return decision === 'allow' && offer ? settle(id, 'allowed', 'town', '', offer) : false;
+    },
     /** Stops the simulation and lets anything still waiting carry on. */
     close() {
       simulation.stop();

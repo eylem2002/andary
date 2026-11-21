@@ -8,12 +8,18 @@
 // terminal prompt.
 //
 // What the terminal answered follows the one dialog model (core/dialogs.js): every request is a
-// dialog in the broker's own tracker, fed through afterHook() like the phone notes, at each
-// hook's own time. When a dialog closes and its request is pending and not held, the terminal
-// answered it; a held one closed meanwhile (its turn or session ended) is resolved when released.
+// dialog in the broker's own tracker, fed through afterHook() like the phone notes and the town,
+// at each hook's own time. When a dialog closes and its request is pending and not held, the
+// terminal answered it; a held one closed meanwhile (its turn or session ended) is resolved when
+// released.
+//
+// An approval may offer to save one of the permission rules Claude Code suggested ("Allow
+// always"). Browsers see the offer; the suggestion itself, exactly as it arrived, stays here and
+// is what an allow saves, so a browser can only choose among the request's own suggestions.
 import { randomUUID } from 'node:crypto';
 import { afterHook, createDialogs } from '../public/js/core/dialogs.js';
 import { normalizeAgentId } from '../public/js/core/ids.js';
+import { offerableSuggestions } from '../public/js/core/permission-rules.js';
 import { callOf, hookStep, hookTime } from './hook-steps.mjs';
 
 export const DENY_MESSAGE = 'Denied from Andary';
@@ -24,6 +30,17 @@ const MAX_DIALOGS = 500;
 /**
  * @typedef {'ran'|'denied'|'stopped'} Proof  how the terminal answered: the tool ran (or failed),
  *   it was denied, or the agent moved on without it (a prompt, the turn or the session ending)
+ */
+
+/**
+ * @typedef {import('../public/js/core/permission-rules.js').OfferedSuggestion} OfferedSuggestion
+ * @typedef {import('../public/js/core/permission-rules.js').PermissionRule} PermissionRule
+ */
+
+/**
+ * A suggestion the town offers to save, with the suggestion exactly as Claude Code sent it
+ * (`saved`), which never leaves the server.
+ * @typedef {OfferedSuggestion & { saved: object }} Offer
  */
 
 /**
@@ -40,9 +57,11 @@ const MAX_DIALOGS = 500;
  * @property {string} cwd
  * @property {number} createdAt
  * @property {number|null} expiresAt  when a held approval times out; null when not held
+ * @property {OfferedSuggestion[]} suggestions  rules an allow may save ("Allow always"); [] for none
  * @property {'town'|'terminal'|'timeout'} [decidedBy]
  * @property {Proof} [proof]          set when resolved: what showed the terminal answered
  * @property {string} [message]
+ * @property {{ rules: PermissionRule[], destination: string, at: number }} [always]  the rule an "Allow always" asked Claude Code to save, and when
  */
 
 /**
@@ -52,22 +71,65 @@ const MAX_DIALOGS = 500;
  * @property {any} timer
  * @property {number} settledOrder  increases with every settlement (orders the history)
  * @property {Proof} [gone]  its dialog closed while the town held it: what the terminal shows once released
+ * @property {Map<number, Offer>} offers  by their place in the request's permission_suggestions
  */
 
 
 /**
- * The hook output for a town decision (CONTRACTS §4.5).
+ * The hook output for a town decision (CONTRACTS §4.5). An allow may save one permission rule:
+ * `saved`, one of the request's own suggestions, exactly as Claude Code sent it.
  * @param {'allow'|'deny'} decision
  * @param {string} [note] optional reason typed in the town; shown to Claude on deny
- * @returns {{ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow'|'deny', message?: string } } }}
+ * @param {object|null} [saved] the suggestion an "Allow always" saves; ignored for a denial
+ * @returns {{ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow'|'deny', message?: string, updatedPermissions?: object[] } } }}
  */
-export function decisionOutput(decision, note = '') {
-  /** @type {{ behavior: 'allow'|'deny', message?: string }} */
+export function decisionOutput(decision, note = '', saved = null) {
+  /** @type {{ behavior: 'allow'|'deny', message?: string, updatedPermissions?: object[] }} */
   const verdict =
     decision === 'allow'
-      ? { behavior: 'allow' }
+      ? { behavior: 'allow', ...(saved ? { updatedPermissions: [saved] } : {}) }
       : { behavior: 'deny', message: note ? `${DENY_MESSAGE}: ${note}` : DENY_MESSAGE };
   return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: verdict } };
+}
+
+/**
+ * Which of a permission request's suggestions the town offers to save with an allow (CONTRACTS
+ * §4.5): those of a kind it offers (core/permission-rules.js) that sanitizing left exactly as
+ * Claude Code sent them, as routes.mjs checks the tool input, so the card shows the very rule an
+ * allow would save. Codex sends no suggestions, so a Codex request offers none.
+ * @param {Record<string, any>} raw        the request as the forwarder sent it
+ * @param {Record<string, any>} sanitized  the same request after sanitizing (what browsers see)
+ * @returns {Offer[]}
+ */
+export function offeredSuggestions(raw, sanitized) {
+  if (sanitized.andary_source === 'codex') return [];
+  const sent = raw.permission_suggestions;
+  const shown = Array.isArray(sanitized.permission_suggestions) ? sanitized.permission_suggestions : [];
+  return offerableSuggestions(sent)
+    .filter(({ index }) => JSON.stringify(sent[index]) === JSON.stringify(shown[index]))
+    .map((offer) => ({ ...offer, saved: sent[offer.index] }));
+}
+
+/** @param {PermissionRule[]} rules */
+function copyRules(rules) {
+  return rules.map((rule) => ({ ...rule }));
+}
+
+/**
+ * What a town decision changes on its approval: the answer, the note typed with it, and the rule
+ * an "Allow always" asked Claude Code to save, with when.
+ * @param {'allow'|'deny'} decision
+ * @param {string} note
+ * @param {Offer|undefined} offer  the suggestion an "Allow always" chose
+ * @param {number} at
+ * @returns {Partial<Approval>}
+ */
+function townPatch(decision, note, offer, at) {
+  /** @type {Partial<Approval>} */
+  const patch = { status: decision === 'allow' ? 'allowed' : 'denied', decidedBy: 'town' };
+  if (note) patch.message = note;
+  if (offer) patch.always = { rules: copyRules(offer.rules), destination: offer.destination, at };
+  return patch;
 }
 
 /**
@@ -83,9 +145,10 @@ function text(value) {
  * @param {boolean} hold
  * @param {number} createdAt
  * @param {number} timeoutMs
+ * @param {Offer[]} offers
  * @returns {Approval}
  */
-function newApproval(event, hold, createdAt, timeoutMs) {
+function newApproval(event, hold, createdAt, timeoutMs, offers) {
   return {
     id: randomUUID(),
     status: 'pending',
@@ -99,6 +162,8 @@ function newApproval(event, hold, createdAt, timeoutMs) {
     cwd: text(event.cwd),
     createdAt,
     expiresAt: hold ? createdAt + timeoutMs : null,
+    // The offers without the suggestions themselves, which stay on the server.
+    suggestions: offers.map(({ index, rules, destination }) => ({ index, rules: copyRules(rules), destination })),
   };
 }
 
@@ -117,11 +182,12 @@ function pruneSettled(entries, maxSettled) {
 /**
  * A pending approval's entry, and the hook's answer to come.
  * @param {Approval} approval
+ * @param {Offer[]} offers  the rules an allow may save
  * @returns {{ entry: Entry, response: Promise<object|null> }}
  */
-function newEntry(approval) {
+function newEntry(approval, offers) {
   /** @type {Entry} */
-  const entry = { approval, respond: null, timer: null, settledOrder: 0 };
+  const entry = { approval, respond: null, timer: null, settledOrder: 0, offers: new Map(offers.map((offer) => [offer.index, offer])) };
   const response = new Promise((resolve) => {
     entry.respond = resolve;
   });
@@ -268,20 +334,21 @@ export function createApprovalBroker({
      * Registers a PermissionRequest. `response` resolves with the hook output: a decision object
      * if the town decides, otherwise null (immediately when not held).
      * @param {Record<string, any>} event sanitized PermissionRequest payload
-     * @param {{ hold: boolean, message?: string, at?: number }} options  message: why it was not
-     *   held; at: when the agent sent it (the forwarder's time)
+     * @param {{ hold: boolean, message?: string, at?: number, offers?: Offer[] }} options  message:
+     *   why it was not held; at: when the agent sent it (the forwarder's time); offers: the rules an
+     *   allow may save (offeredSuggestions)
      * @returns {{ approval: Approval, response: Promise<object|null> }}
      */
-    create(event, { hold, message, at }) {
+    create(event, { hold, message, at, offers = [] }) {
       makeRoom();
-      const approval = newApproval(event, hold, now(), timeoutMs);
+      const approval = newApproval(event, hold, now(), timeoutMs, offers);
       if (message) approval.message = message;
       // Its dialog: a new one, or the open question or plan this request belongs to. A plan the
       // agent asks for again shows its older one was answered.
       const call = callOf(event);
       answered(dialogs.ask(call, hookTime(at, approval.createdAt)).closed, 'PermissionRequest');
       dialogs.link(call, approval.id, hold);
-      const { entry, response } = newEntry(approval);
+      const { entry, response } = newEntry(approval, offers);
       entries.set(approval.id, entry);
       if (hold) {
         entry.timer = timers.set(() => expire(entry), timeoutMs);
@@ -294,20 +361,25 @@ export function createApprovalBroker({
 
     /**
      * A decision from a browser. Only held, pending approvals can be decided in the town.
+     * `always` asks an allow to save one of the request's own suggestions ("Allow always"):
+     * anything but an allow with the place of an offered suggestion is refused, and nothing
+     * changes.
      * @param {unknown} id
      * @param {unknown} decision
      * @param {unknown} [message]
+     * @param {unknown} [always]  the `index` of one of the approval's suggestions
      * @returns {{ ok: boolean, error?: string }}
      */
-    decide(id, decision, message) {
+    decide(id, decision, message, always) {
       const entry = typeof id === 'string' ? entries.get(id) : undefined;
       if (!entry) return { ok: false, error: 'Unknown approval' };
       if (entry.approval.status !== 'pending') return { ok: false, error: `This request is already ${entry.approval.status}` };
       if (!entry.approval.held) return { ok: false, error: 'This request is waiting in the terminal; answer it there' };
       if (decision !== 'allow' && decision !== 'deny') return { ok: false, error: 'Decision must be "allow" or "deny"' };
+      const offer = decision === 'allow' && typeof always === 'number' ? entry.offers.get(always) : undefined;
+      if (always !== undefined && !offer) return { ok: false, error: 'Allow always needs an allow and one of the rules this request offers' };
       const note = denyNote(message);
-      const status = decision === 'allow' ? 'allowed' : 'denied';
-      settle(entry, { status, decidedBy: 'town', ...(note ? { message: note } : {}) }, decisionOutput(decision, note));
+      settle(entry, townPatch(decision, note, offer, now()), decisionOutput(decision, note, offer?.saved ?? null));
       dialogs.decided(entry.approval.id);
       return { ok: true };
     },

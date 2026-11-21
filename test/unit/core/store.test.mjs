@@ -493,6 +493,17 @@ describe('store: approvals, listeners, reset', () => {
     assert.equal(state().approvals.length, 3, 'approvals without an id are ignored');
   });
 
+  it('logs the rule an "Allow always" asked Claude Code to save, with hidden characters shown', () => {
+    const { store, send, state } = setup();
+    send(FIXTURES.SessionStart);
+    const suggestions = [{ index: 0, rules: [{ toolName: 'Bash', ruleContent: 'rm -rf dist\u202E' }], destination: /** @type {const} */ ('localSettings') }];
+    store.setApproval(approval({ suggestions }));
+    store.setApproval(approval({ suggestions, status: 'allowed', decidedBy: 'town', always: { rules: suggestions[0].rules, destination: 'localSettings', at: 20 } }));
+    assert.equal(state().log.at(-1).text, 'Allowed; asked to save Bash(rm -rf dist⟨U+202E⟩)');
+    assert.equal(state().log.at(-1).level, 'success');
+    assert.equal(state().agents[MAIN].status, 'working', 'the agent goes back to work as for any allow');
+  });
+
   it('a throwing listener never breaks ingestion', () => {
     /** @type {unknown[]} */
     const reported = [];

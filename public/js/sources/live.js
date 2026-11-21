@@ -277,10 +277,11 @@ function requests(send) {
      * Answers a held permission request.
      * @param {string} id
      * @param {'allow'|'deny'} decision
-     * @param {string} [message]
+     * @param {string} [message]  why, for a denial
+     * @param {number} [always]   with an allow: the index of the suggestion to save ("Allow always")
      */
-    decide(id, decision, message) {
-      return send({ t: 'decide', id, decision, ...(message ? { message: String(message).slice(0, 500) } : {}) });
+    decide(id, decision, message, always) {
+      return send({ t: 'decide', id, decision, ...(message ? { message: String(message).slice(0, 500) } : {}), ...(always === undefined ? {} : { always }) });
     },
     /** Asks the server to send a test phone notification. */
     notifyTest() {

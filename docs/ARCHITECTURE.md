@@ -72,8 +72,9 @@ Node. What the page was opened with (the town look, from the address or saved pr
 once, in `page.js`, and the HUD and the town's environment take it from there. The server reuses
 the few core modules both sides must read the same way: identifiers, dates, text helpers, prices,
 the growth rules, when an agent is waiting for you (open dialogs: the phone notes, the approval
-broker and the town's "needs you" follow one model), and what an approval card shows of a request
-(card fields).
+broker and the town's "needs you" follow one model), what an approval card shows of a request
+(card fields), and which permission rules an approval may offer to save (permission rules; the
+demo plays the server's part there).
 
 **The world behind a facade.** The app talks to the 3D world only through `world/world.js`
 (CONTRACTS §6). Inside it, the town (`env/`) and the people (`agents/`) never import each other;
@@ -87,7 +88,7 @@ references may cross.
 | Area | May import |
 | --- | --- |
 | `hooks/` | Node built-ins only (it is copied out and must stand alone) |
-| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields` |
+| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules` |
 | `server/cli/`, `cli/` | the server, those core modules, the simulation (for `andary simulate`) |
 | `public/js/core/` | `core/` only |
 | `public/js/sources/` | `sources/`, `core/` |

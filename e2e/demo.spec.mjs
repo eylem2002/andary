@@ -144,6 +144,51 @@ test('a demo permission request can be allowed from the town', async ({ page }) 
   await expect(card.getByTestId('approve')).toBeHidden();
 });
 
+test('a demo permission request can be allowed always, and the card names the rule first', async ({ page }) => {
+  await page.goto(demoUrl('&world=fake'));
+  const pending = page.locator('[data-testid="approval-card"][data-status="pending"]').first();
+  await expect(pending).toBeAttached({ timeout: 60_000 });
+  const id = await pending.getAttribute('data-approval-id');
+  const card = page.locator(`[data-testid="approval-card"][data-approval-id="${id}"]`);
+  await page.getByTestId('waiting-for-you').click();
+  const always = card.getByTestId('approve-always');
+  await expect(always).toBeVisible();
+  // The literal rule and where it is kept, written out above the button and read as its description.
+  const saves = /^Allow always asks Claude Code to save the rule Bash\(.+\) \(only this command\) for this project, only you\.$/;
+  await expect(card.getByTestId('approve-always-rule')).toHaveText(saves);
+  await expect(always).toHaveAccessibleDescription(saves);
+  const rule = (await card.getByTestId('approve-always-rule').locator('code').textContent()) ?? '';
+  await always.click();
+  await expect(card).toHaveAttribute('data-status', 'allowed');
+  await expect(card).toContainText(`Allowed; asked Claude Code to save ${rule} for this project, only you`);
+  await expect(always).toBeHidden();
+  await openTab(page, 'Activity');
+  await expect(page.getByTestId('activity-log')).toContainText(`Allowed; asked to save ${rule}`);
+});
+
+test('a click on Allow always right after its card appears does not count', async ({ page }) => {
+  await page.goto(demoUrl('&world=fake'));
+  // The Approvals tab is open before any request, so a card is on screen the moment it arrives.
+  await openTab(page, 'Approvals');
+  const first = page.locator('[data-testid="approval-card"][data-status="pending"] [data-testid="approve-always"]').first();
+  await first.waitFor({ state: 'visible', timeout: 60_000 });
+  const { id, armed } = await first.evaluate((button) => ({
+    id: button.closest('[data-approval-id]')?.getAttribute('data-approval-id') ?? '',
+    armed: button.getAttribute('aria-disabled') === 'true',
+  }));
+  expect(armed, 'the card is still inside its one-second guard').toBe(true);
+  const card = page.locator(`[data-testid="approval-card"][data-approval-id="${id}"]`);
+  const always = card.getByTestId('approve-always');
+  // A real pointer click, past Playwright's own wait for the button to be enabled.
+  await always.click({ force: true });
+  await page.waitForTimeout(300);
+  await expect(card).toHaveAttribute('data-status', 'pending');
+  await expect(card.locator('.hud-approval__result')).toBeHidden();
+  // Once the guard is over, the same click counts.
+  await always.click();
+  await expect(card).toHaveAttribute('data-status', 'allowed');
+});
+
 test.describe('on a smaller laptop', () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 

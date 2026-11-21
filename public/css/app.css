@@ -1650,6 +1650,7 @@ body {
 
 .hud-approval__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
 }
@@ -1660,6 +1661,37 @@ body {
 
 .hud-btn--deny {
   color: var(--ink);
+}
+
+/* "Allow always" takes a row of its own under Allow and Deny (three buttons do not fit the
+   board). The rule it saves is written out first, between them and the button, and the button is
+   set apart and only as wide as its label: a tap that falls short of Allow lands on words, not
+   on a saved rule. */
+.hud-approval__always {
+  display: grid;
+  flex: 1 1 100%;
+  justify-items: start;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.hud-approval__always-note,
+.hud-approval__hint {
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+/* The rule exactly as it would be saved: line breaks kept, long rules wrapped anywhere. */
+.hud-approval__always-note code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.hud-approval__hint {
+  margin-top: 8px;
+  font-weight: 600;
 }
 
 .hud-approval__terminal,
