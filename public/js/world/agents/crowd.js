@@ -75,6 +75,8 @@ export class Crowd {
     this.agents = new Map();
     /** Present and leaving agents, for the frame loop. @type {Agent[]} */
     this.live = [];
+    /** figureBoxes() output, reused. @type {Agent['screen'][]} */
+    this.figures = [];
     this.clock = 0;
     /** @type {string|null} */
     this.selected = null;
@@ -460,6 +462,18 @@ export class Crowd {
     const agent = this.agents.get(id);
     if (!agent) return null;
     return { x: agent.screen.x, y: agent.screen.y, visible: agent.screen.visible };
+  }
+
+  /**
+   * Where the figures were on screen last frame, head to feet, for the building labels to make
+   * way for them. The array is reused: read it right away, don't keep it.
+   * @returns {ReadonlyArray<{x: number, y: number, feet: number, half: number}>}
+   */
+  figureBoxes() {
+    const out = this.figures;
+    out.length = 0;
+    for (const agent of this.live) if (agent.screen.visible) out.push(agent.screen);
+    return out;
   }
 
   /** Live position of an agent for camera follow (null once it is gone). @param {string} id */

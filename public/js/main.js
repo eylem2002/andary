@@ -146,6 +146,7 @@ async function startWorld(prefs, drawn) {
     quality: prefs.quality,
     reducedMotion: resolveReducedMotion(prefs, matchMedia('(prefers-reduced-motion: reduce)').matches),
     timeOfDay: timeOfDayFor(prefs.timeMode),
+    placeNames: prefs.placeNames,
   };
   if (params.get('world') !== 'fake') {
     try {

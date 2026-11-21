@@ -21,3 +21,4 @@ Accepted or Superseded. Add a new record (next number) instead of rewriting an a
 | [0014](0014-one-pipeline-and-enforced-layers.md) | One ingest pipeline, one event source, enforced layers | Accepted |
 | [0015](0015-origin-scoped-sign-in.md) | Sign-in kept per origin (page storage), not in a cookie | Accepted |
 | [0016](0016-https-for-other-computers.md) | HTTPS for other computers, plain HTTP on loopback, one port | Accepted |
+| [0017](0017-place-labels-on-the-buildings.md) | Place labels on the buildings; agents first | Accepted |

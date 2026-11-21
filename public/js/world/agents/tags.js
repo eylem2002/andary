@@ -14,6 +14,8 @@ const PILL_BOTTOM = 4;
 /** Pixels per world unit at which tags are drawn at their natural size. */
 const NATURAL_PPU = 34;
 const MARGIN_NDC = 1.08;
+/** Half a figure's width in world units at height 1, arms and carried tools included. */
+const FIGURE_HALF_WIDTH = 0.42;
 /** Width of a pill shrunk to its status dot; keep in sync with .tt-tag.is-compact in world.css. */
 const COMPACT_W = 20;
 /** Extra room a shrunk pill needs before it expands again, so crowd edges don't flicker. */
@@ -174,7 +176,8 @@ function obstaclesAndBubbles(count, scale) {
  */
 export function layoutTags(agents, view, dt) {
   const { camera, width, height } = view;
-  const scale = tagScale(pixelsPerUnit(camera, height));
+  const ppu = pixelsPerUnit(camera, height);
+  const scale = tagScale(ppu);
   let visibleCount = 0;
   for (let i = 0; i < agents.length; i++) {
     const a = agents[i];
@@ -188,6 +191,10 @@ export function layoutTags(agents, view, dt) {
     a.screen.visible = visible;
     a.tag.place(x, y, scale, visible);
     if (!visible) continue;
+    // The whole figure, head to feet, for the building labels to make way for (env/signs.js).
+    _v.copy(a.position).project(camera);
+    a.screen.feet = (1 - _v.y) * 0.5 * height;
+    a.screen.half = FIGURE_HALF_WIDTH * a.look.height * ppu;
     a.tag.setDepth(y);
     const p = crowdPill(visibleCount++);
     p.x = x;

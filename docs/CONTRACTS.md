@@ -563,6 +563,7 @@ changing it reloads the page, so the facade has no method for it.
 ```js
 export async function createWorld(container: HTMLElement, options?: {
   quality?: 'auto'|'high'|'low', reducedMotion?: boolean, timeOfDay?: number|'auto',
+  placeNames?: 'auto'|'always'|'off',
   envFactory?: (args) => Env   // testing only: inject a stub environment
 }): Promise<World>
 
@@ -573,6 +574,7 @@ World {
   setTimeOfDay(h: number|'auto'): void           // hours 0–24; 'auto' follows the local clock
   getTimeOfDay(): number
   setReducedMotion(on: boolean): void
+  setPlaceNames(mode: 'auto'|'always'|'off'): void // labels on the buildings (ADR 0017); also an option of createWorld
 
   focusAgent(id, opts?: { follow?: boolean, zoom?: number }): void  // zoom: eases there (1 = whole town)
   setLandmarks(ids: string[], opts?: { grow?: boolean }): void  // landmarks earned (§4.9); grow: rise into place
@@ -585,7 +587,7 @@ World {
   rotateCamera(dir: 1|-1): void                   // 90° steps, animated
   zoomBy(factor: number): void                     // > 1 zooms in
 
-  setBuildingStat(key, text: string|null): void   // small counter on the building sign, e.g. "42 reads"
+  setBuildingStat(key, text: string|null): void   // stat chip on the building's label, e.g. "42 reads"
   pulseBuilding(key, color?: string): void
   setBoard(items: {text: string, status: 'pending'|'in_progress'|'completed'}[], title?: string): void
   setNodeModules(level: number): void              // 0–5: size of the node_modules box pile
@@ -642,17 +644,23 @@ Env {
   buildings: Record<BuildingKey, { key, center: THREE.Vector3, height: number, root: THREE.Object3D, signAnchor: THREE.Vector3 }>
   anchor(key: BuildingKey, name?: string): THREE.Vector3   // named effect anchors, e.g. terminal 'chimney', web 'dish', hall 'portal', post 'garage', harbor 'pier', station 'bus'
   pickBuilding(raycaster: THREE.Raycaster): BuildingKey|null
-  highlightBuilding(key: BuildingKey|null): void
+  highlightBuilding(key: BuildingKey|null): void  // the selection: lit up, and its label shows its name
+  hoverBuilding(key: BuildingKey|null): void      // under the pointer: its label shows its name
+  setPlaceNames(mode: 'auto'|'always'|'off'): void
   setBuildingStat, pulseBuilding, setBoard, setNodeModules, addWorktree, removeWorktree  // as in World
   vehicle(kind, action): void
   setPedestrians(occupied: (x, z, reach) => boolean): void  // the crowd's query, from the facade:
                                                   // cars and the mail truck wait for people in their lane
+  setFigures(figures: () => {x, y, feet, half}[]): void  // the crowd's screen boxes (px, last frame):
+                                                  // a label with a figure in front of it fades
   dispose(): void
 }
 ```
 
-Building signs are DOM pills (white, icon + name, like the reference image), created by the
-environment in an overlay element it appends to `container`.
+Place labels are DOM elements the environment keeps in an overlay it appends to `container`
+(ADR 0017): a small dark plate on each building, inside its outline, showing the building's icon
+and, when it fits at the current zoom (or the mode says so), its name and stat chip. The rules
+(fit, nearer wins, figures first) live in `env/sign-layout.js`.
 
 ### 6.2 Implementation notes (world)
 

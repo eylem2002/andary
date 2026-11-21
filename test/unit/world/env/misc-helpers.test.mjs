@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compactSigns, formatStat, signLabel, signScale } from '../../../../public/js/world/env/sign-format.js';
+import { formatStat, signLabel, signScale } from '../../../../public/js/world/env/sign-format.js';
 import { MAX_BOXES, PILE_COUNTS, clampLevel, pileLayout } from '../../../../public/js/world/env/pile-layout.js';
 import { GROVE_SLOTS, nextFreeSlot, worktreeLabel } from '../../../../public/js/world/env/grove-slots.js';
 import { createRng, hashString, range } from '../../../../public/js/world/env/rand.js';
@@ -25,10 +25,7 @@ test('signScale grows gently with zoom and is clamped', () => {
   assert.equal(signScale(Number.NaN), signScale(1));
 });
 
-test('compactSigns only on narrow screens at low zoom; labels read naturally', () => {
-  assert.equal(compactSigns(390, 1), true);
-  assert.equal(compactSigns(390, 3), false);
-  assert.equal(compactSigns(1440, 1), false);
+test('signLabel reads naturally', () => {
   assert.equal(signLabel('Library', '3 reads'), 'Library, 3 reads');
   assert.equal(signLabel('Library', null), 'Library');
 });

@@ -127,8 +127,10 @@ out of the address bar. Other tabs on the same town are signed in too.
 | Worktree Grove | grow a tree per git worktree | worktrees |
 | Bus Stop | arrive and leave | session start and end |
 
-Hats show the model (a crown for Opus, a beret for Sonnet, a sun hat for Haiku, a cap for OpenAI
-models). Click any agent for its details, including a diff of every file it changed, or any
+Each building carries a small sign: its icon, and its name when there is room for it (zoom in to
+see more names, or press `P`). Signs fade while an agent stands in front of them, so they never
+hide anyone. Hats show the model (a crown for Opus, a beret for Sonnet, a sun hat for Haiku, a cap
+for OpenAI models). Click any agent for its details, including a diff of every file it changed, or any
 building to see who is inside.
 
 ### Keyboard
@@ -140,6 +142,7 @@ building to see who is inside.
 | `F` / `Esc` | Follow the selected agent / stop following, close the open panel |
 | `[` `]` · `+` `−` · `0` | Rotate · zoom · reset the view |
 | `N` | Day, sunset, night or your clock |
+| `P` | Place names: on the buildings where they fit (zoom in for more), always, or off |
 | `M` | Sound on or off |
 | `U` · `L` | Usage (tokens and estimated cost) · Leaderboard |
 | `A` | Go to approvals |

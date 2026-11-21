@@ -50,6 +50,7 @@ export function createFakeWorld(container, { timeOfDay = 'auto', log = false } =
     },
     getTimeOfDay: () => (hour === 'auto' ? clockHour() : hour),
     setReducedMotion: noop('setReducedMotion'),
+    setPlaceNames: noop('setPlaceNames'),
     focusAgent: noop('focusAgent'),
     focusBuilding: noop('focusBuilding'),
     stopFollow: noop('stopFollow'),
