@@ -61,7 +61,9 @@ simulation, and `andary simulate` sends simulated sessions through the real pipe
 - **Translation, on the server:** a multi-file `apply_patch` becomes one edit per file (so the
   inspector shows each diff), `spawn_agent` an Agent call, a command with a non-zero exit code a
   failure, `Interrupt` the end of the turn. Permission requests are passed on exactly as Codex
-  sent them, and Codex reads the town's allow/deny answer in the same format as Claude Code.
+  sent them, and Codex reads the town's allow/deny answer in the same format as Claude Code. A
+  request does not say whether the command asks to leave Codex's sandbox, so its card says that
+  allowing it may let it run outside the sandbox, with network access.
 - **Not covered yet:** token costs (read from Claude Code transcripts only).
 
 ### What the installer does

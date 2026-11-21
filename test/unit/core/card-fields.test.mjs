@@ -2,7 +2,7 @@
 // when the card shows every field of its input as it is.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { CARD_FIELDS, cardLines, cardShowsAll } from '../../../public/js/core/card-fields.js';
+import { CARD_FIELDS, CODEX_SHELL_NOTE, cardLines, cardNote, cardShowsAll } from '../../../public/js/core/card-fields.js';
 
 describe('cardShowsAll', () => {
   test("a command's known options are on the card; anything else, like the sandbox override, is not", () => {
@@ -10,6 +10,8 @@ describe('cardShowsAll', () => {
       assert.equal(cardShowsAll(tool, { command: 'npm test' }), true, tool);
       assert.equal(cardShowsAll(tool, { command: 'npm test', description: 'Run the tests', timeout: 60_000, run_in_background: false }), true, tool);
       assert.equal(cardShowsAll(tool, { command: 'npm test', dangerouslyDisableSandbox: true }), false, `${tool}: the card shows only $ command`);
+      assert.equal(cardShowsAll(tool, { command: 'npm test', dangerouslyDisableSandbox: false }), true, `${tool}: left on, it is a line like any other`);
+      assert.equal(cardShowsAll(tool, { command: 'npm test', dangerouslyDisableSandbox: 'false' }), false, `${tool}: only the plain false`);
       assert.equal(cardShowsAll(tool, { command: 'npm test', somethingNew: 1 }), false, `${tool}: an option nobody listed`);
     }
     assert.equal(cardShowsAll('Bash', { command: ['rm', 'a b'] }), true, "Codex's argument list is quoted word by word");
@@ -25,6 +27,8 @@ describe('cardShowsAll', () => {
     assert.equal(cardShowsAll('MultiEdit', { file_path: 'a.ts', edits: [{ old_string: 'a', new_string: 'b' }, { old_string: 'c', new_string: 'd', replace_all: true }] }), true);
     assert.equal(cardShowsAll('MultiEdit', { file_path: 'a.ts', edits: [{ old_string: 'a', new_string: 'b', also: 'x' }] }), false, 'a field inside an edit the diff leaves out');
     assert.equal(cardShowsAll('MultiEdit', { file_path: 'a.ts', edits: [{ old_string: 'a' }] }), false, 'an edit the diff would drop');
+    assert.equal(cardShowsAll('MultiEdit', { file_path: 'a.ts', edits: [] }), false, 'no edit: no diff to show');
+    assert.equal(cardShowsAll('MultiEdit', { file_path: 'a.ts' }), false);
     assert.equal(cardShowsAll('NotebookEdit', { notebook_path: 'n.ipynb', new_source: 'x', edit_mode: 'insert', cell_id: 'c1', cell_type: 'code' }), true);
     assert.equal(cardShowsAll('NotebookEdit', { notebook_path: 'n.ipynb', new_source: 'x', edit_mode: 'move' }), false);
     assert.equal(cardShowsAll('Edit', { file_path: 'a.ts', replace_all: true }), false, 'with no diff the card cannot say it replaces every occurrence');
@@ -45,8 +49,16 @@ describe('cardShowsAll', () => {
     for (const input of ['rm -rf /', ['a'], null, undefined, 7]) assert.equal(cardShowsAll('mcp__deploy__run', input), false, String(input));
   });
 
+  test("a Codex command's card says what its request cannot: allowing may let it leave its sandbox", () => {
+    assert.equal(cardNote('codex', 'Bash'), CODEX_SHELL_NOTE);
+    assert.equal(cardNote('codex', 'PowerShell'), CODEX_SHELL_NOTE);
+    assert.match(CODEX_SHELL_NOTE, /outside its sandbox, with network access/);
+    assert.equal(cardNote('claude', 'Bash'), '', "Claude Code's request names the sandbox override when it asks for it");
+    assert.equal(cardNote('codex', 'apply_patch'), '');
+  });
+
   test('lines for the card', () => {
-    assert.deepEqual(cardLines('Bash'), ['description', 'timeout', 'run_in_background']);
+    assert.deepEqual(cardLines('Bash'), ['description', 'timeout', 'run_in_background', 'dangerouslyDisableSandbox']);
     assert.deepEqual(cardLines('mcp__deploy__run'), []);
     assert.deepEqual(cardLines('constructor'), [], 'an inherited name is no tool');
     assert.ok(Object.isFrozen(CARD_FIELDS));

@@ -8,12 +8,13 @@
 // terminal prompt.
 //
 // What the terminal answered follows the one dialog model (core/dialogs.js): every request is a
-// dialog in the broker's own tracker, fed through afterHook() like the phone notes and the town.
-// When a dialog closes and its request is pending and not held, the terminal answered it.
+// dialog in the broker's own tracker, fed through afterHook() like the phone notes, at each
+// hook's own time. When a dialog closes and its request is pending and not held, the terminal
+// answered it; a held one closed meanwhile (its turn or session ended) is resolved when released.
 import { randomUUID } from 'node:crypto';
 import { afterHook, createDialogs } from '../public/js/core/dialogs.js';
 import { normalizeAgentId } from '../public/js/core/ids.js';
-import { callOf, hookStep } from './hook-steps.mjs';
+import { callOf, hookStep, hookTime } from './hook-steps.mjs';
 
 export const DENY_MESSAGE = 'Denied from Andary';
 
@@ -35,6 +36,7 @@ const MAX_DIALOGS = 500;
  * @property {string} toolName
  * @property {unknown} toolInput      sanitized
  * @property {string|null} callKey    the request's call key (`andary_key`), so its dialog is found exactly
+ * @property {'claude'|'codex'} source  the agent that asked (a Codex card says what Allow may grant)
  * @property {string} cwd
  * @property {number} createdAt
  * @property {number|null} expiresAt  when a held approval times out; null when not held
@@ -49,6 +51,7 @@ const MAX_DIALOGS = 500;
  * @property {((output: object|null) => void) | null} respond  answers the held hook (once)
  * @property {any} timer
  * @property {number} settledOrder  increases with every settlement (orders the history)
+ * @property {Proof} [gone]  its dialog closed while the town held it: what the terminal shows once released
  */
 
 
@@ -92,10 +95,47 @@ function newApproval(event, hold, createdAt, timeoutMs) {
     toolName: text(event.tool_name),
     toolInput: event.tool_input ?? null,
     callKey: typeof event.andary_key === 'string' ? event.andary_key : null,
+    source: event.andary_source === 'codex' ? 'codex' : 'claude',
     cwd: text(event.cwd),
     createdAt,
     expiresAt: hold ? createdAt + timeoutMs : null,
   };
+}
+
+/**
+ * Keeps the `maxSettled` most recently settled approvals; older ones are forgotten.
+ * @param {Map<string, Entry>} entries @param {number} maxSettled
+ */
+function pruneSettled(entries, maxSettled) {
+  const settled = [...entries.values()].filter((entry) => entry.approval.status !== 'pending');
+  settled.sort((a, b) => a.settledOrder - b.settledOrder);
+  for (const entry of settled.slice(0, Math.max(0, settled.length - maxSettled))) {
+    entries.delete(entry.approval.id);
+  }
+}
+
+/**
+ * A pending approval's entry, and the hook's answer to come.
+ * @param {Approval} approval
+ * @returns {{ entry: Entry, response: Promise<object|null> }}
+ */
+function newEntry(approval) {
+  /** @type {Entry} */
+  const entry = { approval, respond: null, timer: null, settledOrder: 0 };
+  const response = new Promise((resolve) => {
+    entry.respond = resolve;
+  });
+  return { entry, response };
+}
+
+/**
+ * A reason typed by the owner for the agent to read: one line, no control characters, 500 at most.
+ * @param {unknown} message
+ * @returns {string}
+ */
+function denyNote(message) {
+  // eslint-disable-next-line no-control-regex -- removing control characters is the point
+  return typeof message === 'string' ? message.replace(/[\s\u0000-\u001F\u007F]+/g, ' ').trim().slice(0, 500) : '';
 }
 
 /**
@@ -150,7 +190,7 @@ export function createApprovalBroker({
     settlements += 1;
     entry.settledOrder = settlements;
     answer(entry, output);
-    pruneSettled();
+    pruneSettled(entries, maxSettled);
     publish(entry);
   }
 
@@ -170,16 +210,9 @@ export function createApprovalBroker({
     entry.timer = null;
   }
 
-  function pruneSettled() {
-    const settled = [...entries.values()].filter((entry) => entry.approval.status !== 'pending');
-    settled.sort((a, b) => a.settledOrder - b.settledOrder);
-    for (const entry of settled.slice(0, Math.max(0, settled.length - maxSettled))) {
-      entries.delete(entry.approval.id);
-    }
-  }
-
   /**
-   * Dialogs a hook closed: the terminal answered their requests, if pending and not held.
+   * Dialogs a hook closed: the terminal answered their requests, if pending and not held. A held
+   * one keeps waiting for the town, remembering what closed its dialog for when it is released.
    * @param {import('../public/js/core/dialogs.js').Dialog[]} closed @param {string} hook
    * @returns {number} how many approvals were resolved
    */
@@ -187,24 +220,36 @@ export function createApprovalBroker({
     let resolved = 0;
     for (const dialog of closed) {
       const entry = dialog.approvalId === null ? undefined : entries.get(dialog.approvalId);
-      if (!entry || entry.approval.status !== 'pending' || entry.approval.held) continue;
+      if (!entry || entry.approval.status !== 'pending') continue;
+      if (entry.approval.held) {
+        entry.gone = proofOf(hook);
+        continue;
+      }
       settle(entry, { status: 'resolved', decidedBy: 'terminal', proof: proofOf(hook) }, null);
       resolved += 1;
     }
     return resolved;
   }
 
+  /**
+   * No answer from the town in time (or too many waiting): the terminal asks now, so your next
+   * prompt answers its dialog, which no later call of the same tool may then take for its own.
+   * @param {Entry} entry @param {string} [message]
+   */
+  function expire(entry, message) {
+    dialogs.toTerminal(entry.approval.id);
+    settle(entry, { status: 'expired', decidedBy: 'timeout', ...(message ? { message } : {}) }, null);
+  }
+
   /** Keeps at most maxPending - 1 pending so a new one fits; the oldest give way. */
   function makeRoom() {
     const waiting = pending();
-    for (const entry of waiting.slice(0, Math.max(0, waiting.length - maxPending + 1))) {
-      settle(entry, { status: 'expired', decidedBy: 'timeout', message: 'Too many pending approvals' }, null);
-    }
+    for (const entry of waiting.slice(0, Math.max(0, waiting.length - maxPending + 1))) expire(entry, 'Too many pending approvals');
   }
 
   /**
-   * Hands a held request to the terminal: it shows there now, so your next prompt answers it. (An
-   * expired one is never resolved, so its dialog's hold does not matter here.)
+   * Hands a held request to the terminal: it shows there now, so your next prompt answers it. One
+   * whose dialog closed while it was held (its turn or session ended) was answered already.
    * @param {Entry} entry
    */
   function release(entry) {
@@ -214,7 +259,8 @@ export function createApprovalBroker({
     entry.approval.expiresAt = null;
     dialogs.toTerminal(entry.approval.id);
     answer(entry, null);
-    publish(entry);
+    if (entry.gone) settle(entry, { status: 'resolved', decidedBy: 'terminal', proof: entry.gone }, null);
+    else publish(entry);
   }
 
   return {
@@ -222,26 +268,23 @@ export function createApprovalBroker({
      * Registers a PermissionRequest. `response` resolves with the hook output: a decision object
      * if the town decides, otherwise null (immediately when not held).
      * @param {Record<string, any>} event sanitized PermissionRequest payload
-     * @param {{ hold: boolean, message?: string }} options  message: why it was not held
+     * @param {{ hold: boolean, message?: string, at?: number }} options  message: why it was not
+     *   held; at: when the agent sent it (the forwarder's time)
      * @returns {{ approval: Approval, response: Promise<object|null> }}
      */
-    create(event, { hold, message }) {
+    create(event, { hold, message, at }) {
       makeRoom();
       const approval = newApproval(event, hold, now(), timeoutMs);
       if (message) approval.message = message;
       // Its dialog: a new one, or the open question or plan this request belongs to. A plan the
       // agent asks for again shows its older one was answered.
       const call = callOf(event);
-      answered(dialogs.ask(call, approval.createdAt).closed, 'PermissionRequest');
+      answered(dialogs.ask(call, hookTime(at, approval.createdAt)).closed, 'PermissionRequest');
       dialogs.link(call, approval.id, hold);
-      /** @type {Entry} */
-      const entry = { approval, respond: null, timer: null, settledOrder: 0 };
-      const response = new Promise((resolve) => {
-        entry.respond = resolve;
-      });
+      const { entry, response } = newEntry(approval);
       entries.set(approval.id, entry);
       if (hold) {
-        entry.timer = timers.set(() => settle(entry, { status: 'expired', decidedBy: 'timeout' }, null), timeoutMs);
+        entry.timer = timers.set(() => expire(entry), timeoutMs);
       } else {
         answer(entry, null);
       }
@@ -262,9 +305,7 @@ export function createApprovalBroker({
       if (entry.approval.status !== 'pending') return { ok: false, error: `This request is already ${entry.approval.status}` };
       if (!entry.approval.held) return { ok: false, error: 'This request is waiting in the terminal; answer it there' };
       if (decision !== 'allow' && decision !== 'deny') return { ok: false, error: 'Decision must be "allow" or "deny"' };
-      // Typed by the owner for the agent to read: one line, no control characters, 500 at most.
-      // eslint-disable-next-line no-control-regex -- removing control characters is the point
-      const note = typeof message === 'string' ? message.replace(/[\s\u0000-\u001F\u007F]+/g, ' ').trim().slice(0, 500) : '';
+      const note = denyNote(message);
       const status = decision === 'allow' ? 'allowed' : 'denied';
       settle(entry, { status, decidedBy: 'town', ...(note ? { message: note } : {}) }, decisionOutput(decision, note));
       dialogs.decided(entry.approval.id);
@@ -272,14 +313,16 @@ export function createApprovalBroker({
     },
 
     /**
-     * Follows a hook through the broker's dialogs (afterHook). A request whose dialog closes while
-     * it is pending and not held was answered in the terminal: it is resolved, with what proved
-     * it. A held one waits for the town; an expired or released one stays as it is.
+     * Follows a hook through the broker's dialogs (afterHook), at its own time. A request whose
+     * dialog closes while it is pending and not held (never held, or released) was answered in
+     * the terminal: it is resolved, with what proved it. A held one waits for the town, and is
+     * resolved if released after its dialog closed; an expired one stays expired.
      * @param {Record<string, any>} event  sanitized, with its call key
+     * @param {number} [ts]  when the agent sent it (the forwarder's time)
      * @returns {number} how many approvals were resolved
      */
-    observe(event) {
-      const step = hookStep(event, now());
+    observe(event, ts) {
+      const step = hookStep(event, hookTime(ts, now()));
       return answered(afterHook(dialogs, step).closed, step.hook);
     },
 

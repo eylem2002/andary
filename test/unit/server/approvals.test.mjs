@@ -246,19 +246,21 @@ describe('the dialog model decides what the terminal answered (core/dialogs.js)'
   });
 
   it('a plan asked again shows the older one was answered', () => {
-    const { broker } = setup();
+    const { broker, advance } = setup();
     const plan = (/** @type {string} */ text) => ({ session_id: 's1', tool_name: 'ExitPlanMode', tool_input: { plan: text } });
     broker.observe(keyed({ hook_event_name: 'PreToolUse', ...plan('v1') }));
     broker.create(keyed(request(plan('v1'))), { hold: false });
     // "No, keep planning" sends nothing; the next plan does.
+    advance(5_000);
     assert.equal(broker.observe(keyed({ hook_event_name: 'PreToolUse', ...plan('v2') })), 1);
     broker.create(keyed(request(plan('v2'))), { hold: false });
     assert.deepEqual(broker.list().map((a) => [/** @type {any} */ (a.toolInput).plan, a.status, a.proof ?? null]), [['v2', 'pending', null], ['v1', 'resolved', 'stopped']]);
     // Without its PreToolUse (not seen, or not sent), the second plan's request shows it too.
-    const unseen = setup().broker;
-    unseen.create(keyed(request(plan('v1'))), { hold: false });
-    unseen.create(keyed(request(plan('v2'))), { hold: false });
-    assert.deepEqual(unseen.list().map((a) => [/** @type {any} */ (a.toolInput).plan, a.status, a.proof ?? null]), [['v2', 'pending', null], ['v1', 'resolved', 'stopped']]);
+    const unseen = setup();
+    unseen.broker.create(keyed(request(plan('v1'))), { hold: false });
+    unseen.advance(5_000);
+    unseen.broker.create(keyed(request(plan('v2'))), { hold: false });
+    assert.deepEqual(unseen.broker.list().map((a) => [/** @type {any} */ (a.toolInput).plan, a.status, a.proof ?? null]), [['v2', 'pending', null], ['v1', 'resolved', 'stopped']]);
   });
 
   it('proof says what showed the terminal answered', () => {
@@ -318,6 +320,80 @@ describe('the dialog model decides what the terminal answered (core/dialogs.js)'
     const { approval } = broker.create(ask('cat ../a'), { hold: false });
     assert.equal(approval.callKey, inputKey({ command: 'cat ../a' }));
     assert.equal(broker.create(request(), { hold: false }).approval.callKey, null, 'unstamped: no key');
+  });
+
+  it("goes by each hook's own time: a plan's request that overtook its PreToolUse stays pending", () => {
+    // The request is sent at once, the PreToolUse in the background: here it lands 15 ms later.
+    const { broker, advance } = setup();
+    const plan = (/** @type {string} */ text) => ({ session_id: 's1', tool_name: 'ExitPlanMode', tool_input: { plan: text } });
+    broker.observe(keyed({ hook_event_name: 'PreToolUse', ...plan('v1') }), 1_000);
+    broker.create(keyed(request(plan('v1'))), { hold: false, at: 1_000 });
+    // "No, keep planning"; the revised plan's request (sent at 9,995) arrives before its start (9,990).
+    advance(9_000);
+    broker.create(keyed(request(plan('v2'))), { hold: false, at: 9_995 });
+    advance(15);
+    assert.equal(broker.observe(keyed({ hook_event_name: 'PreToolUse', ...plan('v2') }), 9_990), 0, 'its own start answers nothing');
+    assert.deepEqual(broker.list().map((a) => [/** @type {any} */ (a.toolInput).plan, a.status, a.proof ?? null]), [['v2', 'pending', null], ['v1', 'resolved', 'stopped']]);
+    // "No" again; the next plan arrives in the same order: v2 was answered, v3 waits.
+    advance(10_000);
+    broker.create(keyed(request(plan('v3'))), { hold: false, at: 20_005 });
+    assert.equal(broker.observe(keyed({ hook_event_name: 'PreToolUse', ...plan('v3') }), 20_000), 0);
+    assert.deepEqual(broker.list().map((a) => [/** @type {any} */ (a.toolInput).plan, a.status]), [['v3', 'pending'], ['v2', 'resolved'], ['v1', 'resolved']]);
+    assert.equal(broker.observe(keyed({ hook_event_name: 'PostToolUse', ...plan('v3'), tool_response: {} }), 22_000), 1);
+    assert.equal(broker.list()[0].proof, 'ran');
+    // A request that was slow to arrive is still older than the next plan's start.
+    const slow = setup();
+    slow.advance(10_000);
+    slow.broker.create(keyed(request(plan('v1'))), { hold: false, at: 1_000 });
+    assert.equal(slow.broker.observe(keyed({ hook_event_name: 'PreToolUse', ...plan('v2') }), 6_000), 1);
+    assert.deepEqual([slow.broker.list()[0].status, slow.broker.list()[0].proof], ['resolved', 'stopped']);
+  });
+
+  it("a held request whose turn or session ended meanwhile is answered once it goes back to the terminal", () => {
+    /** @type {[string, Record<string, any>][]} */
+    const ends = [
+      ['Stop', { hook_event_name: 'Stop' }],
+      ["Codex's interrupt", { hook_event_name: 'Stop', stop_reason: 'interrupted' }],
+      ['SessionEnd', { hook_event_name: 'SessionEnd', reason: 'other' }],
+    ];
+    for (const [name, end] of ends) {
+      const { broker } = setup();
+      const { approval } = broker.create(ask('npm publish'), { hold: true });
+      assert.equal(broker.observe(keyed({ session_id: 's1', ...end })), 0, `${name}: the town still holds it`);
+      broker.release(approval.id);
+      assert.deepEqual([broker.list()[0].status, broker.list()[0].proof], ['resolved', 'stopped'], name);
+    }
+    const { broker } = setup();
+    const { approval } = broker.create(ask('npm publish'), { hold: true });
+    broker.release(approval.id);
+    assert.deepEqual([broker.list()[0].status, broker.list()[0].held], ['pending', false], 'one still open waits in the terminal');
+  });
+
+  it('a request that timed out in the town shows in the terminal: your prompt answers it, and the same command asked again is its own', () => {
+    const { broker, advance, fireTimers } = setup();
+    broker.create(ask('npm publish'), { hold: true });
+    fireTimers();
+    // "No" in the terminal, then a prompt; the agent asks for the same command again.
+    advance(5_000);
+    assert.equal(broker.observe(keyed({ hook_event_name: 'UserPromptSubmit', session_id: 's1', prompt: 'publish it after all' })), 0);
+    advance(5_000);
+    broker.create(ask('npm publish'), { hold: false });
+    advance(5_000);
+    assert.equal(broker.observe(result('PostToolUse', 'npm publish')), 1);
+    assert.deepEqual(broker.list().map((a) => a.status), ['resolved', 'expired']);
+  });
+
+  it("Codex's request, the only hook with the command's description, is answered by its call's result", () => {
+    const { broker } = setup();
+    broker.create(ask('git push', { tool_input: { command: ['git', 'push'], description: 'Push the branch' }, andary_source: 'codex' }), { hold: false });
+    assert.equal(broker.observe(keyed({ hook_event_name: 'PostToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'git push' }, tool_response: {}, andary_source: 'codex' })), 1);
+    assert.deepEqual([broker.list()[0].status, broker.list()[0].proof], ['resolved', 'ran']);
+  });
+
+  it('says which agent asked, so a Codex card can say what Allow may grant', () => {
+    const { broker } = setup();
+    assert.equal(broker.create(ask('ls'), { hold: false }).approval.source, 'claude');
+    assert.equal(broker.create(ask('ls', { andary_source: 'codex' }), { hold: false }).approval.source, 'codex');
   });
 });
 

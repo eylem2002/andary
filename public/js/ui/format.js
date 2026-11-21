@@ -1,6 +1,6 @@
 // Pure text helpers for the HUD: durations, relative times, countdowns, paths, labels.
 // No DOM here, so everything is unit-tested in Node.
-import { CARD_FIELDS, cardLines } from '../core/card-fields.js';
+import { CARD_FIELDS, cardLines, cardNote } from '../core/card-fields.js';
 import { shellWords } from '../core/text.js';
 
 /**
@@ -165,27 +165,65 @@ export function isCommandText(text) {
 }
 
 /**
- * Characters that change how text looks without being seen: C0/C1 controls (tab and newline
- * excepted), bidirectional overrides and isolates ("Trojan Source"), zero-width and other
- * invisible characters, line/paragraph separators and Unicode tag characters.
+ * Characters that change how text looks without being seen: controls, format characters
+ * (bidirectional overrides and isolates, "Trojan Source"; zero-width characters; Unicode tags),
+ * line and paragraph separators, spaces, and characters that draw nothing (the Braille blank, the
+ * Hangul fillers, variation selectors, the combining grapheme joiner). No character matches two of
+ * its parts, so a long run of them is read one way only and costs no backtracking. The plain
+ * space, tab and newline are left out where they are no secret.
  */
-const HIDDEN_CHARS =
-  // eslint-disable-next-line no-control-regex -- finding control characters is the point
-  /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD\u061C\u115F\u1160\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u3164\uFEFF\uFFA0\uFFF9-\uFFFB]|\uDB40[\uDC00-\uDC7F]/g;
-/** Three or more line breaks in a row (blank or whitespace-only lines between them). */
-const BLANK_RUN = /\n(?:[ \t]*\n){2,}/g;
+const UNSEEN = String.raw`(?:[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}\u115F\u1160\u2800\u3164\uFFA0\u{E0000}-\u{E007F}]|\u034F|\u17B4|\u17B5|[\u180B-\u180D]|\u180F|[\uFE00-\uFE0F]|[\u{E0100}-\u{E01EF}])`;
+/** One hidden character: any of those but the plain space, the tab and the newline. */
+const HIDDEN = String.raw`(?![\t\n ])${UNSEEN}`;
+/** Every hidden character. */
+const HIDDEN_CHAR = new RegExp(HIDDEN, 'gu');
+/** A run of one hidden character, shown as one marker with a count. */
+const HIDDEN_RUN = new RegExp(`(${HIDDEN})\\1*`, 'gu');
+/** A line that shows nothing: only spaces, tabs and hidden characters. */
+const BLANK_LINE = new RegExp(String.raw`^(?:(?!\n)${UNSEEN})*$`, 'u');
+/** Three or more line breaks in a row, with only lines that show nothing between them. */
+const BLANK_RUN = new RegExp(String.raw`\n(?:(?:(?!\n)${UNSEEN})*\n){2,}`, 'gu');
+
+/** @param {string} ch @returns {string} */
+const codeOf = (ch) => `U+${(ch.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}`;
 
 /**
- * Makes text safe to judge by eye: hidden characters become visible markers such as ⟨U+202E⟩, and
- * runs of blank lines (which can push the end of a command out of view) are collapsed into one
- * marker line. Used where the viewer approves exactly what they read.
+ * Whether a line shows nothing (only spaces, tabs and hidden characters), so that a run of such
+ * lines is collapsed where text is judged by eye (see blankLines).
+ * @param {string} line
+ */
+export function looksBlank(line) {
+  return BLANK_LINE.test(line);
+}
+
+/**
+ * The one marker line that stands for `count` lines that show nothing, naming the hidden
+ * characters they hold: to a shell a line of no-break spaces is a word, not a blank.
+ * @param {number} count
+ * @param {string} text  those lines
+ * @returns {string}
+ */
+export function blankLines(count, text) {
+  const held = [...new Set(text.match(HIDDEN_CHAR) ?? [])].map(codeOf);
+  const named = held.length > 3 ? [...held.slice(0, 3), `${held.length - 3} more`] : held;
+  return `⟨${count} blank lines${named.length ? ` with ${listJoin(named)}` : ''}⟩`;
+}
+
+/**
+ * Makes text safe to judge by eye: runs of lines that show nothing (which can push the end of a
+ * command out of view) are collapsed into one marker line, and hidden characters become visible
+ * markers such as ⟨U+202E⟩, a run of one as one marker with its count (⟨U+00A0 ×1900⟩). Used where
+ * the viewer approves exactly what they read.
  * @param {unknown} text
  * @returns {string}
  */
 export function revealHidden(text) {
   return String(text ?? '')
-    .replace(HIDDEN_CHARS, (ch) => `⟨U+${ch.codePointAt(0)?.toString(16).toUpperCase().padStart(4, '0')}⟩`)
-    .replace(BLANK_RUN, (run) => `\n⟨${run.split('\n').length - 2} blank lines⟩\n`);
+    .replace(BLANK_RUN, (run) => `\n${blankLines(run.split('\n').length - 2, run)}\n`)
+    .replace(HIDDEN_RUN, (run, ch) => {
+      const count = [...run].length;
+      return `⟨${codeOf(ch)}${count > 1 ? ` ×${count}` : ''}⟩`;
+    });
 }
 
 /**
@@ -210,14 +248,24 @@ const APPROVAL_WORDING = {
  * What a permission request asks for, in words plus the detail to show in mono. The default is a
  * short form for summaries. `exact` is for the approval card, where the viewer decides: full paths
  * (never shortened in the middle), the tool's other known fields as "name: value" lines
- * (core/card-fields.js), every input field for tools without special wording, and hidden
- * characters revealed (see revealHidden).
- * @param {{ toolName?: string, toolInput?: any, cwd?: string }} approval
+ * (core/card-fields.js), every input field for tools without special wording, hidden characters
+ * revealed (see revealHidden), and `note`, what the request cannot say that allowing it grants
+ * (core/card-fields.js), when there is something to say.
+ * @param {{ toolName?: string, toolInput?: any, cwd?: string, source?: string }} approval
  * @param {{ exact?: boolean }} [options]
+ * @returns {{ action: string, detail: string, note?: string }}
+ */
+export function describeApproval({ toolName = '', toolInput, cwd, source = 'claude' }, { exact = false } = {}) {
+  const words = approvalWords(toolName, toolInput && typeof toolInput === 'object' ? toolInput : {}, cwd, exact);
+  const note = exact ? cardNote(source, toolName) : '';
+  return note ? { ...words, note } : words;
+}
+
+/**
+ * @param {string} toolName @param {Record<string, any>} input @param {string|undefined} cwd @param {boolean} exact
  * @returns {{ action: string, detail: string }}
  */
-export function describeApproval({ toolName = '', toolInput, cwd }, { exact = false } = {}) {
-  const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
+function approvalWords(toolName, input, cwd, exact) {
   const text = exact ? revealHidden : (/** @type {unknown} */ t) => String(t ?? '');
   const path = exact ? revealHidden : (/** @type {unknown} */ p) => shortenPath(p, { cwd, max: 80 });
   // Only the tools core/card-fields.js lists get a view of their own: any other is shown field by field.

@@ -323,6 +323,54 @@ describe('requests the town cannot show in full', () => {
   });
 });
 
+describe('hooks that arrive out of order', () => {
+  it("a plan's request that overtook its PreToolUse stays pending when the PreToolUse lands", async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    const sent = Date.now() - 1_000;
+    const plan = { tool_name: 'ExitPlanMode', tool_input: { plan: 'Split the module' } };
+    const payload = permissionRequest(plan);
+    // The request is sent at once, its PreToolUse in the background: here it lands second.
+    await postHook(town, payload, { ts: sent + 5 });
+    const pending = await approvalFor(browser, payload.session_id);
+    assert.equal(pending.a.status, 'pending');
+    await postHook(town, hookPayload('PreToolUse', { session_id: payload.session_id, ...plan }), { ts: sent });
+    // Approved at the desk: only its result answers it.
+    await postHook(town, hookPayload('PostToolUse', { session_id: payload.session_id, ...plan, tool_response: {} }), { ts: sent + 8_000 });
+    const resolved = await approvalFor(browser, payload.session_id, (a) => a.status !== 'pending');
+    assert.deepEqual([resolved.a.status, resolved.a.proof], ['resolved', 'ran']);
+    await closeBrowser(browser);
+  });
+
+  it("a plan's request that was slow to arrive is still older than the next plan's start", async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    const sent = Date.now() - 10_000;
+    const payload = permissionRequest({ tool_name: 'ExitPlanMode', tool_input: { plan: 'v1' } });
+    await postHook(town, payload, { ts: sent });
+    await approvalFor(browser, payload.session_id);
+    // "No, keep planning": the revised plan started 5 s after the first was sent.
+    await postHook(town, hookPayload('PreToolUse', { session_id: payload.session_id, tool_name: 'ExitPlanMode', tool_input: { plan: 'v2' } }), { ts: sent + 5_000 });
+    const answered = await approvalFor(browser, payload.session_id, (a) => a.status !== 'pending');
+    assert.deepEqual([answered.a.status, answered.a.proof], ['resolved', 'stopped']);
+    await closeBrowser(browser);
+  });
+});
+
+describe("a Codex request's card", () => {
+  it('says which agent asked, so the card can say what Allow may grant', async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    const payload = permissionRequest({ tool_input: { command: ['git', 'push'], description: 'Push the branch' } });
+    const hook = postHook(town, payload, { source: 'codex' });
+    const pending = await approvalFor(browser, payload.session_id);
+    assert.deepEqual([pending.a.source, pending.a.held], ['codex', true]);
+    browser.send(JSON.stringify({ t: 'decide', id: pending.a.id, decision: 'deny' }));
+    await hook;
+    await closeBrowser(browser);
+  });
+});
+
 describe('a forwarder from an older version', () => {
   it('cannot have a request held: it does not say whether it shortened the body', async () => {
     const browser = await connectBrowser(town);

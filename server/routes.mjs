@@ -288,7 +288,7 @@ async function handleHook(ctx, req, res) {
   }
   const request = ingestHook(ctx, body).find((envelope) => envelope.event.hook_event_name === 'PermissionRequest');
   if (request) {
-    await answerPermissionRequest(ctx, req, res, request.event, { exact: shownInFull(body.event, request.event), caps: body.caps });
+    await answerPermissionRequest(ctx, req, res, request.event, { exact: shownInFull(body.event, request.event), caps: body.caps, at: request.ts });
     return;
   }
   sendHookReply(ctx, req, res, null);
@@ -386,17 +386,18 @@ function whyNotHeld(current, exact) {
  * @param {Request} req
  * @param {Response} res
  * @param {Record<string, any>} event
- * @param {{ exact: boolean, caps: string[] }} sent  exact: the tool input reached the town unchanged
- *   and whole (see shownInFull); caps: what the forwarder declared it does
+ * @param {{ exact: boolean, caps: string[], at: number }} sent  exact: the tool input reached the
+ *   town unchanged and whole (see shownInFull); caps: what the forwarder declared it does; at: when
+ *   the agent sent the request (its envelope's `ts`)
  */
-async function answerPermissionRequest(ctx, req, res, event, { exact, caps }) {
+async function answerPermissionRequest(ctx, req, res, event, { exact, caps, at }) {
   const wanted = ctx.settings.remoteApprovals && ctx.hub.owners > 0;
   const terminalOnly = TERMINAL_ONLY.get(String(event.tool_name));
   // Only a forwarder that marks a body it shortened can be trusted to have sent it whole.
   const current = caps.includes('truncated');
   const hold = wanted && exact && current && !terminalOnly;
   const why = terminalOnly ?? (wanted ? whyNotHeld(current, exact) : undefined);
-  const { approval, response } = ctx.broker.create(event, { hold, message: why });
+  const { approval, response } = ctx.broker.create(event, { hold, message: why, at });
   if (hold) {
     // The forwarder went away (Claude Code cancelled the hook): Claude asks in the terminal now.
     res.on('close', () => {

@@ -51,10 +51,14 @@ Principles:
   yet the town holds it and shows Allow. Never hold them; the card says "answer in your terminal".
 - **Hold only what the card shows** (CONTRACTS §4.5): every field of the input, as it is. One list,
   `core/card-fields.js`, says per tool what its card shows, so a field it leaves out (Bash's
-  `dangerouslyDisableSandbox`) sends the request to the terminal, as a redacted or shortened input
-  does; so does a request from a forwarder too old to say it marks a body it shortened.
-- **Phone notes follow the attention rules** (CONTRACTS §4.10), on the one model of open dialogs
-  that the town uses too (`core/dialogs.js`):
+  `dangerouslyDisableSandbox: true`) sends the request to the terminal, as a redacted or shortened
+  input does; so does a request from a forwarder too old to say it marks a body it shortened. The
+  card shows every space but the plain one and every character that draws nothing as a marker,
+  and collapses lines that show nothing, so no padding hides the end of a command. A Codex
+  command's card says that allowing may let it leave its sandbox: its request cannot say.
+- **Phone notes follow the attention rules** (CONTRACTS §4.10), on one model of open dialogs
+  (`core/dialogs.js`) that the approval broker follows too, at each hook's own time (a permission
+  request can arrive before its PreToolUse, a notice before the call started ahead of it):
   - no note for every finished turn: Claude Code's `idle_prompt`, 60 s later, covers an unanswered
     one. Codex has no `idle_prompt`, so the server waits the same 60 s after a Codex lead's turn,
     once per turn; Codex names no helper on its tool calls, so a tool running pauses the minute

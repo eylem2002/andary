@@ -288,9 +288,13 @@ section.
 78. **"This computer" for plain HTTP includes a peer that connects from the address it connected
     to.** That is how a local client of `--host <address>` arrives; TCP addresses cannot be forged
     that way from another computer. A local reverse proxy counts as this computer, as before.
-79. **Blank-line runs on an approval card collapse into a marker.** Three or more blank lines in a
-    row show as "⟨N blank lines⟩", and the note gives the line counts, so padding cannot push the
-    rest of a change out of sight.
+79. **Blank-line runs on an approval card collapse into a marker.** Three or more lines in a row
+    that show nothing (blank, or only spaces and characters that draw nothing, such as no-break or
+    ideographic spaces and the Braille blank) show as "⟨N blank lines⟩", naming any such
+    characters ("with U+00A0": to a shell such a line is a word, not a blank), and the note gives
+    the line counts, so padding cannot push the rest of a request or a change out of sight. Every
+    other space but the plain one shows as a marker too, a run of one as one marker with its
+    count ("⟨U+00A0 ×1900⟩").
 80. **A name "fits" when it takes at most 64% of its lot's width on screen (ADR 0017).** Lots
     have yards and pavements around the building, so the whole lot would be too generous. At the
     whole-town view on a laptop the names take 34–82% of their lots, with a clear gap between
@@ -336,9 +340,10 @@ section.
     `elicitation_dialog`, `elicitation_url_dialog` and `agent_needs_input` notices) is a question
     too; it names no tool, so it closes like a session's notice (below).
 89. **A dialog's note is dropped only on proof of an answer.** Proof is that very call reporting
-    back (the same tool and call key, taken from the input as it arrived, before anything is cut;
-    for a call Codex's adapter renamed, from the original call; questions and plans by name, since
-    your answer changes their input), your prompt or `/compact`, the agent's turn ending (in an
+    back (the same tool and call key, taken from the input as it arrived, before anything is cut,
+    without its `description`, which runs nothing and which Codex sends with a request only; for a
+    call Codex's adapter renamed, from the original call; questions and plans by name, since your
+    answer changes their input), your prompt or `/compact`, the agent's turn ending (in an
     error too, or a teammate going idle) or the session ending, or a decision in the town. Your
     prompt answers every dialog of the session, whoever asked, since nobody can type while a dialog
     shows in the terminal; except a request the town holds right now, which is not in the terminal
@@ -346,8 +351,11 @@ section.
     closes when the lead starts its next call. A new request from the same agent is no proof,
     because parallel calls each ask on their own (a question or a plan aside, 88); nor is a request
     that timed out in the town or went back to the terminal: the agent still waits there, and your
-    next prompt answers it. The approval broker follows the same table, so the town's cards and the
-    phone agree on what the terminal answered.
+    next prompt answers it. Each hook counts at the time it was sent, not when it arrived: a
+    permission request is sent at once and a PreToolUse or a notice in the background, so a
+    question's request can arrive before its own start, and a notice before the call started ahead
+    of it. The approval broker follows the same table, so the town's cards and the phone agree on
+    what the terminal answered.
     Andary sees a yes in the terminal only when the tool finishes, a "No" only at your next prompt,
     and a diff you change in your IDE not at all (its result has another input), so a note can
     come after you answered: one note too many is better than none for an agent that waits. A tool
@@ -363,9 +371,9 @@ section.
     as Claude Code, and sends one note per Stop. Codex names a helper only when it starts and ends,
     so a helper's tool calls look like the lead's: a tool starting pauses the minute; its result, a
     helper ending or the lead's next Stop starts it again; only your prompt, or the session
-    starting or ending, ends the wait. For the same reason Codex's dialogs cannot be told apart by
-    agent: a helper's request counts as the lead's, and the lead's Stop answers it too. Andary
-    cannot see you typing in Codex, so a reply that takes you over a minute to write still sends
-    the note.
+    starting or ending, ends the wait (at most 100 sessions are waited on at once). For the same
+    reason Codex's dialogs cannot be told apart by agent: a helper's request counts as the lead's,
+    and the lead's Stop answers it too. Andary cannot see you typing in Codex, so a reply that
+    takes you over a minute to write still sends the note.
 92. **The waiting note names no agent.** "A crew is waiting for your next prompt." fits Claude Code
     and Codex alike, as the notes for permission requests, questions and plans do.

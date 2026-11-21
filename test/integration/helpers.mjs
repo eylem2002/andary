@@ -35,14 +35,15 @@ export function rawRequest(port, { method = 'GET', path = '/', headers = {}, bod
 }
 
 /**
- * POSTs to /api/hook like the forwarder (with what it declares it does: `caps`; [] for an older one).
+ * POSTs to /api/hook like the forwarder (with what it declares it does: `caps`; [] for an older one;
+ * `ts`, when the agent sent it; `source`, "codex" for Codex's forwarder).
  * @param {{ port: number, secret: string }} town
  * @param {unknown} event
- * @param {{ secret?: string|null, rawBody?: string, agent?: import('node:http').Agent, caps?: string[] }} [options]
+ * @param {{ secret?: string|null, rawBody?: string, agent?: import('node:http').Agent, caps?: string[], ts?: number, source?: string }} [options]
  * @returns {Promise<RawResponse>}
  */
-export function postHook(town, event, { secret = town.secret, rawBody, agent, caps = ['truncated'] } = {}) {
-  const body = rawBody ?? JSON.stringify({ v: 1, ts: Date.now(), caps, event });
+export function postHook(town, event, { secret = town.secret, rawBody, agent, caps = ['truncated'], ts = Date.now(), source } = {}) {
+  const body = rawBody ?? JSON.stringify({ v: 1, ts, ...(source ? { source } : {}), caps, event });
   /** @type {Record<string, string|number>} */
   const headers = { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) };
   if (secret) headers['x-andary-secret'] = secret;

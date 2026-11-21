@@ -159,7 +159,8 @@ file's content, or an edit as a diff. To tell the agent why you said no, type a 
 **Deny** (or press Enter in the reason field). A request the town cannot show in full (a secret
 was masked, a long value was cut, or it has an option the card does not show, such as running a
 command outside the sandbox) is never held there and goes straight to your terminal; so does one
-from an older copy of Andary's hook (the card says how to update it).
+from an older copy of Andary's hook (the card says how to update it). Codex does not say whether
+a command asks to leave its sandbox, so a Codex command's card says that allowing it may.
 While a request waits, a yellow **approvals waiting for you** button sits at the top right and the
 browser tab reads **(1) Andary**, so you notice it from another tab or with the side boards away.
 

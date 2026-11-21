@@ -1,6 +1,6 @@
 // Open dialogs (core/dialogs.js): the one model of "an agent asked you and has had no answer",
-// shared by the phone notes and the town. Each rule here is a way a needed note or a waiting agent
-// could otherwise be lost.
+// shared by the phone notes and the approval broker. Each rule here is a way a needed note or a
+// waiting agent could otherwise be lost.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { afterHook, createDialogs, inputKey } from '../../../public/js/core/dialogs.js';
@@ -64,6 +64,35 @@ describe('createDialogs', () => {
     // A request for one whose start never arrived opens it, and takes the older one's place.
     const late = d.ask(plan('v3'), 6);
     assert.deepEqual([late.opened, late.closed.map((x) => x.at)], [true, [3]]);
+  });
+
+  test("a plan's request that overtook its PreToolUse is joined by it, not taken for an older plan", () => {
+    // The request is sent at once, the PreToolUse in the background: the request sent at 1,005
+    // can arrive before the PreToolUse sent at 1,000.
+    const d = createDialogs();
+    const plan = (/** @type {string} */ text) => lead(['ExitPlanMode'], { plan: text });
+    d.begin(plan('v1'), 1);
+    d.ask(plan('v1'), 2);
+    const asked = d.ask(plan('v2'), 1_005);
+    assert.deepEqual([asked.opened, asked.closed.map((x) => x.at)], [true, [1]], '"No, keep planning": v1 was answered');
+    const begun = d.begin(plan('v2'), 1_000);
+    assert.deepEqual([begun.opened, begun.closed], [false, []], 'its own start joins it');
+    assert.deepEqual(d.list().map((x) => [x.at, x.begun, x.requested]), [[1_005, true, true]]);
+    const v3 = d.begin(plan('v3'), 2_000);
+    assert.deepEqual([v3.opened, v3.closed.map((x) => x.at)], [true, [1_005]], 'a later start is another plan');
+    // A request older than the start is not its own (its start never came): it was answered.
+    const e = createDialogs();
+    e.ask(plan('x'), 500);
+    const start = e.begin(plan('y'), 1_000);
+    assert.deepEqual([start.opened, start.closed.map((x) => x.at)], [true, [500]]);
+    // One start per request, and a start never closes a dialog opened after it.
+    const f = createDialogs();
+    f.ask(plan('p'), 1_005);
+    f.begin(plan('p'), 1_000);
+    const other = f.begin(plan('q'), 1_001);
+    assert.deepEqual([other.opened, other.closed], [true, []]);
+    assert.equal(f.begin(plan('r'), 1_001).opened, true, 'nor one another start opened');
+    assert.deepEqual(f.list().map((x) => x.at), [1_005, 1_001, 1_001]);
   });
 
   test("a session's notice counts only when nothing of that session is known to be open", () => {
@@ -153,6 +182,13 @@ describe('inputKey', () => {
     assert.notEqual(inputKey({ command: 'npm test' }), inputKey({ command: 'npm test ' }));
     assert.equal(inputKey(undefined), inputKey(null));
   });
+
+  test("a description is left out: it changes nothing that runs, and Codex sends one with a request only", () => {
+    assert.equal(inputKey({ command: 'git push', description: 'Push the branch' }), inputKey({ command: 'git push' }));
+    assert.equal(inputKey({ command: ['git', 'push'], description: 'Push' }), inputKey({ command: 'git push' }));
+    assert.notEqual(inputKey({ command: 'git push', timeout: 5 }), inputKey({ command: 'git push' }), 'every other field counts');
+    assert.equal(inputKey('description'), inputKey('description'), 'an input that is not an object is keyed as it is');
+  });
 });
 
 describe('afterHook: the one table every consumer follows', () => {
@@ -187,6 +223,15 @@ describe('afterHook: the one table every consumer follows', () => {
     assert.equal(step(d, 'TeammateIdle').closed.length, 0, "a TeammateIdle without an agent id is not the lead's");
     assert.equal(step(d, 'PreCompact', { trigger: 'auto' }).closed.length, 0, 'Claude Code compacting by itself is not you');
     assert.equal(step(d, 'Stop', { interrupted: true }, { ...lead(['Bash']), agentId: 'h1' }).closed.length, 1, "Codex's interrupt: the whole session");
+  });
+
+  test('a notice that arrived ahead of the call started before it stays open', () => {
+    // A sandbox's network prompt sent at 2,000 can arrive before the PreToolUse (sent at 1,000) of
+    // the call that raised it.
+    const d = createDialogs();
+    assert.equal(afterHook(d, { hook: 'Notification', notice: 'permission_prompt', call: lead([]), at: 2_000 }).opened?.kind, 'unknown');
+    assert.equal(afterHook(d, { hook: 'PreToolUse', call: lead(['Bash'], { command: 'curl x' }), at: 1_000 }).closed.length, 0);
+    assert.equal(afterHook(d, { hook: 'PreToolUse', call: lead(['Read'], { file_path: 'y' }), at: 2_500 }).closed.length, 1, 'a call started after it is the proof');
   });
 
   test("a session's notice closes when the lead starts a new call after it, never on a tool result", () => {

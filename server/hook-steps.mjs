@@ -1,7 +1,7 @@
 // How the server reads a hook for the dialog model (public/js/core/dialogs.js). Ingest stamps a
 // call key on every tool hook as it arrives, before anything else reads it or the sanitizer cuts
 // its input; the phone notes and the approval broker then read the same call, and the same step
-// for afterHook(), from here. The town reads the stamp from the envelope.
+// for afterHook(), from here, each at the hook's own time. The envelope keeps the stamp.
 import { inputKey } from '../public/js/core/dialogs.js';
 import { normalizeAgentId } from '../public/js/core/ids.js';
 
@@ -51,9 +51,20 @@ export function callOf(event) {
 }
 
 /**
+ * A hook's own time: when the agent sent it (the forwarder's `ts`), never later than now; its
+ * arrival when it has none. A permission request is sent at once and a PreToolUse or a notice in
+ * the background, so a later hook can arrive first: the dialog rules go by this time.
+ * @param {unknown} ts @param {number} now
+ * @returns {number}
+ */
+export function hookTime(ts, now) {
+  return typeof ts === 'number' && Number.isFinite(ts) ? Math.min(ts, now) : now;
+}
+
+/**
  * A stamped payload as afterHook() reads it.
  * @param {Record<string, any>} event
- * @param {number} at  when it arrived
+ * @param {number} at  the hook's own time (hookTime)
  * @returns {HookStep}
  */
 export function hookStep(event, at) {

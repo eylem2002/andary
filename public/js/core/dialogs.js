@@ -1,7 +1,6 @@
 // Open dialogs: what each agent has asked you and not had an answer to yet (docs/design/
-// agent-health.md §2, §3). One model for the phone notes (server/notify.mjs), the approval broker
-// (server/approvals.mjs) and the town's "needs you" (core/store.js), so all agree on when an agent
-// waits for you. Pure and bounded.
+// agent-health.md §2). One model for the phone notes (server/notify.mjs) and the approval broker
+// (server/approvals.mjs), so both agree on when an agent waits for you. Pure and bounded.
 //
 // A dialog opens with a permission request, a question or a plan (AskUserQuestion, ExitPlanMode),
 // or a session's own notice: "needs your permission" when nothing of that session is known to be
@@ -18,7 +17,10 @@
 // A request that went back to the terminal (timed out, released) is no proof, and neither is a
 // new request from the same agent: parallel tool calls each ask on their own. A session's notice
 // (whose dialog is unknown) closes when the lead starts a new call, never on a tool result.
-// afterHook() is the table of which hook does what; every consumer follows it.
+// Hooks may arrive out of order (a permission request is sent at once, a PreToolUse or a
+// notice in the background), so every rule goes by the hook's own time: a question's request
+// that overtook its PreToolUse is joined by it, and a notice is closed only by a call started
+// after it. afterHook() is the table of which hook does what; every consumer follows it.
 import { isObject, shellWords } from './text.js';
 
 /** Tools that stop the agent until you answer them in the terminal. */
@@ -52,6 +54,7 @@ export const FORM_NOTICES = Object.freeze(['elicitation_dialog', 'elicitation_ur
  * @property {string|null} approvalId  the town's request for it, once known
  * @property {boolean} held          the town holds its request right now (so no prompt answered it)
  * @property {boolean} requested     its permission request came (a question's or plan's joins it once)
+ * @property {boolean} begun         its PreToolUse came (a question's or plan's; its request may come first)
  * @property {string} text           what the caller wants to show for it ('' when nothing)
  */
 
@@ -62,13 +65,16 @@ export const FORM_NOTICES = Object.freeze(['elicitation_dialog', 'elicitation_ur
 
 /**
  * A short key for a tool input, equal for equal inputs. A command sent as an argument list
- * (Codex) is joined first, as the request and its result may differ in that alone.
+ * (Codex) is joined first, as the request and its result may differ in that alone, and a
+ * `description` is left out: it changes nothing that runs, and Codex sends one with a request
+ * only, not with the call's PreToolUse or result.
  * @param {unknown} input
  * @returns {string}
  */
 export function inputKey(input) {
-  const same = isObject(input) && Array.isArray(input.command) ? { ...input, command: shellWords(input.command) } : input;
-  return hash53(JSON.stringify(same ?? null));
+  if (!isObject(input)) return hash53(JSON.stringify(input ?? null));
+  const { description: _label, ...rest } = input;
+  return hash53(JSON.stringify(Array.isArray(rest.command) ? { ...rest, command: shellWords(rest.command) } : rest));
 }
 
 /** The kind of dialog a call opens. @param {readonly string[]} tools @returns {DialogKind} */
@@ -120,14 +126,23 @@ export function createDialogs({ max = 200 } = {}) {
   }
 
   /**
-   * A new question or plan from an agent closes its older ones of that kind: it cannot ask again
+   * That agent's questions or plans of a kind opened before `at`: answered, as it cannot ask again
    * while one waits.
-   * @param {Call} call @param {DialogKind} kind @param {number} at @param {string} text @param {boolean} requested
+   * @param {Call} call @param {DialogKind} kind @param {number} at
+   */
+  function closeOlder(call, kind, at) {
+    return close((d) => !isNotice(d) && d.kind === kind && d.sessionId === call.sessionId && d.agentId === call.agentId && d.at < at);
+  }
+
+  /**
+   * A new question or plan from an agent: a dialog of its own, closing its older ones of the kind.
+   * @param {Call} call @param {DialogKind} kind @param {number} at @param {string} text
+   * @param {{ requested: boolean, begun: boolean }} came  which of its hooks opened it
    * @returns {Asked}
    */
-  function askAgain(call, kind, at, text, requested) {
-    const closed = close((d) => !isNotice(d) && d.kind === kind && d.sessionId === call.sessionId && d.agentId === call.agentId);
-    const dialog = add({ sessionId: call.sessionId, agentId: call.agentId, kind, tools: [...call.tools], input: null, at, text, requested });
+  function askAgain(call, kind, at, text, came) {
+    const closed = closeOlder(call, kind, at);
+    const dialog = add({ sessionId: call.sessionId, agentId: call.agentId, kind, tools: [...call.tools], input: null, at, text, ...came });
     return { dialog, opened: true, closed };
   }
 
@@ -140,21 +155,31 @@ export function createDialogs({ max = 200 } = {}) {
      */
     ask(call, at, text = '') {
       const kind = kindOf(call.tools);
-      if (kind === 'permission') return { dialog: add({ sessionId: call.sessionId, agentId: call.agentId, kind, tools: [...call.tools], input: call.input, at, text, requested: true }), opened: true, closed: [] };
+      if (kind === 'permission') {
+        const dialog = add({ sessionId: call.sessionId, agentId: call.agentId, kind, tools: [...call.tools], input: call.input, at, text, requested: true, begun: false });
+        return { dialog, opened: true, closed: [] };
+      }
       const waiting = open.findLast((d) => d.kind === kind && !d.requested && fits(d, call));
-      if (!waiting) return askAgain(call, kind, at, text, true);
+      if (!waiting) return askAgain(call, kind, at, text, { requested: true, begun: false });
       waiting.requested = true;
       return { dialog: waiting, opened: false, closed: [] };
     },
 
     /**
-     * A question or a plan starting (its PreToolUse): a new dialog, matched by name, as your answer
-     * changes its input. It closes that agent's older one of the kind.
+     * A question or a plan starting (its PreToolUse): a dialog matched by name, as your answer
+     * changes its input. Its own request may have come first (a PreToolUse is sent in the
+     * background): the newest of that agent's of the kind not begun yet, opened at or after this
+     * hook's time, is this one. Either way it closes that agent's older ones of the kind (opened
+     * before it).
      * @param {Call} call @param {number} at @param {string} [text]
      * @returns {Asked}
      */
     begin(call, at, text = '') {
-      return askAgain(call, kindOf(call.tools), at, text, false);
+      const kind = kindOf(call.tools);
+      const own = open.findLast((d) => d.kind === kind && !d.begun && d.at >= at && fits(d, call));
+      if (!own) return askAgain(call, kind, at, text, { requested: false, begun: true });
+      own.begun = true;
+      return { dialog: own, opened: false, closed: closeOlder(call, kind, at) };
     },
 
     /**
@@ -167,7 +192,7 @@ export function createDialogs({ max = 200 } = {}) {
     notice(sessionId, at, text = '', kind = 'unknown') {
       const known = kind === 'unknown' ? open.some((d) => d.sessionId === sessionId) : open.some((d) => d.sessionId === sessionId && isNotice(d) && d.kind === kind);
       if (known) return null;
-      return add({ sessionId, agentId: null, kind, tools: [], input: null, at, text, requested: false });
+      return add({ sessionId, agentId: null, kind, tools: [], input: null, at, text, requested: false, begun: false });
     },
 
     /**
@@ -263,7 +288,7 @@ export function createDialogs({ max = 200 } = {}) {
  * @typedef {object} HookStep  one hook as the dialog rules read it
  * @property {string} hook          its name: PermissionRequest, PostToolUse, …
  * @property {Call} call            whose and which call (tools and input when it has any)
- * @property {number} at            the hook's time
+ * @property {number} at            the hook's own time (when the agent sent it), not its arrival
  * @property {string} [text]        what a dialog it opens is about
  * @property {string} [notice]      Notification: its notification_type
  * @property {string} [trigger]     PreCompact: manual or auto
@@ -314,8 +339,9 @@ function toolStarted(d, s) {
 }
 
 /**
- * What one hook does to the dialogs: the one table the phone notes, the approval broker and the
- * town all follow, so they agree on when an agent waits for you.
+ * What one hook does to the dialogs: the one table the phone notes and the approval broker both
+ * follow, so they agree on when an agent waits for you. Give each hook its own time (`at`), not
+ * its arrival: hooks may arrive out of order.
  * @param {Dialogs} dialogs
  * @param {HookStep} step
  * @returns {HookChange}

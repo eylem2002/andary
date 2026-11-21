@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { CARD_FIELDS, cardShowsAll } from '../../../public/js/core/card-fields.js';
+import { CARD_FIELDS, CODEX_SHELL_NOTE, cardShowsAll } from '../../../public/js/core/card-fields.js';
 import { revealHidden,
   approvalChange,
   describeApproval,
@@ -220,8 +220,8 @@ describe('describeApproval (exact, for the approval card)', () => {
   test('the card shows every field core/card-fields.js says it shows, for every tool listed there', () => {
     /** One input per listed tool with every field, and what of each the card must show. @type {Record<string, [Record<string, unknown>, string[]]>} */
     const samples = {
-      Bash: [{ command: ['rm', 'a b'], description: 'Clean', timeout: 5, run_in_background: true }, ["$ rm 'a b'", 'description: Clean', 'timeout: 5', 'run_in_background: true']],
-      PowerShell: [{ command: 'Remove-Item x', description: 'Clean', timeout: 5, run_in_background: false }, ['PS> Remove-Item x', 'description: Clean', 'timeout: 5', 'run_in_background: false']],
+      Bash: [{ command: ['rm', 'a b'], description: 'Clean', timeout: 5, run_in_background: true, dangerouslyDisableSandbox: false }, ["$ rm 'a b'", 'description: Clean', 'timeout: 5', 'run_in_background: true', 'dangerouslyDisableSandbox: false']],
+      PowerShell: [{ command: 'Remove-Item x', description: 'Clean', timeout: 5, run_in_background: false, dangerouslyDisableSandbox: false }, ['PS> Remove-Item x', 'description: Clean', 'timeout: 5', 'run_in_background: false', 'dangerouslyDisableSandbox: false']],
       Write: [{ file_path: '/w/a.ts', content: 'the new body' }, ['/w/a.ts', 'the new body']],
       Edit: [{ file_path: '/w/a.ts', old_string: 'the old', new_string: 'the new', replace_all: true }, ['/w/a.ts', 'the old', 'the new', 'Replaces every occurrence']],
       MultiEdit: [{ file_path: '/w/a.ts', edits: [{ old_string: 'o1', new_string: 'n1' }, { old_string: 'o2', new_string: 'n2', replace_all: true }] }, ['/w/a.ts', 'o1', 'n1', 'o2', 'n2', 'edit 2 replaces every occurrence']],
@@ -233,7 +233,7 @@ describe('describeApproval (exact, for the approval card)', () => {
     assert.deepEqual(Object.keys(samples).sort(), Object.keys(CARD_FIELDS).sort(), 'a sample for each tool listed');
     for (const [toolName, [toolInput, shown]] of Object.entries(samples)) {
       const { view, lines } = CARD_FIELDS[toolName];
-      assert.deepEqual(Object.keys(toolInput).sort(), [...Object.keys(view), ...lines].sort(), `${toolName}: the sample has every listed field`);
+      assert.deepEqual(Object.keys(toolInput).sort(), [...Object.keys(view), ...Object.keys(lines)].sort(), `${toolName}: the sample has every listed field`);
       assert.equal(cardShowsAll(toolName, toolInput), true, toolName);
       const { action, detail } = describeApproval({ toolName, toolInput }, exact);
       assert.doesNotMatch(action, /^use /, `${toolName} has a view of its own`);
@@ -241,6 +241,14 @@ describe('describeApproval (exact, for the approval card)', () => {
       const card = [detail, change?.note ?? '', ...(change?.hunks ?? []).flatMap((hunk) => [hunk.before, hunk.after])].join('\n');
       for (const text of shown) assert.ok(card.includes(text), `${toolName}: the card shows ${text}`);
     }
+  });
+
+  test("a Codex command's card says what Allow may grant; the short form does not", () => {
+    const approval = { toolName: 'Bash', toolInput: { command: 'git push' }, source: 'codex' };
+    assert.deepEqual(describeApproval(approval, exact), { action: 'run a command', detail: '$ git push', note: CODEX_SHELL_NOTE });
+    assert.deepEqual(describeApproval(approval), { action: 'run a command', detail: '$ git push' });
+    assert.equal(describeApproval({ ...approval, source: 'claude' }, exact).note, undefined);
+    assert.equal(describeApproval({ toolName: 'Bash', toolInput: { command: 'git push' } }, exact).note, undefined, 'Claude Code by default');
   });
 
   test('lists every field of tools without special wording', () => {
@@ -259,6 +267,32 @@ describe('describeApproval (exact, for the approval card)', () => {
     );
     assert.equal(revealHidden('tag\u{E0041}s'), 'tag⟨U+E0041⟩s');
     assert.equal(revealHidden('tabs\tand\nnewlines stay'), 'tabs\tand\nnewlines stay');
+  });
+
+  test('shows every space but the plain one, and every character that draws nothing', () => {
+    for (const ch of ['\u00A0', '\u1680', '\u2000', '\u2007', '\u200A', '\u202F', '\u205F', '\u3000', '\u2800', '\u3164', '\uFFA0', '\u115F', '\u034F', '\uFE0F', '\u{E0100}', '\u180E', '\u2061']) {
+      const code = (ch.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0');
+      assert.equal(revealHidden(`a${ch}b`), `a⟨U+${code}⟩b`, code);
+    }
+    assert.equal(revealHidden('a b\tc'), 'a b\tc', 'a plain space and a tab stay');
+    // A run of one is one marker, so nothing after it is pushed out of the box.
+    assert.equal(revealHidden(`echo hi${'\u00A0'.repeat(1900)}; rm -rf ~`), 'echo hi⟨U+00A0 ×1900⟩; rm -rf ~');
+  });
+
+  test('reads a run of hidden characters in one pass, so a long one cannot freeze the card', () => {
+    // Unicode tags and the Mongolian vowel separator are format characters listed twice over.
+    const started = performance.now();
+    revealHidden(`\n${'\u{E0041}'.repeat(26)}x\n${'\u180E'.repeat(26)}x`);
+    assert.ok(performance.now() - started < 1_000);
+  });
+
+  test('collapses padding of lines that show nothing, saying what they hold', () => {
+    const tail = (/** @type {string} */ padding) => describeApproval({ toolName: 'Bash', toolInput: { command: `echo hi${padding}rm -rf ~` } }, exact).detail;
+    assert.equal(tail(`${'\n\u00A0'.repeat(40)}\n`), '$ echo hi\n⟨40 blank lines with U+00A0⟩\nrm -rf ~');
+    assert.equal(tail(`${'\n\u3000 \u2800'.repeat(40)}\n`), '$ echo hi\n⟨40 blank lines with U+3000 and U+2800⟩\nrm -rf ~');
+    assert.equal(tail('\r\n'.repeat(40)), '$ echo hi⟨U+000D⟩\n⟨39 blank lines with U+000D⟩\nrm -rf ~');
+    assert.equal(revealHidden('x\n\u200B\n\u2060\n\uFEFF\n\u00AD\ny'), 'x\n⟨4 blank lines with U+200B, U+2060, U+FEFF and 1 more⟩\ny');
+    assert.equal(revealHidden('a\n\u00A0\nb'), 'a\n⟨U+00A0⟩\nb', 'one such line is shown as it is');
   });
 
   test('collapses blank-line padding that would push the end of a command out of view', () => {

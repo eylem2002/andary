@@ -11,8 +11,8 @@ function fakeContext() {
     counts: { events: 0 },
     usage: { observe: (/** @type {any} */ e) => seen.usage.push(e) },
     progress: { observe: (/** @type {any} */ e) => seen.growth.push(e) },
-    notifier: { observe: (/** @type {any} */ e) => seen.notify.push(e) },
-    broker: { observe: (/** @type {any} */ e) => seen.broker.push(e) },
+    notifier: { observe: (/** @type {any} */ e, /** @type {number} */ ts) => seen.notify.push({ ...e, ts }) },
+    broker: { observe: (/** @type {any} */ e, /** @type {number} */ ts) => seen.broker.push({ ...e, ts }) },
     relay: { send: (/** @type {any} */ envelope) => seen.relay.push(envelope) },
     history: { push: (/** @type {any} */ envelope) => seen.history.push(envelope) },
     recorder: null,
@@ -37,6 +37,12 @@ describe('ingest', () => {
     assert.deepEqual([envelope.id, envelope.ts, envelope.event.andary_member], [1, 5, undefined]);
     for (const key of ['usage', 'growth', 'notify', 'broker', 'relay', 'history', 'broadcast']) assert.equal(seen[key].length, 1, key);
     assert.equal(seen.broadcast[0].e.id, 1);
+  });
+
+  it("the phone notes and the approval broker get each hook's own time: hooks may arrive out of order", () => {
+    const { ctx, seen } = fakeContext();
+    ingestHook(ctx, { ts: 1_234, source: 'claude', event: { hook_event_name: 'PreToolUse', session_id: 's', tool_name: 'ExitPlanMode', tool_input: { plan: 'x' } } });
+    assert.deepEqual([seen.notify[0].ts, seen.broker[0].ts], [1_234, 1_234]);
   });
 
   it('a permission request is left to the route: approvals do not observe it', () => {

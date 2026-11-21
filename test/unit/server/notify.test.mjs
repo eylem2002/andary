@@ -49,7 +49,7 @@ function testNotifier(options = {}) {
     ...options,
   });
   // Every event reaches it with its call key, stamped by ingest.
-  const notifier = { ...created, observe: (/** @type {Record<string, any>} */ event) => created.observe(withCallKey(event)) };
+  const notifier = { ...created, observe: (/** @type {Record<string, any>} */ event, /** @type {number} */ ts = clock.now()) => created.observe(withCallKey(event), ts) };
   return {
     notifier,
     posts,
@@ -77,7 +77,7 @@ function brokerFor({ notifier, clock }, timeoutMs = 120_000) {
     /** @type {typeof broker.create} */
     create: (event, options) => broker.create(withCallKey(event), options),
     /** @type {typeof broker.observe} */
-    observe: (event) => broker.observe(withCallKey(event)),
+    observe: (event, ts) => broker.observe(withCallKey(event), ts),
   };
 }
 
@@ -445,6 +445,47 @@ test('a prompt does not answer a request the town holds; once handed back to the
   assert.equal(expired.posts.length, 0);
 });
 
+test("a dialog goes by its hook's own time, whatever order the hooks arrive in", async () => {
+  // A plan's request is sent at once, its PreToolUse in the background: here the request (sent at
+  // 995) lands at 1 s and its start (sent at 990) only at 9 s. One dialog, due ten seconds after
+  // the request was sent.
+  const { notifier, posts, at } = testNotifier();
+  const plan = { tool_name: 'ExitPlanMode', tool_input: { plan: 'Split the module' } };
+  await at(1_000);
+  notifier.observe(hook('PermissionRequest', plan), 995);
+  await at(9_000);
+  notifier.observe(hook('PreToolUse', plan), 990);
+  await at(60_000);
+  assert.deepEqual(posts.map((post) => [post.at, post.body]), [[10_995, 'A crew has a plan for you to approve.']]);
+  // A sandbox's network prompt or an MCP server's form, sent at 2 s, lands before the PreToolUse
+  // of the call that raised it (sent at 1.5 s): that call started before it, so it answers nothing.
+  for (const notice of ['permission_prompt', 'elicitation_dialog']) {
+    const net = testNotifier();
+    await net.at(2_000);
+    net.notifier.observe(hook('Notification', { notification_type: notice }), 2_000);
+    await net.at(2_050);
+    net.notifier.observe(hook('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'curl https://example.com' } }), 1_500);
+    await net.at(60_000);
+    assert.equal(net.posts.length, 1, notice);
+  }
+  // A time ahead of the server's clock counts as now.
+  const ahead = testNotifier();
+  ahead.notifier.observe(ask(), 3_600_000);
+  await ahead.at(DIALOG_DELAY_MS);
+  assert.equal(ahead.posts.length, 1);
+});
+
+test("Codex's request, the only hook with the command's description, is answered by its call's result", async () => {
+  const { notifier, posts, at } = testNotifier();
+  const command = { tool_name: 'Bash', tool_input: { command: ['git', 'push'] } };
+  notifier.observe(codex({ hook_event_name: 'PermissionRequest', ...command, tool_input: { ...command.tool_input, description: 'Push the branch' } })[0]);
+  notifier.observe(codex({ hook_event_name: 'PreToolUse', ...command })[0]);
+  await at(2_000);
+  notifier.observe(codex({ hook_event_name: 'PostToolUse', ...command, tool_response: { exit_code: 0 } })[0]);
+  await at(60_000);
+  assert.equal(posts.length, 0, 'answered in 2 s: no note');
+});
+
 test('a note held back by the 30 s limit goes out when the limit allows', async () => {
   const { notifier, posts, at } = testNotifier();
   notifier.observe(ask({ session_id: 'crew-a' }));
@@ -605,6 +646,10 @@ test('a Codex lead that stopped gets the waiting note after a minute without a p
   others.notifier.observe(event('Stop', { agent_id: 'agent-h1' }));
   await others.at(5 * CODEX_IDLE_MS);
   assert.equal(others.posts.length, 0, "Claude Code's Stop (its idle_prompt says it) and a Codex helper's");
+  // Bounded: sessions that stopped and went quiet give way, the oldest first.
+  const many = testNotifier();
+  for (let i = 0; i < 150; i += 1) many.notifier.observe(event('Stop', { session_id: `thr_${i}` }));
+  assert.equal(many.clock.pending, 100);
 });
 
 test('notes are posted to ntfy with a title, priority and tags, and rate-limited', async () => {

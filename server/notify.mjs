@@ -6,9 +6,9 @@
 // seconds and 30 an hour (CONTRACTS §4.10).
 //
 // They follow the town's attention rules (docs/design/agent-health.md §2). What an agent has asked
-// you and had no answer to is decided by core/dialogs.js, the model the town and the approval
-// broker use too: every hook goes through its afterHook() table (a dialog per call, closed only on
-// proof of an answer). This module keeps only its own part: a dialog's note waits
+// you and had no answer to is decided by core/dialogs.js, the model the approval broker uses too:
+// every hook goes through its afterHook() table at its own time (a dialog per call, closed only
+// on proof of an answer). This module keeps only its own part: a dialog's note waits
 // DIALOG_DELAY_MS and goes out if the dialog is still open then; dialogs due together become one
 // note. A finished turn is no news by itself:
 // Claude Code's idle_prompt says so a minute later if nobody answered, and for Codex, which sends
@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { afterHook, createDialogs } from '../public/js/core/dialogs.js';
 import { normalizeAgentId } from '../public/js/core/ids.js';
 import { isObject } from '../public/js/core/text.js';
-import { hookStep } from './hook-steps.mjs';
+import { hookStep, hookTime } from './hook-steps.mjs';
 
 /** @typedef {import('../public/js/core/dialogs.js').Dialog} Dialog */
 
@@ -172,42 +172,45 @@ function createRateLimit() {
   };
 }
 
+/** Codex sessions waited on at once; the oldest wait gives way (a session gone quiet mid-tool). */
+const MAX_WAITS = 100;
+
 /**
  * Codex sessions whose lead stopped and has had no prompt since, each with the minute that ends
  * in its "waiting" note. Codex names a helper only on SubagentStart and SubagentStop, so a
  * helper's tool events look like the lead's: a tool starting pauses the minute, a result, a
  * helper's end or the lead's next Stop starts it again, and only a prompt, or the session
- * starting or ending, ends the wait. One note per Stop.
+ * starting or ending, ends the wait. One note per Stop: once it is sent, the session is
+ * forgotten until the lead's next Stop.
  * @param {(fn: () => void, ms: number) => any} setTimer
  * @param {(timer: any) => void} clearTimer
  * @param {() => void} onIdle
  */
 function createIdleWatch(setTimer, clearTimer, onIdle) {
-  /** @type {Map<string, { timer: any, noted: boolean }>} */
+  /** @type {Map<string, { timer: any }>} oldest first */
   const waits = new Map();
   /** @param {{ timer: any }} wait */
   const pause = (wait) => {
     if (wait.timer !== null) clearTimer(wait.timer);
     wait.timer = null;
   };
-  /** @param {{ timer: any, noted: boolean }} wait */
-  const run = (wait) => {
+  /** @param {string} sessionId @param {{ timer: any }} wait */
+  const run = (sessionId, wait) => {
     pause(wait);
-    if (wait.noted) return;
     wait.timer = setTimer(() => {
-      wait.timer = null;
-      wait.noted = true;
+      waits.delete(sessionId);
       onIdle();
     }, CODEX_IDLE_MS);
     wait.timer?.unref?.();
   };
-  return {
+  const watch = {
     /** The lead's Stop: the wait starts, or starts again. @param {string} sessionId */
     stopped(sessionId) {
-      const wait = waits.get(sessionId) ?? { timer: null, noted: false };
-      wait.noted = false;
+      const wait = waits.get(sessionId) ?? { timer: null };
+      waits.delete(sessionId);
       waits.set(sessionId, wait);
-      run(wait);
+      if (waits.size > MAX_WAITS) watch.end(waits.keys().next().value ?? '');
+      run(sessionId, wait);
     },
     /** @param {string} sessionId */
     pause(sessionId) {
@@ -217,7 +220,7 @@ function createIdleWatch(setTimer, clearTimer, onIdle) {
     /** @param {string} sessionId */
     resume(sessionId) {
       const wait = waits.get(sessionId);
-      if (wait) run(wait);
+      if (wait) run(sessionId, wait);
     },
     /** @param {string} sessionId */
     end(sessionId) {
@@ -231,6 +234,7 @@ function createIdleWatch(setTimer, clearTimer, onIdle) {
       waits.clear();
     },
   };
+  return watch;
 }
 
 /**
@@ -350,9 +354,10 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
   }
 
   /**
-   * Opens or closes the dialogs this event concerns.
+   * Opens or closes the dialogs this event concerns. A dialog's note is due ten seconds after its
+   * hook was sent.
    * @param {Record<string, any>} event
-   * @param {number} t
+   * @param {number} t  the hook's own time
    */
   function track(event, t) {
     const { opened, closed } = afterHook(dialogs, hookStep(event, t));
@@ -380,13 +385,16 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
       return Boolean(url);
     },
     url,
-    /** @param {Record<string, any>} event  a local town payload, before it is sanitized */
-    observe(event) {
+    /**
+     * @param {Record<string, any>} event  a local town payload, before it is sanitized
+     * @param {number} [ts]  when the agent sent it (the forwarder's time): its dialogs go by it
+     */
+    observe(event, ts) {
       if (!url || disposed || !isObject(event)) return;
       const t = now();
       forgetNoted(t);
       watchIdle(event);
-      track(event, t);
+      track(event, hookTime(ts, t));
       const note = noteFor(event);
       if (note) void send(note);
     },

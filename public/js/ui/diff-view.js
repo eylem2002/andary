@@ -3,7 +3,7 @@
 // only help the eye. Text only, never HTML.
 import { lineDiff } from './diff.js';
 import { h } from './dom.js';
-import { revealHidden } from './format.js';
+import { blankLines, looksBlank, revealHidden } from './format.js';
 
 const OPS = { add: { mark: '+', label: 'Added' }, del: { mark: '−', label: 'Removed' }, same: { mark: ' ', label: '' } };
 
@@ -34,8 +34,9 @@ export function diffView(hunk, { index = 0, count = 1, exact = false, compact = 
 const BLANK_RUN = 3;
 
 /**
- * Runs of blank (or whitespace-only) lines, which could push the rest of a change out of sight in
- * a small box, become one marker row saying how many there are.
+ * Runs of lines that show nothing (blank, or only spaces and hidden characters such as no-break
+ * spaces or the Braille blank), which could push the rest of a change out of sight in a small
+ * box, become one marker row saying how many there are and what they hold.
  * @param {import('./diff.js').DiffLine[]} lines
  * @returns {(import('./diff.js').DiffLine & { gap?: boolean })[]}
  */
@@ -44,9 +45,10 @@ export function collapseBlankRuns(lines) {
   const out = [];
   for (let i = 0; i < lines.length; ) {
     let end = i;
-    while (end < lines.length && lines[end].op === lines[i].op && lines[end].text.trim() === '') end += 1;
+    while (end < lines.length && lines[end].op === lines[i].op && looksBlank(lines[end].text)) end += 1;
     if (end - i >= BLANK_RUN) {
-      out.push({ op: lines[i].op, text: `⟨${end - i} blank lines⟩`, gap: true });
+      const text = blankLines(end - i, lines.slice(i, end).map((line) => line.text).join('\n'));
+      out.push({ op: lines[i].op, text, gap: true });
       i = end;
     } else {
       out.push(lines[i]);
