@@ -35,7 +35,7 @@ const TOOLS = [
   { id: 'cycle-time', label: 'Time of day', key: 'N', keyName: 'N', compact: true },
   { id: 'toggle-quality', label: 'High quality' },
   { id: 'toggle-sound', label: 'Sound', key: 'M', keyName: 'M', compact: true },
-  { id: 'usage', label: 'Usage and cost', key: 'U', keyName: 'U' },
+  { id: 'usage', label: 'Usage and cost', key: 'U', keyName: 'U', compact: true },
   { id: 'leaderboard', label: 'Leaderboard', key: 'L', keyName: 'L', compact: true },
   '|',
   { id: 'pause', label: 'Pause demo', key: 'Space', keyName: 'Space', only: 'demo', compact: true },
