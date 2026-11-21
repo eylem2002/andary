@@ -7,8 +7,10 @@
 //                                                approvals, relay)
 //
 // Which observers see an event depends on where it came from, and that is written down once, in
-// POLICIES, instead of in each route.
+// POLICIES, instead of in each route. Before any of them, a tool hook gets its call key
+// (`andary_key`, hook-steps.mjs), from its input as it arrived.
 import { toTownPayloads } from './adapters/index.mjs';
+import { withCallKey } from './hook-steps.mjs';
 import { sanitize } from './sanitize.mjs';
 
 /** @typedef {import('./app.mjs').TownContext} TownContext */
@@ -71,9 +73,11 @@ export function ingestTeam(ctx, member, items, now = Date.now()) {
  */
 function admit(ctx, origin, item) {
   const policy = POLICIES[origin];
-  if (policy.growth) ctx.progress.observe(item.event);
-  if (policy.notify) ctx.notifier.observe(item.event);
-  const envelope = record(ctx, item);
+  // The call key first, from the input as it arrived: every reader below matches calls by it.
+  const event = withCallKey(item.event);
+  if (policy.growth) ctx.progress.observe(event);
+  if (policy.notify) ctx.notifier.observe(event);
+  const envelope = record(ctx, { ts: item.ts, event });
   if (policy.relay) ctx.relay?.send(envelope);
   // A permission request is answered by the route (it may be held); everything else settles or
   // updates waiting approvals.

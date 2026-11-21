@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { CODEX_IDLE_MS, DIALOG_DELAY_MS, checkNotifyUrl, createNotifier, noteFor, savedTopicUrl } from '../../../server/notify.mjs';
 import { createApprovalBroker } from '../../../server/approvals.mjs';
 import { toTownPayloads } from '../../../server/adapters/index.mjs';
+import { withCallKey } from '../../../server/hook-steps.mjs';
 import { parseNotifyUrl } from '../../../server/cli/options.mjs';
 import { notificationFor } from '../../../public/js/ui/notifications.js';
 import { createFakeClock } from '../core/helpers.mjs';
@@ -36,7 +37,7 @@ function testNotifier(options = {}) {
   const clock = createFakeClock(0);
   /** @type {any[]} */
   const posts = [];
-  const notifier = createNotifier({
+  const created = createNotifier({
     url: 'https://ntfy.example/topic',
     fetchImpl: /** @type {any} */ (async (url, init) => {
       posts.push({ url, ...init, at: clock.now() });
@@ -47,6 +48,8 @@ function testNotifier(options = {}) {
     clearTimer: (id) => clock.clearTimeout(id),
     ...options,
   });
+  // Every event reaches it with its call key, stamped by ingest.
+  const notifier = { ...created, observe: (/** @type {Record<string, any>} */ event) => created.observe(withCallKey(event)) };
   return {
     notifier,
     posts,
@@ -62,12 +65,20 @@ function testNotifier(options = {}) {
  * @param {number} [timeoutMs]
  */
 function brokerFor({ notifier, clock }, timeoutMs = 120_000) {
-  return createApprovalBroker({
+  const broker = createApprovalBroker({
     timeoutMs,
     now: clock.now,
     onChange: (approval) => notifier.approvalChanged(approval),
     timers: { set: (fn, ms) => clock.setTimeout(fn, ms), clear: (id) => clock.clearTimeout(id) },
   });
+  // Events reach it with their call key, as from the route and ingest.
+  return {
+    ...broker,
+    /** @type {typeof broker.create} */
+    create: (event, options) => broker.create(withCallKey(event), options),
+    /** @type {typeof broker.observe} */
+    observe: (event) => broker.observe(withCallKey(event)),
+  };
 }
 
 /** @param {string} name @param {Record<string, any>} [extra] */
@@ -81,7 +92,7 @@ const question = (prompt = 'Which port?') => ({ tool_name: 'AskUserQuestion', to
 /** Codex's payloads, as its adapter makes them. @param {Record<string, any>} payload */
 const codex = (payload) => toTownPayloads('codex', { session_id: 'thr_1', cwd: '/work/app', ...payload });
 /** Notes about open dialogs (not the waiting note). @param {any[]} posts */
-const dialogNotes = (posts) => posts.filter((post) => post.headers.Tags !== 'hourglass');
+const dialogNotes = (posts) => posts.filter((post) => /permission|question|plan|need you/.test(post.body));
 
 test('a permission note goes out after the delay, once for its dialog, and names nothing', async () => {
   const { notifier, posts, at } = testNotifier();
@@ -233,7 +244,7 @@ test("Codex's renamed calls prove their dialog answered", async () => {
   }
 });
 
-test("the broker's own guess that the terminal answered (by tool name only) is no proof", async () => {
+test('the broker follows the same rules: a parallel call settles neither the note nor the request', async () => {
   const town = testNotifier();
   const broker = brokerFor(town);
   const request = ask();
@@ -241,9 +252,9 @@ test("the broker's own guess that the terminal answered (by tool name only) is n
   broker.create(request, { hold: false });
   const parallel = ran({ tool_input: { command: 'ls' }, tool_use_id: 'toolu_2' });
   town.notifier.observe(parallel);
-  assert.equal(broker.observe(parallel), 1, 'the broker takes it for the answer');
+  assert.equal(broker.observe(parallel), 0, 'the request is still open in the terminal');
   await town.at(DIALOG_DELAY_MS);
-  assert.equal(town.posts.length, 1, 'the dialog may still be open');
+  assert.equal(town.posts.length, 1, 'and so is its dialog');
 });
 
 test('a held request that expired or went back to the terminal still gets its note: the agent waits there', async () => {
@@ -274,6 +285,8 @@ test("a session's own permission notice is a dialog only when nothing of that se
     ['a tool result', hook('PostToolUse', { tool_name: 'Read', tool_input: { file_path: '/work/a.ts' }, tool_response: {} }), 1],
     ['a prompt', hook('UserPromptSubmit', { prompt: 'go on' }), 0],
     ["the lead's Stop", hook('Stop'), 0],
+    ["the lead's next call: it got past the dialog", hook('PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/work/b.ts' } }), 0],
+    ["a helper's next call", hook('PreToolUse', { agent_id: 'agent-h1', tool_name: 'Read', tool_input: { file_path: '/work/b.ts' } }), 1],
   ];
   for (const [what, proof, notes] of cases) {
     const { notifier, posts, at } = testNotifier();
@@ -337,6 +350,11 @@ test('a prompt, the turn ending or the session ending proves its dialogs answere
     ["a prompt, for the lead's dialogs", [ask()], hook('UserPromptSubmit', { prompt: 'go on' }), 0],
     ["a prompt, for a helper's (held in the town, it does not stop you typing)", [helper], hook('UserPromptSubmit', { prompt: 'go on' }), 1],
     ['the lead stopping', [ask()], hook('Stop'), 0],
+    ['the turn ending in an error', [ask()], hook('StopFailure', { error: 'server_error' }), 0],
+    ['a teammate going idle', [helper], hook('TeammateIdle', { agent_id: 'agent-h1', teammate_name: 'frontend' }), 0],
+    ['a teammate going idle, without its id', [helper], hook('TeammateIdle', { teammate_name: 'frontend' }), 1],
+    ['your /compact', [ask()], hook('PreCompact', { trigger: 'manual' }), 0],
+    ['a compact Claude Code made by itself', [ask()], hook('PreCompact', { trigger: 'auto' }), 1],
     ['the helper stopping', [helper], hook('SubagentStop', { agent_id: 'agent-h1' }), 0],
     ['the session ending', [ask(), helper], hook('SessionEnd', { reason: 'other' }), 0],
     ['a Codex interrupt', [ask(), helper], interrupt, 0],

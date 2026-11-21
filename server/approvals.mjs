@@ -6,14 +6,24 @@
 // killed) or its audience (remote approvals switched off, every browser gone) is "released":
 // it stays pending with held=false, the hook gets a null answer, and Claude Code shows its normal
 // terminal prompt.
+//
+// What the terminal answered follows the one dialog model (core/dialogs.js): every request is a
+// dialog in the broker's own tracker, fed through afterHook() like the phone notes and the town.
+// When a dialog closes and its request is pending and not held, the terminal answered it.
 import { randomUUID } from 'node:crypto';
+import { afterHook, createDialogs } from '../public/js/core/dialogs.js';
 import { normalizeAgentId } from '../public/js/core/ids.js';
+import { callOf, hookStep } from './hook-steps.mjs';
 
 export const DENY_MESSAGE = 'Denied from Andary';
 
-/** Events after which a non-held prompt has evidently been answered in the terminal. */
-const TOOL_EVENTS = new Set(['PostToolUse', 'PostToolUseFailure', 'PermissionDenied']);
-const AGENT_END_EVENTS = new Set(['Stop', 'SubagentStop']);
+/** Open dialogs the broker keeps; the oldest give way. */
+const MAX_DIALOGS = 500;
+
+/**
+ * @typedef {'ran'|'denied'|'stopped'} Proof  how the terminal answered: the tool ran (or failed),
+ *   it was denied, or the agent moved on without it (a prompt, the turn or the session ending)
+ */
 
 /**
  * @typedef {object} Approval
@@ -24,10 +34,12 @@ const AGENT_END_EVENTS = new Set(['Stop', 'SubagentStop']);
  * @property {string|null} agentId    normalised (leading "agent-" removed), null for the main agent
  * @property {string} toolName
  * @property {unknown} toolInput      sanitized
+ * @property {string|null} callKey    the request's call key (`andary_key`), so its dialog is found exactly
  * @property {string} cwd
  * @property {number} createdAt
  * @property {number|null} expiresAt  when a held approval times out; null when not held
  * @property {'town'|'terminal'|'timeout'} [decidedBy]
+ * @property {Proof} [proof]          set when resolved: what showed the terminal answered
  * @property {string} [message]
  */
 
@@ -79,6 +91,7 @@ function newApproval(event, hold, createdAt, timeoutMs) {
     agentId: normalizeAgentId(event.agent_id),
     toolName: text(event.tool_name),
     toolInput: event.tool_input ?? null,
+    callKey: typeof event.andary_key === 'string' ? event.andary_key : null,
     cwd: text(event.cwd),
     createdAt,
     expiresAt: hold ? createdAt + timeoutMs : null,
@@ -86,24 +99,14 @@ function newApproval(event, hold, createdAt, timeoutMs) {
 }
 
 /**
- * Picks the non-held pending approvals that `event` shows were answered in the terminal: a
- * result for the same session + agent + tool (the oldest such approval), the agent stopping,
- * or the whole session ending.
- * @param {Entry[]} waiting pending entries, oldest first
- * @param {Record<string, any>} event
- * @returns {Entry[]}
+ * What the hook that closed a dialog proves about its request.
+ * @param {string} hook
+ * @returns {Proof}
  */
-function answeredInTerminal(waiting, event) {
-  const name = event?.hook_event_name;
-  const candidates = waiting.filter(({ approval }) => !approval.held && approval.sessionId === text(event?.session_id));
-  if (name === 'SessionEnd') return candidates;
-  const agentId = normalizeAgentId(event?.agent_id);
-  const sameAgent = candidates.filter(({ approval }) => approval.agentId === agentId);
-  if (AGENT_END_EVENTS.has(name)) return sameAgent;
-  if (!TOOL_EVENTS.has(name)) return [];
-  // A tool the adapter renamed (Codex's apply_patch → Edit) was asked for under its own name.
-  const names = new Set([text(event.tool_name), text(event.andary_tool)].filter(Boolean));
-  return sameAgent.filter(({ approval }) => names.has(approval.toolName)).slice(0, 1);
+function proofOf(hook) {
+  if (hook === 'PostToolUse' || hook === 'PostToolUseFailure') return 'ran';
+  if (hook === 'PermissionDenied') return 'denied';
+  return 'stopped';
 }
 
 /**
@@ -129,6 +132,8 @@ export function createApprovalBroker({
 }) {
   /** @type {Map<string, Entry>} insertion order is creation order */
   const entries = new Map();
+  /** Every request as a dialog, so the broker knows when the terminal answered it. */
+  const dialogs = createDialogs({ max: MAX_DIALOGS });
   let settlements = 0;
 
   const publish = (/** @type {Entry} */ entry) => onChange({ ...entry.approval });
@@ -203,6 +208,10 @@ export function createApprovalBroker({
       makeRoom();
       const approval = newApproval(event, hold, now(), timeoutMs);
       if (message) approval.message = message;
+      // Its dialog: a new one, or the open question or plan this request belongs to.
+      const call = callOf(event);
+      dialogs.ask(call, approval.createdAt);
+      dialogs.link(call, approval.id);
       /** @type {Entry} */
       const entry = { approval, respond: null, timer: null, settledOrder: 0 };
       const response = new Promise((resolve) => {
@@ -236,19 +245,27 @@ export function createApprovalBroker({
       const note = typeof message === 'string' ? message.replace(/[\s\u0000-\u001F\u007F]+/g, ' ').trim().slice(0, 500) : '';
       const status = decision === 'allow' ? 'allowed' : 'denied';
       settle(entry, { status, decidedBy: 'town', ...(note ? { message: note } : {}) }, decisionOutput(decision, note));
+      dialogs.decided(entry.approval.id);
       return { ok: true };
     },
 
     /**
-     * Resolves non-held approvals that the terminal has evidently answered: the same session,
-     * agent and tool reported a result, or the agent/session stopped.
-     * @param {Record<string, any>} event
+     * Follows a hook through the broker's dialogs (afterHook). A request whose dialog closes while
+     * it is pending and not held was answered in the terminal: it is resolved, with what proved
+     * it. A held one waits for the town; an expired or released one stays as it is.
+     * @param {Record<string, any>} event  sanitized, with its call key
      * @returns {number} how many approvals were resolved
      */
     observe(event) {
-      const matched = answeredInTerminal(pending(), event);
-      for (const entry of matched) settle(entry, { status: 'resolved', decidedBy: 'terminal' }, null);
-      return matched.length;
+      const step = hookStep(event, now());
+      let resolved = 0;
+      for (const dialog of afterHook(dialogs, step).closed) {
+        const entry = dialog.approvalId === null ? undefined : entries.get(dialog.approvalId);
+        if (!entry || entry.approval.status !== 'pending' || entry.approval.held) continue;
+        settle(entry, { status: 'resolved', decidedBy: 'terminal', proof: proofOf(step.hook) }, null);
+        resolved += 1;
+      }
+      return resolved;
     },
 
     /**

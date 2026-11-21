@@ -267,7 +267,8 @@ Server → browser:
 { t: 'error', message }
 // Envelope = { id: number /* server sequence */, ts: number /* hook start, ms */, rx: number /* server receive */, event: object /* sanitized payload */ }
 // Approval = { id, status: 'pending'|'allowed'|'denied'|'expired'|'resolved', held: boolean, sessionId, agentId: string|null,
-//              toolName, toolInput, cwd, createdAt, expiresAt: number|null, decidedBy?: 'town'|'terminal'|'timeout', message? }
+//              toolName, toolInput, callKey: string|null /* the request's andary_key, §4.6 */, cwd, createdAt,
+//              expiresAt: number|null, decidedBy?: 'town'|'terminal'|'timeout', proof?: 'ran'|'denied'|'stopped', message? }
 ```
 
 Browser → server:
@@ -285,10 +286,14 @@ until a `decide` arrives or `approvalTimeoutMs` (default 120 s) passes; it then 
 `{"output":{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}}`
 or `{"behavior":"deny","message":"Denied from Andary"}`, or `{"output":null}` on timeout (the
 normal terminal prompt then appears). If remote approvals are off, the server answers at once with
-`null` and broadcasts the approval with `held: false` ("answer in your terminal"). A non-held
-approval becomes `resolved` (`decidedBy: 'terminal'`) when the same session + agent + tool next
-reports PostToolUse, PostToolUseFailure, PermissionDenied, Stop or SessionEnd (the tool matches
-by `tool_name` or, for a call an adapter renamed, `andary_tool`, §4.12). At most 50 pending.
+`null` and broadcasts the approval with `held: false` ("answer in your terminal"). Every request is
+a dialog in the broker's own tracker (§4.6, at most 500): a non-held pending approval becomes
+`resolved` (`decidedBy: 'terminal'`) when its dialog closes, and `proof` says what showed it:
+`'ran'` (its `PostToolUse` or `PostToolUseFailure`), `'denied'` (its `PermissionDenied`) or
+`'stopped'` (anything else: your prompt, the turn or the session ending). A held approval is never
+resolved by the terminal; an expired or released one stays as it is. `callKey` lets a browser find
+the approval's own dialog, as a parallel call of the same tool may be open beside it. At most 50
+pending.
 `ExitPlanMode` and `AskUserQuestion` requests are never held: a plain allow or deny cannot approve
 a plan or answer a question, so they are answered with `null` at once (`held: false`) and their
 `message` always says they are answered in the terminal. A request whose `tool_input` was changed
@@ -321,11 +326,35 @@ Settled during implementation; they refine §4.3–§4.5.
   lists to 50 items, 8 levels deep; if that is not enough, only the top-level fields that are not
   objects) and marks such a body `truncated: true`, so the server never holds what it was not sent
   in full. It also looks for `server.json` next to itself (plugin installs).
-- Approvals: `SubagentStop` also resolves that subagent's terminal-answered approvals; approval
-  `agentId` has no `agent-` prefix. A held approval goes back to the terminal (`held: false`,
-  still pending) when remote approvals are switched off, no browser has been connected for 5 s,
-  the hook disconnects, or the server shuts down. Beyond 50 pending, the oldest expires. A deny
-  with a typed reason reads "Denied from Andary: <reason>".
+- **Call keys** (`server/hook-steps.mjs`): in ingest, before anything reads it, every
+  PermissionRequest, PreToolUse, PostToolUse, PostToolUseFailure and PermissionDenied payload gets
+  `andary_key`: `inputKey()` (`core/dialogs.js`) of its `tool_input` as it arrived, before
+  sanitising, so a request and its result match however long they are; null for a call an adapter
+  renamed (`andary_tool`), whose input was rewritten. A key that came with the payload is replaced
+  (a forwarder's `andary_` fields are dropped anyway, §4.12; a teammate's events get the host's
+  own). Sanitising keeps it, so browsers read the same key.
+- **Open dialogs** (`public/js/core/dialogs.js`): what an agent has asked you and had no answer to,
+  one dialog per call. The phone notes (§4.10), the approval broker (§4.5) and the town each keep
+  their own tracker and follow one table, `afterHook()`.
+  - A dialog opens with a `PermissionRequest`, or with the `PreToolUse` of a question
+    (`AskUserQuestion`) or a plan (`ExitPlanMode`), whose own `PermissionRequest` then joins it. A
+    `Notification` (`permission_prompt`) opens one, naming no tool, only when nothing of its
+    session is open (its request never reached the town: a 429, a failed proof, a restart).
+  - It closes only on proof of an answer: that very call reporting back (`PostToolUse`,
+    `PostToolUseFailure` or `PermissionDenied` from the same agent, with a tool name in common and
+    the same call key; a side without a key, a question, a plan or a renamed call, goes by name);
+    the town deciding the request it held for it; your prompt or `/compact` (`UserPromptSubmit`, a
+    manual `PreCompact`: the lead's dialogs and the session's notice, never a helper's); the
+    agent's turn ending (`Stop` for the lead and the notice; `SubagentStop`, `StopFailure`, or
+    `TeammateIdle` with an agent id for that agent); the session ending (`SessionEnd`) or a Codex
+    interrupt (the `Stop` with `stop_reason: "interrupted"`). A session's notice also closes when
+    the lead starts a new call after it, never on a tool result.
+  - No proof: a new request (parallel calls each ask on their own), a request that expired or was
+    released (the agent waits in its terminal), any tool result for a dialog that names no tool.
+- Approvals: approval `agentId` has no `agent-` prefix. A held approval goes back to the terminal
+  (`held: false`, still pending) when remote approvals are switched off, no browser has been
+  connected for 5 s, the hook disconnects, or the server shuts down. Beyond 50 pending, the oldest
+  expires. A deny with a typed reason reads "Denied from Andary: <reason>".
 - Redaction covers more than §4.4 lists (including fields named like `password`/`api_key`); every
   pattern is length-bounded so a 1 MiB payload cannot trigger quadratic regex time.
 - The installer records each settings file's state in `<ANDARY_HOME>/installs.json`, so
@@ -378,27 +407,11 @@ most one note of a kind per 30 s and 30 an hour (test notes aside); a failed pos
 `settings.notify` (also in the unauthenticated `/api/hello`) is a boolean; the topic URL is only in
 the WebSocket `hello`. Only this computer's events count (§4.11).
 
-- **Open dialogs** are decided by `public/js/core/dialogs.js`, the model the town uses too: what
-  an agent has asked you and had no answer to, one dialog per call.
-  - A dialog opens with a `PermissionRequest`, or with the `PreToolUse` of a question
-    (`AskUserQuestion`) or a plan (`ExitPlanMode`), whose own `PermissionRequest` then joins it. A
-    `Notification` (`permission_prompt`) opens one, naming no tool, only when nothing of its
-    session is open (its request never reached the town: a 429, a failed proof, a restart).
-  - It closes only on proof of an answer: that very call reporting back (`PostToolUse`,
-    `PostToolUseFailure` or `PermissionDenied` from the same agent, with a tool name in common and
-    the same `inputKey()` of its input; questions and plans by name only, as your answer changes
-    their input); the town deciding (`allowed`, `denied`) the request it held for it; your prompt
-    (`UserPromptSubmit`: the lead's dialogs and the session's notice, never a helper's); the
-    agent's turn ending (`Stop` for the lead and the notice, `SubagentStop` for that helper); the
-    session ending (`SessionEnd`) or a Codex interrupt (the `Stop` with
-    `stop_reason: "interrupted"`).
-  - No proof: a new request (parallel calls each ask on their own), a request that expired or was
-    released (the agent waits in its terminal), the broker's `resolved` (it matches by tool name
-    only), and any tool result for a dialog that names no tool.
-  - The notifier passes each call as `{ sessionId, agentId, tools: [tool_name, andary_tool],
-    input }`, where `input` is null for a call an adapter renamed (its input cannot be compared),
-    and links the town's requests to their dialogs as the broker reports them. A renamed result
-    is matched by its tool names alone.
+- **Open dialogs** follow the one table of §4.6 (`core/dialogs.js`, `afterHook()`). The notifier
+  keeps its own tracker (at most 100), reads each call by its `andary_key`, and links the town's
+  requests to their dialogs by `callKey` as the broker reports them. Only the town's decision
+  (`allowed`, `denied`) counts from the broker: `resolved` follows from the same events, which the
+  notifier has already seen.
 - **Dialog notes** (priority high): due 10 s after the dialog opens, sent if it is still open: "A
   crew needs your permission.", "A crew has a question for you." or "A crew has a plan for you to
   approve.". Dialogs due together make one note with a crew count ("3 crews need your
@@ -479,7 +492,8 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
 Every agent's payloads are translated on the server, before ingest, into the one event contract
 the rest of the town reads: the Claude Code hook payload (§4.2). `server/adapters/index.mjs`
 picks the adapter by the body's `source` (`claude` when absent) and drops every `andary_` field
-from what arrived (`andary_member`, `andary_source`, `andary_tool`: only the server sets them).
+from what arrived (`andary_member`, `andary_source`, `andary_tool`, `andary_key`: only the server
+sets them).
 
 - **Claude Code**: unchanged.
 - **Codex** (`server/adapters/codex.mjs`): Codex's hooks use Claude Code's event and field names,

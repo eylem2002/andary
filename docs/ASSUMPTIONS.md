@@ -331,12 +331,15 @@ section.
     always says so, also when remote approvals are off. On the phone they have notes of their own
     ("A crew has a question for you.").
 89. **A dialog's note is dropped only on proof of an answer.** Proof is that very call reporting
-    back (the same tool and input; questions and plans by name, since your answer changes their
-    input), your prompt (for the lead's dialogs: a helper's request held in the town does not
-    stop you typing to the lead), the agent's turn or the session ending, or a decision in the
-    town. A new request from the same agent is no proof, because parallel calls each ask on their
-    own. Nor is a request that timed out in the town or went back to the terminal (the agent still
-    waits there), or the broker's "answered in the terminal", which goes by the tool's name only.
+    back (the same tool and call key, taken from the input as it arrived, before anything is cut;
+    questions and plans by name, since your answer changes their input), your prompt or
+    `/compact` (for the lead's dialogs: a helper's request held in the town does not stop you
+    typing to the lead), the agent's turn ending (in an error too, or a teammate going idle) or
+    the session ending, or a decision in the town. A session's notice, which names no tool, also
+    closes when the lead starts its next call. A new request from the same agent is no proof,
+    because parallel calls each ask on their own; nor is a request that timed out in the town or
+    went back to the terminal: the agent still waits there. The approval broker follows the same
+    table, so the town's cards and the phone agree on what the terminal answered.
     Andary sees a yes in the terminal only when the tool finishes, a "No" only at your next prompt,
     and a diff you change in your IDE not at all (its result has another input), so a note can
     come after you answered: one note too many is better than none for an agent that waits. A tool

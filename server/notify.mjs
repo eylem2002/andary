@@ -6,21 +6,22 @@
 // seconds and 30 an hour (CONTRACTS §4.10).
 //
 // They follow the town's attention rules (docs/design/agent-health.md §2). What an agent has asked
-// you and had no answer to is decided by core/dialogs.js, the model the town uses too: a dialog
-// per call (a permission request, a question, a plan), closed only on proof of an answer. This
-// module keeps only its own part: a dialog's note waits DIALOG_DELAY_MS and goes out if the dialog
-// is still open then; dialogs due together become one note. A finished turn is no news by itself:
+// you and had no answer to is decided by core/dialogs.js, the model the town and the approval
+// broker use too: every hook goes through its afterHook() table (a dialog per call, closed only on
+// proof of an answer). This module keeps only its own part: a dialog's note waits
+// DIALOG_DELAY_MS and goes out if the dialog is still open then; dialogs due together become one
+// note. A finished turn is no news by itself:
 // Claude Code's idle_prompt says so a minute later if nobody answered, and for Codex, which sends
 // no idle_prompt, that minute is counted here.
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { INTERACTIVE_TOOLS, createDialogs, inputKey } from '../public/js/core/dialogs.js';
+import { afterHook, createDialogs } from '../public/js/core/dialogs.js';
 import { normalizeAgentId } from '../public/js/core/ids.js';
 import { isObject } from '../public/js/core/text.js';
+import { hookStep } from './hook-steps.mjs';
 
 /** @typedef {import('../public/js/core/dialogs.js').Dialog} Dialog */
-/** @typedef {import('../public/js/core/dialogs.js').Dialogs} Dialogs */
 
 export const NTFY_SERVER = 'https://ntfy.sh';
 /** A dialog's note waits this long; one answered meanwhile (often within seconds) needs none. */
@@ -117,63 +118,8 @@ export function checkNotifyUrl(raw) {
   }
 }
 
-/**
- * Read like the approval broker reads ids, so the town's requests find their dialogs.
- * @param {unknown} value
- */
+/** @param {unknown} value */
 const text = (value) => (typeof value === 'string' ? value : '');
-
-/**
- * A hook event's tool call, as core/dialogs.js identifies it. A call an adapter renamed
- * (andary_tool) no longer has the input it was asked with, so its input cannot be compared.
- * @param {Record<string, any>} event
- * @returns {import('../public/js/core/dialogs.js').Call}
- */
-function callOf(event) {
-  return {
-    sessionId: text(event.session_id),
-    agentId: normalizeAgentId(event.agent_id),
-    tools: [text(event.tool_name), text(event.andary_tool)].filter(Boolean),
-    input: event.andary_tool ? null : inputKey(event.tool_input),
-  };
-}
-
-/**
- * Whether an event opens a dialog: a permission request, or a question or plan starting (they
- * stop the agent until you answer, permission or not).
- * @param {Record<string, any>} event
- */
-function asks(event) {
-  if (event.hook_event_name === 'PermissionRequest') return true;
-  return event.hook_event_name === 'PreToolUse' && [event.tool_name, event.andary_tool].some((tool) => typeof tool === 'string' && Object.hasOwn(INTERACTIVE_TOOLS, tool));
-}
-
-/**
- * The dialogs an event proves answered, or null when it proves nothing.
- * @param {Dialogs} dialogs
- * @param {Record<string, any>} event
- * @returns {Dialog[]|null}
- */
-function closedBy(dialogs, event) {
-  const sessionId = text(event.session_id);
-  switch (event.hook_event_name) {
-    case 'PostToolUse':
-    case 'PostToolUseFailure':
-    case 'PermissionDenied':
-      return dialogs.result(callOf(event));
-    case 'UserPromptSubmit':
-      return dialogs.prompted(sessionId);
-    case 'Stop':
-      // Codex's Interrupt arrives as an interrupted Stop: you are at that session's terminal.
-      return event.stop_reason === 'interrupted' ? dialogs.closeSession(sessionId) : dialogs.stopped(sessionId, normalizeAgentId(event.agent_id));
-    case 'SubagentStop':
-      return dialogs.stopped(sessionId, normalizeAgentId(event.agent_id));
-    case 'SessionEnd':
-      return dialogs.closeSession(sessionId);
-    default:
-      return null;
-  }
-}
 
 /**
  * The note for some open dialogs: worded by their kind (a session's own permission notice reads
@@ -382,19 +328,9 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
    * @param {number} t
    */
   function track(event, t) {
-    /** @type {Dialog|null} */
-    let opened = null;
-    if (asks(event)) {
-      // The permission request Claude Code sends for an open question or plan joins it.
-      const asked = dialogs.ask(callOf(event), t);
-      opened = asked.opened ? asked.dialog : null;
-    } else if (event.hook_event_name === 'Notification' && event.notification_type === 'permission_prompt') {
-      opened = dialogs.notice(text(event.session_id), t);
-    } else {
-      const closed = dialogs.list().length > 0 ? closedBy(dialogs, event) : null;
-      if (!closed?.length) return;
-      for (const dialog of closed) notes.delete(dialog.id);
-    }
+    const { opened, closed } = afterHook(dialogs, hookStep(event, t));
+    if (!opened && closed.length === 0) return;
+    for (const dialog of closed) notes.delete(dialog.id);
     if (opened) notes.set(opened.id, { due: t + delayMs, noted: false });
     schedule();
   }
@@ -429,16 +365,17 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
       if (note) void send(note);
     },
     /**
-     * Every change of an approval (the broker's onChange). A new one links to its dialog (again
-     * for a release: linking is idempotent per approval). Only a decision in the town is proof:
-     * an expired or released approval went back to the terminal, where the agent still waits,
-     * and a resolved one is the broker's guess by tool name, from results observe() has judged.
+     * Every change of an approval (the broker's onChange). A new one links to its own dialog, by
+     * its call key (again for a release: linking is idempotent per approval). Only a decision in
+     * the town proves anything here: an expired or released approval went back to the terminal,
+     * where the agent still waits, and a resolved one followed the same rules as this notifier,
+     * on an event it has already seen.
      * @param {import('./approvals.mjs').Approval} approval
      */
     approvalChanged(approval) {
       if (!url || disposed) return;
       if (approval.status === 'pending') {
-        dialogs.link({ sessionId: approval.sessionId, agentId: approval.agentId, tools: [approval.toolName].filter(Boolean), input: null }, approval.id);
+        dialogs.link({ sessionId: approval.sessionId, agentId: approval.agentId, tools: [approval.toolName].filter(Boolean), input: approval.callKey ?? null }, approval.id);
         return;
       }
       if (approval.status !== 'allowed' && approval.status !== 'denied') return;

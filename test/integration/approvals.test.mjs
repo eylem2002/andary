@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { after, before, describe, it } from 'node:test';
 import { decisionOutput } from '../../server/approvals.mjs';
 import { HOOK_SOURCE } from '../../server/config.mjs';
+import { inputKey } from '../../public/js/core/dialogs.js';
 import { closeBrowser, connectBrowser, hookPayload, postHook, startTown, waitForMessage } from './helpers.mjs';
 
 /** @type {Awaited<ReturnType<typeof startTown>>} */
@@ -172,14 +173,47 @@ describe('terminal resolution', () => {
     const browser = await connectBrowser(town);
     browser.send(JSON.stringify({ t: 'settings', settings: { remoteApprovals: false } }));
     await waitForMessage(browser, (m) => m?.t === 'settings' && m.settings.remoteApprovals === false);
-    const payload = permissionRequest({ tool_name: 'Write', tool_input: { file_path: 'a.txt', content: 'x' } });
+    const input = { file_path: 'a.txt', content: 'x' };
+    const payload = permissionRequest({ tool_name: 'Write', tool_input: input });
     await town.sendHook(payload);
-    await approvalFor(browser, payload.session_id, (a) => a.status === 'pending' && !a.held);
-    await town.sendHook(hookPayload('PostToolUse', { session_id: payload.session_id, tool_name: 'Read', tool_use_id: 't0' }));
-    await town.sendHook(hookPayload('PostToolUse', { session_id: payload.session_id, tool_name: 'Write', tool_use_id: 't1' }));
+    const pending = await approvalFor(browser, payload.session_id, (a) => a.status === 'pending' && !a.held);
+    assert.equal(pending.a.callKey, inputKey(input), 'it carries its call key');
+    await town.sendHook(hookPayload('PostToolUse', { session_id: payload.session_id, tool_name: 'Read', tool_input: { file_path: 'a.txt' }, tool_use_id: 't0' }));
+    await town.sendHook(hookPayload('PostToolUse', { session_id: payload.session_id, tool_name: 'Write', tool_input: input, tool_use_id: 't1' }));
     const resolved = await approvalFor(browser, payload.session_id, (a) => a.status !== 'pending');
-    assert.deepEqual([resolved.a.status, resolved.a.decidedBy], ['resolved', 'terminal']);
+    assert.deepEqual([resolved.a.status, resolved.a.decidedBy, resolved.a.proof], ['resolved', 'terminal', 'ran']);
     browser.send(JSON.stringify({ t: 'settings', settings: { remoteApprovals: true } }));
+    await closeBrowser(browser);
+  });
+
+  it('resolves parallel calls of one tool by their own input, whatever order they finish in', async () => {
+    const browser = await connectBrowser(town);
+    browser.send(JSON.stringify({ t: 'settings', settings: { remoteApprovals: false } }));
+    await waitForMessage(browser, (m) => m?.t === 'settings' && m.settings.remoteApprovals === false);
+    const first = permissionRequest({ tool_input: { command: 'cat ../a' } });
+    const second = { ...first, tool_input: { command: 'cat ../b' } };
+    await town.sendHook(first);
+    await town.sendHook(second);
+    await town.sendHook(hookPayload('PostToolUse', { session_id: first.session_id, tool_name: 'Bash', tool_input: second.tool_input, tool_use_id: 'tb' }));
+    const resolved = await approvalFor(browser, first.session_id, (a) => a.status === 'resolved');
+    assert.deepEqual(resolved.a.toolInput, { command: 'cat ../b' });
+    const reload = await connectBrowser(town);
+    const hello = await waitForMessage(reload, (m) => m?.t === 'hello');
+    const theirs = hello.approvals.filter((/** @type {any} */ a) => a.sessionId === first.session_id);
+    assert.deepEqual(theirs.map((/** @type {any} */ a) => [a.toolInput.command, a.status]), [['cat ../a', 'pending'], ['cat ../b', 'resolved']]);
+    browser.send(JSON.stringify({ t: 'settings', settings: { remoteApprovals: true } }));
+    await Promise.all([closeBrowser(browser), closeBrowser(reload)]);
+  });
+
+  it('settles a request answered "No" once you type your next prompt, so a reload does not bring it back', async () => {
+    // Nobody watches the town: the terminal asks. "No" there sends no event; the prompt does.
+    const payload = permissionRequest({ tool_input: { command: 'npm publish' } });
+    assert.deepEqual(await town.sendHook(payload), { code: 0, stdout: '', stderr: '' });
+    await town.sendHook(hookPayload('UserPromptSubmit', { session_id: payload.session_id, prompt: 'Do not publish yet' }));
+    const browser = await connectBrowser(town);
+    const hello = await waitForMessage(browser, (m) => m?.t === 'hello');
+    const approval = hello.approvals.find((/** @type {any} */ a) => a.sessionId === payload.session_id);
+    assert.deepEqual([approval.status, approval.decidedBy, approval.proof], ['resolved', 'terminal', 'stopped']);
     await closeBrowser(browser);
   });
 

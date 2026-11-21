@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { POLICIES, ingestHook, ingestTeam } from '../../../server/ingest.mjs';
+import { inputKey } from '../../../public/js/core/dialogs.js';
 
 /** A town context that records which observers saw what. */
 function fakeContext() {
@@ -52,6 +53,41 @@ describe('ingest', () => {
     assert.deepEqual(envelopes.map((e) => [e.id, e.event.tool_name, e.event.andary_source]), [[1, 'Write', 'codex'], [2, 'Write', 'codex']]);
     assert.equal(seen.usage.length, 0);
     assert.equal(seen.broker.length, 2);
+  });
+
+  it('stamps every tool hook with its call key, from the input as it arrived; one that came along is replaced', () => {
+    const { ctx, seen } = fakeContext();
+    const input = { command: `echo ${'x'.repeat(3000)}` };
+    const [envelope] = ingestHook(ctx, { ts: 1, source: 'claude', event: { hook_event_name: 'PostToolUse', session_id: 's', tool_name: 'Bash', tool_input: input, andary_key: 'forged' } });
+    const key = inputKey(input);
+    assert.equal(seen.notify[0].andary_key, key, 'the notifier reads it');
+    assert.equal(seen.broker[0].andary_key, key, 'the broker reads it');
+    assert.equal(envelope.event.andary_key, key, 'the sanitizer keeps it for the browsers');
+    assert.notEqual(inputKey(envelope.event.tool_input), key, 'the cut input would not give it back');
+    for (const hook of ['PermissionRequest', 'PreToolUse', 'PostToolUseFailure', 'PermissionDenied']) {
+      const [stamped] = ingestHook(ctx, { ts: 2, source: 'claude', event: { hook_event_name: hook, session_id: 's', tool_name: 'Bash', tool_input: input } });
+      assert.equal(stamped.event.andary_key, key, hook);
+    }
+    const [stop] = ingestHook(ctx, { ts: 3, source: 'claude', event: { hook_event_name: 'Stop', session_id: 's', andary_key: 'forged' } });
+    assert.equal('andary_key' in stop.event, false, 'only a tool hook has one');
+  });
+
+  it("Codex: a renamed call has no key, and a long list command's request and result share one", () => {
+    const { ctx } = fakeContext();
+    const command = ['bash', '-lc', `echo ${'y'.repeat(2500)}`];
+    const [asked] = ingestHook(ctx, { ts: 1, source: 'codex', event: { hook_event_name: 'PermissionRequest', session_id: 't', tool_name: 'Bash', tool_input: { command } } });
+    const [ran] = ingestHook(ctx, { ts: 2, source: 'codex', event: { hook_event_name: 'PostToolUse', session_id: 't', tool_name: 'Bash', tool_use_id: 'c', tool_input: { command }, tool_response: { exit_code: 0 } } });
+    assert.equal(ran.event.andary_key, asked.event.andary_key);
+    assert.notEqual(inputKey(ran.event.tool_input), inputKey(asked.event.tool_input), 'sanitized, a list and the line the adapter joined are cut differently');
+    const patch = '*** Begin Patch\n*** Add File: a.ts\n+a\n*** End Patch';
+    const [write] = ingestHook(ctx, { ts: 3, source: 'codex', event: { hook_event_name: 'PostToolUse', session_id: 't', cwd: '/w', tool_name: 'apply_patch', tool_use_id: 'p', tool_input: { command: patch } } });
+    assert.deepEqual([write.event.tool_name, write.event.andary_key], ['Write', null], 'its input was rewritten: it goes by name');
+  });
+
+  it("a teammate's tool hook gets the host's call key, never its own", () => {
+    const { ctx } = fakeContext();
+    const [envelope] = ingestTeam(ctx, 'Sam', [{ ts: 1, event: { hook_event_name: 'PostToolUse', session_id: 'x', tool_name: 'Bash', tool_input: { command: 'ls' }, andary_key: 'forged' } }], 1);
+    assert.equal(envelope.event.andary_key, inputKey({ command: 'ls' }));
   });
 
   it("a teammate's batch: named, sessions prefixed, dated within the last hour, and kept to themselves", () => {

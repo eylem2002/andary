@@ -103,6 +103,7 @@ references may cross.
 | which agents can connect, and their hooks files | `server/clients.mjs`, `server/installer.mjs` |
 | how another agent's events are translated | `server/adapters/` |
 | what happens to an event on the server | `server/ingest.mjs` |
+| when an agent waits for you, and what each hook proves | `public/js/core/dialogs.js` (`afterHook`), `server/hook-steps.mjs` |
 | who may connect, and what they may do | `server/auth.mjs`, `server/browsers.mjs`, `server/security.mjs` |
 | the team town | `server/team.mjs`, `ingestTeam` in `server/ingest.mjs` |
 | how a hook becomes town events | `public/js/core/events.js`, `summaries.js` |
