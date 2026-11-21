@@ -787,6 +787,11 @@ export function createStore(options = {}) {
       sortApprovals(list);
       const ts = now();
       const ids = previous?.status === next.status ? [] : approvalChanged(m, next, ts);
+      // Handed back to the terminal without a new status (a release): its dialog is no longer held.
+      if (previous?.status === next.status && previous.held !== next.held) {
+        dialogsAfterApproval(m.dialogs, next, '');
+        m.state.dialogs = m.dialogs.list();
+      }
       const at = { ts, sessionId: str(next.sessionId), agentKey: agentKeyOf(str(next.sessionId), normalizeAgentId(next.agentId)) };
       const unlocked = unlock(ids, at);
       emit({ type: 'approval', approval: next });

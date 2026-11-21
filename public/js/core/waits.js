@@ -1,14 +1,13 @@
-// What an agent waits for you on besides its open dialogs (core/dialogs.js, the requests,
-// questions and plans): a finished turn nobody answered, a turn that stopped on an error, or a
-// question a session's notice asks (an MCP server's form, "needs your input"). The store asks after
-// every event it applies and keeps the result on AgentState.wait; core/attention.js turns waits
-// and dialogs into the "needs you" list. Pure.
+// What an agent waits for you on besides its open dialogs (core/dialogs.js: the requests,
+// questions, plans and MCP forms): a finished turn nobody answered, or a turn that stopped on an
+// error. The store asks after every event it applies and keeps the result on AgentState.wait;
+// core/attention.js turns waits and dialogs into the "needs you" list. Pure.
 //
 // A wait starts when the agent stops for you and ends when it moves again (a prompt, a tool call,
 // a new session, a helper finishing).
 import { clip, oneLine, own, str } from './text.js';
 
-/** @typedef {'question'|'finished'|'stopped'} WaitKind */
+/** @typedef {'finished'|'stopped'} WaitKind */
 
 /**
  * @typedef {object} Wait
@@ -19,8 +18,6 @@ import { clip, oneLine, own, str } from './text.js';
  * @property {string|null} cause   stopped turns: the hook's error code (rate_limit, overloaded…)
  */
 
-/** Notifications that mean the session asks you something. */
-const QUESTION_NOTICES = new Set(['agent_needs_input', 'elicitation_dialog', 'elicitation_url_dialog']);
 /** How a stopped turn reads, by the StopFailure hook's error code (also the activity log's words). */
 const STOP_LABELS = Object.freeze({
   rate_limit: 'Rate limited',
@@ -53,8 +50,6 @@ function wait(kind, since, text, cause = null) {
 
 /** Events after which the agent no longer waits for you, whatever it waited for. */
 const MOVES_ON = new Set(['prompt', 'session.start', 'subagent.stop', 'tool.start']);
-/** Events that answer a session's question (the tool that asked reported back). */
-const ANSWERS = new Set(['tool.end', 'tool.fail', 'permission.denied']);
 
 /**
  * @typedef {(agent: { role: string }, current: Wait|null, ts: number, data: Record<string, any>) => Wait|null|undefined} WaitRule
@@ -81,7 +76,6 @@ const RULES = Object.freeze({
 export function waitAfter(agent, event) {
   const current = agent.wait ?? null;
   if (MOVES_ON.has(event.kind)) return null;
-  if (ANSWERS.has(event.kind)) return current?.kind === 'question' ? null : undefined;
   return own(RULES, event.kind)?.(agent, current, event.ts, event.data);
 }
 
@@ -93,9 +87,7 @@ export function waitAfter(agent, event) {
  * @returns {Wait|null|undefined}
  */
 function afterNotice(agent, current, ts, data) {
-  const type = data.notificationType;
-  if (QUESTION_NOTICES.has(type)) return wait('question', ts, str(data.message) || 'Needs your input');
-  if (type !== 'idle_prompt') return undefined;
+  if (data.notificationType !== 'idle_prompt') return undefined;
   // Claude Code says nobody answered for a while: a finished turn now counts as waiting for you.
   if (current?.kind === 'finished') return current.idleAt === null ? { ...current, idleAt: ts } : undefined;
   if (current || agent.role !== 'lead') return undefined;

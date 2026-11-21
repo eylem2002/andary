@@ -4,7 +4,7 @@
 //
 //   blocked  an agent cannot go on without you: an open dialog (core/dialogs.js) — a permission
 //            request (answered in the town while it holds it, else in the terminal), a question,
-//            a plan to approve — or a session's own question
+//            a plan to approve, an MCP server's form
 //   stopped  a turn ended in an error; crews stopped by one rate limit together are one item
 //   ready    a lead finished its turn and nobody has answered: counted once Claude Code says so
 //            (idle_prompt, a minute later; Codex has no such signal: a minute too), for 30 minutes
@@ -104,7 +104,8 @@ function dialogItem(dialog, approval, now) {
     approvalId: held && approval ? approval.id : null,
     since: dialog.at,
     countedSince: dialog.at,
-    text: dialogText(kind, dialog.text),
+    // An MCP server's form (a question with no tool) says what it wants in its own words.
+    text: dialog.kind === 'question' && !dialog.tools.length ? dialog.text || 'Needs your input' : dialogText(kind, dialog.text),
     counted: true,
     // Held in the town: answer it there. Otherwise, past a few minutes it may be stale.
     dismissable: !held && now - dialog.at >= STALE_DIALOG_MS,
@@ -156,8 +157,6 @@ function waitItem(agent, session, now) {
     ...extra,
   });
   switch (wait.kind) {
-    case 'question':
-      return item('question', 'blocked');
     case 'stopped':
       return item('stopped', 'stopped', { dismissable: true });
     case 'finished':

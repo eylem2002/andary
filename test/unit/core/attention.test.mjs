@@ -146,11 +146,13 @@ describe('what each agent waits for (AgentState.wait)', () => {
     assert.equal(t.lead().wait?.kind, 'stopped');
   });
 
-  test("a session's own question (an MCP form) waits until a tool reports back", () => {
+  test("an MCP server's form waits until the lead moves on, not on a tool result (it names no tool)", () => {
     const t = town();
     t.send('Notification', { notification_type: 'elicitation_dialog', message: 'The GitHub server needs input' }, T0);
     assert.deepEqual(t.items().map((i) => [i.kind, i.text]), [['question', 'The GitHub server needs input']]);
-    t.send('PostToolUse', { tool_name: 'mcp__github__create_issue', tool_input: {}, tool_response: {} }, T0 + 1);
+    t.send('PostToolUse', { tool_name: 'Read', tool_input: { file_path: 'x' }, tool_response: {} }, T0 + 1);
+    assert.equal(t.items().length, 1, 'a parallel call finishing proves nothing');
+    t.send('PreToolUse', { tool_name: 'Read', tool_input: { file_path: 'y' }, tool_use_id: 'r2' }, T0 + 2);
     assert.deepEqual(t.items(), []);
   });
 });
@@ -286,6 +288,20 @@ describe('open dialogs: the cases a second review found', () => {
     h.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm publish' } }, T0);
     h.store.setApproval(approvalOf());
     assert.equal(h.items(T0 + 60 * 60_000)[0].dismissable, false, 'answer it in the town');
+  });
+
+  test('your prompt answers what shows in your terminal, never what the town holds', () => {
+    const t = town();
+    const helper = { agent: { id: 'agent-h1', type: 'general-purpose' } };
+    t.send('SubagentStart', { agent_id: 'agent-h1', agent_type: 'general-purpose' }, T0, helper);
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'npm publish' } }, T0 + 1, helper);
+    t.store.setApproval(approvalOf({ agentId: 'agent-h1', toolInput: { command: 'npm publish' } }));
+    t.send('UserPromptSubmit', { prompt: 'and update the changelog' }, T0 + 2);
+    assert.deepEqual(t.items().map((i) => i.kind), ['approval'], 'held in the town: typing did not answer it');
+    t.store.setApproval(approvalOf({ agentId: 'agent-h1', held: false, toolInput: { command: 'npm publish' } }));
+    assert.deepEqual(t.items().map((i) => i.kind), ['terminal'], 'released: now it shows in the terminal');
+    t.send('UserPromptSubmit', { prompt: 'never mind' }, T0 + 3);
+    assert.deepEqual(t.items(), [], 'you typed, so nothing showed there');
   });
 
   test("a teammate's crew is theirs: its requests are not kept", () => {

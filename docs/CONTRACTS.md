@@ -694,12 +694,13 @@ AgentState { key, sessionId, agentId: string|null, name, role: 'lead'|'subagent'
              changes: FileChange[] /* finished Edit/MultiEdit/Write/NotebookEdit, ≤ 20, newest last */,
              recent: LogEntry[] /* ≤ 30 */, errors: number, lastMessage?,
              wait: Wait|null /* what it waits for you on, below */ }
-Wait { kind: 'question'|'finished'|'stopped', since /* hook time */, text /* one line */,
+Wait { kind: 'finished'|'stopped', since /* hook time */, text /* one line */,
        idleAt: number|null /* finished: when idle_prompt said nobody answered */,
        cause: string|null /* stopped: StopFailure's error code */ }
 Dialog { id, sessionId, agentId: string|null, kind: 'permission'|'question'|'plan'|'unknown',
          tools: string[], input: string|null /* inputKey() of the call */, at /* hook time */,
-         approvalId: string|null, text /* what it is about */ }  // StoreState.dialogs: open ones
+         approvalId: string|null, held: boolean /* the town holds its request now */,
+         requested: boolean, text /* what it is about */ }  // StoreState.dialogs: open ones
 LogEntry { id, ts, sessionId, agentKey, agentName, color, kind, icon, text,
            level: 'info'|'success'|'warn'|'error' }
 Achievement { id, title, description, icon, unlockedAt }
@@ -709,20 +710,24 @@ FileChange { id, path /* relative to the crew's folder */, tool, ts, whole: bool
 
 **Needs you** (`core/dialogs.js`, `core/waits.js`, `core/attention.js`, all pure; docs/design/
 agent-health.md §3). `StoreState.dialogs` lists what agents asked you and had no answer to, in the
-model the phone notes share (§4.10, `core/dialogs.js`): a dialog per call, opened by a
-`PermissionRequest`, an `AskUserQuestion` or `ExitPlanMode` call (the permission request Claude
-Code sends for those joins it) or a session's `permission_prompt` notice when nothing of that
-session is known to be open; closed only by that very call reporting back (same tool and input;
-questions and plans by name), the town deciding its request, your prompt (the lead's dialogs), the
-agent's turn ending or the session ending. A request sent back to the terminal, a new request and
-the broker's guesses are no proof. `core/store-dialogs.js` feeds it through the model's one table
-of what each hook does (`afterHook`, which the server's notifier and broker follow too), with the
-server's `callKey` when it sent one; an approval links to its dialog by its `callKey`, an approval
-with no dialog (older than the history kept) opens one, and `allowed`, `denied` and `resolved`
-close it (the broker resolves by the same table). A teammate's crew keeps no dialogs.
-`AgentState.wait` is the rest: a lead's finished turn, a failed turn, or a session's question
-(`agent_needs_input`, elicitation). A prompt, a tool call, a new session, a helper finishing or a
-manual `/compact` ends it; `TeammateIdle` ends only a teammate's own.
+model the phone notes and the broker share (§4.10, `core/dialogs.js`, whose `afterHook` table
+says what each hook does): a dialog per call, opened by a `PermissionRequest`, an
+`AskUserQuestion` or `ExitPlanMode` call (the permission request Claude Code sends for one joins
+it; asking again closes the older one), an MCP server's form (`elicitation_dialog`,
+`elicitation_url_dialog`, `agent_needs_input`), or a session's `permission_prompt` notice when
+nothing of that session is known to be open; closed only by that very call reporting back (same
+tool and input; questions and plans by name), the town deciding its request, your prompt or a
+manual `/compact` (every dialog of the session the town is not holding: nothing showed in your
+terminal if you could type), the agent's turn ending (also in an error, or a teammate going idle)
+or the session ending; a notice or a form closes when the lead starts a new call. A request sent
+back to the terminal, a new request and guesses are no proof. `core/store-dialogs.js` feeds it
+from events (with the server's `callKey` when it sent one) and approval changes: an approval
+links to its dialog by its `callKey` and says whether the town holds it; one with no dialog (older
+than the history kept) opens one; `allowed`, `denied` and `resolved` close it (the broker resolves
+by the same table). A teammate's crew keeps no dialogs.
+`AgentState.wait` is the rest: a lead's finished turn or a failed turn. A prompt, a tool call, a
+new session, a helper finishing or a manual `/compact` ends it; `TeammateIdle` ends only a
+teammate's own.
 `attentionItems(state, now, { dismissed? }) → AttentionItem[]`, most urgent first:
 
 ```js

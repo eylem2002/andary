@@ -69,10 +69,12 @@ export function dialogsAfterEvent(dialogs, e, agentId) {
 }
 
 /**
- * Updates the dialogs after an approval change. A request links to its dialog (one it has no
- * dialog for, such as a request older than the history kept, opens one); the town deciding it,
- * or the broker proving it answered in the terminal (by the same table, server/approvals.mjs),
- * closes it. A request sent back to the terminal (expired, released) keeps it: the agent waits.
+ * Updates the dialogs after an approval changes (its status, or whether the town holds it). A
+ * request links to its dialog and says whether the town holds it (one with no dialog, such as a
+ * request older than the history kept, opens one); a request sent back to the terminal (expired,
+ * released) keeps its dialog, no longer held, so your next prompt answers it; the town deciding
+ * it, or the broker proving it answered in the terminal (by the same table, server/approvals.mjs),
+ * closes it.
  * @param {Dialogs} dialogs
  * @param {import('./store.js').Approval} approval
  * @param {string} about  what the request is about (its summary)
@@ -85,12 +87,13 @@ export function dialogsAfterApproval(dialogs, approval, about) {
     tools,
     input: str(approval.callKey) || inputKey(isObject(approval.toolInput) ? approval.toolInput : {}),
   };
-  const linked = dialogs.link(call, approval.id);
+  const held = approval.status === 'pending' && approval.held === true;
+  const linked = dialogs.link(call, approval.id, held);
   if (!linked && approval.status === 'pending') {
     const kind = own(INTERACTIVE_TOOLS, tools[0] ?? '');
     const text = kind === 'question' ? questionOf(approval.toolInput) : kind === 'plan' ? '' : about;
     dialogs.ask(call, Number(approval.createdAt) || 0, text);
-    dialogs.link(call, approval.id);
+    dialogs.link(call, approval.id, held);
   }
   if (approval.status === 'allowed' || approval.status === 'denied' || approval.status === 'resolved') dialogs.decided(approval.id);
 }
