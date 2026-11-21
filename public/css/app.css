@@ -981,6 +981,15 @@ body {
   color: var(--ink-3);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* A lead's context in use, on its own line under the time: quiet, and never in a waiting colour. */
+.hud-station__context {
+  display: block;
+  color: var(--ink-3);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .hud-station__doing {
@@ -1941,6 +1950,13 @@ body {
   color: var(--ink);
   font-size: 13px;
   overflow-wrap: anywhere;
+}
+
+/* Usage: the context in use, then the totals, each its own line. */
+.hud-inspector__lines {
+  display: grid;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
 }
 
 .hud-inspector__message {

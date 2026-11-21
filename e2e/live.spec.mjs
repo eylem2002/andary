@@ -1,6 +1,8 @@
 // Live mode end to end: a real server, the real hook forwarder, and the HUD in a browser
 // (CONTRACTS §8.1 test ids).
 import { spawn } from 'node:child_process';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { HOOK_SOURCE } from '../server/config.mjs';
 import { startTown } from './helpers/town.mjs';
@@ -113,6 +115,36 @@ test('hook events show up as a crew, agent rows and log entries', async ({ page 
   await expect(page.locator('[data-testid="agent-row"][data-agent-key="e2e-session:main"]')).toBeAttached();
   await expect(page.locator('[data-testid="agent-row"]').first()).toContainText('Foreman');
   expect(await page.getByTestId('log-entry').count()).toBeGreaterThan(0);
+});
+
+test('the context in use: the lead\'s row and the inspector read it from the transcript, a compaction clears it', async ({ page }) => {
+  await signIn(page);
+  // The town's own throw-away Claude Code folder (helpers/town.mjs), where transcripts are read.
+  const project = join(dirname(town.home), 'claude', 'projects', '-work-e2e-app');
+  mkdirSync(project, { recursive: true });
+  const transcript = join(project, 'e2e-session.jsonl');
+  const message = (/** @type {string} */ id, /** @type {Record<string, number>} */ usage, /** @type {number} */ ms) =>
+    `${JSON.stringify({ type: 'assistant', isSidechain: false, sessionId: 'e2e-session', timestamp: new Date(ms).toISOString(), requestId: `req_${id}`, message: { id, role: 'assistant', model: 'claude-opus-5-5', usage } })}\n`;
+  writeFileSync(transcript, message('msg_1', { input_tokens: 4, cache_creation_input_tokens: 1520, cache_read_input_tokens: 180_816, output_tokens: 312 }, Date.now() - 121_000));
+  const send = async (/** @type {string} */ name, /** @type {Record<string, unknown>} */ extra = {}) => expect(await town.sendHook(hook(name, { transcript_path: transcript, ...extra }))).toMatchObject({ code: 0 });
+  await send('SessionStart', { source: 'startup', model: 'claude-opus-5-5' });
+  await send('PostToolUse', { tool_name: 'Bash', tool_use_id: 'tu-1', tool_input: { command: 'npm test' }, tool_response: {} });
+  const lead = page.locator('[data-testid="agent-row"][data-agent-key="e2e-session:main"]');
+  // On the lead's row, under its time: the crew's name keeps its room.
+  await expect(lead.getByTestId('crew-context')).toHaveText('182k in context');
+  await lead.click();
+  const exact = page.getByTestId('agent-inspector').getByTestId('agent-context');
+  await expect(exact).toHaveText('182,340 tokens in context, as of 2m ago.');
+  // A compaction (PreCompact alone proves nothing): the old count no longer holds until the next message.
+  await send('PreCompact', { trigger: 'manual', custom_instructions: '' });
+  await send('PostCompact', { trigger: 'manual', compact_summary: 'Fixed the flaky test.' });
+  await expect(lead.getByTestId('crew-context')).toHaveText('context compacted');
+  // "just now" for ten seconds: a slow machine may already read "10s ago".
+  await expect(exact).toHaveText(/^Context compacted (just now|\d0s ago); the new count comes with the next message\.$/);
+  appendFileSync(transcript, message('msg_2', { input_tokens: 9, cache_creation_input_tokens: 23_000, cache_read_input_tokens: 8000, output_tokens: 40 }, Date.now()));
+  await send('Stop', { last_assistant_message: 'Done.', stop_hook_active: false });
+  await expect(lead.getByTestId('crew-context')).toHaveText('31k in context');
+  await expect(exact).toHaveText(/^31,009 tokens in context, as of (just now|\d0s ago)\.$/);
 });
 
 for (const decision of /** @type {const} */ (['allow', 'deny'])) {

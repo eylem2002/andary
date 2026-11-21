@@ -1,11 +1,11 @@
 // The agent inspector: everything known about the selected agent — role, crew, status, what it is
-// doing (or waiting for you on, or why it seems stuck, and since when), its brief, which tools it
-// used how often, recent files and activity, its last message.
+// doing (or waiting for you on, or why it seems stuck, and since when), its brief, its context in
+// use and what it cost, which tools it used how often, recent files and activity, its last message.
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { doingText, formatAgo, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
 import { changeSummary } from './changes.js';
-import { usageSentence } from './usage.js';
+import { contextSentence, hasCounted, liveContext, usageSentence } from './usage.js';
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 import { waitedText } from './needs-you.js';
 
@@ -45,11 +45,11 @@ export function createInspector(ctx) {
   const changes = h('ul', { class: 'hud-changes', 'data-testid': 'agent-changes' });
   const recent = h('ol', { class: 'hud-recent' });
   const message = h('p', { class: 'hud-inspector__message' });
-  const usage = h('p', { class: 'hud-inspector__usage', 'data-testid': 'agent-usage' });
+  const usage = createUsageLines();
   const sections = {
     now: section('Now', h('div', {}, now, need.el)),
     brief: section('Brief', brief),
-    usage: section('Usage', usage),
+    usage: section('Usage', usage.el),
     tools: section('Tools used', tools),
     changes: section('Changes', changes),
     files: section('Recent files', files),
@@ -117,9 +117,7 @@ export function createInspector(ctx) {
     const asking = state.approvals.find((approval) => approval.status === 'pending' && approvalAgentKey(approval) === agent.key);
     need.update(ctx.needsYou.items(state).find((item) => item.agentKeys.includes(agent.key)) ?? null);
     renderSections(agent, session?.cwd, asking);
-    const spent = state.usage?.[agent.key];
-    setText(usage, spent ? usageSentence(spent) : '');
-    setHidden(sections.usage, !spent);
+    setHidden(sections.usage, !usage.update(state, agent.key, Date.now()));
     setAttr(follow, 'aria-pressed', String(ctx.view.follow));
     tick(Date.now());
   }
@@ -159,6 +157,7 @@ export function createInspector(ctx) {
     const end = agent.status === 'done' ? agent.lastActivity : nowMs;
     setText(since, `Started ${formatAgo(agent.startedAt, nowMs)}, on the job for ${formatDuration(end - agent.startedAt)}`);
     need.tick(nowMs);
+    usage.tick(nowMs);
     for (const item of recent.children) {
       const time = item.querySelector('time');
       if (time) setText(time, formatAgo(Number(/** @type {HTMLElement} */ (item).dataset.ts), nowMs, { short: true }));
@@ -218,6 +217,40 @@ function createNeedLine(ctx, focusAfter) {
       if (!item) return;
       const { long } = waitedText(item, now);
       setText(waited, long.charAt(0).toUpperCase() + long.slice(1));
+    },
+  };
+}
+
+/**
+ * The Usage section's lines: the context in use while it can still be true, or that it was
+ * compacted, with how long ago (that ages, so it is redrawn every second), then what the agent
+ * has used and cost so far.
+ */
+function createUsageLines() {
+  const context = h('p', { class: 'hud-inspector__context', 'data-testid': 'agent-context', hidden: true });
+  const totals = h('p', { class: 'hud-inspector__usage', 'data-testid': 'agent-usage' });
+  /** @type {import('./usage.js').ContextView|null} */
+  let reading = null;
+  /** @param {number} now */
+  const tick = (now) => {
+    if (reading) setText(context, contextSentence(reading, now));
+  };
+  return {
+    el: h('div', { class: 'hud-inspector__lines' }, context, totals),
+    tick,
+    /**
+     * @param {StoreState} state @param {string} agentKey @param {number} now
+     * @returns {boolean} whether there is anything to show
+     */
+    update(state, agentKey, now) {
+      const spent = state.usage?.[agentKey];
+      const sentence = spent && hasCounted(spent) ? usageSentence(spent) : '';
+      setText(totals, sentence);
+      setHidden(totals, !sentence);
+      reading = liveContext(state, agentKey);
+      setHidden(context, !reading);
+      tick(now);
+      return Boolean(sentence || reading);
     },
   };
 }
