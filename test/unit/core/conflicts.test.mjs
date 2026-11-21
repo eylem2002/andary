@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { CONFLICT_MS, MAX_AGENTS_PER_PATH, MAX_HAZARDS, MAX_PATHS, createConflicts, hazardText } from '../../../public/js/core/conflicts.js';
-import { gitHazardOf } from '../../../public/js/core/git-commands.js';
+import { gitAddsOf, gitHazardOf } from '../../../public/js/core/git-commands.js';
 import { createStore } from '../../../public/js/core/store.js';
 import { CWD, envelope, hook } from './helpers.mjs';
 
@@ -21,19 +21,26 @@ function rules() {
   const actor = (agent, at, helper = {}) => ({ agent, session: agent.split(':')[0], at, lead: helper.lead ?? null, since: helper.since ?? 0 });
   return {
     c,
-    /** @param {string} agent @param {string} tool @param {string} path @param {number} at @param {string} [folder] @param {{ lead?: string|null, since?: number }} [helper] */
-    change: (agent, tool, path, at, folder = CWD, helper = {}) => c.changed({ ...actor(agent, at, helper), tool, path, folder }),
+    /**
+     * @param {string} agent @param {string} tool @param {string} path @param {number} at @param {string} [folder]
+     * @param {{ lead?: string|null, since?: number, created?: boolean }} [more]  created: a Write that made the file
+     */
+    change: (agent, tool, path, at, folder = CWD, more = {}) => c.changed({ ...actor(agent, at, more), tool, path, folder, created: more.created }),
     /**
      * @param {string} agent @param {string} command  a command line, read by git-commands.js
-     * @param {number} at @param {string} [folder] @param {{ lead?: string|null, since?: number, sessionFolder?: string }} [more]
+     * @param {number} at @param {string} [folder]
+     * @param {{ lead?: string|null, since?: number, sessionFolder?: string, root?: string, toolUseId?: string }} [more]
      */
     run(agent, command, at, folder = CWD, more = {}) {
-      const git = gitHazardOf(command, { folder, sessionFolder: more.sessionFolder ?? CWD });
+      const git = gitHazardOf(command, { folder, sessionFolder: more.sessionFolder ?? CWD, root: more.root }, { staged: c.staged(agent), known: (path) => c.knows(path) });
       assert.ok(git, `a git hazard: ${command}`);
-      return c.command({ ...actor(agent, at, more), ...git });
+      return c.command({ ...actor(agent, at, more), ...git, toolUseId: more.toolUseId ?? null, callKey: null });
     },
   };
 }
+
+/** A commit's scope, as git-commands.js reports one. @param {string[]} paths @param {Partial<import('../../../public/js/core/git-commands.js').GitCommit>} [more] */
+const commit = (paths, more = {}) => ({ folder: CWD, root: CWD, exact: false, tracked: false, clears: true, paths, ...more });
 
 describe('same file', () => {
   test("an edit over another agent's change is a note; a write over it an alert that replaces the note", () => {
@@ -197,9 +204,9 @@ describe('git hazards', () => {
     const r = rules();
     r.change(A, 'Edit', `${CWD}/src/a.ts`, T0);
     r.change(A, 'Edit', `${CWD}/src/b.ts`, T0 + 1);
-    r.c.committed({ agent: A, folder: CWD, root: CWD, paths: [`${CWD}/src/a.ts`] });
+    r.c.committed({ agent: A, ...commit([`${CWD}/src/a.ts`]) });
     assert.equal(r.run(B, 'git commit -am wip', T0 + 600_000)[0]?.others[0].files, 1, 'b.ts is still uncommitted');
-    r.c.committed({ agent: A, folder: CWD, root: CWD, paths: [] });
+    r.c.committed({ agent: A, ...commit([]) });
     assert.deepEqual(r.run(C, 'git commit -am wip', T0 + 600_001), []);
     assert.deepEqual(r.change(C, 'Write', `${CWD}/src/b.ts`, T0 + 600_002), [], 'nor a write over it');
   });
@@ -221,6 +228,157 @@ describe('git hazards', () => {
     assert.deepEqual(r.c.list().map((h) => h.others.map((o) => o.key)), [[C]]);
     r.c.ended('crew-c');
     assert.deepEqual(r.c.list(), []);
+  });
+
+  test('git clean takes only files agents made; a stash, a checkout and commit -a only tracked ones', () => {
+    const r = rules();
+    r.change(A, 'Edit', `${CWD}/src/a.ts`, T0);
+    r.change(A, 'Write', `${CWD}/src/new.ts`, T0 + 1, CWD, { created: true });
+    r.change(A, 'Edit', `${CWD}/src/new.ts`, T0 + 2);
+    assert.deepEqual(r.run(B, 'git clean -fd', T0 + 10).map((h) => h.others[0].files), [1], 'new.ts, still new after an edit');
+    assert.deepEqual(r.run(B, 'git stash', T0 + 11).map((h) => h.others[0].files), [1], 'a.ts: a stash leaves new files');
+    assert.deepEqual(r.run('crew-e:main', 'git stash -u', T0 + 12).map((h) => h.others[0].files), [2]);
+    assert.deepEqual(r.run(C, 'git commit -am wip', T0 + 13).map((h) => h.others[0].files), [1]);
+    r.c.committed({ agent: A, ...commit([], { tracked: true }) });
+    assert.deepEqual(r.run(C, 'git clean -f', T0 + 14).map((h) => h.others[0].files), [1], 'commit -a takes no new file in');
+    r.c.committed({ agent: A, ...commit([]) });
+    assert.deepEqual(r.run('crew-d:main', 'git clean -f', T0 + 15), [], 'a whole-tree add does');
+  });
+
+  test('a commit counts what the agent staged in an earlier call; its own commit takes that in', () => {
+    const r = rules();
+    const place = { folder: CWD, sessionFolder: CWD };
+    r.change(A, 'Edit', FILE, T0);
+    r.c.added(B, 'crew-b', gitAddsOf('git add -A', place));
+    const [swept] = r.run(B, 'git commit -m "$(cat <<\'EOF\'\nSave\nEOF\n)"', T0 + 1000);
+    assert.deepEqual([swept?.command, swept?.others[0].key], ['git commit after git add -A', A]);
+    r.c.added(A, 'crew-a', gitAddsOf('git add src/auth.ts', place));
+    assert.equal(r.c.staged(A).length, 1);
+    r.c.committed({ agent: A, ...commit([FILE]) });
+    assert.deepEqual(r.c.staged(A), [], 'committed: nothing staged there any more');
+    assert.deepEqual(r.run(C, 'git reset --hard', T0 + 2000), [], 'and its work is safe');
+  });
+
+  test("git checkout <path> without --: a path when an agent changed it", () => {
+    const r = rules();
+    r.change(A, 'Edit', FILE, T0);
+    assert.equal(r.c.knows(FILE), true);
+    assert.equal(r.c.knows(`${CWD}/src`), true, 'a folder holding it');
+    assert.equal(r.c.knows(`${CWD}/lib`), false);
+    assert.deepEqual(r.run(B, 'git checkout src/auth.ts', T0 + 1).map((h) => h.command), ['git checkout src/auth.ts']);
+  });
+
+  test("the top the server found on disk: a sibling repository's files are not this one's", () => {
+    const mono = '/home/dev/workspace';
+    const r = rules();
+    r.change(A, 'Edit', `${mono}/billing/src/a.ts`, T0, `${mono}/billing`);
+    assert.deepEqual(r.run(B, 'git stash', T0 + 1, `${mono}/api`, { sessionFolder: mono, root: `${mono}/api` }), [], 'api is a repository of its own');
+    assert.equal(r.run(B, 'git stash', T0 + 2, `${mono}/api`, { sessionFolder: mono }).length, 1, 'guessed: the whole workspace');
+    assert.deepEqual(r.run(C, 'git add ../billing/src && git commit -m x', T0 + 3, `${mono}/api`, { sessionFolder: mono, root: `${mono}/api` }), [], 'outside the work tree: git refuses it');
+  });
+
+  test('a refused command ends its alert, found by its call', () => {
+    const r = rules();
+    r.change(A, 'Edit', FILE, T0);
+    r.run(B, 'git stash', T0 + 1, CWD, { toolUseId: 'call-1' });
+    assert.equal(r.c.refused({ agent: B, toolUseId: 'call-2' }), false, 'another call');
+    assert.equal(r.c.refused({ agent: A, toolUseId: 'call-1' }), false, 'another agent');
+    assert.equal(r.c.refused({ agent: B, toolUseId: 'call-1' }), true);
+    assert.deepEqual(r.c.list(), []);
+    assert.deepEqual(r.change(C, 'Edit', `${CWD}/src/late.ts`, T0), [], 'a late change finds no refused command');
+  });
+
+  test(`many pathspecs over a full memory stay cheap: ${MAX_PATHS} files of ${MAX_AGENTS_PER_PATH} agents`, () => {
+    const r = rules();
+    for (let file = 0; file < MAX_PATHS; file += 1) {
+      for (let agent = 0; agent < MAX_AGENTS_PER_PATH; agent += 1) r.change(`crew-${agent}:main`, 'Edit', `${CWD}/src/dir${file % 40}/f${file}.ts`, T0 + file);
+    }
+    const specs = (/** @type {number} */ count) => Array.from({ length: count }, (_, i) => `src/dir${i % 40}/f${i}.ts`).join(' ');
+    for (const [i, line] of [`git add ${specs(60)} && git commit -m x`, `git add ${specs(200)} && git commit -m x`, `git restore ${specs(60)}`].entries()) {
+      const started = performance.now();
+      const found = r.run(`crew-x${i}:main`, line, T0 + MAX_PATHS);
+      assert.ok(performance.now() - started < 150, `${line.length} characters in ${Math.round(performance.now() - started)} ms`);
+      assert.equal(found.length, 1);
+    }
+  });
+});
+
+describe('a helper that finishes leaves its work to its lead', () => {
+  const H1 = 'crew-a:h1';
+  const H2 = 'crew-a:h2';
+
+  test("its changes stay in harm's way, as its lead's", () => {
+    const r = rules();
+    r.change(H1, 'Edit', FILE, T0, CWD, { lead: A, since: 0 });
+    r.change(H1, 'Write', `${CWD}/src/new.ts`, T0 + 1, CWD, { lead: A, since: 0, created: true });
+    r.c.finished(H1, A);
+    assert.deepEqual(r.change(B, 'Write', FILE, T0 + 2).map((h) => [h.others[0].key, h.others[0].at]), [[A, T0]], "a write over it is over the lead's");
+    assert.deepEqual(r.run(C, 'git clean -f', T0 + 3).map((h) => h.others[0].key), [A], 'the file it made is still new');
+    assert.deepEqual(r.change(A, 'Write', FILE, T0 + 4).map((h) => h.others[0].key), [B], "the lead's own write over it is silent; only B's counts");
+  });
+
+  test('a later helper of the same lead is handed it; throwing it away still counts', () => {
+    const r = rules();
+    r.change(H1, 'Edit', FILE, T0, CWD, { lead: A, since: 0 });
+    r.c.finished(H1, A);
+    assert.deepEqual(r.change(H2, 'Write', FILE, T0 + 2000, CWD, { lead: A, since: T0 + 1000 }), []);
+    assert.equal(r.run(H2, 'git checkout -- src/auth.ts', T0 + 3000, CWD, { lead: A, since: T0 + 1000 }).length, 1);
+  });
+
+  test('hazards about its work now name the lead; those it did end, and so do the ones the lead did over it', () => {
+    const r = rules();
+    r.change(H1, 'Edit', FILE, T0, CWD, { lead: A, since: 0 });
+    r.change(B, 'Write', FILE, T0 + 1);
+    r.change(H1, 'Edit', `${CWD}/b.ts`, T0 + 2, CWD, { lead: A, since: 0 });
+    r.change(A, 'Write', `${CWD}/b.ts`, T0 + 3);
+    r.change(C, 'Edit', `${CWD}/c.ts`, T0 + 4);
+    r.change(H1, 'Write', `${CWD}/c.ts`, T0 + 5, CWD, { lead: A, since: 0 });
+    r.run('crew-d:main', 'git stash', T0 + 6);
+    assert.equal(r.c.finished(H1, A), true);
+    assert.deepEqual(r.c.list().map((h) => [h.kind, h.agentKey, h.others.map((o) => [o.key, o.files])]), [
+      ['write', B, [[A, 1]]],
+      ['git', 'crew-d:main', [[A, 4], [C, 1], [B, 1]]],
+    ]);
+    assert.deepEqual(r.c.list()[1].others.find((o) => o.key === A)?.at, T0 + 5, "the lead's latest change of them");
+  });
+
+  test('what it staged waits for the lead to commit it', () => {
+    const r = rules();
+    r.c.added(H1, 'crew-a', gitAddsOf('git add src/auth.ts', { folder: CWD, sessionFolder: CWD }));
+    r.c.finished(H1, A);
+    assert.deepEqual(r.c.staged(A).map((add) => add.command), ['git add src/auth.ts']);
+    assert.deepEqual(r.c.staged(H1), []);
+  });
+});
+
+describe('hooks that arrive out of order', () => {
+  test('an older change arriving after a newer write is the other way round: the write is over it', () => {
+    const r = rules();
+    assert.deepEqual(r.change(B, 'Write', FILE, T0 + 2000), []);
+    const [alert] = r.change(A, 'Edit', FILE, T0 + 1000);
+    assert.deepEqual([alert?.kind, alert?.agentKey, alert?.others[0].key, alert?.at, alert?.others[0].at], ['write', B, A, T0 + 2000, T0 + 1000]);
+    const s = rules();
+    s.change(B, 'Edit', FILE, T0 + 2000);
+    assert.deepEqual(s.change(A, 'Write', FILE, T0 + 1000).map((h) => [h.kind, h.agentKey]), [['edit', B]], "a newer edit over it: B's note");
+  });
+
+  test("an agent's older change arriving late leaves its newer one standing", () => {
+    const r = rules();
+    r.change(A, 'Edit', FILE, T0 + 5000);
+    r.change(A, 'Edit', FILE, T0 + 1000);
+    assert.deepEqual(r.change(B, 'Write', FILE, T0 + 6000).map((h) => h.others[0].at), [T0 + 5000]);
+  });
+
+  test('a change arriving after a git command that started later counts for it: in its alert, or a new one', () => {
+    const r = rules();
+    r.change(C, 'Edit', `${CWD}/c.ts`, T0);
+    const [first] = r.run(B, 'git stash', T0 + 2000);
+    assert.deepEqual(r.change(A, 'Edit', FILE, T0 + 1000), [], 'joins the alert there is');
+    assert.deepEqual(r.c.list().find((h) => h.id === first.id)?.others.map((o) => o.key), [A, C], 'the latest first');
+    const s = rules();
+    assert.deepEqual(s.run(B, 'git reset --hard', T0 + 2000), []);
+    assert.deepEqual(s.change(A, 'Edit', FILE, T0 + 1000).map((h) => [h.kind, h.agentKey, h.command, h.others[0].key]), [['git', B, 'git reset --hard', A]]);
+    assert.deepEqual(s.change(A, 'Edit', `${CWD}/x.ts`, T0 + 3000), [], 'a change after the command is none of its business');
   });
 });
 
@@ -357,19 +515,21 @@ describe('the store keeps them on state.hazards', () => {
     assert.equal(t.hazards().length, 1, 'throwing it away still counts');
   });
 
-  test('a helper finishing ends its hazards; so does its crew leaving', () => {
+  test("a helper finishing leaves its work to its lead, and ends the hazards it did; its crew leaving ends them all", () => {
     const t = town();
+    const lead = () => `${t.store.getState().sessions[0].id}:main`;
     const helper = { agent: { id: 'agent-h1', type: 'Explore' } };
     t.send('SubagentStart', {}, T0, helper);
     t.send('PostToolUse', edit, T0 + 1, helper);
     t.send('PostToolUse', write, T0 + 2, { session: OTHER });
-    assert.equal(t.hazards().length, 1);
-    t.send('SubagentStop', { last_assistant_message: 'Done' }, T0 + 3, helper);
-    assert.deepEqual(t.hazards(), []);
-    t.send('PostToolUse', edit, T0 + 4);
-    t.send('PostToolUse', write, T0 + 5, { session: OTHER });
-    assert.deepEqual(t.hazards().map((h) => h.kind), ['edit', 'write'], "the lead's edit over the other crew's write, and that crew's write over it");
-    t.send('SessionEnd', { reason: 'prompt_input_exit' }, T0 + 6, { session: OTHER });
+    t.send('PostToolUse', done('Write', { file_path: `${CWD}/src/b.ts`, content: 'b' }), T0 + 3, { session: OTHER });
+    t.send('PostToolUse', done('Write', { file_path: `${CWD}/src/b.ts`, content: 'mine' }), T0 + 4, helper);
+    assert.equal(t.hazards().length, 2);
+    t.send('SubagentStop', { last_assistant_message: 'Done' }, T0 + 5, helper);
+    assert.deepEqual(t.hazards().map((h) => [h.agentKey, h.others[0].key]), [[`${OTHER}:main`, lead()]], "the other crew's write over the helper's edit, now its lead's");
+    t.send('PreToolUse', bash('git stash'), T0 + 6, { session: OTHER });
+    assert.deepEqual(t.hazards().at(-1)?.others.map((o) => [o.key, o.files]), [[lead(), 2]], "the helper's files are still in the tree");
+    t.send('SessionEnd', { reason: 'prompt_input_exit' }, T0 + 7, { session: OTHER });
     assert.deepEqual(t.hazards(), []);
   });
 
@@ -382,20 +542,23 @@ describe('the store keeps them on state.hazards', () => {
     t.send('PostToolUse', edit, T0 + 2, helper);
     t.send('PostToolUse', write, T0 + 3, { session: OTHER });
     assert.equal(t.hazards().length, 1);
-    t.send('PostToolUseFailure', { ...call, error: 'Interrupted', is_interrupt: true }, T0 + 4);
-    assert.deepEqual(t.hazards(), []);
+    t.send('PostToolUse', done('Edit', { file_path: `${CWD}/src/b.ts`, old_string: 'a', new_string: 'b' }), T0 + 4, { session: OTHER });
+    t.send('PostToolUse', done('Write', { file_path: `${CWD}/src/b.ts`, content: 'x' }), T0 + 5, helper);
+    assert.equal(t.hazards().length, 2);
+    t.send('PostToolUseFailure', { ...call, error: 'Interrupted', is_interrupt: true }, T0 + 6);
+    assert.deepEqual(t.hazards().map((h) => h.others[0].key), [`${t.store.getState().sessions[0].id}:main`], 'its write over the other crew ends; the write over its edit is now about its lead');
     const codex = town();
     const codexHelper = { agent: { id: 'h2', type: 'general-purpose' } };
     codex.send('PreToolUse', call, T0);
     codex.send('SubagentStart', {}, T0 + 1, codexHelper);
-    codex.send('PostToolUse', edit, T0 + 2, codexHelper);
-    codex.send('PostToolUse', write, T0 + 3, { session: OTHER });
+    codex.send('PostToolUse', edit, T0 + 2, { session: OTHER });
+    codex.send('PostToolUse', write, T0 + 3, codexHelper);
     codex.send('PostToolUse', { ...call, tool_response: { status: 'async_launched', agentId: 'h2' } }, T0 + 4);
     assert.equal(codex.hazards().length, 1, 'launched in the background: still at work');
     codex.store.ingest(envelope({ ...hook('Stop', {}), andary_source: 'codex' }, T0 + 5));
     assert.equal(codex.hazards().length, 1, "the lead's turn ending is no interrupt: a background helper goes on");
     codex.store.ingest(envelope({ ...hook('Stop', { stop_reason: 'interrupted' }), andary_source: 'codex' }, T0 + 6));
-    assert.deepEqual(codex.hazards(), []);
+    assert.deepEqual(codex.hazards(), [], 'its write over the other crew ends with it');
   });
 
   test('a lead whose turn ended is still at work: its changes sit in the tree', () => {
@@ -462,6 +625,75 @@ describe('the store keeps them on state.hazards', () => {
     t.send('PostToolUse', write, T0 + 2);
     t.store.ingest(envelope(member(hook('PreToolUse', bash('git stash'))), T0 + 3));
     assert.deepEqual(t.hazards(), []);
+  });
+
+  test('a Write that made the file, or a Codex patch adding one, is a new file: git clean takes it, a stash does not', () => {
+    const t = town();
+    t.send('PostToolUse', { ...write, tool_response: { type: 'create', filePath: FILE } }, T0);
+    t.store.ingest(envelope({ ...hook('PostToolUse', done('Write', { file_path: `${CWD}/src/added.ts`, content: 'x' })), andary_tool: 'apply_patch', andary_source: 'codex' }, T0 + 1));
+    t.send('PostToolUse', done('Write', { file_path: `${CWD}/src/old.ts`, content: 'x' }), T0 + 2);
+    t.send('PreToolUse', bash('git stash'), T0 + 3, { session: OTHER });
+    t.send('PreToolUse', bash('git clean -f src'), T0 + 4, { session: OTHER });
+    assert.deepEqual(t.hazards().map((h) => [h.command, h.others[0].files]), [['git stash', 1], ['git clean -f src', 2]]);
+  });
+
+  test("a commit in a later call than its git add: another crew's add then commit sweeps the work up; one's own takes it out", () => {
+    const t = town();
+    t.send('PostToolUse', edit, T0);
+    t.send('PostToolUse', { ...bash('git add -A'), tool_response: {} }, T0 + 1000, { session: OTHER });
+    assert.deepEqual(t.hazards(), [], 'staging alone loses nothing');
+    t.send('PreToolUse', bash('git commit -m "$(cat <<\'EOF\'\nSave\nEOF\n)"'), T0 + 2000, { session: OTHER });
+    assert.deepEqual(t.hazards().map((h) => h.command), ['git commit after git add -A']);
+    const s = town();
+    s.send('PostToolUse', edit, T0);
+    s.send('PostToolUse', { ...bash('git add src/auth.ts'), tool_response: {} }, T0 + 1000);
+    s.send('PostToolUse', { ...bash('git commit -m "Fix auth"'), tool_response: {} }, T0 + 2000);
+    s.send('PreToolUse', bash('git reset --hard'), T0 + 3000, { session: OTHER });
+    assert.deepEqual(s.hazards(), [], 'committed in two calls');
+  });
+
+  test('git checkout <path> without -- over a file another crew changed', () => {
+    const t = town();
+    t.send('PostToolUse', edit, T0);
+    t.send('PreToolUse', bash('git checkout src/auth.ts'), T0 + 1, { session: OTHER });
+    t.send('PreToolUse', bash('git checkout main'), T0 + 2, { session: OTHER });
+    assert.deepEqual(t.hazards().map((h) => h.command), ['git checkout src/auth.ts']);
+  });
+
+  test("the server's work-tree top (andary_root) is used when a hook has it", () => {
+    const workspace = '/home/dev/workspace';
+    const t = town();
+    t.send('SessionStart', { source: 'startup', cwd: workspace }, T0, { session: OTHER });
+    t.send('PostToolUse', { ...done('Edit', { file_path: `${workspace}/billing/a.ts`, old_string: 'a', new_string: 'b' }), cwd: `${workspace}/billing` }, T0 + 1);
+    t.store.ingest(envelope({ ...hook('PreToolUse', { ...bash('git stash'), cwd: `${workspace}/api` }, { session: OTHER }), andary_root: `${workspace}/api` }, T0 + 2));
+    assert.deepEqual(t.hazards(), [], 'another repository');
+    t.send('PreToolUse', { ...bash('git stash'), cwd: `${workspace}/api` }, T0 + 3, { session: OTHER });
+    assert.equal(t.hazards().length, 1, 'without it, the workspace is guessed to be one');
+  });
+
+  test('a command refused, by PermissionDenied or in the town, ends its alert', () => {
+    const t = town();
+    t.send('PostToolUse', edit, T0);
+    const stash = { ...bash('git stash'), tool_use_id: 'stash-1' };
+    t.send('PreToolUse', stash, T0 + 1, { session: OTHER });
+    assert.equal(t.hazards().length, 1);
+    t.send('PermissionDenied', { ...stash, reason: 'Not now' }, T0 + 2, { session: OTHER });
+    assert.deepEqual(t.hazards(), []);
+    t.store.ingest(envelope({ ...hook('PreToolUse', { ...bash('git reset --hard'), tool_use_id: 'reset-1' }, { session: OTHER }), andary_key: 'key-reset' }, T0 + 3));
+    assert.equal(t.hazards().length, 1);
+    const approval = { id: 'ap-1', status: /** @type {const} */ ('pending'), held: true, sessionId: OTHER, agentId: null, toolName: 'Bash', toolInput: { command: 'git reset --hard' }, createdAt: T0 + 3, expiresAt: null, callKey: 'key-reset' };
+    t.store.setApproval(approval);
+    assert.equal(t.hazards().length, 1, 'still asking');
+    t.store.setApproval({ ...approval, status: 'denied' });
+    assert.deepEqual(t.hazards(), []);
+  });
+
+  test('hooks out of order: an older edit arriving after the other crew\'s write', () => {
+    const t = town();
+    t.send('PostToolUse', write, T0 + 2000, { session: OTHER });
+    t.send('PostToolUse', edit, T0 + 1000);
+    assert.deepEqual(t.hazards().map((h) => [h.kind, h.agentKey]), [['write', `${OTHER}:main`]]);
+    assert.match(t.lines()[0]?.text ?? '', /^Foreman \(crew 1\) wrote over src\/auth\.ts, which Foreman \(crew 2\) changed/, 'the other crew came first, as crew 1');
   });
 
   test('a reset forgets everything', () => {

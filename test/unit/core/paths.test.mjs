@@ -3,7 +3,7 @@
 // links stay as given.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { baseName, isInside, nestedWorkTree, normalizePath, sameWorkTree, workTreeRoot } from '../../../public/js/core/paths.js';
+import { baseName, insideAny, isInside, nestedWorkTree, normalizePath, sameWorkTree, workTreeOf } from '../../../public/js/core/paths.js';
 
 describe('normalizePath', () => {
   test('separators: backslashes become slashes, doubled and trailing ones go', () => {
@@ -34,6 +34,13 @@ describe('normalizePath', () => {
     assert.notEqual(normalizePath('/home/dev/App.ts'), normalizePath('/home/dev/app.ts'), 'whether the disk ignores case is unknown');
   });
 
+  test('Git Bash writes a drive as a folder: /c/work is C:/work beside a folder on a drive', () => {
+    assert.equal(normalizePath('/c/work/a.ts', 'C:\\Users\\dev'), 'C:/work/a.ts');
+    assert.equal(normalizePath('/d', 'C:/x'), 'D:/');
+    assert.equal(normalizePath('/c/work/a.ts', '/home/dev'), '/c/work/a.ts', 'not on a drive: as written');
+    assert.equal(normalizePath('/cd/work', 'C:/x'), '/cd/work', 'one letter only');
+  });
+
   test('a network share keeps its two slashes', () => {
     assert.equal(normalizePath('\\\\server\\share\\app\\a.ts'), '//server/share/app/a.ts');
     assert.equal(normalizePath('///srv//a.ts'), '/srv/a.ts');
@@ -47,6 +54,18 @@ describe('normalizePath', () => {
 });
 
 describe('isInside and baseName', () => {
+  test('insideAny: inside one of many folders, by its own folders', () => {
+    const folders = new Set(['/repo/src', '/repo/lib/a.ts', 'C:/', '//server/share']);
+    assert.equal(insideAny('/repo/src/deep/a.ts', folders), true);
+    assert.equal(insideAny('/repo/lib/a.ts', folders), true);
+    assert.equal(insideAny('/repo/lib/b.ts', folders), false);
+    assert.equal(insideAny('/repo/srcx/a.ts', folders), false, 'by whole parts');
+    assert.equal(insideAny('C:/work/a.ts', folders), true, 'a drive');
+    assert.equal(insideAny('//server/share/x', folders), true);
+    assert.equal(insideAny('/a.ts', new Set(['/'])), true, 'the root');
+    assert.equal(insideAny('/a.ts', new Set()), false);
+  });
+
   test('a path lies inside a folder by whole parts', () => {
     assert.equal(isInside('/repo/src/a.ts', '/repo'), true);
     assert.equal(isInside('/repo', '/repo'), true);
@@ -75,10 +94,18 @@ describe('work trees', () => {
     assert.equal(sameWorkTree(`${repo}/a.ts`, `${tree}/a.ts`), false);
   });
 
-  test("its top is a guess: such a worktree, else the crew's session folder when it holds the folder, else the folder", () => {
-    assert.equal(workTreeRoot(`${repo}/packages/web`, repo), repo);
-    assert.equal(workTreeRoot(`${tree}/src`, repo), tree);
-    assert.equal(workTreeRoot('/srv/other', repo), '/srv/other');
-    assert.equal(workTreeRoot(`${repo}/packages/web`), `${repo}/packages/web`);
+  test("without the server's answer its top is a guess: such a worktree, else the crew's session folder when it holds the folder, else the folder", () => {
+    const guess = (/** @type {string} */ folder, /** @type {string} */ session = '') => workTreeOf(folder, session);
+    assert.deepEqual(guess(`${repo}/packages/web`, repo), { root: repo, exact: false });
+    assert.deepEqual(guess(`${tree}/src`, repo), { root: tree, exact: false });
+    assert.deepEqual(guess('/srv/other', repo), { root: '/srv/other', exact: false });
+    assert.deepEqual(guess(`${repo}/packages/web`), { root: `${repo}/packages/web`, exact: false });
+  });
+
+  test('the top the server found holds for any folder in it, but a worktree Claude Code made there', () => {
+    assert.deepEqual(workTreeOf(`${repo}/packages/web`, '/home/dev', `${repo}/packages`), { root: `${repo}/packages`, exact: true });
+    assert.deepEqual(workTreeOf(`${tree}/src`, repo, tree), { root: tree, exact: true });
+    assert.deepEqual(workTreeOf(`${tree}/src`, repo, repo), { root: tree, exact: false }, 'a worktree inside it is its own');
+    assert.deepEqual(workTreeOf('/srv/other', repo, repo), { root: '/srv/other', exact: false }, 'outside it: guessed');
   });
 });

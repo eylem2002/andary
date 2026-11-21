@@ -199,8 +199,8 @@ symbolic links or know whether a disk ignores case, so those can be missed (writ
 
 **Decision:** do. Size: small–medium.
 
-**As built** (CONTRACTS §5.1, ASSUMPTIONS 135–144), where it adds to the above, after an
-independent review: the attention kind is `conflict` (§3's sketch says `same-file`), level
+**As built** (CONTRACTS §5.1, ASSUMPTIONS 135–147), where it adds to the above, after two
+independent reviews: the attention kind is `conflict` (§3's sketch says `same-file`), level
 `alert`, for git hazards too. A Codex patch that deletes a file counts as a Write. Git hazards
 are found when the command starts (PreToolUse), one per command naming every other agent it
 touches, and count only what the command acts on: its pathspecs, or the whole work tree, whose
@@ -212,7 +212,13 @@ helper's edits, writes and commits over what its lead changed before it started 
 not a conflict (throwing them away still counts); a helper interrupted without its SubagentStop
 finishes when its Agent call ends. The Edit note is shown under what both agents do rather than in
 its place; every hazard's words name who did it; a counted Write alert stays counted until it
-ends. A lead whose turn ended is still active: its changes are still in the tree.
+ends. A lead whose turn ended is still active: its changes are still in the tree. Unlike the
+above, a helper that finishes does not take its changes with it: they become its lead's, as they
+are still uncommitted in the tree, and the hazards about them name the lead. The server finds each
+local folder's work-tree top on disk (`andary_root`) and the guess is only the fallback; a `git
+add` and its `git commit` in two calls count as one; `git clean` counts only files agents made,
+and the other discards only tracked ones; a hook that arrives out of order is judged by its own
+time, both for files and for git commands; a command refused before it ran ends its alert.
 
 ## 7. Catch me up
 

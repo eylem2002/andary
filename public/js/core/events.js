@@ -60,6 +60,7 @@ export const NO_SESSION = 'unknown';
  * @property {string|null} mcpServer
  * @property {string|null} file        raw file path the tool touches, if any
  * @property {string|null} callKey     the server's key for the call's input (andary_key), if any
+ * @property {string|null} root        the top of the hook folder's work tree, found on disk by the server (andary_root), if any
  */
 
 /** @type {Readonly<Record<string, TownEventKind>>} */
@@ -118,6 +119,8 @@ function toolData(p, cwd) {
     file: str(input.file_path ?? input.notebook_path) || null,
     // The server's key for this call's input, read before sanitising cut anything (§4.6).
     callKey: str(p.andary_key) || null,
+    // Where the hook folder's work tree starts, as the server found it on disk (§4.6).
+    root: str(p.andary_root) || null,
   };
 }
 

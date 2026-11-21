@@ -1,14 +1,19 @@
 // File paths as the town compares them (core/conflicts.js, core/git-commands.js): absolute, with
 // forward slashes, without `.` and `..`, and a relative path joined to the folder it was given in.
 // Only the text is compared. The browser cannot resolve a symbolic link or ask whether a disk
-// ignores case, so two spellings of one file stay two paths (docs/ASSUMPTIONS.md); nor can it ask
-// git where a work tree starts, so that is guessed from the folders it knows. Pure.
+// ignores case, so two spellings of one file stay two paths (docs/ASSUMPTIONS.md). Where a work
+// tree starts is the server's to find on disk; without it, it is guessed from the folders known.
+// Pure.
 import { str } from './text.js';
 
 /** Where an absolute path starts: a drive (C:/), a network share (//server) or the root (/). */
 const ROOT = /^(?:[A-Za-z]:\/|\/\/(?=[^/])|\/)/;
 /** A path under the home folder or a variable: the browser cannot tell where that is. */
 const UNPLACEABLE = /^[~$%]/;
+/** Git Bash writes a drive as a folder: /c/Users is C:/Users. */
+const GIT_BASH_DRIVE = /^\/([A-Za-z])(?=\/|$)/;
+/** A normalised path on a drive. */
+const ON_DRIVE = /^[A-Za-z]:\//;
 
 /**
  * A path as compared: absolute and normalised, or '' when it cannot be placed (empty, under `~`
@@ -20,9 +25,19 @@ const UNPLACEABLE = /^[~$%]/;
 export function normalizePath(path, folder = '') {
   const text = str(path).trim().replace(/\\/g, '/');
   if (!text || UNPLACEABLE.test(text)) return '';
-  if (ROOT.test(text)) return resolveDots(text);
   const base = normalizePath(folder);
+  if (ROOT.test(text)) return resolveDots(onDrive(text, base));
   return base ? resolveDots(`${base}/${text}`) : '';
+}
+
+/**
+ * A Git Bash path (/c/Users/…) as Windows writes it (C:/Users/…), when the folder it was given in
+ * is on a drive; any other path as it is.
+ * @param {string} path  with forward slashes
+ * @param {string} like  a normalised folder of the same computer, or ''
+ */
+export function onDrive(path, like) {
+  return ON_DRIVE.test(like) ? path.replace(GIT_BASH_DRIVE, (_, drive) => `${drive.toUpperCase()}:/`) : path;
 }
 
 /**
@@ -49,6 +64,26 @@ function resolveDots(text) {
 export function isInside(path, folder) {
   if (!path || !folder) return false;
   return path === folder || path.startsWith(folder.endsWith('/') ? folder : `${folder}/`);
+}
+
+/**
+ * Whether a normalised path lies in one of a set of normalised folders (or is one), by its own
+ * folders: as cheap for a hundred folders as for one.
+ * @param {string} path
+ * @param {ReadonlySet<string>} folders
+ */
+export function insideAny(path, folders) {
+  let at = path;
+  for (;;) {
+    if (folders.has(at)) return true;
+    const cut = at.lastIndexOf('/');
+    if (cut < 0) return false;
+    const parent = at.slice(0, cut);
+    // A root keeps its slash: /a → /, C:/a → C:/, //server → //.
+    const up = parent === '' || parent === '/' || parent.endsWith(':') ? at.slice(0, cut + 1) : parent;
+    if (up === at) return false;
+    at = up;
+  }
 }
 
 /**
@@ -84,12 +119,18 @@ export function sameWorkTree(a, b) {
 }
 
 /**
- * The top of the work tree a folder is in, as well as the browser can tell without asking git: a
- * worktree Claude Code made, else the crew's session folder (where it started) when that holds
- * the folder, else the folder itself. A command such as `git stash` acts on all of it.
+ * The top of the work tree a folder is in. The server finds it on disk for this computer's hooks
+ * (`known`: the top of the hook's own folder's work tree), which holds for any folder inside it
+ * but a worktree Claude Code made there. Without it, as well as the browser can tell: a worktree
+ * Claude Code made, else the crew's session folder (where it started) when that holds the folder,
+ * else the folder itself. A command such as `git stash` acts on all of it.
  * @param {string} folder  normalised
  * @param {string} [sessionFolder]  normalised
+ * @param {string} [known]  normalised
+ * @returns {{ root: string, exact: boolean }}  exact: found on disk, not guessed
  */
-export function workTreeRoot(folder, sessionFolder = '') {
-  return nestedWorkTree(folder) || (isInside(folder, sessionFolder) ? sessionFolder : folder);
+export function workTreeOf(folder, sessionFolder = '', known = '') {
+  const nested = nestedWorkTree(folder);
+  if (known && isInside(folder, known) && (!nested || isInside(known, nested))) return { root: known, exact: true };
+  return { root: nested || (isInside(folder, sessionFolder) ? sessionFolder : folder), exact: false };
 }

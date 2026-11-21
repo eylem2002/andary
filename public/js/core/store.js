@@ -13,7 +13,7 @@ import { agentFor, assignSpawn, attribute, dropAgent, place, pruneDoneHelpers, p
 import { recordChange, rememberFile } from './changes.js';
 import { hazardText } from './conflicts.js';
 import { NO_SESSION, normalize } from './events.js';
-import { gitCommitsOf, gitHazardOf } from './git-commands.js';
+import { gitAddsOf, gitCommitsOf, gitHazardOf } from './git-commands.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { rulesText } from './permission-rules.js';
 import { summarizeTool } from './summaries.js';
@@ -694,17 +694,19 @@ const SPAWN_TOOLS = new Set(['Agent', 'Task']);
 
 /**
  * What each event does to the same-file and git rules (conflicts.js): a file change or a git
- * command may start a hazard, a commit that went through takes its committer's changes out of
- * harm's way, and a helper finishing (also without its SubagentStop: its call ended, or the lead
- * was interrupted) or its crew leaving ends its own.
+ * command may start a hazard, a refusal ends the command's, a commit that went through takes its
+ * committer's changes out of harm's way, and a helper finishing (also without its SubagentStop:
+ * its call ended, or the lead was interrupted) leaves its changes to its lead; its crew leaving
+ * ends them all.
  * @type {Readonly<Record<string, ConflictStep>>}
  */
 const CONFLICT_STEPS = Object.freeze({
   'tool.start': commandStarted,
   'tool.end': toolEnded,
   'tool.fail': (m, e, s) => (SPAWN_TOOLS.has(e.data.tool) ? finishHelper(m, s, e.data.toolUseId, null) : []),
+  'permission.denied': (m, e, s, a) => (m.conflicts.refused({ agent: a.key, toolUseId: e.data.toolUseId, callKey: e.data.callKey }), []),
   'spawn.result': (m, e, s) => (e.data.status === 'async_launched' ? [] : finishHelper(m, s, e.data.toolUseId, e.data.agentId)),
-  'subagent.stop': (m, e, s, a) => (m.conflicts.finished(a.key), []),
+  'subagent.stop': (m, e, s, a) => (m.conflicts.finished(a.key, leadOf(s, a)), []),
   'turn.stop': (m, e, s, a) => (e.data.interrupted === true && a.role === 'lead' ? helpersOf(m, s.id).flatMap((h) => finishHelper(m, s, null, h.agentId)) : []),
 });
 
@@ -737,25 +739,46 @@ function followConflicts(m, e, s, a) {
  * @returns {import('./conflicts.js').Actor}
  */
 function actorOf(e, s, a) {
-  return { agent: a.key, session: s.id, at: e.ts, lead: a.role === 'lead' ? null : agentKeyOf(s.id, null), since: a.startedAt };
+  return { agent: a.key, session: s.id, at: e.ts, lead: leadOf(s, a), since: a.startedAt };
 }
 
-/** Where a shell command runs: the hook's folder, and where its crew started. @param {TownEvent} e @param {Session} s */
+/** A helper's lead, who keeps its changes when it finishes; null for a lead. @param {Session} s @param {AgentState} a */
+function leadOf(s, a) {
+  return a.role === 'lead' ? null : agentKeyOf(s.id, null);
+}
+
+/**
+ * Where a shell command runs: the hook's folder, where its crew started, and the top of the hook
+ * folder's work tree when the server found it on disk (`andary_root`, CONTRACTS §4.6).
+ * @param {TownEvent} e @param {Session} s
+ */
 function placeOf(e, s) {
-  return { folder: e.cwd || s.cwd, sessionFolder: s.cwd };
+  return { folder: e.cwd || s.cwd, sessionFolder: s.cwd, root: e.data.root };
 }
 
 /** A shell command starting: a git hazard shows while it asks for permission or runs. @type {ConflictStep} */
 function commandStarted(m, e, s, a) {
   if (!SHELL_TOOLS.has(e.data.tool)) return [];
-  const git = gitHazardOf(e.data.input?.command, placeOf(e, s), { powershell: e.data.tool === 'PowerShell' });
-  return git ? m.conflicts.command({ ...actorOf(e, s, a), ...git }) : [];
+  const options = { powershell: e.data.tool === 'PowerShell', staged: m.conflicts.staged(a.key), known: (/** @type {string} */ path) => m.conflicts.knows(path) };
+  const git = gitHazardOf(e.data.input?.command, placeOf(e, s), options);
+  return git ? m.conflicts.command({ ...actorOf(e, s, a), ...git, toolUseId: e.data.toolUseId, callKey: e.data.callKey }) : [];
 }
 
-/** A tool that went through: a file change, or a command whose commits took changes in. @type {ConflictStep} */
+/**
+ * A tool that went through: a file change (a Write that made the file, or a Codex patch adding
+ * one, makes an untracked file), or a command whose commits took changes in and whose adds wait
+ * for the next commit.
+ * @type {ConflictStep}
+ */
 function toolEnded(m, e, s, a) {
-  if (!SHELL_TOOLS.has(e.data.tool)) return m.conflicts.changed({ ...actorOf(e, s, a), tool: e.data.tool, path: e.data.file, folder: e.cwd || s.cwd });
-  for (const commit of gitCommitsOf(e.data.input?.command, placeOf(e, s), { powershell: e.data.tool === 'PowerShell' })) m.conflicts.committed({ agent: a.key, ...commit });
+  if (!SHELL_TOOLS.has(e.data.tool)) {
+    const created = e.data.tool === 'Write' && (e.data.response?.type === 'create' || e.data.sourceTool === 'apply_patch');
+    return m.conflicts.changed({ ...actorOf(e, s, a), tool: e.data.tool, path: e.data.file, folder: e.cwd || s.cwd, created });
+  }
+  const options = { powershell: e.data.tool === 'PowerShell', staged: m.conflicts.staged(a.key) };
+  const place = placeOf(e, s);
+  for (const commit of gitCommitsOf(e.data.input?.command, place, options)) m.conflicts.committed({ agent: a.key, ...commit });
+  m.conflicts.added(a.key, s.id, gitAddsOf(e.data.input?.command, place, options));
   return [];
 }
 
@@ -768,7 +791,7 @@ function toolEnded(m, e, s, a) {
 function finishHelper(m, s, toolUseId, agentId) {
   const spawn = toolUseId ? (m.spawns.get(s.id) ?? []).find((sp) => sp.toolUseId === toolUseId) : undefined;
   const helper = agentId ? agentKeyOf(s.id, agentId) : spawn?.claimedBy;
-  if (helper) m.conflicts.finished(helper);
+  if (helper) m.conflicts.finished(helper, agentKeyOf(s.id, null));
   return [];
 }
 
@@ -871,7 +894,11 @@ function approvalChanged(m, approval, ts) {
     const at = { ts, sessionId: approval.sessionId, agentKey: key, kind: 'approval' };
     pushLog(m, at, s, a, { icon: log.icon, text: saved ? `Allowed; asked to save ${saved}` : `${log.prefix}: ${summary}`, level: /** @type {LogDraft['level']} */ (log.level) });
   }
-  if (approval.status === 'denied') m.awaiting.delete(key);
+  if (approval.status === 'denied') {
+    m.awaiting.delete(key);
+    // A git command refused in the town runs nothing: its alert ends.
+    if (m.conflicts.refused({ agent: key, callKey: typeof approval.callKey === 'string' ? approval.callKey : null })) m.state.hazards = m.conflicts.list();
+  }
   return approval.status === 'allowed' ? countApproval(m, key, tool) : [];
 }
 
