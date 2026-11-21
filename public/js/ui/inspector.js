@@ -1,11 +1,13 @@
 // The agent inspector: everything known about the selected agent — role, crew, status, what it is
-// doing, its brief, which tools it used how often, recent files and activity, its last message.
+// doing (or waiting for you on, and since when), its brief, which tools it used how often, recent
+// files and activity, its last message.
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { doingText, formatAgo, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
 import { changeSummary } from './changes.js';
 import { usageSentence } from './usage.js';
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
+import { waitedText } from './needs-you.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -36,6 +38,7 @@ export function createInspector(ctx) {
   const chip = statusChip('idle', { labelled: true });
   const since = h('span', { class: 'hud-inspector__since' });
   const now = h('p', { class: 'hud-inspector__now' });
+  const need = createNeedLine(ctx, name);
   const brief = h('p', { class: 'hud-inspector__brief' });
   const tools = h('ul', { class: 'hud-bars' });
   const files = h('ul', { class: 'hud-files' });
@@ -44,7 +47,7 @@ export function createInspector(ctx) {
   const message = h('p', { class: 'hud-inspector__message' });
   const usage = h('p', { class: 'hud-inspector__usage', 'data-testid': 'agent-usage' });
   const sections = {
-    now: section('Now', now),
+    now: section('Now', h('div', {}, now, need.el)),
     brief: section('Brief', brief),
     usage: section('Usage', usage),
     tools: section('Tools used', tools),
@@ -112,6 +115,7 @@ export function createInspector(ctx) {
     setText(role, `${roleLabel(agent)}${session ? ` in ${session.project}` : ''}`);
     updateStatusChip(chip, agent.status);
     const asking = state.approvals.find((approval) => approval.status === 'pending' && approvalAgentKey(approval) === agent.key);
+    need.update(ctx.needsYou.items(state).find((item) => item.agentKeys.includes(agent.key)) ?? null);
     renderSections(agent, session?.cwd, asking);
     const spent = state.usage?.[agent.key];
     setText(usage, spent ? usageSentence(spent) : '');
@@ -126,7 +130,7 @@ export function createInspector(ctx) {
    * @param {import('./types.js').Approval} [asking]
    */
   function renderSections(agent, cwd, asking) {
-    const doing = doingText(agent, asking);
+    const doing = need.item ? need.item.text : doingText(agent, asking);
     setText(now, doing);
     now.classList.toggle('hud-mono', isCommandText(doing));
     setText(brief, agent.description ?? '');
@@ -154,6 +158,7 @@ export function createInspector(ctx) {
     if (!agent) return;
     const end = agent.status === 'done' ? agent.lastActivity : nowMs;
     setText(since, `Started ${formatAgo(agent.startedAt, nowMs)}, on the job for ${formatDuration(end - agent.startedAt)}`);
+    need.tick(nowMs);
     for (const item of recent.children) {
       const time = item.querySelector('time');
       if (time) setText(time, formatAgo(Number(/** @type {HTMLElement} */ (item).dataset.ts), nowMs, { short: true }));
@@ -175,6 +180,46 @@ function changeItem(change, open) {
   button.setAttribute('aria-label', `Show changes to ${change.path}, ${changeSummary(change)}`);
   button.addEventListener('click', open);
   return h('li', {}, button);
+}
+
+/**
+ * Under the Now line while the agent waits for you: since when, and a Set aside button for a
+ * finished turn or a stop.
+ * @param {HudContext} ctx
+ * @param {HTMLElement} focusAfter  where the keyboard goes when the button goes
+ */
+function createNeedLine(ctx, focusAfter) {
+  const waited = h('span', { class: 'hud-inspector__waited' });
+  const setAside = h('button', { type: 'button', class: 'hud-btn hud-btn--small', 'data-testid': 'inspector-dismiss' }, 'Set aside');
+  const el = h('p', { class: 'hud-inspector__need', hidden: true }, waited, setAside);
+  /** @type {import('../core/attention.js').AttentionItem|null} */
+  let item = null;
+  setAside.addEventListener('click', () => {
+    if (!item?.dismissable) return;
+    ctx.needsYou.dismiss(item.id);
+    focusAfter.focus();
+    ctx.announcer.polite(`Set aside: ${item.text}`);
+    ctx.refresh();
+  });
+  return {
+    el,
+    get item() {
+      return item;
+    },
+    /** @param {import('../core/attention.js').AttentionItem|null} next */
+    update(next) {
+      item = next;
+      setHidden(el, !item);
+      if (!item?.dismissable && document.activeElement === setAside) focusAfter.focus();
+      setHidden(setAside, !item?.dismissable);
+    },
+    /** @param {number} now */
+    tick(now) {
+      if (!item) return;
+      const { long } = waitedText(item, now);
+      setText(waited, long.charAt(0).toUpperCase() + long.slice(1));
+    },
+  };
 }
 
 /** @param {string} title @param {HTMLElement} content */

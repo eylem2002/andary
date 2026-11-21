@@ -1,6 +1,7 @@
 // Side effects of store changes: toasts, sounds and announcements. Changes are queued as they
 // arrive and played once per rendered frame. Only fresh changes count: history replayed to a
 // late-joining browser renders in the panels but never toasts or rings.
+import { INTERACTIVE_TOOLS } from '../core/dialogs.js';
 import { describeApproval, truncate } from './format.js';
 import { approvalAgentKey, crewNumber, findSession } from './parts.js';
 
@@ -33,6 +34,8 @@ export function effectFor(change, seenApprovals, now) {
   if (change.type === 'approval') {
     const { approval } = change;
     if (approval.status !== 'pending' || seenApprovals.has(approval.id)) return null;
+    // A question or a plan is not a permission to grant: "needs you" tells of it in its words.
+    if (Object.hasOwn(INTERACTIVE_TOOLS, approval.toolName)) return null;
     seenApprovals.add(approval.id);
     return now - approval.createdAt < FRESH_MS * 4 ? { type: 'approval', approval } : null;
   }

@@ -14,6 +14,7 @@ import { nextPlaceNames } from '../core/place-names.js';
  * @property {ReturnType<typeof import('./board.js').createBoard>} board
  * @property {ReturnType<typeof import('./inspector.js').createInspector>} inspector
  * @property {ReturnType<typeof import('./building-card.js').createBuildingCard>} place
+ * @property {ReturnType<typeof import('./approvals.js').createApprovalsPanel>} approvals
  * @property {Record<'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard', { open(): void, close(): void, isOpen: boolean }>} dialogs
  */
 
@@ -149,11 +150,34 @@ export function runAction(hud, action) {
     'toggle-sound': () => toggleSound(ctx),
     pause: () => togglePause(ctx),
     'cycle-speed': () => cycleSpeed(ctx),
+    'needs-you': () => goToNextNeed(hud),
     help: () => openDialog(hud, 'help'),
     usage: () => openDialog(hud, 'usage'),
     leaderboard: () => openDialog(hud, 'leaderboard'),
   };
   actions[action]?.();
+}
+
+/**
+ * Goes to what needs the viewer, most urgent first; again goes on to the next one. A request the
+ * town can answer opens its card in Approvals (the full change is shown there); anything else is
+ * answered in the terminal, so the agent is selected and the camera points at it.
+ * @param {Hud} hud
+ */
+function goToNextNeed(hud) {
+  const { ctx, ui } = hud;
+  const item = ctx.needsYou.next(ctx.needsYou.items(ctx.store.getState()));
+  if (!item) {
+    ctx.announcer.polite('Nothing needs you right now.');
+    return;
+  }
+  if (item.approvalId) {
+    ctx.showTab('approvals');
+    ui.approvals.focusApproval(item.approvalId);
+  } else {
+    ui.crews.reveal(item.sessionId);
+    select(hud, { type: 'agent', id: item.agentKey }, { camera: true, focus: true });
+  }
 }
 
 /**

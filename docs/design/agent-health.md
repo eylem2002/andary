@@ -57,8 +57,9 @@ Principles:
   and collapses lines that show nothing, so no padding hides the end of a command. A Codex
   command's card says that allowing may let it leave its sandbox: its request cannot say.
 - **Phone notes follow the attention rules** (CONTRACTS §4.10), on one model of open dialogs
-  (`core/dialogs.js`) that the approval broker follows too, at each hook's own time (a permission
-  request can arrive before its PreToolUse, a notice before the call started ahead of it):
+  (`core/dialogs.js`) that the approval broker and the town's "needs you" (§3) follow too, at each
+  hook's own time (a permission request can arrive before its PreToolUse, a notice before the call
+  started ahead of it):
   - no note for every finished turn: Claude Code's `idle_prompt`, 60 s later, covers an unanswered
     one. Codex has no `idle_prompt`, so the server waits the same 60 s after a Codex lead's turn,
     once per turn; Codex names no helper on its tool calls, so a tool running pauses the minute
@@ -92,10 +93,15 @@ AttentionItem {
 | blocked | approval (the town can answer), terminal (the terminal asks: not held, expired or released), question (`AskUserQuestion`, `agent_needs_input`, elicitation), plan (`ExitPlanMode`) | always |
 | stopped | the turn ended in an error; several crews stopped by one rate limit are **one** item ("paused until 15:40, 6 crews") | always |
 | alert | stuck; same file when a Write lands on another active agent's change | until dismissed |
-| ready | a lead finished its turn and has had no prompt since | after Claude Code's `idle_prompt` (Codex: two minutes with no prompt), for 30 minutes; never for agent-team teammates |
+| ready | a lead finished its turn and has had no prompt since | after Claude Code's `idle_prompt` (Codex: a minute with no prompt), for 30 minutes; never for agent-team teammates |
 
-The store gains `AgentState.wait = { kind, since, text } | null`, set and cleared by the handlers
-that already change an agent's status; `attentionItems` only reads. Teammates' crews are left
+The store keeps the open dialogs (requests, questions, plans) in the model the phone shares
+(`core/dialogs.js`, §2): one per call, closed only on proof of an answer, so parallel calls, a
+helper's request held while you type to the lead, and a reconnect's replay never lose an agent
+that waits. `AgentState.wait = { kind, since, text, idleAt, cause } | null` holds the rest
+(finished, stopped); `attentionItems` only reads. Both go by each hook's own time (the event's
+`ts`), as the phone and the broker do: a plan's request that overtook its PreToolUse stays one
+item, and a hook sent before a wait began, arriving late, does not end it. Teammates' crews are left
 out; a view-only viewer gets no attention items.
 
 **HUD, first version (simpler than a new panel):**
@@ -107,8 +113,9 @@ out; a view-only viewer gets no attention items.
   Approvals; everything else selects the agent and points the camera); the next click goes to the
   next one. `I` does the same.
 - The tab title is "(3) Andary".
-- Dismiss (alerts and finished turns) is on the agent's row and in the inspector; dismissals are
-  kept in local storage.
+- Dismiss (alerts, stops and finished turns; a dialog the town does not hold once it has waited
+  five minutes, as it may be stale) is on the agent's row and in the inspector;
+  dismissals are kept in local storage.
 - **Desktop notifications** (opt-in) follow the model: one per new counted item, never for
   replayed history, and no "finished" notice while only one local crew is active (you are
   probably at its terminal).

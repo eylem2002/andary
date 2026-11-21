@@ -21,6 +21,7 @@ import { createUsageDialog } from './usage.js';
 import { createLeaderboard } from './leaderboard.js';
 import { installNotifications } from './notifications.js';
 import { createMasthead } from './masthead.js';
+import { createNeedsYou } from './needs-you.js';
 import { createNotices } from './notices.js';
 import { savePrefs } from './prefs.js';
 import { installShortcuts } from './shortcuts.js';
@@ -71,6 +72,8 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       for (const dialog of Object.values(ui.dialogs)) if (dialog.isOpen) dialog.close();
       ui.dialogs.diff.show(agentKey, changeId);
     },
+    // Someone watching a team town with its view link can answer nothing: nothing needs them.
+    needsYou: createNeedsYou({ viewOnly: () => view.serverSettings.team?.role === 'viewer', onChange: () => ctx.refresh() }),
     // The director camera needs the finished context, so it is attached right below.
     cinema: /** @type {any} */ (null),
   };
@@ -80,10 +83,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
   const effects = createEffectQueue();
 
   mount(ctx, ui);
-  // Phones open on the Crews tab: it is the overview, and the rest is one tap away.
-  if (view.mobile) view.tab = 'crews';
-  ui.board.setMobile(view.mobile);
-  ui.board.select(view.tab);
+  openBoard(ui, view);
   applyTheme(prefs, null);
   applyMotion(prefs, null);
 
@@ -291,6 +291,17 @@ function mount(ctx, ui) {
   main.before(ui.masthead.el, ui.board.leftDock, ui.inspector.el);
   main.append(ui.notices.el, ui.place.el, ctx.cinema.el, ui.toolbar.el, ...ctx.announcer.elements);
   main.after(ui.board.el, ctx.toasts.el, ...Object.values(ui.dialogs).map((dialog) => dialog.el));
+}
+
+/**
+ * The board's first tab. Phones open on Crews: it is the overview, and the rest is one tap away.
+ * @param {Parts} ui
+ * @param {import('./types.js').ViewState} view
+ */
+function openBoard(ui, view) {
+  if (view.mobile) view.tab = 'crews';
+  ui.board.setMobile(view.mobile);
+  ui.board.select(view.tab);
 }
 
 /**

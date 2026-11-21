@@ -345,8 +345,9 @@ section.
     a newer achievement the older's; the Crews panel and the leaderboard keep them all. A toast
     under the pointer or the keyboard is never replaced or pushed out. When one must go, the
     oldest without a button goes first, then a crew arrival, and an approval's toast last.
-86. **The page title counts approvals only.** "(2) Andary" is for things that block an agent
-    until you answer; failures and finished work do not change the title.
+86. **The page title counts what needs you.** "(2) Andary" counts the same items as the "need
+    you" button (93): what blocks an agent, a stopped turn, a finished turn nobody answered.
+    (It first counted approvals only; a question or a plan blocks an agent just as much.)
 87. **A phone note for a dialog waits ten seconds.** Most prompts are answered within a few seconds
     by someone at the computer; a note that arrives after you answered is noise. Each dialog (a
     permission request, a question, a plan, a form an MCP server asks you to fill in) has its own
@@ -420,3 +421,40 @@ section.
     takes you over a minute to write still sends the note.
 92. **The waiting note names no agent.** "A crew is waiting for your next prompt." fits Claude Code
     and Codex alike, as the notes for permission requests, questions and plans do.
+93. **"Needs you" counts what blocks an agent, a stopped turn, and a finished turn nobody
+    answered.** A request, a question or a plan counts until the same proof of an answer the phone
+    waits for (89), so the town and the phone never disagree. A finished turn counts only once
+    Claude Code's `idle_prompt` says nobody answered (about a minute later), and for 30 minutes at
+    most: by then the crew is probably done for now. Teammates' crews and ended sessions never
+    count. A session's own notice that something asks for permission counts only when nothing of
+    that session is known to be open: it does not say whose it is.
+94. **A finished Codex turn counts after a minute without a prompt.** Codex sends no
+    `idle_prompt`; a minute matches Claude Code's, and the phone's Codex note waits as long.
+95. **Crews stopped by one rate limit within ten minutes are one item.** One cause, one thing to
+    do: "Rate limited: 3 crews stopped". It takes two crews: a lead and its helper stopped by the
+    same limit are one crew's two stops.
+96. **Stops and finished turns can be set aside, until the situation changes and for a day at
+    most; a request, question or plan only once it has waited five minutes, and never while the
+    town holds it.** A waiting dialog blocks the agent, so it stays until answered, unless it may
+    be stale: an interrupted helper sends no hook at all, and only you can tell. An item's id
+    carries the time it started, so a new stop is a new item; dismissals are kept in this
+    browser's local storage and forgotten after 24 hours.
+97. **Desktop notifications are for news only.** An item pops up once, only while the town is in
+    a background tab, and only if it started to count within the last two minutes: a reconnect or
+    a page opened in the background shows older items in the town without popping them up.
+    Changes that arrive together (a reconnect's history) are checked once, so a request asked and
+    answered within them is no news. A permission request waits until its request reaches the town
+    (it follows its hook within milliseconds; three seconds at most), so it says the right place to
+    answer. They name the crew by its title or folder, never a request's command or file: they can
+    show on a locked screen. Screen readers hear of new questions, plans and stops the same way;
+    approvals are announced with their cards, and finished turns would be too chatty.
+98. **No "Turn finished" notification while only one of your crews is in town.** You are probably
+    at its terminal.
+99. **`I` goes to what needs you.** It is free in the page (no browser uses a bare `I`), and reads
+    as "inbox". A request the town can answer opens its card in Approvals; anything else is
+    answered in the terminal, so the agent is selected and the camera points at it.
+100. **A hook sent before an agent's wait began, or before it last moved on, is stale.** Every hook
+    but a permission request reaches the town on its own, in the background, so a late
+    `PreToolUse` of a finished turn does not end its wait, and a `Stop` that arrives after the
+    prompt you queued behind it starts none. The town goes by each hook's own time, as the phone
+    notes and the broker do; the clock is the agent's machine, the same one for all its hooks.

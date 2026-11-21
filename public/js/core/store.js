@@ -13,6 +13,8 @@ import { NO_SESSION, normalize } from './events.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
+import { dialogsAfterApproval, dialogsAfterEvent } from './store-dialogs.js';
+import { movesOn, stopLabel, waitAfter } from './waits.js';
 
 export { ACHIEVEMENTS };
 
@@ -89,6 +91,8 @@ export { ACHIEVEMENTS };
  * @property {number} errors
  * @property {string} [lastMessage]
  * @property {string} [model]
+ * @property {import('./waits.js').Wait|null} wait  what it waits for you on, if anything (waits.js)
+ * @property {number} movedAt  when it last moved on (a prompt, a tool call…): a stop sent earlier is stale
  */
 
 /**
@@ -106,6 +110,7 @@ export { ACHIEVEMENTS };
  * @property {number|null} expiresAt
  * @property {'town'|'terminal'|'timeout'} [decidedBy]
  * @property {string} [message]
+ * @property {string|null} [callKey]  the server's key for the call's input (§4.5), to find its dialog
  */
 
 /**
@@ -123,6 +128,7 @@ export { ACHIEVEMENTS };
  * @property {Session[]} sessions          in order first seen
  * @property {Record<string, AgentState>} agents
  * @property {Approval[]} approvals        pending first, then most recent
+ * @property {readonly import('./dialogs.js').Dialog[]} dialogs  open: asked and not answered yet, oldest first
  * @property {LogEntry[]} log              newest last
  * @property {Stats} stats
  * @property {Achievement[]} achievements
@@ -197,14 +203,6 @@ function upsertTask(s, patch) {
 // Applying events. Each handler mutates state and returns a log line (or null for no log line).
 
 const SESSION_SOURCES = Object.freeze({ startup: 'Arrived for work', resume: 'Resumed', clear: 'Started fresh', fork: 'Forked a session' });
-const STOP_FAILURES = Object.freeze({
-  rate_limit: 'Rate limited',
-  overloaded: 'Servers overloaded',
-  authentication_failed: 'Authentication failed',
-  billing_error: 'Billing problem',
-  server_error: 'Server error',
-  max_output_tokens: 'Hit the output limit',
-});
 const SHIPPING_LOG = Object.freeze({
   test: ['✅', 'Tests passed'],
   'git-commit': ['📮', 'Committed'],
@@ -385,7 +383,7 @@ function applyTurnFail(m, e, s, a) {
   m.turnFailed.add(a.key);
   m.state.stats.failures += 1;
   place(a, null, 'facepalm');
-  const label = own(STOP_FAILURES, e.data.error) ?? `Stopped (${String(e.data.error).replace(/_/g, ' ')})`;
+  const label = stopLabel(e.data.error);
   const details = e.data.errorDetails ? `: ${clip(e.data.errorDetails, 120)}` : '';
   return { icon: '⛈️', text: `${label}${details}`, level: 'error' };
 }
@@ -578,12 +576,26 @@ function apply(m, input) {
   m.state.stats.events += 1;
   const handler = own(APPLY, e.kind);
   const draft = handler && a ? handler(m, e, s, a, relabels) : null;
+  if (a) setWait(a, e);
+  // A teammate's crew (a team town) is theirs to answer: its dialogs are not kept.
+  if (!s.member && dialogsAfterEvent(m.dialogs, e, a ? a.agentId : e.agentId)) m.state.dialogs = m.dialogs.list();
   if (relabels.length) e.data.relabels = relabels;
   s.lastActivity = Math.max(s.lastActivity, e.ts);
   if (a) a.lastActivity = Math.max(a.lastActivity, e.ts);
   if (s.status !== 'ended') s.status = sessionStatus(m, s);
   if (draft) pushLog(m, e, s, a, draft);
   return e;
+}
+
+/**
+ * The agent's wait after an event (waits.js), and when it last moved on.
+ * @param {AgentState} a
+ * @param {TownEvent} e
+ */
+function setWait(a, e) {
+  const next = waitAfter(a, e);
+  if (next !== undefined) a.wait = next;
+  if (movesOn(e)) a.movedAt = Math.max(a.movedAt, e.ts);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -651,11 +663,13 @@ function approvalChanged(m, approval, ts) {
   const key = agentKeyOf(approval.sessionId, normalizeAgentId(approval.agentId));
   const a = m.state.agents[key];
   const tool = str(approval.toolName) || 'Tool';
+  const summary = summarizeTool(tool, approval.toolInput, approval.cwd ?? s?.cwd ?? '');
   if (a) waitForAnswer(m, a, key, approval.status, tool);
+  dialogsAfterApproval(m.dialogs, approval, summary);
+  m.state.dialogs = m.dialogs.list();
   if (s && s.status !== 'ended') s.status = sessionStatus(m, s);
   const log = own(APPROVAL_LOG, approval.status);
   if (log) {
-    const summary = summarizeTool(tool, approval.toolInput, approval.cwd ?? s?.cwd ?? '');
     const at = { ts, sessionId: approval.sessionId, agentKey: key, kind: 'approval' };
     pushLog(m, at, s, a, { icon: log.icon, text: `${log.prefix}: ${summary}`, level: /** @type {LogDraft['level']} */ (log.level) });
   }
@@ -776,6 +790,11 @@ export function createStore(options = {}) {
       sortApprovals(list);
       const ts = now();
       const ids = previous?.status === next.status ? [] : approvalChanged(m, next, ts);
+      // Handed back to the terminal without a new status (a release): its dialog is no longer held.
+      if (previous?.status === next.status && previous.held !== next.held) {
+        dialogsAfterApproval(m.dialogs, next, '');
+        m.state.dialogs = m.dialogs.list();
+      }
       const at = { ts, sessionId: str(next.sessionId), agentKey: agentKeyOf(str(next.sessionId), normalizeAgentId(next.agentId)) };
       const unlocked = unlock(ids, at);
       emit({ type: 'approval', approval: next });

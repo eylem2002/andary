@@ -1,6 +1,7 @@
 // Open dialogs: what each agent has asked you and not had an answer to yet (docs/design/
-// agent-health.md §2). One model for the phone notes (server/notify.mjs) and the approval broker
-// (server/approvals.mjs), so both agree on when an agent waits for you. Pure and bounded.
+// agent-health.md §2, §3). One model for the phone notes (server/notify.mjs), the approval broker
+// (server/approvals.mjs) and the town's "needs you" (core/store-dialogs.js), so all agree on when
+// an agent waits for you. Pure and bounded.
 //
 // A dialog opens with a permission request, a question or a plan (AskUserQuestion, ExitPlanMode),
 // or a session's own notice: "needs your permission" when nothing of that session is known to be
@@ -383,8 +384,8 @@ function toolStarted(d, s) {
 }
 
 /**
- * What one hook does to the dialogs: the one table the phone notes and the approval broker both
- * follow, so they agree on when an agent waits for you. Give each hook its own time (`at`), not
+ * What one hook does to the dialogs: the one table the phone notes, the approval broker and the
+ * town all follow, so they agree on when an agent waits for you. Give each hook its own time (`at`), not
  * its arrival: hooks may arrive out of order.
  * @param {Dialogs} dialogs
  * @param {HookStep} step

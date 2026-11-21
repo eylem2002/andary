@@ -1,10 +1,12 @@
 // The top of the screen: the town's street sign (brand + live counts) on the left; on the right,
-// "waiting for you" when approvals wait (like a wanted level: it stays until you answer), the
-// connection status and settings. The page title carries the same count for a background tab.
+// "3 need you" while agents wait for you (like a wanted level: it stays until you act, and a click
+// goes to the most urgent, the next click to the next one), the connection status and settings.
+// The page title carries the same count for a background tab.
 import { h, setAttr, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { listJoin, plural } from './format.js';
-import { pendingCount } from './approvals.js';
+import { countedItems } from '../core/attention.js';
+import { needsYouLabel } from './needs-you.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -34,7 +36,7 @@ export function createMasthead(ctx) {
 
   const waitingCount = h('span', { class: 'hud-waiting__count' });
   const waitingWords = h('span', { class: 'hud-waiting__words' });
-  const waiting = h('button', { type: 'button', class: 'hud-btn hud-btn--board hud-waiting', hidden: true, 'data-testid': 'waiting-for-you', on: { click: () => ctx.showTab('approvals', { focus: true }) } },
+  const waiting = h('button', { type: 'button', class: 'hud-btn hud-btn--board hud-waiting', hidden: true, 'data-testid': 'waiting-for-you', 'aria-keyshortcuts': 'I', on: { click: () => ctx.run('needs-you') } },
     icon('hourglass', { size: 18 }), waitingCount, waitingWords);
 
   const el = h('header', { class: 'hud hud-masthead' }, sign, h('div', { class: 'hud-topright' }, waiting, setupButton, status, settingsButton));
@@ -42,15 +44,18 @@ export function createMasthead(ctx) {
   /** @param {StoreState} state */
   function render(state) {
     setText(subtitle, subtitleFor(state, ctx.view));
-    const pending = pendingCount(state);
+    const items = ctx.needsYou.items(state);
+    const counted = countedItems(items);
+    const n = counted.length;
     // Answered elsewhere while the button had the keyboard: keep focus in the cluster.
-    if (pending === 0 && document.activeElement === waiting) settingsButton.focus();
-    setHidden(waiting, pending === 0);
-    setText(waitingCount, String(pending));
-    setText(waitingWords, pending === 1 ? 'approval waiting for you' : 'approvals waiting for you');
-    setAttr(waiting, 'aria-label', waitingLabel(pending));
-    const title = pageTitle(pending);
-    if (document.title !== title) document.title = title;
+    if (n === 0 && document.activeElement === waiting) settingsButton.focus();
+    setHidden(waiting, n === 0);
+    setText(waitingCount, String(n));
+    setText(waitingWords, n === 1 ? 'needs you' : 'need you');
+    setAttr(waiting, 'aria-label', needsYouLabel(counted, ctx.needsYou.peek(items)));
+    // Yellow while an agent is blocked or stopped; quieter when crews only finished their turns.
+    setAttr(waiting, 'data-level', counted[0]?.level ?? null);
+    updateTitle(n);
     const key = ctx.view.connection;
     const info = STATUS[key] ?? STATUS.connecting;
     const text = key === 'demo' && ctx.view.paused ? 'Demo, paused' : info.text;
@@ -66,14 +71,15 @@ export function createMasthead(ctx) {
   return { el, render };
 }
 
-/** The button's words: what is waiting, and on whom. @param {number} pending */
-export function waitingLabel(pending) {
-  return pending === 1 ? '1 approval waiting for you' : `${pending} approvals waiting for you`;
+/** "(2) Andary" while things need you, so a background tab shows it. @param {number} count */
+export function pageTitle(count) {
+  return count > 0 ? `(${count}) Andary` : 'Andary';
 }
 
-/** "(2) Andary" while approvals wait, so a background tab shows it. @param {number} pending */
-export function pageTitle(pending) {
-  return pending > 0 ? `(${pending}) Andary` : 'Andary';
+/** @param {number} count */
+export function updateTitle(count) {
+  const title = pageTitle(count);
+  if (document.title !== title) document.title = title;
 }
 
 /**

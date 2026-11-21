@@ -305,5 +305,16 @@ export function createApprovalsPanel(ctx) {
     return Boolean(card);
   }
 
-  return { el, render, tick, focusFirstPending };
+  /** Focuses one request's card (from "need you"); the first pending one if it is gone. @param {string} id */
+  function focusApproval(id) {
+    const card = /** @type {HTMLElement|null} */ (list.querySelector(`.hud-approval[data-approval-id="${CSS.escape(id)}"]`));
+    if (card) {
+      card.scrollIntoView({ block: 'nearest' });
+      card.focus();
+      return true;
+    }
+    return focusFirstPending();
+  }
+
+  return { el, render, tick, focusFirstPending, focusApproval };
 }

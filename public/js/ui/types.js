@@ -91,6 +91,7 @@
  * @property {ReturnType<typeof import('./toasts.js').createToasts>} toasts
  * @property {() => void} refresh   re-renders view-dependent parts (toolbar, masthead, panels)
  * @property {ReturnType<typeof import('./cinema.js').createCinema>} cinema   the director camera
+ * @property {ReturnType<typeof import('./needs-you.js').createNeedsYou>} needsYou  what needs the viewer (core/attention.js)
  */
 
 export {};

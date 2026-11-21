@@ -272,7 +272,7 @@ Server → browser:
 { t: 'progress', p: { points, days: string[] } }   // §4.9, when a point or a busy day is added
 { t: 'notify-test', ok: boolean }                  // §4.10, the answer to a test
 { t: 'error', message }
-// Envelope = { id: number /* server sequence */, ts: number /* hook start, ms */, rx: number /* server receive */, event: object /* sanitized payload */ }
+// Envelope = { id: number /* server sequence */, ts: number /* hook start, ms, never after rx nor more than an hour before it (a teammate's: §7) */, rx: number /* server receive */, event: object /* sanitized payload */ }
 // Approval = { id, status: 'pending'|'allowed'|'denied'|'expired'|'resolved', held: boolean, sessionId, agentId: string|null,
 //              toolName, toolInput, callKey: string|null /* the request's andary_key, §4.6 */, source: 'claude'|'codex',
 //              cwd, createdAt, expiresAt: number|null, decidedBy?: 'town'|'terminal'|'timeout', proof?: 'ran'|'denied'|'stopped', message? }
@@ -302,8 +302,9 @@ new question or plan). A held approval is not resolved by the terminal while the
 Released, it waits in the terminal like any other and is resolved when its dialog closes, or at
 once if its dialog closed while it was held (its turn or session ended; `proof` says by what). An
 expired one stays expired, but its dialog shows in the terminal now, so your next prompt answers
-it. `callKey` is the request's call key (§4.6): the phone notes find the approval's own dialog by
-it (§4.10), as a parallel call of the same tool may be open beside it. At most 50 pending.
+it. `callKey` is the request's call key (§4.6): the phone notes and the town find the approval's
+own dialog by it (§4.10, §5.1), as a parallel call of the same tool may be open beside it. At
+most 50 pending.
 `ExitPlanMode` and `AskUserQuestion` requests are never held: a plain allow or deny cannot approve
 a plan or answer a question, so they are answered with `null` at once (`held: false`) and their
 `message` always says they are answered in the terminal. A request is held only when its card
@@ -382,8 +383,8 @@ Settled during implementation; they refine §4.3–§4.5.
   are dropped, §4.12). A renamed call without a key (from an older teammate's server) gets null and
   goes by name. Other hooks lose any `andary_key`. Sanitising keeps it: envelopes carry it.
 - **Open dialogs** (`public/js/core/dialogs.js`): what an agent has asked you and had no answer to,
-  one dialog per call. The phone notes (§4.10) and the approval broker (§4.5) each keep their own
-  tracker and follow one table, `afterHook()`, at each hook's own time (`hookTime()`,
+  one dialog per call. The phone notes (§4.10), the approval broker (§4.5) and the town (§5.1)
+  each keep their own tracker and follow one table, `afterHook()`, at each hook's own time (`hookTime()`,
   `server/hook-steps.mjs`): the forwarder's `ts` (the envelope's), kept between an hour before
   its arrival (`MAX_HOOK_AGE_MS`; an older stamp counts as `arrival − 1 h`) and its arrival. The
   stamp is this computer's own clock, and a computer that sleeps or suspends can hold a hook back
@@ -525,8 +526,17 @@ the WebSocket `hello`. Only this computer's events count (§4.11).
 - A finished turn posts nothing by itself. Stopping the server drops every note still waiting.
 
 This computer (`public/js/ui/notifications.js`), opt-in in Settings (`prefs.desktopNotify`, after
-the browser's permission): while the page is hidden, a fresh pending approval, the main agent's
-finished turn or a failed turn becomes a system notification naming the crew.
+the browser's permission), follows "needs you" (§5.1): while the page is hidden, each new counted
+item becomes one system notification naming the crew (its title, or its project's folder), never
+a request's command or file ("Permission needed", "Question for you", "Plan to approve", "Turn
+stopped", "Crews stopped", "Turn finished"). An item the viewer could already see (the page in
+front, or notifications off) never pops up later, nor one that started to count more than two
+minutes ago (a reconnect or a page opened in the background); changes that arrive together (a
+reconnect's history) are checked once. A permission request waits until its request reaches the
+town (or three seconds), so it is worded right the first time. No "Turn finished" while only one
+of your crews is in town, and nothing for someone watching a team town with its view link. The
+same watcher keeps the page title's count current in a background tab, redraws the HUD when the
+clock alone changes the list, and tells screen readers of new questions, plans and stops.
 
 ### 4.11 Team town
 
@@ -627,8 +637,10 @@ sets them).
 `subagent.start`, `subagent.stop`, `turn.stop`, `turn.fail`, `task.created`, `task.completed`,
 `teammate.idle`, `compact.start`, `compact.end`, `model.switch`, `todos.set`, `task.upsert`,
 `spawn.request`, `spawn.result`, `message.send`, `unknown`. `tool.start` carries
-`{toolUseId, tool, input, building, activity, summary}` where `summary` is a short human string
-("Read src/auth/login.ts", "$ npm test", "grep \"TODO\" in src").
+`{toolUseId, tool, input, building, activity, summary, callKey}` where `summary` is a short human
+string ("Read src/auth/login.ts", "$ npm test", "grep \"TODO\" in src") and `callKey` the server's
+key for the call's input (`andary_key`, §4.6), or null. `turn.stop` carries `interrupted` (Codex's
+interrupt).
 
 `store.js` keeps sessions (crews), agents, tasks/todos, approvals, the activity log (ring buffer)
 and stats, and emits change notifications. `director.js` turns TownEvents into world calls and
@@ -681,13 +693,72 @@ AgentState { key, sessionId, agentId: string|null, name, role: 'lead'|'subagent'
              currentTool?, summary?, description?, startedAt, lastActivity,
              toolCounts: Record<string, number>, files: string[] /* recent unique, ≤ 30 */,
              changes: FileChange[] /* finished Edit/MultiEdit/Write/NotebookEdit, ≤ 20, newest last */,
-             recent: LogEntry[] /* ≤ 30 */, errors: number, lastMessage? }
+             recent: LogEntry[] /* ≤ 30 */, errors: number, lastMessage?,
+             wait: Wait|null /* what it waits for you on, below */,
+             movedAt /* hook time it last moved on: a prompt, a tool call… */ }
+Wait { kind: 'finished'|'stopped', since /* hook time */, text /* one line */,
+       idleAt: number|null /* finished: when idle_prompt said nobody answered */,
+       cause: string|null /* stopped: StopFailure's error code */ }
+Dialog { id, sessionId, agentId: string|null, kind: 'permission'|'question'|'plan'|'unknown',
+         tools: string[], input: string|null /* inputKey() of the call */, at /* hook time */,
+         approvalId: string|null, held: boolean /* the town holds its request now */,
+         requested: boolean /* its permission request came */,
+         begun: boolean /* its PreToolUse came */, text /* what it is about */ }
+         // StoreState.dialogs: open ones
 LogEntry { id, ts, sessionId, agentKey, agentName, color, kind, icon, text,
            level: 'info'|'success'|'warn'|'error' }
 Achievement { id, title, description, icon, unlockedAt }
 FileChange { id, path /* relative to the crew's folder */, tool, ts, whole: boolean /* Write */,
              hunks: { before: string, after: string }[] /* from tool_input, ≤ 4,000 characters each */ }
 ```
+
+**Needs you** (`core/dialogs.js`, `core/waits.js`, `core/attention.js`, all pure;
+docs/design/agent-health.md §3). `StoreState.dialogs` lists what agents asked you and had no answer
+to, in the model the phone notes and the broker share (§4.6, `core/dialogs.js`, whose `afterHook`
+table says what each hook does, at the event's own `ts`, as hooks may arrive out of order): a dialog
+per call, opened by a `PermissionRequest`, an `AskUserQuestion` or `ExitPlanMode` call (the
+permission request Claude Code sends for one joins it, whichever arrives first; asking again closes
+the older one), an MCP server's form (`elicitation_dialog`, `elicitation_url_dialog`,
+`agent_needs_input`), or a session's `permission_prompt` notice when nothing of that session is
+known to be open; closed only by that very call reporting back (same tool and input; questions and
+plans by name), the town deciding its request, your prompt or a manual `/compact` (every dialog of
+the session the town is not holding: nothing showed in your terminal if you could type), the agent's
+turn ending (also in an error, or a teammate going idle) or the session ending; a notice or a form
+closes when the lead starts a new call after it. A request sent back to the terminal, a new request
+and guesses are no proof. `core/store-dialogs.js` feeds it from events (with the server's `callKey`
+when it sent one) and approval changes: an approval links to its dialog by its `callKey` and says
+whether the town holds it; one with no dialog (older than the history kept) opens one; `allowed`,
+`denied` and `resolved` close it (the broker resolves by the same table). A teammate's crew keeps no
+dialogs.
+`AgentState.wait` is the rest: a lead's finished turn or a failed turn. A prompt, a tool call, a new
+session, a helper finishing or a manual `/compact` ends it; `TeammateIdle` ends only a teammate's
+own. A hook sent before the wait began, or before the agent last moved on (`movedAt`: its newest
+prompt, tool call, new session or helper finishing), changes nothing when it arrives late: a
+`PreToolUse` of the turn does not end the wait, and a `Stop` that arrives after the prompt you
+queued behind it starts none.
+`attentionItems(state, now, { dismissed? }) → AttentionItem[]`, most urgent first:
+
+```js
+AttentionItem { id /* one per episode: dialog:agentKey:at:input, kind:agentKey:since, limit:since */,
+                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'finished',
+                level: 'blocked'|'stopped'|'alert'|'ready', sessionId, agentKey,
+                agentKeys: string[] /* everyone it stands for */,
+                approvalId: string|null /* a request the town holds */, since, countedSince,
+                text, counted: boolean, dismissable: boolean, crews: number,
+                settled: boolean /* false: a permission dialog whose request has not reached the town yet */ }
+```
+
+A permission dialog is an `approval` item while the town holds its request, else `terminal`;
+its id stays the same either way. A dialog the town does not hold can be set aside once it has
+waited `STALE_DIALOG_MS` (five minutes): it may be stale, as an interrupted helper sends nothing. A finished turn is listed at once and counted from
+`idle_prompt` (Codex: `CODEX_IDLE_MS`, a minute) for `READY_MS` (30 minutes). Stops by one rate
+limit (`cause: 'rate_limit'`) within ten minutes merge into one item for all their agents (two
+crews at least: a lead and its helper are one crew). Ended
+sessions and teammates' crews are left out. `ui/needs-you.js` adds the viewer's dismissals
+(stops and finished turns, kept in `localStorage["andary:dismissed"]` for a day and shared with the
+town's other tabs; someone watching a team town with its view link gets no items, as they can
+answer nothing) and drives the masthead button (its name: the visible words, then where a click
+goes), the `I` key, the page title, the crew rows, the inspector and the desktop notifications.
 
 `director.js`: `createDirector({ world, store, backlog?, humor?, random? }) → { dispose() }`
 subscribes to the store and drives the world. `recordChanges(store) → { stop() }` keeps the
@@ -896,7 +967,9 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="demo-button"]` | starts the simulation (shown when there is nothing live to watch) |
 | `[data-testid="crew-list"]` | crews panel; children `[data-testid="crew"][data-session-id]` |
 | `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects |
-| `[data-testid="agent-inspector"]` | details drawer for the selected agent |
+| `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn or stop aside |
+| `[data-testid="waiting-for-you"]` | the masthead's "N need you" button (`data-level` is the most urgent level); click goes to the next item |
+| `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn or a stop aside |
 | `[data-testid="activity-log"]` | log; children `[data-testid="log-entry"]` |
 | `[data-testid="tasks-panel"]` | goals/tasks; children `[data-testid="task-item"]` |
 | `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]` |

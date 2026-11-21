@@ -9,7 +9,7 @@ import { busiestAgent, sameSelection } from '../../../public/js/ui/hud-actions.j
 import { effectFor, FRESH_MS } from '../../../public/js/ui/hud-effects.js';
 import { noticeKind } from '../../../public/js/ui/hud.js';
 import { topTools } from '../../../public/js/ui/inspector.js';
-import { pageTitle, subtitleFor, waitingLabel } from '../../../public/js/ui/masthead.js';
+import { pageTitle, subtitleFor } from '../../../public/js/ui/masthead.js';
 
 /**
  * Test data only needs the fields a helper reads.
@@ -142,6 +142,13 @@ describe('effects', () => {
     assert.equal(effectFor({ type: 'reset' }, seen, now), null);
   });
 
+  test('a question or a plan is no permission to grant: no approval toast (needs-you tells of it)', () => {
+    const seen = new Set();
+    for (const toolName of ['AskUserQuestion', 'ExitPlanMode']) {
+      assert.equal(effectFor({ type: 'approval', approval: fixture({ id: toolName, status: 'pending', toolName, createdAt: now }) }, seen, now), null);
+    }
+  });
+
   test('each pending approval is announced once', () => {
     const seen = new Set();
     const approval = fixture({ id: 'x', status: 'pending', createdAt: now - 1000 });
@@ -181,9 +188,7 @@ describe('inspector and masthead', () => {
     assert.equal(subtitleFor(fixture({ sessions: [], agents: {}, stats: { toolCalls: 0 } }), fixture({ mode: 'demo', connection: 'demo' })), 'The demo crews are on their way');
   });
 
-  test('approvals waiting: the button and the page title say how many', () => {
-    assert.equal(waitingLabel(1), '1 approval waiting for you');
-    assert.equal(waitingLabel(3), '3 approvals waiting for you');
+  test('the page title says how many things need you', () => {
     assert.equal(pageTitle(0), 'Andary');
     assert.equal(pageTitle(2), '(2) Andary');
   });

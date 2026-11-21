@@ -619,6 +619,17 @@ body {
   background: #F6C665;
 }
 
+/* Only finished turns wait: no one is stuck, so the plate is quieter. */
+.hud-waiting[data-level="ready"] {
+  border-color: var(--hairline);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.hud-waiting[data-level="ready"]:hover {
+  background: var(--paper-2);
+}
+
 @keyframes hud-waiting-in {
   0% {
     transform: scale(0.85);
@@ -993,6 +1004,35 @@ body {
 
 .hud-station[data-status="error"] .hud-station__doing {
   color: var(--error);
+}
+
+/* Waiting for you (core/attention.js): what for, and the time it has waited. */
+.hud-station[data-need="blocked"] .hud-station__doing,
+.hud-station[data-need="blocked"] .hud-station__time {
+  color: var(--waiting);
+  font-weight: 600;
+}
+
+.hud-station[data-need="stopped"] .hud-station__doing {
+  color: var(--error);
+}
+
+.hud-stations__item {
+  position: relative;
+}
+
+.hud-stations__item.has-dismiss .hud-station {
+  padding-right: 34px;
+}
+
+/* Sets a finished turn or a stop aside; outside the station's button (buttons do not nest). */
+.hud-station__dismiss {
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  width: 28px;
+  height: 28px;
+  transform: translateY(-50%);
 }
 
 .hud-line__more {
@@ -1849,6 +1889,17 @@ body {
 .hud-inspector__now {
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+
+.hud-inspector__need {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: 6px;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .hud-inspector__brief,

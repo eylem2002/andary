@@ -59,6 +59,7 @@ export const NO_SESSION = 'unknown';
  * @property {CommandKind|null} commandKind  what a shell command does, for reactions/achievements
  * @property {string|null} mcpServer
  * @property {string|null} file        raw file path the tool touches, if any
+ * @property {string|null} callKey     the server's key for the call's input (andary_key), if any
  */
 
 /** @type {Readonly<Record<string, TownEventKind>>} */
@@ -83,6 +84,9 @@ const KIND_BY_HOOK = Object.freeze({
   PostCompact: 'compact.end',
   PostModelSwitch: 'model.switch',
 });
+
+/** The hook each town event kind came from (core/dialogs.js reads hooks by name). */
+export const HOOK_BY_KIND = Object.freeze(Object.fromEntries(Object.entries(KIND_BY_HOOK).map(([hook, kind]) => [kind, hook])));
 
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 
@@ -110,6 +114,8 @@ function toolData(p, cwd) {
     commandKind: command ? classifyCommand(command) : null,
     mcpServer: str(p.mcp_server) || mcpServerOf(tool),
     file: str(input.file_path ?? input.notebook_path) || null,
+    // The server's key for this call's input, read before sanitising cut anything (§4.6).
+    callKey: str(p.andary_key) || null,
   };
 }
 
@@ -182,6 +188,8 @@ const DATA = Object.freeze({
   }),
   'turn.stop': (p) => ({
     lastMessage: lastMessageOf(p),
+    // Codex's interrupt arrives as an interrupted Stop.
+    interrupted: str(p.stop_reason) === 'interrupted',
     stopHookActive: p.stop_hook_active === true,
     backgroundTasks: listOf(p.background_tasks),
     sessionCrons: listOf(p.session_crons),
