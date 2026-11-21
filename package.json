@@ -24,6 +24,7 @@
     "cli",
     "server",
     "hooks",
+    "mods",
     "public",
     ".claude-plugin",
     "commands",

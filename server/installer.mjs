@@ -288,8 +288,18 @@ function registeredEvents(settings, hookPath) {
  * @returns {boolean}
  */
 function pluginEnabledIn(settings) {
+  return enabledIn(settings, 'andary');
+}
+
+/**
+ * Whether these settings enable a plugin of that name, from any marketplace.
+ * @param {Record<string, any>} settings
+ * @param {string} name
+ * @returns {boolean}
+ */
+function enabledIn(settings, name) {
   const enabled = settings.enabledPlugins;
-  return isObject(enabled) && Object.entries(enabled).some(([id, on]) => id.startsWith('andary@') && on === true);
+  return isObject(enabled) && Object.entries(enabled).some(([id, on]) => id.startsWith(`${name}@`) && on === true);
 }
 
 /**
@@ -494,6 +504,7 @@ export function refreshForwarder(home) {
  * @property {string[]} events     events that have an Andary entry
  * @property {boolean} complete    all registrations present
  * @property {boolean} plugin      this file enables the Andary plugin
+ * @property {boolean} limitsMod   this file enables the andary-limits mod (CONTRACTS §4.14)
  * @property {string|null} error   unreadable or malformed file
  */
 
@@ -501,7 +512,7 @@ export function refreshForwarder(home) {
  * Where Andary is registered: each scope of each client for `dir`, plus the Claude Code plugin.
  * `scopes` lists Claude Code's scopes first, then Codex's.
  * @param {{ dir?: string, env?: NodeJS.ProcessEnv, home: string, clients?: HookClient[] }} options
- * @returns {{ scopes: ScopeReport[], plugin: boolean, installed: boolean }}
+ * @returns {{ scopes: ScopeReport[], plugin: boolean, limitsMod: boolean, installed: boolean }}
  */
 export function inspectInstallations({ dir, env, home, clients = Object.values(CLIENTS) }) {
   const hookPath = forwarderPath(home);
@@ -518,7 +529,8 @@ export function inspectInstallations({ dir, env, home, clients = Object.values(C
     }
   }
   const plugin = scopes.some((report) => report.plugin);
-  return { scopes, plugin, installed: plugin || scopes.some((report) => report.events.length > 0) };
+  // The mod sends limits only, not events: it does not count as installed hooks.
+  return { scopes, plugin, limitsMod: scopes.some((report) => report.limitsMod), installed: plugin || scopes.some((report) => report.events.length > 0) };
 }
 
 /**
@@ -533,8 +545,9 @@ function inspectScope(client, scope, settingsPath, hookPath) {
     const { settings } = readSettingsFile(settingsPath);
     const events = registeredEvents(settings, hookPath);
     const complete = client.registrations.every((r) => events.includes(r.event));
-    return { client, scope, settingsPath, events, complete, plugin: client.id === 'claude' && pluginEnabledIn(settings), error: null };
+    const claude = client.id === 'claude';
+    return { client, scope, settingsPath, events, complete, plugin: claude && pluginEnabledIn(settings), limitsMod: claude && enabledIn(settings, 'andary-limits'), error: null };
   } catch (error) {
-    return { client, scope, settingsPath, events: [], complete: false, plugin: false, error: error.message };
+    return { client, scope, settingsPath, events: [], complete: false, plugin: false, limitsMod: false, error: error.message };
   }
 }

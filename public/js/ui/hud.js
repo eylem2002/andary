@@ -16,6 +16,7 @@ import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
 import { createInspector } from './inspector.js';
 import { createWeatherDriver } from '../core/town-weather.js';
 import { MILESTONES, unlockedAt } from '../core/growth.js';
+import { readAccounts } from '../core/limits.js';
 import { LOOK } from '../page.js';
 import { createDiffDialog } from './changes.js';
 import { createUsageDialog } from './usage.js';
@@ -152,6 +153,8 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     setProgress(progress) {
       showProgress(hud, shell, progress);
     },
+    /** Plan limits (§4.14), from the server or the demo: every account's, as a whole. @param {unknown} limits */
+    setLimits: (limits) => showLimits(ctx, limits),
     /** @param {boolean} available */
     setServerAvailable(available) {
       view.serverAvailable = available;
@@ -220,6 +223,16 @@ function showProgress({ ctx }, shell, raw) {
 }
 
 /**
+ * Keeps the plan limits in the view; the toolbar and the Usage dialog read them from there.
+ * @param {HudContext} ctx
+ * @param {unknown} limits
+ */
+function showLimits(ctx, limits) {
+  ctx.view.limits = readAccounts(limits);
+  ctx.refresh();
+}
+
+/**
  * How the ambient sound should feel now: busier with more agents at work, night by the town's
  * clock, rain with the town's weather.
  * @param {HudContext} ctx
@@ -256,6 +269,7 @@ function initialView(prefs) {
     worldFailed: false,
     serverSettings: {},
     progress: null,
+    limits: [],
     selection: null,
     follow: false,
     paused: false,
@@ -487,6 +501,11 @@ function watchEnvironment(ctx, ui, shell) {
     ui.inspector.tick(now);
     if (++ticks % 5 === 0) ui.activity.tick(now);
     if (ticks % 60 === 0) applyTheme(ctx.prefs, ctx.world());
+    // "as of", the reset time and the pace move with the clock alone.
+    if (ticks % 30 === 0) {
+      ui.toolbar.render();
+      ui.dialogs.usage.render();
+    }
     if (ticks % 2 === 0) ctx.sound.setAmbient({ wanted: ctx.prefs.ambient, mood: ambientMood(ctx, shell.weather?.current.rain ?? 0) });
   };
   const sync = () => {

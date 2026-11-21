@@ -64,6 +64,31 @@ already running pick the hooks up when they restart.
   separate Claude Code sessions, and their hooks carry nothing that names the lead's session,
   so each shows up as a crew of its own. The default in-process teammates join the lead's crew.
 
+### Plan limits (optional)
+
+To see your **5-hour and weekly limits** (and a gateway's spend limit) in the town, add the small
+`andary-limits` mod to Claude Code (v2.1.287 or newer). It is a plugin of its own, so you choose
+it; it works next to `andary install` or the Andary plugin, and it leaves your status line alone.
+
+```text
+/plugin marketplace add eylem2002/andary      # once, if you have not added it for the plugin
+/plugin install andary-limits@andary
+```
+
+(From a shell: `claude plugin marketplace add eylem2002/andary` and
+`claude plugin install andary-limits@andary`.) Sessions you start afterwards report after each
+turn: the **Usage** button gets a gauge of your most used limit, and `U` shows each limit with when
+it was read, when it resets, and, when your pace would use it up first, around when. Claude Code
+reports limits for Pro and Max plans, after its first answer.
+
+- **What it sends:** numbers only (each limit's percent and reset time, the session's context size,
+  its id and Claude Code's version), to the Andary server on this computer, which first proves
+  it is yours, as the hook forwarder does. Nothing leaves your computer.
+- **A phone note at 90%:** start with `andary start --notify --notify-limits` (off by default; one
+  note per limit window).
+- **Check it:** `andary doctor` says when the mod last reported, and from which Claude Code.
+- **Remove it:** `/plugin uninstall andary-limits@andary` (or turn it off in `/plugin`).
+
 ## 3. Connect Codex
 
 Andary connects to OpenAI's **Codex CLI** through Codex's own hooks (recent versions have hooks
@@ -232,7 +257,8 @@ team town are theirs and left out.
 
 - **Cost and tokens:** each crew shows what it has cost so far, estimated at API list prices from
   Claude Code's own transcripts (on a Pro or Max plan, a measure of value, not a bill). `U` opens
-  today's total and the last 14 days.
+  today's total and the last 14 days, and your plan limits with the
+  [andary-limits mod](#plan-limits-optional).
 - **Context in use:** each crew's lead shows how much context it is using, under its time
   ("182k in context"): what its latest request read, the way Claude Code's status line counts it.
   An agent's details give the exact count and how old it is ("as of 2m ago"), for helpers too.
@@ -365,6 +391,7 @@ The full model: [docs/INTEGRATION.md](docs/INTEGRATION.md).
 | Port 4747 is in use | `andary start --port 5000` (or `--port 0` for any free port). |
 | Events arrive twice | The plugin and `andary install` are both active, or one agent is installed in two scopes: `andary doctor` says which; uninstall one. |
 | A teammate's view link says "Forbidden" | Start the host with `--team-host <the name in the link>`, or use the IP address the invite printed. |
+| No plan limits on the Usage button | Install the [andary-limits mod](#plan-limits-optional), then finish a turn in a session started afterwards (Claude Code v2.1.287 or newer; an API key has no plan limits). `andary doctor` says whether it reported. |
 | The 3D view is blank or slow | Settings → Graphics → Low power; the boards and log keep working without WebGL. |
 
 ## 8. Command reference
@@ -375,6 +402,7 @@ andary [command] [options]
   start                 start the town and open it (the default command)
                         --port <n>, --host <address>, --no-open, --detach, --record,
                         --remote-approvals, --approval-timeout <s>, --notify, --notify-url <url>,
+                        --notify-limits (a phone note at 90% of a plan limit),
                         --team [--team-host <name>], --share-to <address> (key in ANDARY_TEAM_KEY),
                         --tls-cert <file> --tls-key <file> (HTTPS for other computers)
   demo                  start the town with the built-in simulation
@@ -462,6 +490,7 @@ server/adapters/      Claude Code and Codex → one event format
 server/ingest.mjs     the one pipeline every event enters through
 server/cli/           one module per command
 hooks/                the hook forwarder (shared by Claude Code and Codex) and plugin hooks
+mods/andary-limits/   the optional Claude Code mod that reports plan limits
 public/js/core/       pure logic: events, store, director, catalog, rules shared with the server
 public/js/sources/    where events come from: live (WebSocket) or demo (simulation)
 public/js/ui/         the HUD

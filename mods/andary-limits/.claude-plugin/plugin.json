@@ -1,0 +1,12 @@
+{
+  "name": "andary-limits",
+  "displayName": "Andary limits",
+  "version": "0.1.0",
+  "description": "Optional mod for Andary (Claude Code v2.1.287 or newer): after each turn, sends your 5-hour and weekly limits (numbers only) to the Andary town running on this computer, which shows them on its Usage button. Leaves your status line alone.",
+  "author": {
+    "name": "eylem2002"
+  },
+  "repository": "https://github.com/eylem2002/andary",
+  "license": "MIT",
+  "keywords": ["usage", "limits", "rate-limits", "andary", "mod"]
+}

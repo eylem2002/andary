@@ -28,6 +28,7 @@ test('the rules catch the crossings the architecture forbids', () => {
     { file: 'public/js/core/store.js', text: "import { h } from '../ui/dom.js';" },
     { file: 'server/routes.mjs', text: "import { createStore } from '../public/js/core/store.js';\nimport { localDate } from '../public/js/core/dates.js';" },
     { file: 'hooks/hook.mjs', text: "import { x } from '../server/config.mjs';" },
+    { file: 'mods/andary-limits/hooks/register.js', text: "import { createHmac } from 'node:crypto';\nimport { isObject } from '../../../public/js/core/text.js';\nimport { helper } from './helper.js';" },
     { file: 'public/js/world/world.js', text: "import { water } from './env/water.js';\nimport { createEnvironment } from './env/environment.js';" },
     { file: 'public/js/world/env/water.js', text: "import * as THREE from 'three';\nimport { Crowd } from '../agents/crowd.js';" },
   ]);
@@ -36,6 +37,8 @@ test('the rules catch the crossings the architecture forbids', () => {
     'public/js/core/store.js ../ui/dom.js',
     'server/routes.mjs ../public/js/core/store.js',
     'hooks/hook.mjs ../server/config.mjs',
+    'mods/andary-limits/hooks/register.js node:crypto',
+    'mods/andary-limits/hooks/register.js ../../../public/js/core/text.js',
     'public/js/world/world.js ./env/water.js',
     'public/js/world/env/water.js ../agents/crowd.js',
   ]);

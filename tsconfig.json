@@ -21,6 +21,7 @@
     "cli/**/*.mjs",
     "server/**/*.mjs",
     "hooks/**/*.mjs",
+    "mods/**/*.js",
     "scripts/**/*.mjs",
     "public/js/**/*.js",
     "test/**/*.mjs",

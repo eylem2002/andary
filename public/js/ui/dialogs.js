@@ -262,7 +262,7 @@ function notifyBlocks(ctx) {
       setHidden(topicRow, !url);
       topic.textContent = url ?? '';
       phoneText.textContent = url
-        ? 'On. Install the free ntfy app and subscribe to this address. Messages only say what happened, never your project or commands.'
+        ? `On. Install the free ntfy app and subscribe to this address. Messages only say what happened, never your project or commands.${ctx.view.serverSettings.notifyLimits ? ' Also when a plan limit reaches 90%.' : ''}`
         : 'Off. Start Andary with --notify to get them on your phone through the free ntfy app (no account).';
     },
   };

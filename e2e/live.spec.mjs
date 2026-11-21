@@ -5,6 +5,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { HOOK_SOURCE } from '../server/config.mjs';
+import { measureWithMod } from './helpers/mod.mjs';
 import { startTown } from './helpers/town.mjs';
 
 // These tests cover the live pipeline and the HUD, not the 3D scene: ?world=fake skips WebGL,
@@ -559,4 +560,33 @@ test('with --notify-url, Settings shows the phone topic and sends a test', async
   await page.getByTestId('phone-notify-test').click();
   // Nothing listens on port 9, so the server says it could not send it.
   await expect(page.getByText('The test notification was not sent')).toBeVisible({ timeout: 10_000 });
+});
+
+test('limits from the andary-limits mod arrive, and the Usage button shows the gauge', async ({ page }) => {
+  await signIn(page);
+  const usage = page.locator('[data-tool="usage"]');
+  await expect(usage).toHaveAttribute('aria-label', 'Usage and cost');
+  await expect(page.getByTestId('usage-gauge')).toBeHidden();
+  const resetsAt = new Date(Date.now() + 2 * 3_600_000);
+  // The mod's own code, as Claude Code runs it after a turn: proof, secret, numbers.
+  await measureWithMod({
+    env: { ANDARY_HOME: town.home },
+    usage: { context: { tokens: 182_340, window: 1_000_000, percent: 18 }, rateLimits: [{ kind: 'five_hour', percentUsed: 91, resetsAt: resetsAt.toISOString() }, { kind: 'seven_day', percentUsed: 20, resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() }], cost: { usd: 2 } },
+  });
+  const clock = `${String(resetsAt.getHours()).padStart(2, '0')}:${String(resetsAt.getMinutes()).padStart(2, '0')}`;
+  await expect(usage).toHaveAttribute('aria-label', new RegExp(`^Usage and cost\\. 5-hour limit 91% used, resets (tomorrow )?at ${clock}$`));
+  const gauge = page.getByTestId('usage-gauge');
+  await expect(gauge).toBeVisible();
+  await expect(gauge).toHaveAttribute('data-level', 'high');
+  await expect(gauge).toHaveAttribute('data-percent', '91');
+  // Not something that needs you: Claude Code warns at 85% itself.
+  await expect(page.getByTestId('waiting-for-you')).toBeHidden();
+  await usage.click();
+  const limits = page.locator('[data-testid="limit-gauge"]');
+  await expect(limits).toHaveCount(2);
+  await expect(limits.first()).toContainText('5-hour limit');
+  await expect(limits.first()).toContainText('91% used');
+  await expect(limits.first()).toContainText(/as of \d\d:\d\d, resets (tomorrow )?at \d\d:\d\d/);
+  await expect(limits.nth(1)).toContainText('Weekly limit');
+  await expect(page.getByTestId('limits-note')).toBeHidden();
 });

@@ -10,7 +10,22 @@
       "source": "./",
       "description": "Shows every Claude Code session, subagent and teammate as a worker in a live 3D town, and lets you answer permission prompts from it.",
       "category": "observability",
-      "tags": ["visualization", "hooks", "agents"]
+      "tags": [
+        "visualization",
+        "hooks",
+        "agents"
+      ]
+    },
+    {
+      "name": "andary-limits",
+      "source": "./mods/andary-limits",
+      "description": "Optional mod (Claude Code v2.1.287+): shows your 5-hour and weekly limits on the Andary town's Usage button, without taking over your status line. Install it next to Andary (the plugin or andary install).",
+      "category": "observability",
+      "tags": [
+        "usage",
+        "limits",
+        "mod"
+      ]
     }
   ]
 }

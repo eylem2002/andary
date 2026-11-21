@@ -18,6 +18,8 @@ const START_HELP = `Options:
       --notify              Phone notifications through the free ntfy app (a private topic
                             on ntfy.sh, kept in ~/.andary/notify.json)
       --notify-url <url>    Your own ntfy topic URL instead (or ANDARY_NOTIFY_URL)
+      --notify-limits       Also a phone note when a Claude plan limit (5-hour, weekly) reaches
+                            90%, once per window; needs the andary-limits mod
       --team                Host a team town: teammates' Andarys can share their sessions here
                             (listens on your network unless --host says otherwise)
       --team-host <name>    Another name teammates reach this town by, e.g. a Tailscale name

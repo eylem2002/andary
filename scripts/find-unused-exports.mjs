@@ -20,6 +20,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const COMPUTED_IMPORTS = [
   { file: 'public/js/sim/simulation.js', names: ['createSimulation'], by: 'server/cli/simulate.mjs' },
   { file: 'eslint.config.js', names: ['default'], by: 'eslint' },
+  { file: 'mods/andary-limits/hooks/register.js', names: ['register'], by: 'Claude Code, which loads the mod (hooks.json)' },
   { file: 'playwright.config.mjs', names: ['default'], by: 'playwright' },
 ];
 

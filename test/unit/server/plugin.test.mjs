@@ -30,8 +30,22 @@ describe('Claude Code plugin packaging', () => {
     assert.ok(marketplace.owner?.name);
     assert.deepEqual(
       marketplace.plugins.map((/** @type {any} */ p) => [p.name, p.source]),
-      [['andary', './']],
+      [['andary', './'], ['andary-limits', './mods/andary-limits']],
     );
+  });
+
+  it('offers the limits mod as a plugin of its own, so nobody gets it without choosing it', () => {
+    const manifest = readJson('mods/andary-limits/.claude-plugin/plugin.json');
+    const pkg = readJson('package.json');
+    assert.equal(manifest.name, 'andary-limits');
+    assert.equal(manifest.version, pkg.version);
+    assert.equal(manifest.license, pkg.license);
+    // A hooks module and nothing else: no settings hooks, so it never sends events twice beside
+    // the andary plugin or andary install.
+    assert.deepEqual(readJson('mods/andary-limits/hooks/hooks.json').modules, ['./register.js']);
+    assert.ok(!('hooks' in readJson('mods/andary-limits/hooks/hooks.json')));
+    assert.ok(!('modules' in readJson('hooks/hooks.json')), 'the andary plugin itself carries no mod');
+    assert.ok(pkg.files.includes('mods'), 'the marketplace\'s mod is published with it');
   });
 
   it('ships a /town command that starts the server in the background', () => {

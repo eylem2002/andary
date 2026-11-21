@@ -10,7 +10,7 @@ The owner asked for seven things, from developers' own reports of running coding
 | 1 | Missing the moment an agent is waiting for you | **Needs you** | do, changed |
 | 2 | Agents stuck repeating the same failing step | **Stuck** alerts | do, changed |
 | 3 | Running out of context window | **Context** in tokens | do, much smaller |
-| 4 | Hitting usage limits by surprise | **Limits** gauge, status-line bridge | do last, opt-in |
+| 4 | Hitting usage limits by surprise | **Limits** gauge, through an opt-in mod (was: status-line bridge) | do last, opt-in |
 | 5 | Two agents editing the same file | **Same file** and git hazards | do, changed |
 | 6 | Coming back and not knowing what happened | **Catch me up** | do, changed |
 | 7 | Approving the same command again and again | **Allow always** | do, changed |
@@ -173,8 +173,8 @@ usage tracker keeps the newest per agent: `UsageRecord.context = { tokens, at }`
 **No percentage from the estimate, and no alert:** today's default models run a 1M window with no
 `[1m]` in the model id, the compaction point can be set by the user, and `/context` exists. So the
 Crews panel shows "182k in context" beside the model, the inspector the exact count and when it
-was read, and a compaction resets it. A percentage appears only with exact data from the status
-line (§9).
+was read, and a compaction resets it. A percentage appears only with exact data from the limits
+mod (§9).
 
 **Decision:** do, small.
 
@@ -270,26 +270,45 @@ rules while the suggestion stays), so the card is worded honestly.
 
 **Decision:** do. Size: small–medium.
 
-## 9. Limits gauge and the status-line bridge (last)
+## 9. Limits gauge, through an opt-in mod (last)
 
-The 5-hour and weekly limits reach exactly one place: the status line command's input
+The 5-hour and weekly limits reach no hook. They reach the status line command's input
 (`rate_limits.five_hour`, `.seven_day`, and `spend_limit` behind a gateway), for Pro and Max, after
-the first response. Before building the bridge, check whether Claude Code's newer extension points
-can read them without taking over the user's status line.
+the first response, and, since Claude Code v2.1.287, **mods**: plugins with a JavaScript hooks
+module that runs inside Claude Code. `$.session.usage()` returns `{ context: { tokens, window,
+percent }, rateLimits: [{ kind, percentUsed, resetsAt }], … }`, and the `session.measure` event
+fires after each turn and when a limit's percent changes.
 
-If the bridge is still the way: `andary install --statusline` points `statusLine` at the forwarder
-in a status mode. It sends numbers only (limits, exact context, session id, model), never waits on
-the server, and runs **the previous status line command from the same settings file** with the
-same input (only that one, never a project's; killed when Claude Code cancels it; quoted correctly
-on Windows); with no server it only runs that command. Uninstall restores it. `andary doctor`
-warns when a project's own `statusLine` overrides the bridge. The cost: Claude Code hides some
-footer hints when any status line is set.
+**The check this section asked for came out for mods, so the status-line bridge is not built.** A
+bridge would point `statusLine` at the forwarder, which hides some of Claude Code's footer hints
+for every session, and it would have to run the user's own status line command with the same
+input (only the one from the same settings file, killed when Claude Code cancels it, quoted
+right on Windows) and give it back on uninstall; a project's own `statusLine` would silently
+win over it. A mod reads the same numbers and leaves the status line alone.
 
-Shown as a gauge on the Usage button and in the usage dialog, with "as of" and the reset time, a
-projection when the pace runs out before the reset, and an optional phone note at 90%. Not counted
-in "needs you": Claude Code already warns at 85%.
+**Decided and built** (CONTRACTS §4.14):
 
-**Decision:** do last, opt-in, after the check. Size: medium.
+- **The mod** `andary-limits`: a second plugin in this repository's marketplace, installed on
+  purpose (`/plugin install andary-limits@andary`); nobody who installs Andary gets a mod without
+  choosing it. On `session.measure` it reads `$.session.usage()` and posts the numbers only
+  (kinds, percents, reset times, the exact context and window, the session id, Claude Code's
+  version) to the local server, without waiting: the hook returns at once and nothing it does
+  can throw into the session. It proves itself as the forwarder does: it reads `server.json`,
+  checks the server's proof (HMAC over a fresh nonce; the hooks sandbox has
+  `crypto.subtle.digest` only, so the HMAC is built on SHA-256) before it sends the hook secret.
+- **The server** keeps limits per Claude account (told apart by the config folder), in memory,
+  and shows them to owners only; a team host never gets them.
+- **The town**: a gauge on the Usage button (the most used limit) and a "Plan limits" list in the
+  usage dialog, each with "as of", the reset time, and a projection when the average pace since
+  the window opened would run it out before the reset. Not counted in "needs you": Claude Code
+  already warns at 85%.
+- **An optional phone note at 90%** (`--notify-limits`), once per window, within the notifier's
+  limits.
+- **Doctor** says whether limits have arrived, and from which Claude Code version.
+- **Exact context** from the mod is kept per session but not shown yet: the context reading (§5)
+  reads transcripts, and can later show a percentage from the mod's window.
+
+**Decision:** done, opt-in. Size: medium.
 
 ## 10. Review outcome
 
@@ -320,7 +339,7 @@ What it changed:
 4. Context in tokens (§5).
 5. Same file and git hazards (§6).
 6. Catch me up (§7).
-7. The limits gauge (§9), after the check.
+7. The limits gauge (§9), after the check (which chose a mod over the status-line bridge).
 
 Each is its own branch and pull request, with tests, docs (CONTRACTS, ASSUMPTIONS, README) and a
 review by someone who has not seen the work.

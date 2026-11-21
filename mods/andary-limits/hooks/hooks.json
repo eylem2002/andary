@@ -1,0 +1,4 @@
+{
+  "description": "The andary-limits hooks module: reports plan limits to the local Andary town after each turn",
+  "modules": ["./register.js"]
+}

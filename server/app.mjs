@@ -8,6 +8,7 @@ import { createProgress } from './progress.mjs';
 import { createNotifier } from './notify.mjs';
 import { createWorkTrees } from './work-trees.mjs';
 import { createTownDigest } from './digest.mjs';
+import { createLimitsTracker } from './limits.mjs';
 import { announceTeam, createHub, handleUpgrade } from './browsers.mjs';
 import { createTeamHost, createTeamRelay, lanAddresses, teamSecret } from './team.mjs';
 import { DEFAULT_APPROVAL_TIMEOUT_MS, DEFAULT_HOST, DEFAULT_PORT, LIMITS, PUBLIC_DIR, readVersion, resolveClaudeConfigDir, resolveHome } from './config.mjs';
@@ -29,6 +30,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {string} [publicDir]
  * @property {boolean} [remoteApprovals]
  * @property {string|null} [notifyUrl]    ntfy topic URL for phone notifications (null: off)
+ * @property {boolean} [notifyLimits]      a phone note when a plan limit reaches 90% (off by default)
  * @property {number} [notifyDelayMs]      how long a dialog's phone note waits (DIALOG_DELAY_MS); for tests, no CLI flag
  * @property {number} [awayMs]             how long without you counts as away (AWAY_MS); for tests, no CLI flag
  * @property {string} [claudeDir]          Claude Code's config folder, for reading token usage from transcripts
@@ -58,6 +60,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {ReturnType<typeof createNotifier>} notifier
  * @property {import('./work-trees.mjs').WorkTrees} [workTrees]  where local hooks' work trees start (andary_root)
  * @property {ReturnType<typeof createTownDigest>} digest   what your crews did while you were away
+ * @property {ReturnType<typeof createLimitsTracker>} limits  plan limits from the andary-limits mod
  * @property {import('./browsers.mjs').Hub} hub
  * @property {ReturnType<typeof createTeamHost>|null} team    set on a team host
  * @property {ReturnType<typeof createTeamRelay>|null} relay  set when sharing to a team host
@@ -185,7 +188,7 @@ function createHttpServer(ctx, tls) {
  */
 function createContext(config, options) {
   const hub = createHub(LIMITS.wsClients);
-  const notifier = createNotifier({ url: options.notifyUrl ?? null, log: config.log, delayMs: options.notifyDelayMs });
+  const notifier = createNotifier({ url: options.notifyUrl ?? null, log: config.log, delayMs: options.notifyDelayMs, limitNotes: Boolean(options.notifyLimits) });
   // Your absences are yours: only signed-in browsers hear of them.
   const digest = createTownDigest({ awayMs: options.awayMs, onAway: (away) => hub.broadcastOwners({ t: 'away', away }) });
   /** @type {TownContext} */
@@ -229,6 +232,13 @@ function createContext(config, options) {
     }),
     notifier,
     workTrees: createWorkTrees(),
+    // Per account, not per session: owners only, like costs; never relayed to a team host.
+    limits: createLimitsTracker({
+      onChange: (snapshot, account) => {
+        hub.broadcastOwners({ t: 'limits', limits: snapshot });
+        notifier.limitsChanged(account);
+      },
+    }),
     progress: createProgress({
       stateFile: config.writeState ? join(config.home, 'progress.json') : null,
       onChange: (progress) => hub.broadcast({ t: 'progress', p: progress }),

@@ -90,11 +90,11 @@ export function createHub(maxClients) {
 
 /**
  * @param {import('./app.mjs').TownContext} ctx
- * @returns {{ remoteApprovals: boolean, approvalTimeoutMs: number, notify: boolean }}
+ * @returns {{ remoteApprovals: boolean, approvalTimeoutMs: number, notify: boolean, notifyLimits: boolean }}
  */
 export function publicSettings(ctx) {
   // Whether phone notifications are on, never the topic: /api/hello answers without signing in.
-  return { remoteApprovals: ctx.settings.remoteApprovals, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: ctx.notifier.on };
+  return { remoteApprovals: ctx.settings.remoteApprovals, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: ctx.notifier.on, notifyLimits: ctx.notifier.limitNotes };
 }
 
 /**
@@ -112,7 +112,7 @@ export function teamSettings(ctx, role) {
  * @param {BrowserRole} role
  */
 function settingsFor(ctx, role) {
-  const settings = role === 'owner' ? publicSettings(ctx) : { remoteApprovals: false, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: false };
+  const settings = role === 'owner' ? publicSettings(ctx) : { remoteApprovals: false, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: false, notifyLimits: false };
   return ctx.team ? { ...settings, team: teamSettings(ctx, role) } : settings;
 }
 
@@ -212,6 +212,7 @@ function attachBrowser(ctx, connection, role) {
     history: ctx.history.list(),
     approvals: owner ? ctx.broker.list() : [],
     usage: owner ? ctx.usage.snapshot() : { agents: [], days: [] },
+    limits: owner ? ctx.limits.snapshot() : { accounts: [], contexts: {} },
     progress: ctx.progress.snapshot(),
     notifyUrl: owner ? ctx.notifier.url : null,
     // The latest time the owner was away: a page opened after one offers to catch up.

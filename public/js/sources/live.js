@@ -112,6 +112,7 @@ export function socketUrl(pageUrl) {
  * @property {(settings: object) => void} [onSettings]
  * @property {(message: string) => void} [onError]
  * @property {(progress: unknown) => void} [onProgress]  the town's growth and busy days (§4.9)
+ * @property {(limits: unknown) => void} [onLimits]  plan limits from the andary-limits mod, owners only (§4.14)
  * @property {(ok: boolean) => void} [onNotifyTest]  the answer to notifyTest()
  * @property {(digest: unknown) => void} [onDigest]   the answer to requestDigest(): what each crew did
  * @property {(away: unknown, offset: number) => void} [onAway]  the latest time you were away, from hello and as it changes, with how far the server's clock is ahead of this browser's (from hello)
@@ -122,7 +123,7 @@ export function socketUrl(pageUrl) {
  */
 
 /**
- * @typedef {Required<Pick<LiveOptions, 'onSettings'|'onError'|'onProgress'|'onNotifyTest'|'onDigest'|'onAway'>> & { store: LiveOptions['store'], ingest: (envelope: unknown) => void, clock: { offset: number } }} Sinks
+ * @typedef {Required<Pick<LiveOptions, 'onSettings'|'onError'|'onProgress'|'onLimits'|'onNotifyTest'|'onDigest'|'onAway'>> & { store: LiveOptions['store'], ingest: (envelope: unknown) => void, clock: { offset: number } }} Sinks
  */
 
 /**
@@ -140,6 +141,7 @@ const MESSAGES = Object.freeze({
   settings: (m, to) => to.onSettings(m.settings ?? {}),
   usage: (m, to) => to.store.setUsage?.(m.u, m.days),
   progress: (m, to) => to.onProgress(m.p),
+  limits: (m, to) => to.onLimits(m.limits),
   'notify-test': (m, to) => to.onNotifyTest(m.ok === true),
   digest: (m, to) => to.onDigest(m.d),
   away: (m, to) => to.onAway(m.away ?? null, to.clock.offset),
@@ -157,6 +159,7 @@ export function connectLive({
   onSettings = () => {},
   onError = () => {},
   onProgress = () => {},
+  onLimits = () => {},
   onNotifyTest = () => {},
   onDigest = () => {},
   onAway = () => {},
@@ -176,7 +179,7 @@ export function connectLive({
   /** @type {ReturnType<typeof setInterval>|null} */
   let pingTimer = null;
   /** Where the server's messages go (MESSAGES). @type {Sinks} */
-  const sinks = { store, ingest, onSettings, onError, onProgress, onNotifyTest, onDigest, onAway, clock: { offset: 0 } };
+  const sinks = { store, ingest, onSettings, onError, onProgress, onLimits, onNotifyTest, onDigest, onAway, clock: { offset: 0 } };
 
   /** @param {LinkStatus} next */
   function setStatus(next) {
@@ -245,6 +248,8 @@ export function connectLive({
     sinks.clock.offset = Number.isFinite(message.serverTime) ? message.serverTime - Date.now() : 0;
     // Always, so an absence from before a restart is not offered again.
     onAway(message.away ?? null, sinks.clock.offset);
+    // Whole, so a restarted server's empty list replaces what the town showed before.
+    onLimits(message.limits ?? null);
     setStatus('live');
     startPing();
   }

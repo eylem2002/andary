@@ -35,7 +35,8 @@ server/clients.mjs           What differs between the agents Andary connects to 
 server/cli/                  One module per CLI command, plus argument parsing
 hooks/hook.mjs               Hook forwarder copied to ~/.andary/hook.mjs by `install` (Claude Code and Codex)
 hooks/hooks.json             Hook config used when Andary is installed as a Claude Code plugin
-.claude-plugin/              plugin.json + marketplace.json (plugin distribution)
+mods/andary-limits/          The opt-in andary-limits mod: a second plugin of the marketplace (§4.14)
+.claude-plugin/              plugin.json + marketplace.json (plugin distribution; lists both plugins)
 commands/town.md             /town slash command for the plugin
 public/index.html            The app shell (import map, fonts, HUD markup roots)
 public/css/*.css             HUD styles (app.css) and in-world overlay styles (world.css)
@@ -77,7 +78,7 @@ docs/                        ADRs, QA and security reports, this file
 - `npm run lint` (ESLint, zero warnings), `npm run typecheck` (tsc `checkJs`), `npm run deadcode`
   (no export that nothing imports or uses) and `npm run boundaries` (the layer rules in
   docs/ARCHITECTURE.md: core is pure, the server reuses only listed core modules, the HUD never
-  imports the 3D world, the forwarder stands alone) must pass for every file you touch. Keep functions
+  imports the 3D world, the forwarder and the mod stand alone) must pass for every file you touch. Keep functions
   small (lint warns over 120 lines or complexity 20), names clear, comments explaining why rather
   than what. Use JSDoc types on exported functions.
 - **Never render dynamic text as HTML.** Hook data comes from sessions that read untrusted
@@ -261,6 +262,9 @@ shows up as a crew of its own.
   - `POST /api/hook` → requires `x-andary-secret` (constant-time compare), JSON ≤ 1 MiB,
     rate-limited (token bucket ~300 req/s, burst 600 → `429`). Responds `{"output": object|null}`,
     signed in `x-andary-signature` when the request has an `x-andary-nonce` (see §4.3).
+  - `POST /api/limits` → the andary-limits mod's report (§4.14): the same secret and the same
+    token bucket (`401` before anything else), JSON ≤ 16 KiB (`413`), `400` for a body that is
+    not `{"v":1,…}`. Responds `{"ok":true}`.
   - `GET /ws` → WebSocket upgrade; requires the subprotocol `andary.token.<uiToken>` (or
     `andary.view.<token>` on a team host) and an `Origin` matching the server's own origin (or
     absent); when the client offers `andary`, the answer confirms it (never a credential). Max 16 clients; client messages ≤ 64 KiB.
@@ -280,12 +284,13 @@ shows up as a crew of its own.
 Server → browser:
 
 ```js
-{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs }, history: Envelope[], approvals: Approval[], usage: { agents: UsageRecord[], days: UsageDay[] }, progress: { points, days }, notifyUrl: string|null, away: Away|null }
+{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits }, history: Envelope[], approvals: Approval[], usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null }
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
 { t: 'settings', settings: {...} }
 { t: 'usage', u: UsageRecord, days: UsageDay[] }   // §4.8, when an agent's totals change
 { t: 'progress', p: { points, days: string[] } }   // §4.9, when a point or a busy day is added
+{ t: 'limits', limits: LimitsSnapshot }            // §4.14, owners only, after each report of the mod
 { t: 'notify-test', ok: boolean }                  // §4.10, the answer to a test
 { t: 'away', away: Away }                          // §4.13, owners: an absence began or ended
 { t: 'digest', d: Digest }                         // §4.13, the answer to a digest request
@@ -634,6 +639,12 @@ the WebSocket `hello`. Only this computer's events count (§4.11).
   notifier runs on this computer's events, at each hook's own time (`hookTime`), with a memory of
   its own: the note goes out when an episode starts, through the usual limits. One held back by
   the 30 s limit is dropped, not sent later, and the episode sends nothing more.
+- **Plan limits** (§4.14), only with `--notify-limits` (off by default; it needs `--notify` or
+  `--notify-url`): when the mod reports a limit at 90% or more, "Claude's 5-hour limit is 91%
+  used. It resets at 15:40." (priority default), once per window: an account's limit of one kind
+  until its reset time (reset times less than an hour apart are one window). Each kind of limit
+  has its own 30 s turn (`limit-high:<kind>`) and the hour's limit counts them; a note the rate
+  limits hold back goes out with a later report. `settings.notifyLimits` says whether it is on.
 - A finished turn posts nothing by itself. Stopping the server drops every note still waiting.
 
 This computer (`public/js/ui/notifications.js`), opt-in in Settings (`prefs.desktopNotify`, after
@@ -692,8 +703,9 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
   their own prompts.
   A local `/api/hook` event never keeps an `andary_member` field.
 - **Browsers** are `owner` (the UI token) or `viewer` (the view token, team hosts only); `/api/hello` reports `authenticated: true` for both. A viewer's `hello` has no
-  approvals, empty usage, `notifyUrl: null`, `away: null` and `remoteApprovals: false`;
-  `approval`, `usage`, `away` and `settings` broadcasts go to owners only; a viewer's messages other than `ping` get
+  approvals, empty usage, empty limits, `notifyUrl: null`, `away: null` and `remoteApprovals: false`;
+  `approval`, `usage`, `limits`, `away` and `settings` broadcasts go to owners only (a team host
+  never receives a member's limits: they are not events); a viewer's messages other than `ping` get
   `{t:'error', message:'Viewers can only watch…'}`. Viewers never use the last 4 connections, and
   held prompts wait only while an owner is connected. On a team host `settings.team` is
   `{ role, members }` (members: names seen since start); when a new member's first batch
@@ -831,6 +843,77 @@ it is kept in memory, never on disk (it holds your agents' last messages); a res
                stops: Record<string, number>, failures, tests: 'passed'|'failed'|null, commits, pushes,
                allPushed: boolean, files, asked, answered, helpersStarted, helpersFinished, toolCalls }
   ```
+
+### 4.14 Plan limits: the andary-limits mod
+
+The 5-hour and weekly limits (and a gateway's spend limit) reach no hook. Claude Code (v2.1.287 and
+later) gives them to **mods**: plugins whose `hooks/hooks.json` names a JavaScript hooks module
+that runs inside Claude Code. `mods/andary-limits/` is one, offered as a second plugin of this
+repository's marketplace (`andary-limits@andary`), so nobody who installs Andary gets a mod
+without choosing it. It has no settings hooks of its own and works beside the `andary` plugin or
+`andary install` alike. No status-line bridge: it would hide some of Claude Code's footer hints and
+would have to run the user's own status line (design §9).
+
+**The mod** (`hooks/register.js`, ES module, `register(on)`): one hook, on `session.measure`
+("after each turn, and when a plan limit's percent used changes"). It starts a report and returns
+`next(e)` at once (the report never holds the session up; the hook's 10 s limit is far away), and
+nothing it does can throw into the session. A report: read `<ANDARY_HOME or $HOME/.andary>/server.json`
+with `$.fs.read` (none: stop); challenge `GET /api/proof` exactly as the forwarder does (§4.3) and
+check the proof with HMAC-SHA256 built on `crypto.subtle.digest` (the hooks sandbox has `digest`,
+`getRandomValues` and `randomUUID`, but no `importKey`, `sign` or `verify`); read
+`$.session.usage()`, `$.session.id()`, `$.session.version()` and `$.env.get('CLAUDE_CONFIG_DIR')`;
+`POST /api/limits` with `x-andary-secret` and
+
+```js
+{ v: 1, sessionId: string|null, claudeVersion: string|null /* "2.1.330" */, configDir: string|null,
+  limits: [{ kind /* five_hour, seven_day, spend_limit */, percentUsed: number, resetsAt: string /* ISO */ }],
+  context: { tokens: number, window: number } | null /* null before the first answer */ }
+```
+
+Numbers and identifiers only (no cost, nothing of the conversation). Readings that come while a
+report is on its way make one more report, of the newest numbers. `$` is never stored (Claude
+Code's static check refuses that), so that report reuses the `$` of the one in flight.
+`claude plugin validate mods/andary-limits` lists exactly `$.env.get` (ANDARY_HOME,
+CLAUDE_CONFIG_DIR, HOME, USERPROFILE), `$.fs.read`, `$.http.fetch`, `$.session.id`,
+`$.session.usage` and `$.session.version`; `claude plugin test mods/andary-limits` runs its tests
+in Claude Code's own engine.
+
+**The server** (`server/limits.mjs`): validates defensively (`kind` `/^[a-z][a-z0-9_]{0,39}$/`, a
+kind once, at most 8; `percentUsed` clamped to 0–100, one decimal; `resetsAt` no more than a day
+past and at most 32 days ahead; `sessionId` `[\w.:-]{1,200}`; `claudeVersion` `\d+.\d+.\d+…` ≤ 64;
+`context` whole numbers ≤ 100,000,000, window ≥ 1; anything else dropped or null). **Accounts**:
+limits belong to a Claude account, told apart by the config folder (`account: "default"`
+without `CLAUDE_CONFIG_DIR`, else `"dir-" + base64url(sha256(folder))[0..16]`, `label` the folder's
+name; the path itself is not kept). A report updates the kinds it carries, each with its own
+`at` (arrival time); one that carries none (an API key, a session before its first answer) keeps
+the account's. At most 8 accounts and the exact context of 100 sessions are kept, newest first,
+in memory only (a restart forgets them until the next turn). Limits whose `resetsAt` has passed
+are left out of every snapshot.
+
+```js
+LimitsSnapshot { accounts: AccountLimits[] /* newest first */,
+                 contexts: Record<sessionId, { tokens, window, at }> /* not shown yet: design §5 */ }
+AccountLimits { account, label: string|null, claudeVersion: string|null, at: number,
+                limits: [{ kind, percentUsed, resetsAt: number, at: number }] }
+```
+
+**The town** (`public/js/core/limits.js`, shared with the server for the phone note;
+`ui/limits.js`): the Usage button carries a gauge (`usage-gauge`) of the most used limit of any
+account, and its name says it ("Usage and cost. 5-hour limit 42% used, resets at 15:40"). The Usage
+dialog opens with "Plan limits": per limit (`limit-gauge`) its name, "42% used" (or "used up"), a
+meter, "as of 14:02, resets at 15:40" (24-hour, this computer's time zone; "tomorrow", a weekday
+within the week, else a date), and a projection when the pace would run it out first. Levels:
+`ok`, `warn` from 75%, `high` from 90%. **Projection rule** (`runOutAt`): the average pace since
+the window opened, as of the reading; a window opens one length before it resets (5 hours, 7
+days; a spend limit's period is not reported, so it gets none). Run-out = opened + (reading time −
+opened) × 100 / percent used, shown only when it falls before the reset and after now, the
+reading came after the first tenth of the window, and the limit is neither at 0 nor used up. Not
+counted in "needs you": Claude Code warns at 85% itself. With no reading the dialog says how to
+add the mod (`limits-note`); the demo makes a reading up (`sources/demo-limits.js`).
+
+**Doctor**: from the hello's `limits`, "the andary-limits mod reported 4 min ago from Claude Code
+2.1.330"; a warning when a settings file enables `andary-limits@…` but nothing came since the
+town started; otherwise how to add it (optional).
 
 ## 5. Browser: events, store, director
 
@@ -1401,6 +1484,8 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]`, and, when a rule can be saved, `[data-testid="approve-always"]` with the rule in `[data-testid="approve-always-rule"]`; a hint in `[data-testid="approval-hint"]` |
 | `[data-testid="remote-approvals-toggle"]` | checkbox/switch for remote approvals (live mode) |
 | `[data-testid="settings-button"]` | opens the settings dialog (holds the remote approvals switch) |
+| `[data-testid="usage-gauge"]` | the plan-limit gauge on the Usage button (`data-level`, `data-percent`); hidden without a reading |
+| `[data-testid="limit-gauge"][data-kind]` | one plan limit in the Usage dialog; `[data-testid="limits-note"]` says why there is none |
 | `[data-testid="director-caption"]` | the director camera's caption (plain text, not a live region); shown while it has a shot, hidden while you hold the camera or an agent is selected |
 
 ### 8.2 URL options

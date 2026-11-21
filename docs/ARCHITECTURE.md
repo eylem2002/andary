@@ -16,6 +16,8 @@ How Andary is put together, and why. The exact interfaces (payloads, messages, A
  │                                                        │ ingest  → policy per origin:    │ │
  │  A teammate's Andary ──POST /api/team (member key)───▶ │   usage, growth, notifications, │ │
  │                                                        │   approvals, digest, team relay │ │
+ │  andary-limits mod (in Claude Code) ─POST /api/limits▶ │ limits  → per account, owners   │ │
+ │    (hook secret, after the server's proof)             │   only, never relayed           │ │
  │                                                        │ record  → sanitize, history,    │ │
  │                                                        │   recording, broadcast          │ │
  │                                                        └──────────────┬──────────────────┘ │
@@ -51,7 +53,9 @@ only authenticate and parse. What an event does besides appearing in the town is
 it came from, in one table (`POLICIES`): a local event counts toward growth, notifications,
 approvals and the catch-up (what your crews did while you were away) and is relayed to a team
 host; a teammate's event grows the town and nothing else.
-Token usage is read before the adapter, and only for Claude Code (its transcripts).
+Token usage is read before the adapter, and only for Claude Code (its transcripts). Plan limits
+are not events: the opt-in andary-limits mod, which runs inside Claude Code, posts them to their
+own route, and the server keeps them per account and shows them to owners only (CONTRACTS §4.14).
 
 **Security at every boundary.** The forwarder only talks to a live server of yours that proves it
 holds a key that never leaves `~/.andary`, and only obeys replies signed with it (ADR 0012). The server checks the `Host`
@@ -79,7 +83,8 @@ plays the server's part there), when an agent seems stuck (the town's alert and 
 note follow one set of rules), how a shell command line reads (`core/shell.js`, the one reader
 of Bash and PowerShell commands that every rule about what an agent ran goes through: the
 catch-up's test runs, commits and pushes too), what an error is about (summaries) and what each
-crew did, for the catch-up (digest; the demo keeps the same counts).
+crew did, for the catch-up (digest; the demo keeps the same counts), and the words for plan
+limits (so the phone note and the town agree).
 
 **The world behind a facade.** The app talks to the 3D world only through `world/world.js`
 (CONTRACTS §6). Inside it, the town (`env/`) and the people (`agents/`) never import each other;
@@ -93,7 +98,8 @@ references may cross.
 | Area | May import |
 | --- | --- |
 | `hooks/` | Node built-ins only (it is copied out and must stand alone) |
-| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules`, `loops`, `shell`, `summaries`, `digest` |
+| `mods/` | its own folder only, no packages (Claude Code copies only the plugin's folder and runs the module without Node.js) |
+| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules`, `loops`, `shell`, `summaries`, `digest`, `limits` |
 | `server/cli/`, `cli/` | the server, those core modules, the simulation (for `andary simulate`) |
 | `public/js/core/` | `core/` only |
 | `public/js/sources/` | `sources/`, `core/` |
@@ -116,6 +122,7 @@ references may cross.
 | when you were away, and what your crews did meanwhile (Catch me up) | `server/digest.mjs`, `public/js/core/digest.js`, `public/js/core/shell.js`, `public/js/ui/catch-up.js` |
 | who may connect, and what they may do | `server/auth.mjs`, `server/browsers.mjs`, `server/security.mjs` |
 | the team town | `server/team.mjs`, `ingestTeam` in `server/ingest.mjs` |
+| plan limits (the andary-limits mod) | `mods/andary-limits/`, `server/limits.mjs`, `public/js/core/limits.js`, `ui/limits.js` |
 | how a hook becomes town events | `public/js/core/events.js`, `summaries.js` |
 | crews, agents, the log | `public/js/core/store.js`, `crews.js` |
 | what needs you, and when an agent seems stuck | `public/js/core/dialogs.js`, `store-dialogs.js`, `waits.js`, `attention.js`, `loops.js`, `public/js/ui/needs-you.js` |

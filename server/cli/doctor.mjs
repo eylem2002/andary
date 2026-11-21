@@ -12,6 +12,7 @@ import { connectWebSocket, waitForMessage } from '../ws-client.mjs';
 import { describeScope } from './status.mjs';
 import { cliInvocation, tildify } from './io.mjs';
 import { DOCTOR_SESSION_PREFIX } from '../../public/js/core/ids.js';
+import { currentLimits, readAccounts } from '../../public/js/core/limits.js';
 
 const SYMBOLS = { ok: '✔', warn: '!', fail: '✖' };
 
@@ -39,7 +40,11 @@ export async function runDoctor(_values, _positionals, io) {
   const installs = checkHooks(report, home, io);
   checkForwarderCopy(report, home, installs);
   const state = await checkServer(report, home);
-  if (state) await checkRoundTrip(report, home, io);
+  if (state) {
+    const hello = await checkRoundTrip(report, home, io);
+    const limits = hello ? limitsCheck(hello.limits, installs.limitsMod, Date.now()) : null;
+    if (limits) report(limits.status, limits.title, limits.detail);
+  }
   io.out('');
   io.out(tally.fail === 0 ? `All good${tally.warn ? ` (${tally.warn} warning${tally.warn === 1 ? '' : 's'})` : ''}.` : `${tally.fail} problem${tally.fail === 1 ? '' : 's'} found.`);
   return tally.fail === 0 ? 0 : 1;
@@ -143,6 +148,7 @@ async function checkServer(report, home) {
  * @param {Report} report
  * @param {string} home
  * @param {import('./io.mjs').CliIo} io
+ * @returns {Promise<Record<string, any>|null>} the town's hello, when it answered
  */
 async function checkRoundTrip(report, home, io) {
   const state = readStateFile(home);
@@ -157,20 +163,61 @@ async function checkRoundTrip(report, home, io) {
     socket = await connectWebSocket(`${serverOrigin(state).replace(/^http/, 'ws')}/ws`, {
       headers: { 'Sec-WebSocket-Protocol': `${WS_PROTOCOL}, ${TOKEN_PROTOCOL_PREFIX}${state.uiToken}` },
     });
-    await waitForMessage(socket, (m) => m?.t === 'hello', 5000);
+    const hello = await waitForMessage(socket, (m) => m?.t === 'hello', 5000);
     const payload = { ...base, hook_event_name: 'Notification', notification_type: 'andary_doctor', message: 'Andary doctor: the hook pipeline works' };
     const run = await runHookScript({ script, payload, env });
     if (run.code !== 0 || run.stdout !== '' || run.stderr !== '') {
       report('fail', 'The hook forwarder misbehaved', `exit code ${run.code}, ${run.stdout.length + run.stderr.length} bytes of unexpected output`);
-      return;
+      return hello;
     }
     await waitForMessage(socket, (m) => m?.t === 'hook' && m.e?.event?.session_id === sessionId, 5000);
     report('ok', 'A test event went through the hook forwarder and reached the town');
     // Let the doctor's visitor leave the town again.
     await runHookScript({ script, payload: { ...base, hook_event_name: 'SessionEnd', reason: 'other' }, env });
+    return hello;
   } catch (error) {
     report('fail', 'A test event did not reach the town', error.message);
+    return null;
   } finally {
     socket?.close();
   }
 }
+
+/** How to add the mod, and how to take it away again (README §2). */
+const ADD_MOD = 'In Claude Code: /plugin marketplace add eylem2002/andary, then /plugin install andary-limits@andary';
+const REMOVE_MOD = 'To remove it: /plugin uninstall andary-limits@andary';
+
+/** "just now", "4 min ago", "3 h ago". @param {number} ms */
+function age(ms) {
+  const minutes = Math.floor(Math.max(0, ms) / 60_000);
+  if (minutes < 1) return 'just now';
+  return minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ago`;
+}
+
+/**
+ * What the doctor says about plan limits (CONTRACTS §4.14): whether the andary-limits mod has
+ * reported since the town started, from which Claude Code, or how to add it. It is optional, so
+ * a town without it is fine.
+ * @param {unknown} limits     the hello's `limits`
+ * @param {boolean} enabled    a Claude Code settings file enables the mod
+ * @param {number} now
+ * @returns {{ status: 'ok'|'warn', title: string, detail: string }}
+ */
+export function limitsCheck(limits, enabled, now) {
+  const accounts = readAccounts(limits);
+  const newest = accounts.reduce((/** @type {typeof accounts[number]|null} */ best, account) => (!best || account.at > best.at ? account : best), null);
+  if (newest) {
+    const from = newest.claudeVersion ? ` from Claude Code ${newest.claudeVersion}` : '';
+    const none = currentLimits(newest.limits, now).length === 0 ? ' (no plan limits in it: an API key, or before the first answer)' : '';
+    return { status: 'ok', title: `Plan limits: the andary-limits mod reported ${age(now - newest.at)}${from}${none}`, detail: REMOVE_MOD };
+  }
+  if (enabled) {
+    return {
+      status: 'warn',
+      title: 'Plan limits: the andary-limits mod is enabled, but has not reported since the town started',
+      detail: 'It reports after each turn, from Claude Code v2.1.287 or newer: finish a turn in a session started after you installed it (/plugin should list it as an active mod).',
+    };
+  }
+  return { status: 'ok', title: 'Plan limits: not set up (optional)', detail: `To see your 5-hour and weekly limits in the town: ${ADD_MOD}` };
+}
+
