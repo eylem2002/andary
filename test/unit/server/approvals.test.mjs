@@ -229,15 +229,36 @@ describe('the dialog model decides what the terminal answered (core/dialogs.js)'
     assert.deepEqual(states(broker), { 'cat a': ['resolved', 'ran'], 'cat b': ['resolved', 'ran'] });
   });
 
-  it('your prompt after a "No" resolves the lead\'s requests, never a helper\'s, so a reload does not bring them back', () => {
+  it('your prompt after a "No" resolves what the terminal showed, whoever asked, so a reload does not bring it back', () => {
     const { broker } = setup();
     broker.create(ask('npm publish'), { hold: false });
     broker.create(ask('git push', { agent_id: 'agent-h1' }), { hold: false });
-    // "No" in the terminal sends nothing; your next prompt shows the lead moved on.
-    assert.equal(broker.observe(keyed({ hook_event_name: 'UserPromptSubmit', session_id: 's1', prompt: 'do it differently' })), 1);
-    assert.deepEqual(states(broker), { 'npm publish': ['resolved', 'stopped'], 'git push': ['pending', null] });
-    const [resolved] = broker.list().filter((a) => a.status === 'resolved');
-    assert.equal(resolved.decidedBy, 'terminal');
+    broker.create(ask('npm run deploy', { agent_id: 'agent-h2' }), { hold: true });
+    // "No" in the terminal sends nothing; you can type your next prompt only once nothing shows there.
+    const prompt = keyed({ hook_event_name: 'UserPromptSubmit', session_id: 's1', prompt: 'do it differently' });
+    assert.equal(broker.observe(prompt), 2);
+    assert.deepEqual(states(broker), { 'npm publish': ['resolved', 'stopped'], 'git push': ['resolved', 'stopped'], 'npm run deploy': ['pending', null] }, 'held in the town: still waiting');
+    assert.ok(broker.list().filter((a) => a.status === 'resolved').every((a) => a.decidedBy === 'terminal'));
+    // Handed back to the terminal, it shows there: the next prompt answers it.
+    broker.releaseAll();
+    assert.equal(broker.observe(prompt), 1);
+    assert.deepEqual(states(broker)['npm run deploy'], ['resolved', 'stopped']);
+  });
+
+  it('a plan asked again shows the older one was answered', () => {
+    const { broker } = setup();
+    const plan = (/** @type {string} */ text) => ({ session_id: 's1', tool_name: 'ExitPlanMode', tool_input: { plan: text } });
+    broker.observe(keyed({ hook_event_name: 'PreToolUse', ...plan('v1') }));
+    broker.create(keyed(request(plan('v1'))), { hold: false });
+    // "No, keep planning" sends nothing; the next plan does.
+    assert.equal(broker.observe(keyed({ hook_event_name: 'PreToolUse', ...plan('v2') })), 1);
+    broker.create(keyed(request(plan('v2'))), { hold: false });
+    assert.deepEqual(broker.list().map((a) => [/** @type {any} */ (a.toolInput).plan, a.status, a.proof ?? null]), [['v2', 'pending', null], ['v1', 'resolved', 'stopped']]);
+    // Without its PreToolUse (not seen, or not sent), the second plan's request shows it too.
+    const unseen = setup().broker;
+    unseen.create(keyed(request(plan('v1'))), { hold: false });
+    unseen.create(keyed(request(plan('v2'))), { hold: false });
+    assert.deepEqual(unseen.list().map((a) => [/** @type {any} */ (a.toolInput).plan, a.status, a.proof ?? null]), [['v2', 'pending', null], ['v1', 'resolved', 'stopped']]);
   });
 
   it('proof says what showed the terminal answered', () => {

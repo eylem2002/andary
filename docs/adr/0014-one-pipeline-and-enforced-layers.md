@@ -42,4 +42,6 @@ Modules that joined the server's list since this decision (`SERVER_CORE` in
 `scripts/check-boundaries.mjs` keeps the full list): `dialogs` (`public/js/core/dialogs.js`), the
 one model of what an agent has asked you and had no answer to. The phone notes and the town's
 "needs you" must agree on when an agent waits for you, so that rule lives once, in core, where
-both read it.
+both read it. `card-fields` (`public/js/core/card-fields.js`), the input fields an approval card
+shows for each tool: the server holds a request only when the card shows every field of it, so
+the card and that rule read one list.

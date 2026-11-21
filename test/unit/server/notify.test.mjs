@@ -184,6 +184,49 @@ test('parallel requests from one agent each wait for their own answer', async ()
   assert.equal(terminal.posts.length, 1, 'b still waits');
 });
 
+test('a revised plan gets a note of its own: "No, keep planning" sends nothing else', async () => {
+  const { notifier, posts, at } = testNotifier();
+  const plan = (/** @type {string} */ text) => ({ tool_name: 'ExitPlanMode', tool_input: { plan: text } });
+  notifier.observe(hook('PreToolUse', plan('Split the module')));
+  notifier.observe(hook('PermissionRequest', plan('Split the module')));
+  await at(DIALOG_DELAY_MS);
+  assert.equal(posts.length, 1);
+  // You said "No, keep planning" at the desk, then walked away: the revised plan waits for you.
+  await at(60_000);
+  notifier.observe(hook('PreToolUse', plan('Split the module, with tests')));
+  notifier.observe(hook('PermissionRequest', plan('Split the module, with tests')));
+  await at(60_000 + DIALOG_DELAY_MS);
+  assert.deepEqual(posts.map((post) => post.body), ['A crew has a plan for you to approve.', 'A crew has a plan for you to approve.']);
+  // At the desk the whole time: "No" at 4 s, the revised plan at 6 s, approved at 12 s. The first
+  // plan was answered when the second came, so its ten seconds sent nothing.
+  const desk = testNotifier();
+  desk.notifier.observe(hook('PreToolUse', plan('Split the module')));
+  desk.notifier.observe(hook('PermissionRequest', plan('Split the module')));
+  await desk.at(6_000);
+  desk.notifier.observe(hook('PreToolUse', plan('Split the module, with tests')));
+  desk.notifier.observe(hook('PermissionRequest', plan('Split the module, with tests')));
+  await desk.at(12_000);
+  desk.notifier.observe(hook('PostToolUse', { ...plan('Split the module, with tests'), tool_response: {} }));
+  await desk.at(120_000);
+  assert.equal(desk.posts.length, 0);
+});
+
+test("an MCP server's form waits for you like a question", async () => {
+  for (const notice of ['elicitation_dialog', 'elicitation_url_dialog', 'agent_needs_input']) {
+    const { notifier, posts, at } = testNotifier();
+    notifier.observe(hook('Notification', { notification_type: notice, message: 'Sign in to the issue tracker' }));
+    await at(DIALOG_DELAY_MS);
+    assert.deepEqual(posts.map((post) => post.body), ['A crew has a question for you.'], notice);
+  }
+  // Answered when the lead moves on (its next call).
+  const answered = testNotifier();
+  answered.notifier.observe(hook('Notification', { notification_type: 'elicitation_dialog' }));
+  await answered.at(3_000);
+  answered.notifier.observe(hook('PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/work/a.ts' } }));
+  await answered.at(60_000);
+  assert.equal(answered.posts.length, 0);
+});
+
 test('a question or a plan has a note of its own, and its answer closes it whatever its input became', async () => {
   // Answered at the desk: Claude Code adds the answers to the input. The request it sends joins the question.
   const answered = testNotifier();
@@ -348,7 +391,7 @@ test('a prompt, the turn ending or the session ending proves its dialogs answere
   /** @type {[string, Record<string, any>[], Record<string, any>, number][]} */
   const cases = [
     ["a prompt, for the lead's dialogs", [ask()], hook('UserPromptSubmit', { prompt: 'go on' }), 0],
-    ["a prompt, for a helper's (held in the town, it does not stop you typing)", [helper], hook('UserPromptSubmit', { prompt: 'go on' }), 1],
+    ["a prompt, for a helper's shown in the terminal (nobody types while one shows)", [helper], hook('UserPromptSubmit', { prompt: 'go on' }), 0],
     ['the lead stopping', [ask()], hook('Stop'), 0],
     ['the turn ending in an error', [ask()], hook('StopFailure', { error: 'server_error' }), 0],
     ['a teammate going idle', [helper], hook('TeammateIdle', { agent_id: 'agent-h1', teammate_name: 'frontend' }), 0],
@@ -369,6 +412,37 @@ test('a prompt, the turn ending or the session ending proves its dialogs answere
     await at(30_000);
     assert.equal(dialogNotes(posts).length, notes, what);
   }
+});
+
+test('a prompt does not answer a request the town holds; once handed back to the terminal it does', async () => {
+  const town = testNotifier();
+  const broker = brokerFor(town);
+  const request = ask({ agent_id: 'agent-h1', tool_name: 'WebFetch', tool_input: { url: 'https://example.com' } });
+  town.notifier.observe(request);
+  const { approval } = broker.create(request, { hold: true });
+  await town.at(1_000);
+  town.notifier.observe(hook('UserPromptSubmit', { prompt: 'meanwhile, fix the README' }));
+  await town.at(DIALOG_DELAY_MS);
+  assert.equal(town.posts.length, 1, 'you may type to the lead while the town holds a helper\'s request');
+  // Sent back to the terminal, it shows there: a prompt now means it was answered.
+  const released = testNotifier();
+  const broker2 = brokerFor(released);
+  released.notifier.observe(request);
+  broker2.release(broker2.create(request, { hold: true }).approval.id);
+  await released.at(1_000);
+  released.notifier.observe(hook('UserPromptSubmit', { prompt: 'next' }));
+  await released.at(60_000);
+  assert.equal(released.posts.length, 0);
+  assert.equal(approval.held, true);
+  // So it does once the town's wait ran out: the terminal asks now.
+  const expired = testNotifier();
+  const broker3 = brokerFor(expired, 1_000);
+  expired.notifier.observe(request);
+  broker3.create(request, { hold: true });
+  await expired.at(1_000);
+  expired.notifier.observe(hook('UserPromptSubmit', { prompt: 'next' }));
+  await expired.at(60_000);
+  assert.equal(expired.posts.length, 0);
 });
 
 test('a note held back by the 30 s limit goes out when the limit allows', async () => {
@@ -482,27 +556,43 @@ test('a Codex lead that stopped gets the waiting note after a minute without a p
   assert.equal(stopped.posts.length, 0);
   await stopped.at(CODEX_IDLE_MS);
   assert.deepEqual(stopped.posts.map((post) => post.body), ['A crew is waiting for your next prompt.']);
-  // The lead at work again, or the session starting or ending: no note.
-  const lead = [event('UserPromptSubmit', { prompt: 'next' }), event('PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/a' } }), event('SessionStart', { source: 'resume' }), event('SessionEnd')];
-  for (const next of lead) {
+  await stopped.at(3 * CODEX_IDLE_MS);
+  assert.equal(stopped.posts.length, 1, 'one note per Stop');
+  // Only a prompt, or the session starting or ending, ends the wait.
+  const ends = [event('UserPromptSubmit', { prompt: 'next' }), event('SessionStart', { source: 'resume' }), event('SessionEnd')];
+  for (const next of ends) {
     const { notifier, posts, at } = testNotifier();
     notifier.observe(event('Stop'));
     await at(30_000);
     notifier.observe(next);
+    notifier.observe(event('PostToolUse', { tool_name: 'Read', tool_input: { file_path: '/b' }, tool_response: {} }));
     await at(5 * CODEX_IDLE_MS);
     assert.equal(posts.length, 0, next.hook_event_name);
   }
-  // A helper still at work starts the minute again; its end too.
+  // Codex names a helper only when it starts and ends, so its tools look like the lead's: a tool
+  // pauses the minute, its result or the helper's end starts it again.
   const helpers = testNotifier();
   helpers.notifier.observe(event('Stop'));
   await helpers.at(5_000);
-  helpers.notifier.observe(event('PostToolUse', { agent_id: 'agent-h1', tool_name: 'Read', tool_input: { file_path: '/b' }, tool_response: {} }));
-  await helpers.at(20_000);
+  helpers.notifier.observe(event('PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/b' } }));
+  await helpers.at(5_000 + 2 * CODEX_IDLE_MS);
+  assert.equal(helpers.posts.length, 0, 'paused while the tool runs');
+  helpers.notifier.observe(event('PostToolUse', { tool_name: 'Read', tool_input: { file_path: '/b' }, tool_response: {} }));
+  const resumed = helpers.clock.now();
+  await helpers.at(resumed + 10_000);
   helpers.notifier.observe(event('SubagentStop', { agent_id: 'agent-h1' }));
-  await helpers.at(20_000 + CODEX_IDLE_MS - 1);
+  await helpers.at(resumed + 10_000 + CODEX_IDLE_MS - 1);
   assert.equal(helpers.posts.length, 0);
-  await helpers.at(20_000 + CODEX_IDLE_MS);
+  await helpers.at(resumed + 10_000 + CODEX_IDLE_MS);
   assert.equal(helpers.posts.length, 1);
+  // Noted: more of the crew's work does not say it again.
+  helpers.notifier.observe(event('PostToolUse', { tool_name: 'Read', tool_input: { file_path: '/c' }, tool_response: {} }));
+  await helpers.at(helpers.clock.now() + 2 * CODEX_IDLE_MS);
+  assert.equal(helpers.posts.length, 1, 'one note per Stop');
+  // The lead's next Stop is news again.
+  helpers.notifier.observe(event('Stop'));
+  await helpers.at(helpers.clock.now() + CODEX_IDLE_MS);
+  assert.equal(helpers.posts.length, 2);
   // Anything else of the lead's leaves the minute running.
   const compacted = testNotifier();
   compacted.notifier.observe(event('Stop'));

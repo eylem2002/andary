@@ -29,6 +29,11 @@ const MAX_BODY_BYTES = 1024 * 1024 - 1024;
 const RAW_PREVIEW_CHARS = 4000;
 /** A deny reason is at most 500 characters plus our prefix; anything longer did not come from us. */
 const MAX_DENY_MESSAGE_CHARS = 1000;
+/**
+ * What this forwarder does, so the server knows what to trust: `truncated`, it marks a body it
+ * shortened (a server holds a request for the town only from a forwarder that does).
+ */
+const CAPS = Object.freeze(['truncated']);
 
 /**
  * Exits 0, after flushing `text` to stdout if there is any.
@@ -151,15 +156,15 @@ function shrink(value, depth = 0) {
  * @returns {string}
  */
 function buildBody(event) {
-  const source = SOURCE ? { source: SOURCE } : {};
-  const body = JSON.stringify({ v: 1, ts, ...source, event });
+  const head = { v: 1, ts, ...(SOURCE ? { source: SOURCE } : {}), caps: CAPS };
+  const body = JSON.stringify({ ...head, event });
   if (Buffer.byteLength(body) <= MAX_BODY_BYTES) return body;
   const shortened = /** @type {Record<string, unknown>} */ (shrink(event));
-  const smaller = JSON.stringify({ v: 1, ts, ...source, event: { ...shortened, truncated: true } });
+  const smaller = JSON.stringify({ ...head, event: { ...shortened, truncated: true } });
   if (Buffer.byteLength(smaller) <= MAX_BODY_BYTES) return smaller;
   // Still too big (a huge object): keep the identifying fields only.
   const essentials = Object.entries(event).filter(([, value]) => typeof value !== 'object');
-  return JSON.stringify({ v: 1, ts, ...source, event: { ...Object.fromEntries(essentials.map(([k, v]) => [k, shrink(v)])), truncated: true } });
+  return JSON.stringify({ ...head, event: { ...Object.fromEntries(essentials.map(([k, v]) => [k, shrink(v)])), truncated: true } });
 }
 
 /**

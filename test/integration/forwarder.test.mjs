@@ -278,3 +278,29 @@ describe('forwarder trust (another program on the recorded port)', () => {
     }
   });
 });
+
+describe('forwarder capabilities', () => {
+  it('declares on every body that it marks one it shortened, so the town may trust one unmarked', async () => {
+    const fake = await impostor(() => ({}), 'caps-key');
+    try {
+      const env = isolatedEnv({ ANDARY_HOME: homeWith('caps', { pid: process.pid, port: fake.port, responseKey: 'caps-key' }) });
+      const payloads = [
+        hookPayload('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'ls' } }),
+        hookPayload('PermissionRequest', { tool_name: 'Write', tool_input: { file_path: 'a.ts', content: 'x'.repeat(3 * 1024 * 1024) } }),
+        hookPayload('PermissionRequest', { tool_name: 'mcp__deploy__run', tool_input: Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`key${i}`, 'y'.repeat(800)])) }),
+      ];
+      for (const payload of payloads) assert.equal((await runHookScript({ payload, env })).code, 0);
+      const bodies = fake.received.filter((entry) => entry.body).map((entry) => JSON.parse(entry.body));
+      assert.deepEqual(
+        bodies.map((body) => [body.caps, body.event.truncated]),
+        [
+          [['truncated'], undefined],
+          [['truncated'], true],
+          [['truncated'], true],
+        ],
+      );
+    } finally {
+      await fake.close();
+    }
+  });
+});

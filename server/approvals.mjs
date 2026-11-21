@@ -178,6 +178,22 @@ export function createApprovalBroker({
     }
   }
 
+  /**
+   * Dialogs a hook closed: the terminal answered their requests, if pending and not held.
+   * @param {import('../public/js/core/dialogs.js').Dialog[]} closed @param {string} hook
+   * @returns {number} how many approvals were resolved
+   */
+  function answered(closed, hook) {
+    let resolved = 0;
+    for (const dialog of closed) {
+      const entry = dialog.approvalId === null ? undefined : entries.get(dialog.approvalId);
+      if (!entry || entry.approval.status !== 'pending' || entry.approval.held) continue;
+      settle(entry, { status: 'resolved', decidedBy: 'terminal', proof: proofOf(hook) }, null);
+      resolved += 1;
+    }
+    return resolved;
+  }
+
   /** Keeps at most maxPending - 1 pending so a new one fits; the oldest give way. */
   function makeRoom() {
     const waiting = pending();
@@ -186,12 +202,17 @@ export function createApprovalBroker({
     }
   }
 
-  /** @param {Entry} entry */
+  /**
+   * Hands a held request to the terminal: it shows there now, so your next prompt answers it. (An
+   * expired one is never resolved, so its dialog's hold does not matter here.)
+   * @param {Entry} entry
+   */
   function release(entry) {
     if (entry.approval.status !== 'pending' || !entry.approval.held) return;
     stopTimer(entry);
     entry.approval.held = false;
     entry.approval.expiresAt = null;
+    dialogs.toTerminal(entry.approval.id);
     answer(entry, null);
     publish(entry);
   }
@@ -208,10 +229,11 @@ export function createApprovalBroker({
       makeRoom();
       const approval = newApproval(event, hold, now(), timeoutMs);
       if (message) approval.message = message;
-      // Its dialog: a new one, or the open question or plan this request belongs to.
+      // Its dialog: a new one, or the open question or plan this request belongs to. A plan the
+      // agent asks for again shows its older one was answered.
       const call = callOf(event);
-      dialogs.ask(call, approval.createdAt);
-      dialogs.link(call, approval.id);
+      answered(dialogs.ask(call, approval.createdAt).closed, 'PermissionRequest');
+      dialogs.link(call, approval.id, hold);
       /** @type {Entry} */
       const entry = { approval, respond: null, timer: null, settledOrder: 0 };
       const response = new Promise((resolve) => {
@@ -258,14 +280,7 @@ export function createApprovalBroker({
      */
     observe(event) {
       const step = hookStep(event, now());
-      let resolved = 0;
-      for (const dialog of afterHook(dialogs, step).closed) {
-        const entry = dialog.approvalId === null ? undefined : entries.get(dialog.approvalId);
-        if (!entry || entry.approval.status !== 'pending' || entry.approval.held) continue;
-        settle(entry, { status: 'resolved', decidedBy: 'terminal', proof: proofOf(step.hook) }, null);
-        resolved += 1;
-      }
-      return resolved;
+      return answered(afterHook(dialogs, step).closed, step.hook);
     },
 
     /**

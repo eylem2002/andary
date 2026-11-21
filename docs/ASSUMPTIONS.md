@@ -322,24 +322,32 @@ section.
     until you answer; failures and finished work do not change the title.
 87. **A phone note for a dialog waits ten seconds.** Most prompts are answered within a few seconds
     by someone at the computer; a note that arrives after you answered is noise. Each dialog (a
-    permission request, a question, a plan) has its own ten seconds. Dialogs whose seconds run out
-    together become one note, which also covers the other dialogs their crews have open, since
-    parallel calls ask a moment apart. A finished turn sends nothing by itself: Claude Code's
-    `idle_prompt`, a minute later, covers a turn nobody came back to.
+    permission request, a question, a plan, a form an MCP server asks you to fill in) has its own
+    ten seconds. Dialogs whose seconds run out together become one note, which also covers the
+    other dialogs their crews have open, since parallel calls ask a moment apart. A finished turn
+    sends nothing by itself: Claude Code's `idle_prompt`, a minute later, covers a turn nobody came
+    back to.
 88. **Plans and questions are never held in the town.** A plain allow cannot approve a plan
     (`ExitPlanMode`) or answer a question (`AskUserQuestion`); both wait in the terminal, and the card
     always says so, also when remote approvals are off. On the phone they have notes of their own
-    ("A crew has a question for you.").
+    ("A crew has a question for you."). An agent cannot ask again while one waits, so its next
+    question or plan shows the older one was answered: "No, keep planning" sends nothing, and the
+    revised plan is a dialog, and a note, of its own. An MCP server's form (Claude Code's
+    `elicitation_dialog`, `elicitation_url_dialog` and `agent_needs_input` notices) is a question
+    too; it names no tool, so it closes like a session's notice (below).
 89. **A dialog's note is dropped only on proof of an answer.** Proof is that very call reporting
     back (the same tool and call key, taken from the input as it arrived, before anything is cut;
-    questions and plans by name, since your answer changes their input), your prompt or
-    `/compact` (for the lead's dialogs: a helper's request held in the town does not stop you
-    typing to the lead), the agent's turn ending (in an error too, or a teammate going idle) or
-    the session ending, or a decision in the town. A session's notice, which names no tool, also
+    for a call Codex's adapter renamed, from the original call; questions and plans by name, since
+    your answer changes their input), your prompt or `/compact`, the agent's turn ending (in an
+    error too, or a teammate going idle) or the session ending, or a decision in the town. Your
+    prompt answers every dialog of the session, whoever asked, since nobody can type while a dialog
+    shows in the terminal; except a request the town holds right now, which is not in the terminal
+    and does not stop you typing to the lead. A session's notice or form, which names no tool, also
     closes when the lead starts its next call. A new request from the same agent is no proof,
-    because parallel calls each ask on their own; nor is a request that timed out in the town or
-    went back to the terminal: the agent still waits there. The approval broker follows the same
-    table, so the town's cards and the phone agree on what the terminal answered.
+    because parallel calls each ask on their own (a question or a plan aside, 88); nor is a request
+    that timed out in the town or went back to the terminal: the agent still waits there, and your
+    next prompt answers it. The approval broker follows the same table, so the town's cards and the
+    phone agree on what the terminal answered.
     Andary sees a yes in the terminal only when the tool finishes, a "No" only at your next prompt,
     and a diff you change in your IDE not at all (its result has another input), so a note can
     come after you answered: one note too many is better than none for an agent that waits. A tool
@@ -352,8 +360,12 @@ section.
     100 dialogs are kept; the oldest give way.
 91. **Codex gets its "waiting" note after a minute.** Codex sends no Notification events, so no
     `idle_prompt`. After a Codex lead's Stop (an interrupt too), Andary waits the same 60 seconds
-    as Claude Code. A helper still at work starts the minute again; the lead's prompt or tool use,
-    or the session starting or ending, cancels it. Andary cannot see you typing in Codex, so a
-    reply that takes you over a minute to write still sends the note.
+    as Claude Code, and sends one note per Stop. Codex names a helper only when it starts and ends,
+    so a helper's tool calls look like the lead's: a tool starting pauses the minute; its result, a
+    helper ending or the lead's next Stop starts it again; only your prompt, or the session
+    starting or ending, ends the wait. For the same reason Codex's dialogs cannot be told apart by
+    agent: a helper's request counts as the lead's, and the lead's Stop answers it too. Andary
+    cannot see you typing in Codex, so a reply that takes you over a minute to write still sends
+    the note.
 92. **The waiting note names no agent.** "A crew is waiting for your next prompt." fits Claude Code
     and Codex alike, as the notes for permission requests, questions and plans do.

@@ -1,17 +1,20 @@
 // Open dialogs: what each agent has asked you and not had an answer to yet (docs/design/
-// agent-health.md §2, §3). One model for the phone notes (server/notify.mjs) and the town's
-// "needs you" (core/store.js), so both agree on when an agent waits for you. Pure and bounded.
+// agent-health.md §2, §3). One model for the phone notes (server/notify.mjs), the approval broker
+// (server/approvals.mjs) and the town's "needs you" (core/store.js), so all agree on when an agent
+// waits for you. Pure and bounded.
 //
 // A dialog opens with a permission request, a question or a plan (AskUserQuestion, ExitPlanMode),
-// or a session's own "needs your permission" notice when nothing of that session is known to be
-// open. It closes only on proof of an answer:
-//   - the same call reporting back: a tool name in common and the same input (questions and plans
-//     by name only, as Claude Code adds your answer to their input; a call an adapter renamed by
-//     name too, as its input was rewritten);
+// or a session's own notice: "needs your permission" when nothing of that session is known to be
+// open, or an MCP server's form (a question). It closes only on proof of an answer:
+//   - the same call reporting back: a tool name in common and the same call key (questions and
+//     plans by name only, as Claude Code adds your answer to their input; a side with no key by
+//     name);
 //   - the town deciding the request it holds for it;
-//   - your prompt or /compact (the lead's dialogs only: a helper's request held in the town does
-//     not stop you typing), the agent's turn ending (also in an error, or a teammate going idle),
-//     or the session ending.
+//   - your prompt or /compact: every dialog of the session the town is not holding right now,
+//     whoever asked (nobody can type while a dialog shows in the terminal); the agent's turn
+//     ending (also in an error, or a teammate going idle); the session ending;
+//   - for a question or a plan, the same agent starting another one: it cannot ask again while
+//     one waits, and a "No, keep planning" sends nothing else.
 // A request that went back to the terminal (timed out, released) is no proof, and neither is a
 // new request from the same agent: parallel tool calls each ask on their own. A session's notice
 // (whose dialog is unknown) closes when the lead starts a new call, never on a tool result.
@@ -20,6 +23,9 @@ import { isObject, shellWords } from './text.js';
 
 /** Tools that stop the agent until you answer them in the terminal. */
 export const INTERACTIVE_TOOLS = Object.freeze({ AskUserQuestion: 'question', ExitPlanMode: 'plan' });
+
+/** Notification types for an MCP server's form, which waits for you like a question. */
+export const FORM_NOTICES = Object.freeze(['elicitation_dialog', 'elicitation_url_dialog', 'agent_needs_input']);
 
 /**
  * @typedef {'permission'|'question'|'plan'|'unknown'} DialogKind
@@ -31,7 +37,7 @@ export const INTERACTIVE_TOOLS = Object.freeze({ AskUserQuestion: 'question', Ex
  * @property {string} sessionId
  * @property {string|null} agentId   normalised (core/ids.js); null for the lead
  * @property {readonly string[]} tools  its tool names (an adapter's renamed call keeps both)
- * @property {string|null} input     inputKey() of its input; null when it cannot be compared
+ * @property {string|null} input     its call key (inputKey() of its input); null when it has none
  */
 
 /**
@@ -40,11 +46,18 @@ export const INTERACTIVE_TOOLS = Object.freeze({ AskUserQuestion: 'question', Ex
  * @property {string} sessionId
  * @property {string|null} agentId
  * @property {DialogKind} kind
- * @property {readonly string[]} tools
+ * @property {readonly string[]} tools  none for a session's notice
  * @property {string|null} input     null: any result of one of its tools answers it
  * @property {number} at             when it opened (the hook's time)
  * @property {string|null} approvalId  the town's request for it, once known
+ * @property {boolean} held          the town holds its request right now (so no prompt answered it)
+ * @property {boolean} requested     its permission request came (a question's or plan's joins it once)
  * @property {string} text           what the caller wants to show for it ('' when nothing)
+ */
+
+/**
+ * @typedef {{ dialog: Dialog, opened: boolean, closed: Dialog[] }} Asked
+ *   opened: a new dialog (not one joined); closed: dialogs it showed were answered
  */
 
 /**
@@ -64,15 +77,18 @@ function kindOf(tools) {
   return 'permission';
 }
 
+/** A session's notice: no tool, so no call can be matched to it. @param {Dialog} d */
+const isNotice = (d) => d.tools.length === 0;
+
 /** @param {Dialog} d @param {Call} call */
 function sameAgent(d, call) {
-  return d.kind !== 'unknown' && d.sessionId === call.sessionId && d.agentId === call.agentId && d.tools.some((t) => call.tools.includes(t));
+  return !isNotice(d) && d.sessionId === call.sessionId && d.agentId === call.agentId && d.tools.some((t) => call.tools.includes(t));
 }
 
 /**
  * A call belongs to a dialog unless their inputs differ: the same agent, a tool name in common,
- * and the same input where both are known. A side without one (a question or plan; a call an
- * adapter renamed, its input rewritten) goes by the name.
+ * and the same key where both have one. A side without one (a question or plan; a call nobody
+ * keyed) goes by the name.
  * @param {Dialog} d @param {Call} call
  */
 function fits(d, call) {
@@ -87,10 +103,10 @@ export function createDialogs({ max = 200 } = {}) {
   let open = [];
   let seq = 0;
 
-  /** @param {Omit<Dialog, 'id'|'approvalId'>} fields */
+  /** @param {Omit<Dialog, 'id'|'approvalId'|'held'>} fields */
   function add(fields) {
     seq += 1;
-    const dialog = { id: seq, approvalId: null, ...fields };
+    const dialog = { id: seq, approvalId: null, held: false, ...fields };
     open.push(dialog);
     if (open.length > max) open.shift();
     return dialog;
@@ -103,43 +119,80 @@ export function createDialogs({ max = 200 } = {}) {
     return closed;
   }
 
+  /**
+   * A new question or plan from an agent closes its older ones of that kind: it cannot ask again
+   * while one waits.
+   * @param {Call} call @param {DialogKind} kind @param {number} at @param {string} text @param {boolean} requested
+   * @returns {Asked}
+   */
+  function askAgain(call, kind, at, text, requested) {
+    const closed = close((d) => !isNotice(d) && d.kind === kind && d.sessionId === call.sessionId && d.agentId === call.agentId);
+    const dialog = add({ sessionId: call.sessionId, agentId: call.agentId, kind, tools: [...call.tools], input: null, at, text, requested });
+    return { dialog, opened: true, closed };
+  }
+
   return {
     /**
-     * A permission request, or a question or plan starting: opens a dialog. The permission
-     * request Claude Code sends for an open question or plan joins it instead.
+     * A permission request: opens a dialog. The one Claude Code sends for a question or plan joins
+     * the newest of that agent's it has not joined yet (else it starts one).
      * @param {Call} call @param {number} at @param {string} [text]
-     * @returns {{ dialog: Dialog, opened: boolean }}
+     * @returns {Asked}
      */
     ask(call, at, text = '') {
       const kind = kindOf(call.tools);
-      const already = kind === 'permission' ? null : open.find((d) => d.kind === kind && fits(d, call));
-      if (already) return { dialog: already, opened: false };
-      // Questions and plans match by name: your answer changes their input.
-      const input = kind === 'permission' ? call.input : null;
-      return { dialog: add({ sessionId: call.sessionId, agentId: call.agentId, kind, tools: [...call.tools], input, at, text }), opened: true };
+      if (kind === 'permission') return { dialog: add({ sessionId: call.sessionId, agentId: call.agentId, kind, tools: [...call.tools], input: call.input, at, text, requested: true }), opened: true, closed: [] };
+      const waiting = open.findLast((d) => d.kind === kind && !d.requested && fits(d, call));
+      if (!waiting) return askAgain(call, kind, at, text, true);
+      waiting.requested = true;
+      return { dialog: waiting, opened: false, closed: [] };
     },
 
     /**
-     * The session says a permission dialog is showing, without saying whose: a dialog of its own
-     * only when nothing of that session is known to be open.
-     * @param {string} sessionId @param {number} at @param {string} [text]
+     * A question or a plan starting (its PreToolUse): a new dialog, matched by name, as your answer
+     * changes its input. It closes that agent's older one of the kind.
+     * @param {Call} call @param {number} at @param {string} [text]
+     * @returns {Asked}
+     */
+    begin(call, at, text = '') {
+      return askAgain(call, kindOf(call.tools), at, text, false);
+    },
+
+    /**
+     * The session says something waits for you, without saying whose: a permission dialog
+     * ('unknown', a dialog of its own only when nothing of that session is known to be open), or
+     * an MCP server's form ('question', unless one is already open).
+     * @param {string} sessionId @param {number} at @param {string} [text] @param {DialogKind} [kind]
      * @returns {Dialog|null} the new dialog
      */
-    notice(sessionId, at, text = '') {
-      if (open.some((d) => d.sessionId === sessionId)) return null;
-      return add({ sessionId, agentId: null, kind: 'unknown', tools: [], input: null, at, text });
+    notice(sessionId, at, text = '', kind = 'unknown') {
+      const known = kind === 'unknown' ? open.some((d) => d.sessionId === sessionId) : open.some((d) => d.sessionId === sessionId && isNotice(d) && d.kind === kind);
+      if (known) return null;
+      return add({ sessionId, agentId: null, kind, tools: [], input: null, at, text, requested: false });
     },
 
     /**
-     * Attaches the town's request to its dialog: the newest open one for that call without one.
-     * @param {Call} call @param {string} approvalId
+     * Attaches the town's request to its dialog (the newest open one for that call without one),
+     * and says whether the town holds it. Linking again changes only that.
+     * @param {Call} call @param {string} approvalId @param {boolean} [held]
      * @returns {Dialog|null}
      */
-    link(call, approvalId) {
-      const linked = open.find((d) => d.approvalId === approvalId);
-      if (linked) return linked;
-      const dialog = open.findLast((d) => d.approvalId === null && fits(d, call)) ?? null;
-      if (dialog) dialog.approvalId = approvalId;
+    link(call, approvalId, held = false) {
+      const dialog = open.find((d) => d.approvalId === approvalId) ?? open.findLast((d) => d.approvalId === null && fits(d, call)) ?? null;
+      if (dialog) {
+        dialog.approvalId = approvalId;
+        dialog.held = held;
+      }
+      return dialog;
+    },
+
+    /**
+     * The town handed its request back to the terminal (released, or timed out): it shows there
+     * now, so your next prompt answers it.
+     * @param {string} approvalId @returns {Dialog|null}
+     */
+    toTerminal(approvalId) {
+      const dialog = open.find((d) => d.approvalId === approvalId) ?? null;
+      if (dialog) dialog.held = false;
       return dialog;
     },
 
@@ -154,14 +207,18 @@ export function createDialogs({ max = 200 } = {}) {
       return dialog ? close((d) => d === dialog) : [];
     },
 
-    /** You sent a prompt: the lead's dialogs, and the session's notice. @param {string} sessionId @returns {Dialog[]} */
+    /**
+     * You sent a prompt: nothing showed in the terminal, so every dialog of the session was
+     * answered, whoever asked, except those the town holds right now.
+     * @param {string} sessionId @returns {Dialog[]}
+     */
     prompted(sessionId) {
-      return close((d) => d.sessionId === sessionId && d.agentId === null);
+      return close((d) => d.sessionId === sessionId && !d.held);
     },
 
     /**
      * An agent's turn ended (the lead's Stop, a helper's SubagentStop): its dialogs; the lead's
-     * take the session's notice with them.
+     * take the session's notices with them.
      * @param {string} sessionId @param {string|null} agentId @returns {Dialog[]}
      */
     stopped(sessionId, agentId) {
@@ -175,7 +232,7 @@ export function createDialogs({ max = 200 } = {}) {
      * @param {string} sessionId @param {number} at @returns {Dialog[]}
      */
     movedOn(sessionId, at) {
-      return close((d) => d.sessionId === sessionId && d.kind === 'unknown' && d.at <= at);
+      return close((d) => d.sessionId === sessionId && isNotice(d) && d.at <= at);
     },
 
     /** The session ended or was interrupted: all of its dialogs. @param {string} sessionId @returns {Dialog[]} */
@@ -218,8 +275,8 @@ export function createDialogs({ max = 200 } = {}) {
 /** @type {HookChange} */
 const NO_CHANGE = Object.freeze({ opened: null, closed: [] });
 
-/** @param {{ dialog: Dialog, opened: boolean }} asked @returns {HookChange} */
-const opening = (asked) => ({ opened: asked.opened ? asked.dialog : null, closed: [] });
+/** @param {Asked} asked @returns {HookChange} */
+const opening = (asked) => ({ opened: asked.opened ? asked.dialog : null, closed: asked.closed });
 /** @param {Dialog[]} closed @returns {HookChange} */
 const closing = (closed) => ({ opened: null, closed });
 
@@ -228,13 +285,13 @@ const HOOK_RULES = Object.freeze({
   PermissionRequest: (d, s) => opening(d.ask(s.call, s.at, s.text)),
   PreToolUse: toolStarted,
   Notification: (d, s) => {
-    if (s.notice !== 'permission_prompt') return NO_CHANGE;
-    return { opened: d.notice(s.call.sessionId, s.at, s.text), closed: [] };
+    const kind = s.notice === 'permission_prompt' ? 'unknown' : FORM_NOTICES.includes(s.notice ?? '') ? 'question' : null;
+    return kind ? { opened: d.notice(s.call.sessionId, s.at, s.text, kind), closed: [] } : NO_CHANGE;
   },
   PostToolUse: (d, s) => closing(d.result(s.call)),
   PostToolUseFailure: (d, s) => closing(d.result(s.call)),
   PermissionDenied: (d, s) => closing(d.result(s.call)),
-  // You typed (a prompt, or /compact): the lead's dialogs were answered.
+  // You typed (a prompt, or /compact): what showed in the terminal was answered.
   UserPromptSubmit: (d, s) => closing(d.prompted(s.call.sessionId)),
   PreCompact: (d, s) => (s.trigger === 'manual' ? closing(d.prompted(s.call.sessionId)) : NO_CHANGE),
   // Codex's interrupt arrives as an interrupted Stop: you are at that session's terminal.
@@ -252,7 +309,7 @@ const HOOK_RULES = Object.freeze({
  * @param {Dialogs} d @param {HookStep} s @returns {HookChange}
  */
 function toolStarted(d, s) {
-  if (kindOf(s.call.tools) !== 'permission') return opening(d.ask(s.call, s.at, s.text));
+  if (kindOf(s.call.tools) !== 'permission') return opening(d.begin(s.call, s.at, s.text));
   return s.call.agentId === null ? closing(d.movedOn(s.call.sessionId, s.at)) : NO_CHANGE;
 }
 

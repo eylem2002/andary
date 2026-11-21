@@ -1,5 +1,6 @@
 // Pure text helpers for the HUD: durations, relative times, countdowns, paths, labels.
 // No DOM here, so everything is unit-tested in Node.
+import { CARD_FIELDS, cardLines } from '../core/card-fields.js';
 import { shellWords } from '../core/text.js';
 
 /**
@@ -187,7 +188,11 @@ export function revealHidden(text) {
     .replace(BLANK_RUN, (run) => `\n⟨${run.split('\n').length - 2} blank lines⟩\n`);
 }
 
-/** @type {Record<string, (input: any, path: (p: unknown) => string, text: (t: unknown) => string) => { action: string, detail: string }>} */
+/**
+ * Tools with a view of their own on the approval card: the same tools, and fields, as
+ * core/card-fields.js lists, which also decides whether the town may hold a request.
+ * @type {Record<string, (input: any, path: (p: unknown) => string, text: (t: unknown) => string) => { action: string, detail: string }>}
+ */
 const APPROVAL_WORDING = {
   // A command may be an argument list (Codex): each argument is quoted, so none can hide another.
   Bash: (input, _path, text) => ({ action: 'run a command', detail: `$ ${text(shellWords(input.command))}` }),
@@ -204,8 +209,9 @@ const APPROVAL_WORDING = {
 /**
  * What a permission request asks for, in words plus the detail to show in mono. The default is a
  * short form for summaries. `exact` is for the approval card, where the viewer decides: full paths
- * (never shortened in the middle), every input field for tools without special wording, and
- * hidden characters revealed (see revealHidden).
+ * (never shortened in the middle), the tool's other known fields as "name: value" lines
+ * (core/card-fields.js), every input field for tools without special wording, and hidden
+ * characters revealed (see revealHidden).
  * @param {{ toolName?: string, toolInput?: any, cwd?: string }} approval
  * @param {{ exact?: boolean }} [options]
  * @returns {{ action: string, detail: string }}
@@ -214,8 +220,13 @@ export function describeApproval({ toolName = '', toolInput, cwd }, { exact = fa
   const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
   const text = exact ? revealHidden : (/** @type {unknown} */ t) => String(t ?? '');
   const path = exact ? revealHidden : (/** @type {unknown} */ p) => shortenPath(p, { cwd, max: 80 });
-  const wording = Object.hasOwn(APPROVAL_WORDING, toolName) ? APPROVAL_WORDING[toolName] : null;
-  if (wording) return wording(input, path, text);
+  // Only the tools core/card-fields.js lists get a view of their own: any other is shown field by field.
+  const wording = Object.hasOwn(CARD_FIELDS, toolName) ? APPROVAL_WORDING[toolName] : null;
+  if (wording) {
+    const words = wording(input, path, text);
+    const lines = exact ? cardLines(toolName).filter((key) => Object.hasOwn(input, key)) : [];
+    return lines.length ? { ...words, detail: [words.detail, ...lines.map((key) => fieldLine(key, input[key]))].join('\n') } : words;
+  }
   const detail = exact ? allFields(input) : firstText(input);
   if (toolName.startsWith('mcp__')) {
     const [, server = '', tool = ''] = toolName.split('__');
@@ -250,8 +261,10 @@ export function approvalChange(toolName, toolInput) {
     case 'MultiEdit': {
       const edits = Array.isArray(input.edits) ? input.edits.filter((edit) => isText(edit?.old_string) && isText(edit?.new_string)) : [];
       if (edits.length === 0) return null;
-      const everywhere = edits.some((edit) => edit.replace_all === true);
-      return { hunks: edits.map((edit) => ({ before: edit.old_string, after: edit.new_string })), note: `${edits.length} edits, in order${everywhere ? '; some replace every occurrence' : ''}` };
+      // Numbered as the card titles them ("Edit 2 of 3"), so each edit's replace_all is on the card.
+      const everywhere = edits.flatMap((edit, index) => (edit.replace_all === true ? [String(index + 1)] : []));
+      const which = everywhere.length === 1 ? `edit ${everywhere[0]} replaces` : `edits ${listJoin(everywhere)} replace`;
+      return { hunks: edits.map((edit) => ({ before: edit.old_string, after: edit.new_string })), note: `${edits.length} edits, in order${everywhere.length ? `; ${which} every occurrence` : ''}` };
     }
     case 'NotebookEdit':
       if (!isText(input.new_source)) return null;
@@ -269,8 +282,18 @@ export function approvalChange(toolName, toolInput) {
  */
 function allFields(input) {
   return Object.entries(input)
-    .map(([key, value]) => `${revealHidden(key)}: ${revealHidden(typeof value === 'string' ? value : JSON.stringify(value))}`)
+    .map(([key, value]) => fieldLine(key, value))
     .join('\n');
+}
+
+/**
+ * One field as a "name: value" line (a value that is not text as JSON), hidden characters revealed.
+ * @param {string} key
+ * @param {unknown} value
+ * @returns {string}
+ */
+function fieldLine(key, value) {
+  return `${revealHidden(key)}: ${revealHidden(typeof value === 'string' ? value : JSON.stringify(value))}`;
 }
 
 /**

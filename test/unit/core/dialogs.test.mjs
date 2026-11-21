@@ -38,7 +38,7 @@ describe('createDialogs', () => {
 
   test('a question or a plan is one dialog, answered by its result whatever its input became', () => {
     const d = createDialogs();
-    d.ask(lead(['AskUserQuestion'], { questions: [{ question: 'Which port?' }] }), 1, 'Asks: Which port?');
+    d.begin(lead(['AskUserQuestion'], { questions: [{ question: 'Which port?' }] }), 1, 'Asks: Which port?');
     // Claude Code sends a permission request for it too: it joins the question.
     const again = d.ask(lead(['AskUserQuestion'], { questions: [{ question: 'Which port?' }] }), 2);
     assert.equal(again.opened, false);
@@ -46,8 +46,24 @@ describe('createDialogs', () => {
     assert.equal(d.list()[0].text, 'Asks: Which port?');
     d.result(lead(['AskUserQuestion'], { questions: [{ question: 'Which port?' }], answers: { 'Which port?': '8080' } }));
     assert.deepEqual(d.list(), []);
-    d.ask(helper(['ExitPlanMode'], { plan: 'x' }), 3);
+    d.begin(helper(['ExitPlanMode'], { plan: 'x' }), 3);
     assert.deepEqual(kinds(d), ['h1:plan:ExitPlanMode']);
+  });
+
+  test('a revised plan or a question asked again is a new dialog: the agent cannot ask again while one waits', () => {
+    const d = createDialogs();
+    const plan = (/** @type {string} */ text) => lead(['ExitPlanMode'], { plan: text });
+    d.begin(plan('v1'), 1);
+    assert.equal(d.ask(plan('v1'), 2).opened, false, "its permission request joins it");
+    // "No, keep planning" sends nothing; the next plan is the proof.
+    const v2 = d.begin(plan('v2'), 3);
+    assert.deepEqual([v2.opened, v2.closed.map((x) => x.at)], [true, [1]]);
+    assert.equal(d.ask(plan('v2'), 4).opened, false, 'v2 is joined, not v1');
+    d.begin(helper(['ExitPlanMode'], { plan: 'theirs' }), 5);
+    assert.deepEqual(d.list().map((x) => [x.agentId, x.at]), [[null, 3], ['h1', 5]], "another agent's plan stays");
+    // A request for one whose start never arrived opens it, and takes the older one's place.
+    const late = d.ask(plan('v3'), 6);
+    assert.deepEqual([late.opened, late.closed.map((x) => x.at)], [true, [3]]);
   });
 
   test("a session's notice counts only when nothing of that session is known to be open", () => {
@@ -61,12 +77,39 @@ describe('createDialogs', () => {
     assert.equal(d.prompted(S).length, 1, 'your prompt is');
   });
 
-  test("your prompt answers the lead's dialogs, never a helper's held in the town", () => {
+  test('your prompt answers every dialog of the session, whoever asked, except one the town holds right now', () => {
     const d = createDialogs();
-    d.ask(helper(['WebFetch'], { url: 'https://x' }), 1);
-    d.ask(lead(['Bash'], { command: 'npm publish' }), 2);
-    assert.deepEqual(d.prompted(S).map((x) => x.agentId), [null]);
-    assert.deepEqual(kinds(d), ['h1:permission:WebFetch']);
+    d.ask(helper(['WebFetch'], { url: 'https://held' }), 1);
+    d.link(helper(['WebFetch'], { url: 'https://held' }), 'H', true);
+    d.ask(helper(['Bash'], { command: 'npm run lint' }), 2);
+    d.ask(lead(['Bash'], { command: 'npm publish' }), 3);
+    d.ask({ ...lead(['Bash'], { command: 'ls' }), sessionId: 'other' }, 4);
+    // Nothing can be typed while a dialog shows in the terminal: those were answered.
+    assert.deepEqual(d.prompted(S).map((x) => x.at), [2, 3]);
+    assert.deepEqual(d.list().map((x) => x.at), [1, 4]);
+    // Handed back to the terminal, the held one shows there now: the next prompt answers it.
+    assert.equal(d.toTerminal('H')?.held, false);
+    assert.deepEqual(d.prompted(S).map((x) => x.at), [1]);
+    assert.equal(d.toTerminal('nobody'), null);
+  });
+
+  test("an MCP server's form waits like a question: one per session, closed like a session's notice", () => {
+    const d = createDialogs();
+    const form = afterHook(d, { hook: 'Notification', notice: 'elicitation_dialog', call: lead([]), at: 1, text: 'Sign in to the API' });
+    assert.equal(form.opened?.kind, 'question');
+    assert.equal(afterHook(d, { hook: 'Notification', notice: 'elicitation_url_dialog', call: lead([]), at: 2 }).opened, null, 'the same form again');
+    assert.equal(afterHook(d, { hook: 'PostToolUse', call: lead(['mcp__api__login']), at: 3 }).closed.length, 0, 'no tool result answers it');
+    assert.equal(afterHook(d, { hook: 'PreToolUse', call: lead(['Read'], { file_path: 'x' }), at: 4 }).closed.length, 1, 'the lead moved on');
+    for (const [hook, extra] of /** @type {const} */ ([['UserPromptSubmit', {}], ['Stop', {}], ['SessionEnd', {}]])) {
+      const e = createDialogs();
+      afterHook(e, { hook: 'Notification', notice: 'agent_needs_input', call: lead([]), at: 1 });
+      assert.equal(afterHook(e, { hook, call: lead([]), at: 2, ...extra }).closed.length, 1, hook);
+    }
+    // A helper's request open meanwhile is no reason to miss the form: it is a dialog of its own.
+    const both = createDialogs();
+    both.ask(helper(['WebFetch'], { url: 'https://x.dev' }), 1);
+    assert.equal(afterHook(both, { hook: 'Notification', notice: 'elicitation_dialog', call: lead([]), at: 2 }).opened?.kind, 'question');
+    assert.equal(afterHook(both, { hook: 'Notification', notice: 'permission_prompt', call: lead([]), at: 3 }).opened, null, 'a permission notice is, when something is open');
   });
 
   test("an agent's turn ending closes its own dialogs; the session ending closes all", () => {

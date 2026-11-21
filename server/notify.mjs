@@ -134,12 +134,16 @@ function dialogNote(covered, crews) {
   return { kind: DIALOG_RATE, title: 'Andary', body: crews === 1 ? words.one : words.many(crews), priority: 'high', tags: words.tags };
 }
 
-/** Events that show a Codex lead at work again. */
-const LEAD_AT_WORK = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'PermissionDenied']);
+/** A Codex session's wait for your prompt ends only with one, or with the session. */
+const WAIT_ENDS = new Set(['UserPromptSubmit', 'SessionStart', 'SessionEnd']);
+/** A tool starting: someone works, the minute pauses. */
+const TOOL_STARTS = new Set(['PreToolUse', 'PermissionRequest']);
+/** A tool or a helper done: the minute starts again. */
+const WORK_DONE = new Set(['PostToolUse', 'PostToolUseFailure', 'PermissionDenied', 'SubagentStop']);
 
 /**
  * Codex sends no idle_prompt: its lead's finished turn (Stop, an interrupt included) starts the
- * minute here. Helpers have agent_id.
+ * minute here.
  * @param {Record<string, any>} event
  */
 function isCodexLeadStop(event) {
@@ -169,41 +173,64 @@ function createRateLimit() {
 }
 
 /**
- * Codex leads that stopped, each with the timer of its "waiting" note.
+ * Codex sessions whose lead stopped and has had no prompt since, each with the minute that ends
+ * in its "waiting" note. Codex names a helper only on SubagentStart and SubagentStop, so a
+ * helper's tool events look like the lead's: a tool starting pauses the minute, a result, a
+ * helper's end or the lead's next Stop starts it again, and only a prompt, or the session
+ * starting or ending, ends the wait. One note per Stop.
  * @param {(fn: () => void, ms: number) => any} setTimer
  * @param {(timer: any) => void} clearTimer
  * @param {() => void} onIdle
  */
 function createIdleWatch(setTimer, clearTimer, onIdle) {
-  /** @type {Map<string, any>} */
-  const timers = new Map();
-  const watch = {
+  /** @type {Map<string, { timer: any, noted: boolean }>} */
+  const waits = new Map();
+  /** @param {{ timer: any }} wait */
+  const pause = (wait) => {
+    if (wait.timer !== null) clearTimer(wait.timer);
+    wait.timer = null;
+  };
+  /** @param {{ timer: any, noted: boolean }} wait */
+  const run = (wait) => {
+    pause(wait);
+    if (wait.noted) return;
+    wait.timer = setTimer(() => {
+      wait.timer = null;
+      wait.noted = true;
+      onIdle();
+    }, CODEX_IDLE_MS);
+    wait.timer?.unref?.();
+  };
+  return {
+    /** The lead's Stop: the wait starts, or starts again. @param {string} sessionId */
+    stopped(sessionId) {
+      const wait = waits.get(sessionId) ?? { timer: null, noted: false };
+      wait.noted = false;
+      waits.set(sessionId, wait);
+      run(wait);
+    },
     /** @param {string} sessionId */
-    stop(sessionId) {
-      if (!timers.has(sessionId)) return;
-      clearTimer(timers.get(sessionId));
-      timers.delete(sessionId);
+    pause(sessionId) {
+      const wait = waits.get(sessionId);
+      if (wait) pause(wait);
     },
-    /** (Re)starts the minute. @param {string} sessionId */
-    start(sessionId) {
-      watch.stop(sessionId);
-      const timer = setTimer(() => {
-        timers.delete(sessionId);
-        onIdle();
-      }, CODEX_IDLE_MS);
-      timer?.unref?.();
-      timers.set(sessionId, timer);
+    /** @param {string} sessionId */
+    resume(sessionId) {
+      const wait = waits.get(sessionId);
+      if (wait) run(wait);
     },
-    /** Starts the minute again if it is running: a helper still works. @param {string} sessionId */
-    restart(sessionId) {
-      if (timers.has(sessionId)) watch.start(sessionId);
+    /** @param {string} sessionId */
+    end(sessionId) {
+      const wait = waits.get(sessionId);
+      if (!wait) return;
+      pause(wait);
+      waits.delete(sessionId);
     },
     clear() {
-      for (const timer of timers.values()) clearTimer(timer);
-      timers.clear();
+      for (const wait of waits.values()) pause(wait);
+      waits.clear();
     },
   };
-  return watch;
 }
 
 /**
@@ -336,17 +363,16 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
   }
 
   /**
-   * The Codex waiting note: a lead's Stop starts its minute, a helper's event starts it again
-   * (the crew still works), and the lead at work again or the session starting or ending stops it.
+   * The Codex waiting note (see createIdleWatch).
    * @param {Record<string, any>} event
    */
   function watchIdle(event) {
     const sessionId = text(event.session_id);
     const name = event.hook_event_name;
-    if (name === 'SessionStart' || name === 'SessionEnd') idle.stop(sessionId);
-    else if (isCodexLeadStop(event)) idle.start(sessionId);
-    else if (normalizeAgentId(event.agent_id) !== null) idle.restart(sessionId);
-    else if (LEAD_AT_WORK.has(name)) idle.stop(sessionId);
+    if (WAIT_ENDS.has(name)) idle.end(sessionId);
+    else if (isCodexLeadStop(event)) idle.stopped(sessionId);
+    else if (TOOL_STARTS.has(name)) idle.pause(sessionId);
+    else if (WORK_DONE.has(name)) idle.resume(sessionId);
   }
 
   return {
@@ -365,17 +391,21 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
       if (note) void send(note);
     },
     /**
-     * Every change of an approval (the broker's onChange). A new one links to its own dialog, by
-     * its call key (again for a release: linking is idempotent per approval). Only a decision in
-     * the town proves anything here: an expired or released approval went back to the terminal,
-     * where the agent still waits, and a resolved one followed the same rules as this notifier,
-     * on an event it has already seen.
+     * Every change of an approval (the broker's onChange). A pending one links to its own dialog
+     * by its call key, saying whether the town holds it (again for a release, which hands it to
+     * the terminal; an expiry does too). Only a decision in the town proves anything here: an
+     * expired or released approval went back to the terminal, where the agent still waits, and a
+     * resolved one followed the same rules as this notifier, on an event it has already seen.
      * @param {import('./approvals.mjs').Approval} approval
      */
     approvalChanged(approval) {
       if (!url || disposed) return;
       if (approval.status === 'pending') {
-        dialogs.link({ sessionId: approval.sessionId, agentId: approval.agentId, tools: [approval.toolName].filter(Boolean), input: approval.callKey ?? null }, approval.id);
+        dialogs.link({ sessionId: approval.sessionId, agentId: approval.agentId, tools: [approval.toolName].filter(Boolean), input: approval.callKey ?? null }, approval.id, approval.held);
+        return;
+      }
+      if (approval.status === 'expired') {
+        dialogs.toTerminal(approval.id);
         return;
       }
       if (approval.status !== 'allowed' && approval.status !== 'denied') return;

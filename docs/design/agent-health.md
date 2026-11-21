@@ -49,16 +49,23 @@ Principles:
   it drops out of every count. The count must follow the agent's wait, not the approval's status.
 - **Plan approvals** (`ExitPlanMode`) raise a PermissionRequest that a plain allow cannot answer,
   yet the town holds it and shows Allow. Never hold them; the card says "answer in your terminal".
+- **Hold only what the card shows** (CONTRACTS §4.5): every field of the input, as it is. One list,
+  `core/card-fields.js`, says per tool what its card shows, so a field it leaves out (Bash's
+  `dangerouslyDisableSandbox`) sends the request to the terminal, as a redacted or shortened input
+  does; so does a request from a forwarder too old to say it marks a body it shortened.
 - **Phone notes follow the attention rules** (CONTRACTS §4.10), on the one model of open dialogs
   that the town uses too (`core/dialogs.js`):
   - no note for every finished turn: Claude Code's `idle_prompt`, 60 s later, covers an unanswered
     one. Codex has no `idle_prompt`, so the server waits the same 60 s after a Codex lead's turn,
-    and starts again while its helpers still work;
-  - a dialog per call (a permission request, a question, a plan): its note waits 10 seconds and is
-    dropped only on proof of an answer: that call reporting back, your prompt (for the lead's
-    dialogs), the agent's turn ending, a decision in the town. A request that timed out or went
-    back to the terminal still gets its note: the agent waits there. A yes in the terminal is seen
-    only when the tool finishes and a "No" only at the next prompt, so those can still send one;
+    once per turn; Codex names no helper on its tool calls, so a tool running pauses the minute
+    and only your prompt ends the wait;
+  - a dialog per call (a permission request, a question, a plan, an MCP server's form): its note
+    waits 10 seconds and is dropped only on proof of an answer: that call reporting back, your
+    prompt (every dialog of the session but one the town holds), the agent's turn ending, a
+    decision in the town, or a question or plan the agent asks again. A request that timed out or
+    went back to the terminal still gets its note: the agent waits there. A yes in the terminal is
+    seen only when the tool finishes and a "No" only at the next prompt, so those can still send
+    one;
   - notes due together become one ("2 crews need your permission"; questions and plans have words
     of their own), and one held back by the 30 s limit goes out when the limit allows.
 

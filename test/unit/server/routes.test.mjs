@@ -11,7 +11,11 @@ describe('parseHookBody', () => {
       ts: 123,
       source: 'claude',
       event: { hook_event_name: 'Stop' },
+      caps: [],
     });
+    // What the forwarder declares it does: strings only; an older forwarder declares nothing.
+    assert.deepEqual(parseHookBody(body({ v: 1, ts: 1, caps: ['truncated', 7, 'updatedPermissions'], event: {} })).caps, ['truncated', 'updatedPermissions']);
+    assert.deepEqual(parseHookBody(body({ v: 1, ts: 1, caps: 'truncated', event: {} })).caps, []);
     assert.equal(parseHookBody(body({ v: 1, ts: 1, source: 'codex', event: {} })).source, 'codex');
     assert.equal(parseHookBody(body({ v: 1, ts: 1, source: 'other', event: {} })).source, 'claude', 'unknown sources read as Claude Code');
   });

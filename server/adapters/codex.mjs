@@ -9,10 +9,12 @@
 //   - a shell command that ends with a non-zero exit code becomes PostToolUseFailure (Codex has no
 //     failure event), so failures still bring rain;
 //   - `Interrupt` becomes `Stop`.
-// A renamed tool call keeps Codex's own name in `andary_tool`, so the approval it may have needed
-// (asked under that name) settles when it runs. Permission requests are never rewritten: the town
-// must show exactly what it would approve.
+// A renamed tool call keeps Codex's own name in `andary_tool` and the call key of its original
+// input in `andary_key` (ingest keys every other call), so the approval it may have needed, asked
+// under that name and input, settles when exactly that call runs. Permission requests are never
+// rewritten: the town must show exactly what it would approve.
 import { isAbsolute, join } from 'node:path';
+import { inputKey } from '../../public/js/core/dialogs.js';
 import { shellWords } from '../../public/js/core/text.js';
 import { parsePatch } from './apply-patch.mjs';
 
@@ -44,8 +46,9 @@ export function fromCodex(payload) {
  * @returns {Payload[]}
  */
 function toolEvents(event) {
-  if (event.tool_name === 'apply_patch') return patchEvents({ ...event, andary_tool: 'apply_patch' });
-  if (event.tool_name === 'spawn_agent') return [spawnEvent({ ...event, andary_tool: 'spawn_agent' })];
+  // Keyed before its input is rewritten: each payload made from it keeps the call's own key.
+  if (event.tool_name === 'apply_patch') return patchEvents({ ...event, andary_tool: 'apply_patch', andary_key: inputKey(event.tool_input) });
+  if (event.tool_name === 'spawn_agent') return [spawnEvent({ ...event, andary_tool: 'spawn_agent', andary_key: inputKey(event.tool_input) })];
   const shell = event.tool_name === 'Bash' ? withShellCommand(event) : event;
   return [failed(shell) ?? shell];
 }

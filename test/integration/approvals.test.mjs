@@ -282,6 +282,8 @@ describe('requests the town cannot show in full', () => {
     ['its body is marked shortened', (payload) => ({ ...payload, truncated: true })],
     ['it has no input', ({ tool_input: _dropped, ...payload }) => payload],
     ['its input is null', (payload) => ({ ...payload, tool_input: null })],
+    ['its input is a string', (payload) => ({ ...payload, tool_input: 'rm -rf ~' })],
+    ['its input is a list', (payload) => ({ ...payload, tool_input: ['rm', '-rf', '~'] })],
   ];
   for (const [name, shape] of shapes) {
     it(`goes to the terminal when ${name}`, async () => {
@@ -296,4 +298,49 @@ describe('requests the town cannot show in full', () => {
       await closeBrowser(browser);
     });
   }
+
+  it("goes to the terminal when the card would leave out a field, like Bash's sandbox override", async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    const payload = permissionRequest({ tool_input: { command: 'npm test', dangerouslyDisableSandbox: true } });
+    assert.deepEqual(await town.sendHook(payload), { code: 0, stdout: '', stderr: '' }, 'answered at once, with no decision');
+    const approval = await approvalFor(browser, payload.session_id);
+    assert.deepEqual([approval.a.status, approval.a.held], ['pending', false]);
+    assert.match(approval.a.message, /cannot show this request in full/);
+    await closeBrowser(browser);
+  });
+
+  it('holds a command whose other options the card shows as lines', async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    const payload = permissionRequest({ tool_input: { command: 'npm test', description: 'Run the tests', timeout: 60_000, run_in_background: false } });
+    const hook = town.sendHook(payload);
+    const pending = await approvalFor(browser, payload.session_id);
+    assert.equal(pending.a.held, true);
+    browser.send(JSON.stringify({ t: 'decide', id: pending.a.id, decision: 'allow' }));
+    assert.equal((await hook).stdout, JSON.stringify(decisionOutput('allow')));
+    await closeBrowser(browser);
+  });
+});
+
+describe('a forwarder from an older version', () => {
+  it('cannot have a request held: it does not say whether it shortened the body', async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    for (const caps of [[], ['updatedPermissions']]) {
+      const payload = permissionRequest();
+      const answer = await postHook(town, payload, { caps });
+      assert.equal(JSON.parse(answer.text).output, null, 'answered at once, with no decision');
+      const approval = await approvalFor(browser, payload.session_id);
+      assert.deepEqual([approval.a.status, approval.a.held], ['pending', false]);
+      assert.match(approval.a.message, /older version.*andary install/);
+    }
+    const current = permissionRequest();
+    const held = postHook(town, current);
+    const pending = await approvalFor(browser, current.session_id);
+    assert.equal(pending.a.held, true, 'the same request from a current forwarder is held');
+    browser.send(JSON.stringify({ t: 'decide', id: pending.a.id, decision: 'deny' }));
+    await held;
+    await closeBrowser(browser);
+  });
 });

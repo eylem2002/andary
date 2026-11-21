@@ -13,15 +13,21 @@ export const KEYED_HOOKS = Object.freeze(new Set(['PermissionRequest', 'PreToolU
 
 /**
  * A payload with its call key: inputKey() of the tool input as it arrived (before sanitizing, so
- * a request and its result match however long they are), or null for a call an adapter renamed,
- * whose input it rewrote. Only the server sets the key: one that came with the payload goes.
+ * a request and its result match however long they are). A key is the server's own: the one an
+ * adapter set for a call it renamed (from the call's original input) stays, as does a teammate's
+ * server's; a forwarder's never gets this far (adapters/index.mjs drops it). A renamed call
+ * without one has none (null): it goes by name.
  * @param {Record<string, any>} event  a town payload, before it is sanitized
  * @returns {Record<string, any>}
  */
 export function withCallKey(event) {
-  const { andary_key: _arrived, ...rest } = event;
-  if (!KEYED_HOOKS.has(event.hook_event_name)) return 'andary_key' in event ? rest : event;
-  return { ...rest, andary_key: event.andary_tool ? null : inputKey(event.tool_input) };
+  if (!KEYED_HOOKS.has(event.hook_event_name)) {
+    if (!('andary_key' in event)) return event;
+    const { andary_key: _dropped, ...rest } = event;
+    return rest;
+  }
+  if (typeof event.andary_key === 'string') return event;
+  return { ...event, andary_key: event.andary_tool ? null : inputKey(event.tool_input) };
 }
 
 /**

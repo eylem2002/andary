@@ -72,22 +72,32 @@ describe('ingest', () => {
     assert.equal('andary_key' in stop.event, false, 'only a tool hook has one');
   });
 
-  it("Codex: a renamed call has no key, and a long list command's request and result share one", () => {
+  it("Codex: a renamed call keeps its own call's key, and a long list command's request and result share one", () => {
     const { ctx } = fakeContext();
     const command = ['bash', '-lc', `echo ${'y'.repeat(2500)}`];
     const [asked] = ingestHook(ctx, { ts: 1, source: 'codex', event: { hook_event_name: 'PermissionRequest', session_id: 't', tool_name: 'Bash', tool_input: { command } } });
     const [ran] = ingestHook(ctx, { ts: 2, source: 'codex', event: { hook_event_name: 'PostToolUse', session_id: 't', tool_name: 'Bash', tool_use_id: 'c', tool_input: { command }, tool_response: { exit_code: 0 } } });
     assert.equal(ran.event.andary_key, asked.event.andary_key);
     assert.notEqual(inputKey(ran.event.tool_input), inputKey(asked.event.tool_input), 'sanitized, a list and the line the adapter joined are cut differently');
-    const patch = '*** Begin Patch\n*** Add File: a.ts\n+a\n*** End Patch';
-    const [write] = ingestHook(ctx, { ts: 3, source: 'codex', event: { hook_event_name: 'PostToolUse', session_id: 't', cwd: '/w', tool_name: 'apply_patch', tool_use_id: 'p', tool_input: { command: patch } } });
-    assert.deepEqual([write.event.tool_name, write.event.andary_key], ['Write', null], 'its input was rewritten: it goes by name');
+    // A two-file patch: both edits it becomes carry the key the request was asked with.
+    const patch = '*** Begin Patch\n*** Add File: a.ts\n+a\n*** Add File: b.ts\n+b\n*** End Patch';
+    const [request] = ingestHook(ctx, { ts: 3, source: 'codex', event: { hook_event_name: 'PermissionRequest', session_id: 't', tool_name: 'apply_patch', tool_input: { command: patch } } });
+    const writes = ingestHook(ctx, { ts: 4, source: 'codex', event: { hook_event_name: 'PostToolUse', session_id: 't', cwd: '/w', tool_name: 'apply_patch', tool_use_id: 'p', tool_input: { command: patch }, andary_key: 'forged' } });
+    assert.deepEqual(writes.map((e) => [e.event.tool_name, e.event.andary_key]), [['Write', request.event.andary_key], ['Write', request.event.andary_key]]);
+    const [helper] = ingestHook(ctx, { ts: 5, source: 'codex', event: { hook_event_name: 'PreToolUse', session_id: 't', tool_name: 'spawn_agent', tool_input: { message: 'look around' } } });
+    assert.deepEqual([helper.event.tool_name, helper.event.andary_key], ['Agent', inputKey({ message: 'look around' })]);
   });
 
-  it("a teammate's tool hook gets the host's call key, never its own", () => {
+  it("a teammate's tool hook keeps the key its own server stamped; one without is keyed here", () => {
     const { ctx } = fakeContext();
-    const [envelope] = ingestTeam(ctx, 'Sam', [{ ts: 1, event: { hook_event_name: 'PostToolUse', session_id: 'x', tool_name: 'Bash', tool_input: { command: 'ls' }, andary_key: 'forged' } }], 1);
-    assert.equal(envelope.event.andary_key, inputKey({ command: 'ls' }));
+    const [theirs, unkeyed, renamed] = ingestTeam(ctx, 'Sam', [
+      { ts: 1, event: { hook_event_name: 'PostToolUse', session_id: 'x', tool_name: 'Bash', tool_input: { command: 'ls' }, andary_key: 'from-their-server' } },
+      { ts: 1, event: { hook_event_name: 'PostToolUse', session_id: 'x', tool_name: 'Bash', tool_input: { command: 'ls' } } },
+      // From an older server: a call its adapter renamed, with no key. Its input was rewritten,
+      // so it has none here either and goes by name.
+      { ts: 1, event: { hook_event_name: 'PostToolUse', session_id: 'x', tool_name: 'Edit', andary_tool: 'apply_patch', tool_input: { file_path: '/a', old_string: 'a', new_string: 'b' } } },
+    ], 1);
+    assert.deepEqual([theirs.event.andary_key, unkeyed.event.andary_key, renamed.event.andary_key], ['from-their-server', inputKey({ command: 'ls' }), null]);
   });
 
   it("a teammate's batch: named, sessions prefixed, dated within the last hour, and kept to themselves", () => {
