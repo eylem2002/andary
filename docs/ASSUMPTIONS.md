@@ -509,8 +509,10 @@ section.
     rule's content get a backslash (Claude Code's own settings writer does this), so
     `Bash(echo \), Bash\(ls)` cannot read as two rules. Hidden characters are revealed on the card
     and in the log, as for commands.
-111. **"The same step" is judged from the call alone.** A shell command is read as the command
-    inside a shell it was handed to (one level of `bash`/`sh`/`zsh -c` or `-lc '…'`: Codex sends
+111. **"The same step" is judged from the call alone.** Shell commands are read by `core/shell.js`
+    as a shell reads them (quotes, here-documents and their bodies, redirections, comments;
+    PowerShell's in its own mode). A shell command is read as the command inside a
+    shell it was handed to (one level of `bash`/`sh`/`zsh -c` or `-lc '…'`: Codex sends
     every command so), its whitespace collapsed, without a leading `sleep N &&` (or `;`) and
     without a trailing `2>&1`, `| tail …` or `| head …` (only a single pipe: `|| true` stays). A
     trailing `| grep …` is dropped only after a test or build run (`npm test`, `npm run build`,
@@ -539,8 +541,8 @@ section.
     a path that is not a log or temporary file (`*.log`, `*.out`, `/tmp/…`, `/dev/…` do not count),
     and a script given to python, node, ruby, perl or a shell inline (a here-document, `-c`, `-e`)
     that opens a file for writing (`open(…, 'w')` or `'a'`) or calls `writeFile`, `appendFile`,
-    `write_text` or `write_bytes`. Wrongly taken for a change: a `>` that is no redirect
-    (`awk '$3 > 100'`, `python -c "print(a > b)"`), test output kept in a file that is not a log
+    `write_text` or `write_bytes` (a shell's here-document is read as a command line itself).
+    Wrongly taken for a change: test output kept in a file that is not a log
     (`npm test | tee results.txt`), a script that only reads, a `-w` that means something else, a
     word in a grep pattern (`grep "git commit"`). Each can hide a loop, never invent one. Missed: a
     change made in a way not listed (a script under another folder, a code generator by another
@@ -560,8 +562,8 @@ section.
     output file (Claude Code writes it to
     `<temp>/claude-<uid>/<project>/<session>/tasks/<id>.output` and has Claude read it with Read
     since TaskOutput went), or a shell command that reads one; a shell command that loops with
-    `sleep`; and a shell command (read inside `bash -lc '…'`, as in 111) whose every part, between
-    `&&`, `||` and `;`, waits, besides any `cd`, `echo`, `printf`, `true` or `date`: `sleep`
+    `sleep`; and a shell command (read inside `bash -lc '…'`, as in 111) whose every pipeline, between
+    `&&`, `||`, `;` and `&`, waits, besides any `cd`, `echo`, `printf`, `true` or `date`: `sleep`
     (`Start-Sleep`, `Get-Job`, `Wait-Job`, `Receive-Job` in PowerShell), `watch`, CI and deployment
     checks (`gh run watch|view|list`, `gh pr checks|status`, `gh pr view --json
     statusCheckRollup`, `gh workflow view`, `gh api` on runs, check runs, check suites or statuses,

@@ -1,6 +1,6 @@
 // Agents going round in circles (docs/design/agent-health.md §4): the same step failing again and
 // again with nothing changed, or run over and over with nothing changed, whatever its exit code.
-// Pure, and needing nothing but text.js (shared with the server too), because both sides run it:
+// Pure, and needing nothing but shell.js and text.js (shared with the server too), because both sides run it:
 // the browser's store keeps AgentState.stuck through it, and the server's notifier sends its phone
 // note from it. Each maps its own events to the small input below: a finished tool call
 // (LoopCall), or a fresh start for an agent (reset).
@@ -20,7 +20,8 @@
 //
 // Hooks reach Andary out of order, so the rules go by each call's own time (`at`): a call made
 // before the agent's latest change counts for rule 3 only, and rule 3's window is in time order.
-import { clip, isObject, oneLine, relativePath, shellWords, shortPath, str } from './text.js';
+import { normalizedPath, readShell } from './shell.js';
+import { clip, isObject, oneLine, relativePath, shortPath, str } from './text.js';
 
 /**
  * One finished tool call, as the rules read it.
@@ -111,7 +112,7 @@ const TASK_OUTPUT = /\/tasks\/[\w.-]+\.output(?![\w.-])/;
 const SLEEP_LOOP = /\b(?:while|until|for)\b.*\bsleep\b/;
 const LOCALHOST = /(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])/;
 /**
- * Parts of a command (between `&&`, `||` and `;`) that wait or poll by nature: sleeping, watching,
+ * Pipelines of a command (between `&&`, `||`, `;` and `&`) that wait or poll by nature: sleeping, watching,
  * CI and deployment checks, health checks, looking at logs and processes, a background task's
  * output. A command is a wait only when every part waits (or is a `cd` or an `echo`): `sleep 5 &&
  * npm test` is the test run.
@@ -134,9 +135,8 @@ const WAITS = Object.freeze([
   /\\tasks\\[\w.-]+\.output\b/,
   TASK_OUTPUT,
 ]);
-/** Parts that neither wait nor work. */
+/** Pipelines that neither wait nor work. */
 const NEUTRAL = /^(?:cd|echo|printf|true|date)\b/;
-const COMMAND_SEPARATORS = /\s*(?:&&|\|\||;)\s*/;
 
 /** The name of a command, after an opening quote or parenthesis (`(cd a && rm b)`, `sh -c 'mv a b'`). */
 const STARTS = String.raw`(?:^|[\s;&|(]|-l?c\s+['"])`;
@@ -144,7 +144,8 @@ const STARTS = String.raw`(?:^|[\s;&|(]|-l?c\s+['"])`;
  * Shell commands that change files, judged by the command (what it did cannot be seen): in-place
  * edits, formatters and fixers, scripts that format, fix or generate, the project's own scripts,
  * git commands that rewrite the work tree or the index, patches, package installs, and moving,
- * copying, creating or removing files. Output written to a file is judged apart (writesFile).
+ * copying, creating or removing files, read in the command's text. Output written to a file, a
+ * script given inline and a `-w` flag are judged from the command as shell.js reads it.
  */
 const CHANGING_COMMANDS = Object.freeze([
   /\b(?:sed|perl)\s+(?:[^|;&]*\s)?-[a-zA-Z]*i/,
@@ -157,27 +158,22 @@ const CHANGING_COMMANDS = Object.freeze([
   /\b(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|ci|remove|uninstall|rm)\b|\b(?:pip3?|uv\s+pip)\s+install\b|\buv\s+(?:sync|add)\b|\bpoetry\s+(?:install|add)\b|\bcargo\s+add\b|\bgo\s+get\b|\bbundle\s+install\b/,
   new RegExp(`${STARTS}(?:patch|rm|mv|cp|mkdir|touch)\\s`),
 ]);
-/** `> file`, `>> file`, `2> file`, `&> file`; not `2>&1`, `>&2`, `=>` or `->`. */
-const REDIRECT = /(?<![=<>-])[\d&]?>>?\s*([^\s;&|<>()]+)/g;
-const TEE = /(?:^|[\s|])tee\s+(?:(?:-[ai]|--append)\s+)*([^\s;&|<>()]+)/g;
+/** Redirections that write a file: `>`, `>>`, `2>`, `&>`, `>|` (not `2>&1`). */
+const WRITING_REDIRECTS = new Set(['>', '>>', '>|', '&>', '&>>']);
 /** Where output may go without changing the project: logs and temporary files. */
 const SCRATCH = /^(?:\/dev\/|\/tmp\/|\/private\/tmp\/|\$\{?TMPDIR\b)|\.(?:log|out)$/i;
-/** A script handed to an interpreter on the command line: a here-document, `-c` or `-e`… */
-const INLINE_SCRIPT = /\b(?:python[\d.]*|node|ruby|perl|bash|sh|zsh)\s+(?:[^|;&]*\s)?(?:<<|-[ce]\s)/;
+/** Interpreters a script may be handed to on the command line: a here-document, `-c` or `-e`… */
+const INTERPRETERS = /^(?:python[\d.]*|node|ruby|perl|bash|sh|zsh)$/;
 /** …that opens a file for writing, or writes one. */
 const SCRIPT_WRITES = /\bopen\([^)]*,\s*(?:mode\s*=\s*)?['"][wax]b?\+?['"]|\b(?:writeFile|writeFileSync|appendFile|appendFileSync|write_text|write_bytes)\b/;
 /** `-w` writes for gofmt, prettier and the like; for these it reads (words, a format, whitespace). */
-const WRITE_FLAG = /\s-w(?=\s|$)/;
 const READING_W = /^(?:grep|egrep|fgrep|rg|curl|wc|diff|git)$/;
 
-/** `bash -lc '…'`, `sh -c "…"`, `zsh -c …`: a command handed to a shell (Codex sends every command this way). */
-const SHELL_WRAPPER = /^(?:\S*\/)?(?:ba|z)?sh\s+-l?c\s+/;
-const LEADING_CD = /^cd\s+("[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/;
-/** A pause before the step: `sleep 2 && npm test` is `npm test`. */
-const LEADING_SLEEP = /^(?:sleep|start-sleep)\s[^;&|]*?(?:&&|;)\s*/i;
+/** What may come before the step without being part of it: a `cd`, or a pause (`sleep 2 && npm test` is `npm test`). */
+const LEADS = new Set(['cd', 'sleep', 'start-sleep']);
+/** Output plumbing after the step: a single pipe into tail or head (`|| true` stays), or into grep after a test or build run. */
+const PLUMBING = new Set(['tail', 'head', 'grep']);
 const TRAILING_REDIRECT = /\s*2>&1$/;
-/** A single pipe at the end into tail, head or grep (`|| true` stays). */
-const TRAILING_PIPE = /\s*(?<!\|)\|(?!\|)\s*(tail|head|grep)\b(?:'[^']*'|"[^"]*"|[^|'"])*$/;
 /** A test or build run, whose output a trailing grep only filters: `npm test | grep FAIL` is `npm test`. */
 const TEST_OR_BUILD =
   /\b(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|build|lint|check|typecheck)(?![\w-])|jest|vitest|mocha|pytest|tox|tsc|node\s+--test|deno\s+test|cargo\s+(?:test|build|check|clippy)|go\s+(?:test|build|vet)|make|gradlew?|mvn|dotnet\s+(?:test|build)|rspec|phpunit)\b/;
@@ -214,15 +210,16 @@ export function stuckWords(rule) {
 }
 
 /**
- * A shell command as the step it repeats: unwrapped from `bash -lc '…'`, whitespace collapsed,
+ * A shell command as the step it repeats: read inside `bash -lc '…'`, whitespace collapsed,
  * without a pause before it or trailing output plumbing, and without a leading `cd` into the
  * folder it runs in. A `cd` elsewhere stays: `cd packages/a && npm test` is a step of its own.
  * @param {unknown} command  a string, or a list of arguments (Codex)
  * @param {string} [folder]  the folder it runs in
+ * @param {boolean} [powershell]
  */
-export function coreCommand(command, folder = '') {
+export function coreCommand(command, folder = '', powershell = false) {
   const home = folderOf(folder);
-  const { dir, core } = parseCommand(command, home);
+  const { dir, core } = parseCommand(command, home, powershell);
   return dir === home ? core : `cd ${relativePath(dir, home)} && ${core}`;
 }
 
@@ -236,7 +233,7 @@ export function coreCommand(command, folder = '') {
 export function stepKey(tool, input, folder = '') {
   const args = isObject(input) ? input : {};
   if (SHELL_TOOLS.has(tool)) {
-    const { dir, core } = parseCommand(args.command, folderOf(folder));
+    const { dir, core } = parseCommand(args.command, folderOf(folder), tool === 'PowerShell');
     return clip(`${tool}\n${dir}\n${core}`, MAX_KEY_CHARS);
   }
   if (tool === 'Read') return clip(`${tool}\n${pathOf(args)}\n${str(args.offset)}\n${str(args.limit)}`, MAX_KEY_CHARS);
@@ -250,12 +247,12 @@ export function stepKey(tool, input, folder = '') {
  * written to a file that is not a log or a temporary one, a script given inline that writes, and
  * a `-w` flag.
  * @param {unknown} command
+ * @param {boolean} [powershell]
  */
-export function changesFiles(command) {
-  const text = commandText(command);
-  if (CHANGING_COMMANDS.some((pattern) => pattern.test(text)) || writesFile(text)) return true;
-  if (INLINE_SCRIPT.test(text) && SCRIPT_WRITES.test(text)) return true;
-  return text.split(COMMAND_SEPARATORS).some((part) => WRITE_FLAG.test(part) && !READING_W.test(programOf(part)));
+export function changesFiles(command, powershell = false) {
+  const { segments } = shellOf(command, '', powershell);
+  const text = textOf(segments);
+  return CHANGING_COMMANDS.some((pattern) => pattern.test(text)) || segments.some((segment) => segmentWrites(segment));
 }
 
 /**
@@ -268,11 +265,11 @@ export function isPolling(tool, input) {
   if (POLLING_TOOLS.has(tool)) return true;
   if (tool === 'Read') return TASK_OUTPUT.test(pathOf(args));
   if (!SHELL_TOOLS.has(tool)) return false;
-  const text = withoutPlumbing(commandText(args.command));
-  if (SLEEP_LOOP.test(text)) return true;
-  const parts = text.split(COMMAND_SEPARATORS).filter(Boolean);
-  const waits = parts.filter((part) => WAITS.some((pattern) => pattern.test(part)));
-  return waits.length > 0 && parts.every((part) => waits.includes(part) || NEUTRAL.test(part));
+  const { segments } = shellOf(args.command, '', tool === 'PowerShell');
+  if (SLEEP_LOOP.test(textOf(segments))) return true;
+  const pipelines = [...new Set(segments.map((segment) => segment.pipeline))].map((n) => textOf(segments.filter((segment) => segment.pipeline === n), false));
+  const waits = pipelines.filter((pipeline) => WAITS.some((pattern) => pattern.test(pipeline)));
+  return waits.length > 0 && pipelines.every((pipeline) => waits.includes(pipeline) || NEUTRAL.test(pipeline));
 }
 
 /**
@@ -283,7 +280,7 @@ export function isPolling(tool, input) {
  * @param {unknown} [command]  the command that failed, for a shell tool
  */
 export function errorSignature(error, command) {
-  const echoes = new Set([commandText(command), coreCommand(command)]);
+  const echoes = new Set([textOf(shellOf(command).segments), coreCommand(command)]);
   for (const raw of str(error).split('\n')) {
     const line = oneLine(raw);
     if (line && !echoes.has(line) && !GENERIC_LINES.some((pattern) => pattern.test(line))) return clip(line.replace(DURATION, ''), ERROR_CHARS);
@@ -292,26 +289,30 @@ export function errorSignature(error, command) {
 }
 
 /**
- * A command on one line, unwrapped from a shell it was handed to (one level). A list of
- * arguments (Codex) is joined as a shell would need it first.
- * @param {unknown} command
+ * A command as shell.js reads it, from `folder`. A `cd` that cannot be worked out (`~`, `$DIR`)
+ * is kept as written: it still tells one step from another.
+ * @param {unknown} command @param {string} [folder] @param {boolean} [powershell]
  */
-function commandText(command) {
-  const text = oneLine(Array.isArray(command) ? shellWords(command) : command);
-  const wrapper = SHELL_WRAPPER.exec(text);
-  const script = wrapper ? unquoted(text.slice(wrapper[0].length)) : null;
-  return script === null ? text : oneLine(script);
+function shellOf(command, folder = '', powershell = false) {
+  return readShell(command, { folder, powershell, resolve: resolveDir });
 }
 
 /**
- * One shell word without its quotes, or null when the text is more than one word.
- * @param {string} word
- * @returns {string|null}
+ * Segments as one line of text: each as written, its here-documents' bodies after it, joined by
+ * their separators.
+ * @param {import('./shell.js').Segment[]} segments
+ * @param {boolean} [bodies]
  */
-function unquoted(word) {
-  if (/^'(?:[^']|'\\'')*'$/.test(word)) return word.slice(1, -1).replaceAll(`'\\''`, "'");
-  if (/^"(?:[^"\\]|\\.)*"$/.test(word)) return word.slice(1, -1).replace(/\\(.)/g, '$1');
-  return /^[^\s'"]+$/.test(word) ? word : null;
+function textOf(segments, bodies = true) {
+  return segments
+    .map((segment, i) => {
+      const text = bodies ? [segment.text, ...segment.redirects.map((r) => r.body ?? '')].filter(Boolean).join(' ') : segment.text;
+      const separator = i === segments.length - 1 && ['', ';'].includes(segment.separator) ? '' : segment.separator;
+      return separator === ';' ? `${text}; ` : separator ? `${text} ${separator} ` : text;
+    })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
@@ -319,80 +320,54 @@ function unquoted(word) {
  * lead to from `folder`, `core` the rest, without a pause before it or the output plumbing after it.
  * @param {unknown} command
  * @param {string} folder  as folderOf has it
+ * @param {boolean} powershell
  */
-function parseCommand(command, folder) {
-  let text = commandText(command);
-  let dir = folder;
-  for (let lead = leadOf(text); lead; lead = leadOf(text)) {
-    if (lead[1] !== undefined) dir = resolveDir(unquoted(lead[1]) ?? lead[1], dir);
-    text = text.slice(lead[0].length);
+function parseCommand(command, folder, powershell) {
+  const { segments } = shellOf(command, folder, powershell);
+  let first = 0;
+  while (first < segments.length - 1 && LEADS.has(segments[first].program) && ['&&', ';'].includes(segments[first].separator)) first += 1;
+  const core = segments.slice(first);
+  // `git log | grep fix` is not `git log | grep feat`: grep's pattern is part of a step it does not just filter.
+  while (core.length > 1 && core[core.length - 2].separator === '|' && PLUMBING.has(core[core.length - 1].program)) {
+    if (core[core.length - 1].program === 'grep' && !TEST_OR_BUILD.test(textOf(core.slice(0, -1)))) break;
+    core.pop();
   }
-  return { dir, core: withoutPlumbing(text) };
-}
-
-/** A leading `cd <dir> &&` (its dir captured) or `sleep N &&`. @param {string} text */
-function leadOf(text) {
-  return LEADING_CD.exec(text) ?? LEADING_SLEEP.exec(text);
-}
-
-/**
- * A command without its trailing `2>&1` and a single pipe into tail or head, or into grep after a
- * test or build run (else grep's pattern is part of the step: `git log | grep fix` is not
- * `git log | grep feat`).
- * @param {string} command
- */
-function withoutPlumbing(command) {
-  let text = command;
-  for (let before = ''; before !== text; ) {
-    before = text;
-    text = text.replace(TRAILING_REDIRECT, '');
-    const pipe = TRAILING_PIPE.exec(text);
-    if (pipe && (pipe[1] !== 'grep' || TEST_OR_BUILD.test(text.slice(0, pipe.index)))) text = text.slice(0, pipe.index);
-    text = text.trim();
-  }
-  return text;
+  const last = core[core.length - 1];
+  const trimmed = last ? [...core.slice(0, -1), { ...last, text: last.text.replace(TRAILING_REDIRECT, ''), separator: '' }] : [];
+  return { dir: folderOf(segments[first]?.folder ?? folder), core: textOf(trimmed) };
 }
 
 /**
  * Where `cd <dir>` leads from `base`. A path that cannot be worked out here (`~`, `$VAR`) is kept
  * as written.
+ * @param {string|null} base
  * @param {string} dir
- * @param {string} base
  */
-function resolveDir(dir, base) {
+function resolveDir(base, dir) {
   const path = dir.replace(/\\/g, '/');
   if (path === '.' || path === '') return base;
-  if (ABSOLUTE_PATH.test(path) || /^[~$]/.test(path) || !base) return folderOf(normalized(path));
-  return folderOf(normalized(`${base}/${path}`));
-}
-
-/** A path without `.` and `..` segments. @param {string} path */
-function normalized(path) {
-  /** @type {string[]} */
-  const parts = [];
-  for (const [i, part] of path.split('/').entries()) {
-    if (part === '.' || (part === '' && i > 0)) continue;
-    if (part === '..' && parts.length > 0 && !['', '..'].includes(parts[parts.length - 1])) parts.pop();
-    else parts.push(part);
-  }
-  return parts.join('/');
+  if (ABSOLUTE_PATH.test(path) || /^[~$]/.test(path) || !base) return folderOf(normalizedPath(path));
+  return folderOf(normalizedPath(`${base}/${path}`));
 }
 
 /**
- * Whether a command writes its output, or a here-document, to a file that is not a log or a
- * temporary file: `> src/a.ts`, `>> notes.md`, `| tee -a out.txt`.
- * @param {string} text
+ * Whether one command writes a file: its output or a here-document into a file that is not a log
+ * or temporary file (`> src/a.ts`, `| tee -a out.txt`), an inline script that writes (a shell's
+ * here-document read as a command line itself), or a `-w` flag.
+ * @param {import('./shell.js').Segment} segment
  */
-function writesFile(text) {
-  return [...text.matchAll(REDIRECT), ...text.matchAll(TEE)]
-    .map((match) => match[1].replace(/^['"]+|['"]+$/g, ''))
-    .some((path) => path !== '' && !SCRATCH.test(path));
-}
-
-/** The program a part of a command runs: `sh -c 'grep -w x'` is grep. @param {string} part */
-function programOf(part) {
-  const word = part.replace(/^[('"]+/, '').split(' ')[0] ?? '';
-  return word.slice(word.lastIndexOf('/') + 1);
+function segmentWrites({ program, words, redirects }) {
+  const targets = redirects.filter((r) => WRITING_REDIRECTS.has(r.op)).map((r) => r.target);
+  if (program === 'tee') targets.push(...words.slice(1).filter((word) => !word.startsWith('-')));
+  if (targets.some((path) => path !== '' && !SCRATCH.test(path))) return true;
+  if (INTERPRETERS.test(program)) {
+    const bodies = redirects.map((r) => r.body ?? '');
+    const inline = words.findIndex((word) => word === '-c' || word === '-e');
+    const scripts = [...bodies, ...(inline > 0 ? words.slice(inline + 1, inline + 2) : [])];
+    if (scripts.some((script) => SCRIPT_WRITES.test(script))) return true;
+    if (/^(?:ba|z)?sh$/.test(program) && bodies.some((body) => body && changesFiles(body))) return true;
+  }
+  return words.includes('-w') && !READING_W.test(program);
 }
 
 /**
@@ -638,7 +613,7 @@ function ended(agent) {
 function isChange(call) {
   if (!call.ok) return false;
   if (EDIT_TOOLS.has(call.tool)) return true;
-  return SHELL_TOOLS.has(call.tool) && changesFiles(call.input.command);
+  return SHELL_TOOLS.has(call.tool) && changesFiles(call.input.command, call.tool === 'PowerShell');
 }
 
 /**
@@ -703,7 +678,7 @@ function sortedJson(value) {
  */
 function stepLabel(call, folder) {
   const { tool, input } = call;
-  if (SHELL_TOOLS.has(tool)) return clip(coreCommand(input.command, folder), LABEL_CHARS) || tool;
+  if (SHELL_TOOLS.has(tool)) return clip(coreCommand(input.command, folder, tool === 'PowerShell'), LABEL_CHARS) || tool;
   const path = pathOf(input);
   if (path && FILE_TOOLS.has(tool)) return `${tool} ${shortPath(path, call.folder, Math.max(12, LABEL_CHARS - tool.length - 1))}`;
   if (SEARCH_TOOLS.has(tool)) return clip(`${tool} ${oneLine(input.pattern)}`, LABEL_CHARS);

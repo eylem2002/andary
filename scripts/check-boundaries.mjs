@@ -23,6 +23,7 @@ export const SERVER_CORE = Object.freeze([
   'public/js/core/card-fields.js',
   'public/js/core/permission-rules.js',
   'public/js/core/loops.js',
+  'public/js/core/shell.js',
 ]);
 
 /**

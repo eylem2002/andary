@@ -54,3 +54,6 @@ Modules that joined the server's list since this decision (`SERVER_CORE` in
 - `loops` (`public/js/core/loops.js`), the rules that say when an agent seems stuck (the same
   step failing or repeating with nothing changed). The town's alert and the phone's note must
   agree on when an episode starts and ends, so the rules live once, in core, where both run them.
+- `shell` (`public/js/core/shell.js`), the one reader of shell command lines: segments, programs,
+  redirections, a shell's `-c` script, folder moves. `loops` reads commands through it, so the
+  server needs it too, and every other rule about what an agent ran reads commands the same way.

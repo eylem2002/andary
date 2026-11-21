@@ -45,7 +45,8 @@ public/js/core/              Pure logic, no DOM, no I/O: events (normalize), sto
                              text, summaries, ids, dates, looks, prices, growth, records,
                              town-weather, humor, dialogs (open dialogs), waits, attention,
                              card-fields (what an approval card shows), permission-rules (what
-                             "Allow always" may save), loops (when an agent seems stuck)
+                             "Allow always" may save), loops (when an agent seems stuck), shell
+                             (shell command lines read as a shell reads them, for every rule)
 public/js/sources/           Where events come from: live.js (WebSocket) and demo.js (simulation),
                              one TownSource shape (types.js)
 public/js/world/layout.js    Town plan (shared, pure data)
@@ -828,12 +829,29 @@ where a click goes), the `I` key, the page title, the crew rows, the inspector a
 notifications. A crew row says how long: "waiting for 4m 05s", "finished 4m 05s ago", "stuck for
 4m 05s".
 
+**Shell** (`core/shell.js`, pure, shared with the server): the one reader of Bash and
+PowerShell command lines. `readShell(command, { powershell?, folder?, root?, resolve? }) →
+{ segments, pipefail, truncated }` reads a string or a Codex argument list (at most
+`MAX_SHELL_CHARS`, 20,000) into segments, one per simple command, each `{ text, argv, words,
+program, redirects, separator, pipeline, condition, succeeded, decides, depth, folder }`: its text
+as written; its words with quotes resolved, redirections and leading keywords left out; its program
+behind assignments, wrappers and launchers (`programOf`); its redirections `{ op, fd, target,
+body }` with here-document bodies; the separator after it (`&&`, `||`, `;`, `|`, `|&`, `&`, '');
+its pipeline; what the line's exit status proves of it (pipes, `||`, `&`, conditions, `set -o
+pipefail`); 1 inside a shell's `-c` script, which is read in its place one level deep; and, given a
+starting folder, where it runs after `cd`, `pushd`/`popd` (`Set-Location`, `sl`, `Push-Location`,
+`Pop-Location`), `env -C` and `cd "$(git rev-parse --show-toplevel)"` (with `root`), unknown
+(`null`) for `~`, `$VAR`, `cd -` or past `MAX_MOVES` (64) moves. `shellCommands(command, options)
+→ { words, succeeded, decides }[]` is the short form; `isTestRun(words)` and `gitAction(words)`
+read a program's words; `normalizedPath(path)` drops `.` and `..`. It never throws.
+
 **Stuck** (`core/loops.js`, pure; docs/design/agent-health.md §4). The store runs it after each
 event and keeps the result on `AgentState.stuck` (and a `stuck` log line, level `warn`, when an
 episode starts); the server's notifier runs the same module for its phone note (§4.10), and the
 boundary check lists it among the core modules the server may import. Each side maps its events
 to the module's own input: a finished call `{ agent, folder, tool, input, ok, error, at }`
-(PostToolUse; PostToolUseFailure and PermissionDenied are failures; `error` is the whole error
+(PostToolUse; PostToolUseFailure and PermissionDenied are failures; shell commands are read
+through `core/shell.js`, PowerShell's in its mode; `error` is the whole error
 text, `tool.fail`'s `data.errorText` in the town, or a refusal's reason; `at` is the hook's own
 time, `e.ts` in the town, `hookTime` on the server) or a fresh start, `reset(agent)`, and
 `resetAll(belongs)` when a session ends.

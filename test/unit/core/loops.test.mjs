@@ -171,6 +171,7 @@ describe('what counts as a change', () => {
       'npm run build:types',
       'node scripts/build-icons.mjs',
       'python scripts/gen_schema.py',
+      'bash <<EOF\necho ready > status.txt\nEOF',
     ];
     for (const command of changes) assert.equal(changesFiles(command), true, command);
     const nothing = [
@@ -196,6 +197,8 @@ describe('what counts as a change', () => {
       "curl -s -w '%{http_code}' localhost:3000",
       'npm run test:fixtures',
       'echo "=> done" >&2',
+      "awk '$3 > 100' data.csv",
+      'python3 -c "print(1 > 0)"',
     ];
     for (const command of nothing) assert.equal(changesFiles(command), false, command);
     assert.equal(changesFiles(['git', 'checkout', 'main']), true, 'a Codex argument list');
