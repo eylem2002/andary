@@ -375,7 +375,7 @@ test('two crews in one folder: an edit of the same file is a note on both rows, 
   }
   const row = (/** @type {string} */ session) => page.locator(`[data-testid="agent-row"][data-agent-key="${session}:main"]`);
   // An edit must match what is there: a note under what both agents do, and nothing counted.
-  const note = 'Edited src/app.ts, which Foreman (crew 1) changed just now';
+  const note = 'Foreman (crew 2) edited src/app.ts, which Foreman (crew 1) changed just now';
   for (const session of ['e2e-first', 'e2e-second']) await expect(row(session).getByTestId('agent-note')).toHaveText(note);
   const button = page.getByTestId('waiting-for-you');
   await expect(button).toBeHidden();
@@ -386,7 +386,7 @@ test('two crews in one folder: an edit of the same file is a note on both rows, 
 
   // A write over the first crew's change needs you, on both rows.
   await town.sendHook(second('PostToolUse', done('Write', 'w1', { content: 'export const theme = "dim";' })));
-  const words = 'Wrote over src/app.ts, which Foreman (crew 1) changed just now';
+  const words = 'Foreman (crew 2) wrote over src/app.ts, which Foreman (crew 1) changed just now';
   await expect(button).toHaveAttribute('aria-label', `1 needs you. Next: ${words}`);
   await expect(button).toHaveAttribute('data-level', 'alert');
   await expect(page).toHaveTitle('(1) Andary');

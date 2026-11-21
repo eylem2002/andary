@@ -31,7 +31,7 @@ import { agentKeyOf } from './ids.js';
  * @property {AttentionLevel} level
  * @property {string} sessionId
  * @property {string} agentKey      who to show (the first, for a group)
- * @property {string[]} agentKeys   everyone it stands for (a shared rate limit: every crew's agent; the same files: both agents)
+ * @property {string[]} agentKeys   everyone it stands for (a shared rate limit: every crew's agent; the same files: who did it, then the others)
  * @property {string|null} approvalId  the request to open in Approvals (kind 'approval')
  * @property {number} since         when the agent stopped for you
  * @property {number} countedSince  when it started to count (since, or idle_prompt for a finished turn)
@@ -221,10 +221,10 @@ function finishedItem(item, wait, session, now) {
 }
 
 /**
- * Two agents on the same files (core/conflicts.js), listed for both: a Write over the other's
- * change or a git command over its changes is an alert, counted until set aside; an Edit is a
- * note that counts for nothing. The store ends a hazard when either agent finishes; this also
- * leaves out one that is half an hour old, or whose agents or crews are gone.
+ * Two agents on the same files (core/conflicts.js), listed for everyone it names: a Write over
+ * another agent's change or a git command over others' changes is an alert, counted until set
+ * aside; an Edit is a note that counts for nothing. The store ends a hazard when its agent
+ * finishes; this also leaves out one half an hour old, and the agents or crews no longer here.
  * @param {Hazard} hazard
  * @param {StoreState} state
  * @param {Map<string, Session>} yours  your crews still in town
@@ -232,9 +232,10 @@ function finishedItem(item, wait, session, now) {
  * @returns {AttentionItem|null}
  */
 function conflictItem(hazard, state, yours, now) {
-  const agentKeys = [hazard.agentKey, hazard.otherKey];
-  if (now - hazard.at >= CONFLICT_MS || !yours.has(hazard.sessionId) || !yours.has(hazard.otherSessionId)) return null;
-  if (agentKeys.some((key) => !state.agents[key] || state.agents[key].status === 'done')) return null;
+  const here = (/** @type {string} */ key, /** @type {string} */ session) => yours.has(session) && Boolean(state.agents[key]) && state.agents[key].status !== 'done';
+  if (now - hazard.at >= CONFLICT_MS || !here(hazard.agentKey, hazard.sessionId)) return null;
+  const others = hazard.others.filter((other) => here(other.key, other.sessionId));
+  if (!others.length) return null;
   const alert = hazard.kind !== 'edit';
   return {
     id: `conflict:${hazard.id}`,
@@ -242,14 +243,14 @@ function conflictItem(hazard, state, yours, now) {
     level: 'alert',
     sessionId: hazard.sessionId,
     agentKey: hazard.agentKey,
-    agentKeys,
+    agentKeys: [hazard.agentKey, ...others.map((other) => other.key)],
     approvalId: null,
     since: hazard.at,
     countedSince: hazard.at,
-    text: hazardText(hazard, state, now),
+    text: hazardText(others.length === hazard.others.length ? hazard : { ...hazard, others }, state, now),
     counted: alert,
     dismissable: alert,
-    crews: hazard.sessionId === hazard.otherSessionId ? 1 : 2,
+    crews: new Set([hazard.sessionId, ...others.map((other) => other.sessionId)]).size,
     settled: true,
   };
 }

@@ -53,8 +53,9 @@ export function notificationFor(item, state, now) {
       // The item's own words name the command: these may show on a locked screen.
       return note('Seems stuck', `${crew} seems stuck: ${stuckWords(state.agents[item.agentKey]?.stuck?.rule ?? 1)}.`);
     case 'conflict':
-      // The item's own words name the file or the command: these may show on a locked screen.
-      return note('Two agents in one folder', `${crew} may be undoing another agent's work.`);
+      // The item's own words name files and commands: these may show on a locked screen. Crews in
+      // one folder share a project name, so the crew's number tells which.
+      return note('Two agents in one folder', `${crew}${crewNumber(state, item)} may be undoing another agent's work.`);
     case 'finished':
       // With one crew at work you are probably at its terminal already.
       return activeCrews(state) > 1 ? note('Turn finished', `${crew} is waiting for your next prompt.`) : null;
@@ -67,6 +68,12 @@ export function notificationFor(item, state, now) {
 function crewName(state, item) {
   const session = state.sessions.find((s) => s.id === item.sessionId);
   return session ? session.title || session.project : 'A crew';
+}
+
+/** " (crew 2)" for the crew an item is about, or nothing. @param {StoreState} state @param {AttentionItem} item */
+function crewNumber(state, item) {
+  const session = state.sessions.find((s) => s.id === item.sessionId);
+  return session ? ` (crew ${session.number})` : '';
 }
 
 /** Your crews still in town. @param {StoreState} state */

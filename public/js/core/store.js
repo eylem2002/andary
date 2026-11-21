@@ -8,12 +8,12 @@
 
 import { ACHIEVEMENTS, achievementFor } from './achievements.js';
 import { BUILDINGS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
-import { LEAD_NAME, MAX_APPROVALS, MAX_RECENT, MAX_RETIRED, MAX_SPAWNS_PER_SESSION, boundedPush, createModel } from './store-model.js';
+import { LEAD_NAME, MAX_APPROVALS, MAX_RECENT, MAX_RETIRED, MAX_SPAWNS_PER_SESSION, boundedPush, createModel, helpersOf } from './store-model.js';
 import { agentFor, assignSpawn, attribute, dropAgent, place, pruneDoneHelpers, pruneEndedSessions, reconcileTeammate, repairGuesses, sessionFor, sessionStatus } from './crews.js';
 import { recordChange, rememberFile } from './changes.js';
 import { hazardText } from './conflicts.js';
 import { NO_SESSION, normalize } from './events.js';
-import { gitHazardOf } from './git-commands.js';
+import { gitCommitsOf, gitHazardOf } from './git-commands.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { rulesText } from './permission-rules.js';
 import { summarizeTool } from './summaries.js';
@@ -686,45 +686,90 @@ function setWait(a, e) {
 
 /** Shell tools whose command line may hold a git command (git-commands.js). */
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
+/** Tools that start a helper: their call ending (unless launched in the background) ends it. */
+const SPAWN_TOOLS = new Set(['Agent', 'Task']);
+
+/** @typedef {import('./conflicts.js').Hazard} Hazard */
+/** @typedef {(m: Model, e: TownEvent, s: Session, a: AgentState) => Hazard[]} ConflictStep */
 
 /**
- * Keeps what the same-file and git rules need (conflicts.js), and the hazards they find on
- * state.hazards: a file change or a git command may start one; a helper finishing or its crew
- * leaving ends its own, and they end after half an hour. A teammate's crew (a team town) works
- * on their computer, so its files are left out.
+ * What each event does to the same-file and git rules (conflicts.js): a file change or a git
+ * command may start a hazard, a commit that went through takes its committer's changes out of
+ * harm's way, and a helper finishing (also without its SubagentStop: its call ended, or the lead
+ * was interrupted) or its crew leaving ends its own.
+ * @type {Readonly<Record<string, ConflictStep>>}
+ */
+const CONFLICT_STEPS = Object.freeze({
+  'tool.start': commandStarted,
+  'tool.end': toolEnded,
+  'tool.fail': (m, e, s) => (SPAWN_TOOLS.has(e.data.tool) ? finishHelper(m, s, e.data.toolUseId, null) : []),
+  'spawn.result': (m, e, s) => (e.data.status === 'async_launched' ? [] : finishHelper(m, s, e.data.toolUseId, e.data.agentId)),
+  'subagent.stop': (m, e, s, a) => (m.conflicts.finished(a.key), []),
+  'turn.stop': (m, e, s, a) => (e.data.interrupted === true && a.role === 'lead' ? helpersOf(m, s.id).flatMap((h) => finishHelper(m, s, null, h.agentId)) : []),
+});
+
+/**
+ * Keeps the same-file and git rules' memory (conflicts.js) and the hazards they find on
+ * state.hazards; they also end after half an hour. A teammate's crew (a team town) works on their
+ * computer, so its files are left out.
  * @param {Model} m
  * @param {TownEvent} e
  * @param {Session} s
  * @param {AgentState|undefined} a
- * @returns {import('./conflicts.js').Hazard[]} the hazards that just started
+ * @returns {Hazard[]} the hazards that just started
  */
 function followConflicts(m, e, s, a) {
   if (s.member) return [];
-  let ended = m.conflicts.expire(e.ts);
-  /** @type {import('./conflicts.js').Hazard[]} */
-  let started = [];
-  if (e.kind === 'session.end') ended = m.conflicts.ended(s.id) || ended;
-  else if (a && e.kind === 'subagent.stop') ended = m.conflicts.finished(a.key) || ended;
-  else if (a) started = hazardsOf(m, e, s, a);
-  if (ended || started.length) m.state.hazards = m.conflicts.list();
+  const before = m.conflicts.list();
+  m.conflicts.expire(e.ts);
+  if (e.kind === 'session.end') m.conflicts.ended(s.id);
+  const step = a ? own(CONFLICT_STEPS, e.kind) : undefined;
+  const started = step && a ? step(m, e, s, a) : [];
+  const after = m.conflicts.list();
+  if (after.length !== before.length || after.some((hazard, i) => hazard !== before[i])) m.state.hazards = after;
   return started;
 }
 
 /**
- * The hazards an event starts: a finished file change, or a shell command starting (a git hazard
- * shows while the command asks for permission or runs).
- * @param {Model} m
- * @param {TownEvent} e
- * @param {Session} s
- * @param {AgentState} a
+ * Who did it, for the rules: a helper names its lead and when it started, as the lead's changes
+ * from before then were handed to it.
+ * @param {TownEvent} e @param {Session} s @param {AgentState} a
+ * @returns {import('./conflicts.js').Actor}
  */
-function hazardsOf(m, e, s, a) {
-  const by = { agent: a.key, session: s.id, at: e.ts };
-  const folder = e.cwd || s.cwd;
-  if (e.kind === 'tool.end') return m.conflicts.changed({ ...by, tool: e.data.tool, path: e.data.file, folder });
-  if (e.kind !== 'tool.start' || !SHELL_TOOLS.has(e.data.tool)) return [];
-  const git = gitHazardOf(e.data.input.command, folder, { powershell: e.data.tool === 'PowerShell' });
-  return git ? m.conflicts.command({ ...by, ...git }) : [];
+function actorOf(e, s, a) {
+  return { agent: a.key, session: s.id, at: e.ts, lead: a.role === 'lead' ? null : agentKeyOf(s.id, null), since: a.startedAt };
+}
+
+/** Where a shell command runs: the hook's folder, and where its crew started. @param {TownEvent} e @param {Session} s */
+function placeOf(e, s) {
+  return { folder: e.cwd || s.cwd, sessionFolder: s.cwd };
+}
+
+/** A shell command starting: a git hazard shows while it asks for permission or runs. @type {ConflictStep} */
+function commandStarted(m, e, s, a) {
+  if (!SHELL_TOOLS.has(e.data.tool)) return [];
+  const git = gitHazardOf(e.data.input?.command, placeOf(e, s), { powershell: e.data.tool === 'PowerShell' });
+  return git ? m.conflicts.command({ ...actorOf(e, s, a), ...git }) : [];
+}
+
+/** A tool that went through: a file change, or a command whose commits took changes in. @type {ConflictStep} */
+function toolEnded(m, e, s, a) {
+  if (!SHELL_TOOLS.has(e.data.tool)) return m.conflicts.changed({ ...actorOf(e, s, a), tool: e.data.tool, path: e.data.file, folder: e.cwd || s.cwd });
+  for (const commit of gitCommitsOf(e.data.input?.command, placeOf(e, s), { powershell: e.data.tool === 'PowerShell' })) m.conflicts.committed({ agent: a.key, ...commit });
+  return [];
+}
+
+/**
+ * A helper is done for the rules: the one an Agent call started (proven by its result, or else
+ * paired with it), or the one named.
+ * @param {Model} m @param {Session} s @param {string|null} toolUseId @param {string|null} agentId
+ * @returns {Hazard[]}
+ */
+function finishHelper(m, s, toolUseId, agentId) {
+  const spawn = toolUseId ? (m.spawns.get(s.id) ?? []).find((sp) => sp.toolUseId === toolUseId) : undefined;
+  const helper = agentId ? agentKeyOf(s.id, agentId) : spawn?.claimedBy;
+  if (helper) m.conflicts.finished(helper);
+  return [];
 }
 
 /**

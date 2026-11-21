@@ -435,7 +435,7 @@ describe('two agents on the same files (core/conflicts.js)', () => {
     const [item] = t.items(T0 + 4 * 60_000);
     assert.deepEqual([item.kind, item.level, item.counted, item.dismissable, item.settled], ['conflict', 'alert', true, true, true]);
     assert.deepEqual([item.agentKey, item.agentKeys, item.sessionId, item.crews], [SECOND, [SECOND, FIRST], OTHER, 2]);
-    assert.equal(item.text, 'Wrote over src/auth.ts, which Foreman (crew 1) changed 4 min ago');
+    assert.equal(item.text, 'Foreman (crew 2) wrote over src/auth.ts, which Foreman (crew 1) changed 4 min ago', 'who did it, on either row');
     assert.match(item.id, /^conflict:write:/);
   });
 
@@ -445,7 +445,7 @@ describe('two agents on the same files (core/conflicts.js)', () => {
     t.send('PostToolUse', edit, T0 + 1000, other);
     const [note] = t.items(T0 + 2000);
     assert.deepEqual([note.kind, note.level, note.counted, note.dismissable, note.agentKeys], ['conflict', 'alert', false, false, [SECOND, FIRST]]);
-    assert.equal(note.text, 'Edited src/auth.ts, which Foreman (crew 1) changed just now');
+    assert.equal(note.text, 'Foreman (crew 2) edited src/auth.ts, which Foreman (crew 1) changed just now');
     assert.deepEqual(countedItems(t.items(T0 + 2000)), []);
   });
 
@@ -456,7 +456,19 @@ describe('two agents on the same files (core/conflicts.js)', () => {
     t.send('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'git add -A && git commit -m "Save"' }, tool_use_id: 'c1' }, T0 + 2, other);
     const [item] = t.items(T0 + 3);
     assert.deepEqual([item.kind, item.counted, item.agentKeys], ['conflict', true, [SECOND, FIRST]]);
-    assert.equal(item.text, 'git add -A && git commit in api-server, where Foreman (crew 1) has changed 2 files');
+    assert.equal(item.text, 'Foreman (crew 2) runs git add -A && git commit in api-server, where Foreman (crew 1) has changed 2 files');
+  });
+
+  test('a git command over several crews: one item for everyone it names', () => {
+    const t = town();
+    const third = '9d2e1f40-3f6c-4e55-9a31-2c9d8e7f6a51';
+    t.send('PostToolUse', edit, T0);
+    t.send('PostToolUse', done('Edit', { file_path: `${CWD}/src/b.ts`, old_string: 'a', new_string: 'b' }), T0 + 1, { session: third });
+    t.send('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'git stash' }, tool_use_id: 's1' }, T0 + 2, other);
+    const items = t.items(T0 + 3);
+    assert.equal(items.length, 1);
+    assert.deepEqual([items[0].agentKeys, items[0].crews], [[SECOND, `${third}:main`, FIRST], 3], 'who ran it, then the latest change first');
+    assert.equal(items[0].text, 'Foreman (crew 3) runs git stash in api-server, where Foreman (crew 2) and Foreman (crew 1) have changed 2 files');
   });
 
   test('set aside, it stays away; a new episode is a new item', () => {
@@ -469,7 +481,7 @@ describe('two agents on the same files (core/conflicts.js)', () => {
     assert.deepEqual(t.items(T0 + 4000, dismissed), [], 'writing again is the same episode');
     t.send('PostToolUse', edit, T0 + 5000);
     t.send('PostToolUse', write, T0 + 6000, other);
-    assert.deepEqual(t.items(T0 + 7000, dismissed).filter((i) => i.counted).map((i) => i.text), ['Wrote over src/auth.ts, which Foreman (crew 1) changed just now'], 'over a newer change');
+    assert.deepEqual(t.items(T0 + 7000, dismissed).filter((i) => i.counted).map((i) => i.text), ['Foreman (crew 2) wrote over src/auth.ts, which Foreman (crew 1) changed just now'], 'over a newer change');
   });
 
   test('it lasts half an hour, words its time from now, and ranks after what blocks or stopped', () => {

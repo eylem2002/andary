@@ -134,7 +134,7 @@ describe('two agents on the same files', () => {
     assert.deepEqual([...itemsByAgent(store.getState(), needsYou, T0 + 2000).keys()], [], 'nothing takes the place of what they do');
     const notes = notesByAgent(store.getState(), needsYou, T0 + 2000);
     assert.deepEqual([...notes.keys()].sort(), [`${OTHER}:main`, `${SESSION}:main`].sort());
-    assert.equal(notes.get(`${SESSION}:main`)?.text, 'Edited src/auth.ts, which Foreman (crew 1) changed just now');
+    assert.equal(notes.get(`${SESSION}:main`)?.text, 'Foreman (crew 2) edited src/auth.ts, which Foreman (crew 1) changed just now', 'on the other row too, it says who did it');
   });
 
   test('an alert takes the row; the newest note is the one shown', () => {
@@ -142,10 +142,10 @@ describe('two agents on the same files', () => {
     send('PostToolUse', { ...edit, tool_input: { ...edit.tool_input, file_path: `${file}.bak` } }, T0 + 3000);
     send('PostToolUse', { ...edit, tool_input: { ...edit.tool_input, file_path: `${file}.bak` } }, T0 + 4000, OTHER);
     const needsYou = createNeedsYou({ storage: null, now: () => T0 + 5000 });
-    assert.match(notesByAgent(store.getState(), needsYou, T0 + 5000).get(`${OTHER}:main`)?.text ?? '', /^Edited src\/auth\.ts\.bak/);
+    assert.match(notesByAgent(store.getState(), needsYou, T0 + 5000).get(`${OTHER}:main`)?.text ?? '', /^Foreman \(crew 2\) edited src\/auth\.ts\.bak/);
     send('PostToolUse', { tool_name: 'Write', tool_input: { file_path: file, content: 'x' }, tool_response: {}, tool_use_id: 'w' }, T0 + 6000, OTHER);
     const row = itemsByAgent(store.getState(), needsYou, T0 + 7000);
-    assert.equal(row.get(`${SESSION}:main`)?.text, 'Wrote over src/auth.ts, which Foreman (crew 1) changed just now');
+    assert.equal(row.get(`${SESSION}:main`)?.text, 'Foreman (crew 2) wrote over src/auth.ts, which Foreman (crew 1) changed just now');
     assert.equal(row.get(`${OTHER}:main`)?.counted, true);
   });
 

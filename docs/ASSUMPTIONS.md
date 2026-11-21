@@ -704,66 +704,97 @@ section.
     to the hook's folder, a drive letter is read in capitals), and nothing more: the browser
     cannot resolve a symbolic link, a hard link or a mounted folder, or ask whether a disk ignores
     case, so `src/App.ts` and `src/app.ts` stay two files and a conflict through a link is
-    missed. A path under `~` or a variable is not placed at all. Git worktrees are different
-    paths, so agents in separate worktrees never conflict, as is right.
+    missed. A path under `~` or a variable is not placed at all. Worktrees: a file in one is never
+    the same file as in another (other paths); for git commands, a worktree Claude Code makes
+    inside the repository (`<repo>/.claude/worktrees/<name>`, from `claude --worktree`, a helper's
+    `isolation: worktree` or the desktop app's parallel sessions) is a work tree of its own both
+    ways, though its folder is inside the checkout's. A worktree git makes elsewhere is just
+    another folder. Other nested worktree layouts are not known.
 136. **A file change is a successful file tool call: Edit, MultiEdit, NotebookEdit, Write, and a
     Codex patch.** A Codex patch that deletes a file loses the other agent's work like a Write, so
-    it is an alert too ("Deleted …"). Files changed by shell commands (`sed -i`, `rm`, formatters,
+    it is an alert too ("deleted …"). Files changed by shell commands (`sed -i`, `rm`, formatters,
     scripts, code generators) are not seen: a command line does not say which files it touched.
     A failed call changes nothing.
-137. **"Active" means still in town: a helper until its SubagentStop, a lead until its session
-    ends.** A lead whose turn ended is still active: its changes sit uncommitted in the tree, and
-    a Write or a `git stash` by another session is just as much a loss then. When an agent
-    finishes, its changes are forgotten and its hazards end, as the design says, even a counted
-    alert you have not seen yet. A session that crashed sends no SessionEnd; its changes still
-    age out after 30 minutes. Teammates' crews (a team town) are left out entirely: their files
-    are on their own computers, so equal paths are different files.
-138. **Any two agents count, also a lead and its own helper.** Helpers share the lead's tree and
-    may run in parallel (background agents), so a helper's Write over the lead's change can lose
-    it just the same; a helper that has finished no longer counts, which leaves out the usual
-    hand-over. One hazard per pair of agents and file (or per pair and git command): it goes on
-    while the agent changes the file again, and becomes a new one when the other agent changes it
-    again or an edit turns into a write (the write replaces the note). The order of two changes
-    is that of their hooks' times.
+137. **"Active" means still in town.** A helper until its SubagentStop, or, when it was interrupted
+    and sends none, until the Agent call that started it ends (a call launched in the background
+    ends at once, so that one does not count) or its lead's turn is interrupted (Codex says so;
+    Claude Code sends nothing when you press Esc, so such a helper stays until its half hour ends).
+    A lead until its session ends: a lead whose turn ended is still active, as its changes sit
+    uncommitted in the tree. When an agent finishes, its changes are forgotten and its hazards
+    end, as the design says, even a counted alert you have not seen yet. Teammates' crews (a team
+    town) are left out entirely: their files are on their own computers.
+138. **Any two agents count, also a lead and its own helper, except for what the lead handed on.**
+    Helpers share the lead's tree and may run in parallel, so a helper's Write over a change its
+    lead made while it worked can lose it. What the lead changed before the helper started
+    (SubagentStart) was handed to it, a draft to rewrite or edits to commit: the helper's edits,
+    writes and sweeping commands (`git add`/`git commit`) over it are no conflict, though a
+    command that throws changes away still counts it. The design names Writes; edits are left out
+    too, as the note would only say the hand-off happened. One hazard per pair of agents and file:
+    it goes on while the agent changes the file again, and becomes a new one when the other agent
+    changes it again or an edit turns into a write (the write replaces the note); a counted Write
+    alert is never turned back into a note. The order of two changes is that of their hooks' times.
 139. **An edit's note is shown beside what the agents do, never instead of it, and cannot be set
     aside.** It may last half an hour while both agents keep working, so on the crew row it is a
     line of its own under what the agent is doing (and under Now in the inspector); it never
-    counts, pops up or is announced, and ends by itself. The words read from the agent that made
-    the change on both rows ("Edited src/app.ts, which Foreman (crew 1) changed 4 min ago"); the
-    other agent's crew number is added when it is another crew, as every lead is a Foreman. "4 min
-    ago" is counted from now, so the HUD redraws when the clock alone changes those words.
-140. **Git hazards are read from the command line, when the command starts.** Recognised: `git
-    add -A|--all|-u|--update|.|:/|*` with a `git commit` later on the same line, `git commit -a`
-    (also `-am`), `git stash` (also `push` and `save`; not `list`, `show`, `pop`, `apply`,
-    `drop`, `clear`…), `git checkout .`, `git checkout [<tree>] -- <path>`, `git checkout -f`,
-    `git switch --discard-changes`/`-f`, `git restore <path>` (not `--staged` alone), `git reset
-    --hard` and `git clean -f…` (not `-n`). `checkout -f` and `switch --discard-changes` are
-    added to the design's list: they throw local changes away like `checkout .`. Not recognised:
-    `git checkout <path>` without `--` (it cannot be told from a branch name), `git add -A` in
-    one call and `git commit` in a later one, `git pull --autostash`, aliases, and anything run
-    through `sh -c`, `eval`, a script, `make` or `xargs`. A command you deny keeps its alert until
+    counts, pops up or is announced, and ends by itself. Every hazard's words name who did it,
+    with its crew's number, and the other agents, with theirs when of another crew ("Foreman
+    (crew 2) edited src/app.ts, which Foreman (crew 1) changed 4 min ago"), so each row, the
+    inspector, the button's "Next:" and the announcements read right. "4 min ago" is counted from
+    now, so the HUD redraws when the clock alone changes those words.
+140. **Git hazards are read from the command line, when the command starts.** Recognised, as
+    sweeping changes up: `git add <pathspec>|-A|-u|.` with a `git commit` later on the same line,
+    `git commit -a` (also `-am`), `git commit <pathspec>` (`git commit .`, `git commit -m x
+    src/`); as throwing them away: `git stash` (also `push` and `save`, with or without a
+    pathspec; not `list`, `show`, `pop`, `apply`, `drop`, `clear`…), `git checkout .`, `git
+    checkout [<tree>] -- <pathspec>`, `git checkout -f`, `git switch --discard-changes`/`-f`, `git
+    restore <pathspec>` (not `--staged` alone), `git reset --hard` and `git clean -f…` (not `-n`).
+    Each counts only the changes under its pathspecs (a glob stands for its folder, `git clean`
+    without one for its folder), or in the whole work tree. A `git add <file> && git commit` of
+    your own files alerts only when another agent changed those files too. Still missed: `git
+    checkout <path>` without `--` (it cannot be told from a branch name), `git add -A` in one
+    call and `git commit` in a later one, a commit of what was staged earlier, `git pull
+    --autostash` and `git rebase --autostash`, `git stash` inside a script, aliases (`git co`),
+    `--work-tree`/`--git-dir`, PowerShell's `pwsh -Command`, and anything run through `eval`, a
+    script, `make`, `xargs` or a shell two levels deep. A command you deny keeps its alert until
     you set it aside: Andary cannot see a "No" in the terminal.
-141. **Which changes a git command acts on.** Another agent's recent changes count when the file
-    lies in the folder the command runs in (the hook's folder, moved by `cd`, `pushd`, `chdir`,
-    `Set-Location` or `git -C`), or when the command runs inside the folder that agent worked in
-    and the file lies in that folder: git acts on the whole work tree from a subfolder, and the
-    browser cannot know where a repository starts. So `git clean` or `git checkout .` in a
-    subfolder may be flagged for a file it would not touch, and a session started in your home
-    folder may make one in a repository below it look shared. One alert per other agent, naming
-    how many files it changed there. The same command run again by the same agent in the same
-    folder alerts again only for changes made after the last time: what it swept up was seen.
+141. **Which changes a git command acts on is a guess at the work tree.** The browser cannot ask
+    git where a repository starts. A command with no pathspec takes in the crew's session folder
+    (where it started) when that holds the folder the command runs in: a `git stash` from
+    `packages/web` takes the sibling `packages/api` too, when the crew started at the
+    repository's top, as crews usually do. Else it takes the folder it runs in, and also another
+    agent's changes in the folder that agent worked in when the command runs inside it. So a crew
+    started in a subfolder misses a sibling package's changes made by a crew started in another
+    one, and a session started in your home folder may make one in a repository below it look
+    shared. One alert per command names every other agent with changes there, and how many files.
+    The same command run again by the same agent in the same folder alerts again only for changes
+    made after the last time: what it swept up was seen.
 142. **Reading a command line.** It is split at `&&`, `||`, `;`, `|`, `&`, newlines and
     parentheses outside quotes; quotes, backslash escapes (a backtick in PowerShell, where a
     backslash is a path separator), comments, redirections and their targets (`2>&1`, `> log`),
     `$(…)` and here-document bodies are read as a shell would, so a commit message or a file
-    written with `cat <<'EOF'` that mentions `git reset --hard` is not that command. `NAME=value`,
-    shell keywords (`if`, `then`, `do`…) and plain wrappers (`sudo`, `env`, `time`, `nohup`…)
-    before a command are skipped; a wrapper with options of its own (`sudo -u x git …`) is not
-    followed. A `cd` to `~`, `-` or a variable leaves the folder unknown, and the commands after
-    it are not judged (an absolute `cd` places it again). A subshell's `cd` is taken to last past
-    the subshell. Only the first 20,000 characters are read.
-143. **The desktop notification says only "Two agents in one folder" and the crew.** "<crew> may
-    be undoing another agent's work." fits a Write over another agent's change and a git command
-    about to run alike, and names no file, command or other agent: it can show on a locked
-    screen. The HUD shows the file or the command. An item's id is a notification's tag, so a
+    written with `cat <<'EOF'` that mentions `git reset --hard` is not that command. A shell's
+    `-c` script (`sh`, `bash`, `zsh`, `dash`, `ksh`; `bash -lc '…'` is how Codex sends commands)
+    is read one level deep. `NAME=value`, shell keywords (`if`, `then`, `do`…) and wrappers with
+    their own options (`sudo -u bob`, `env -i X=1`, `nice -n 10`, `timeout -k 5 30`, `nohup`,
+    `time`, `command`, `exec`, `stdbuf`, `ionice`) before a command are skipped. `cd`, `chdir`,
+    `pushd`/`popd` and PowerShell's `Set-Location`, `sl`, `Push-Location`, `Pop-Location` move the
+    folder; `cd "$(git rev-parse --show-toplevel)"` goes to the top of the work tree as guessed
+    (141). A `cd` to `~`, `-` or a variable leaves the folder unknown and the commands after it
+    unjudged (an absolute `cd` places it again), and so do more than 64 moves on one line, which
+    keeps a long line of `cd x;` cheap. A subshell's `cd` is taken to last past the subshell.
+    Only the first 20,000 characters are read.
+143. **The desktop notification says only "Two agents in one folder" and the crew, by name and
+    number.** "api-server (crew 2) may be undoing another agent's work." fits a Write over another
+    agent's change and a git command about to run alike, names no file, command or other agent
+    (it can show on a locked screen), and the number tells apart crews that share a project
+    folder. The HUD shows the file or the command. An item's id is a notification's tag, so a
     hazard's id carries the file's path hashed, as a dialog's carries its input.
+144. **A commit that went through takes its committer's changes out of harm's way.** When a
+    command line holding a `git commit` ends without an error, the committer's changes it took in
+    are forgotten: all of them in that work tree for `-a` or a whole-tree `git add`, else those
+    under the paths named by the commit or the `git add` before it on the line. They then count
+    neither for git commands nor for another agent's Write. Only the committer's own are
+    forgotten: another agent's changes swept into the same commit still count, so a later command
+    may name them again (its alert for the commit already showed). A commit of what was staged
+    before the line takes nothing out, and `git commit -a` also forgets the committer's new,
+    untracked files, which it did not commit.

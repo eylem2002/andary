@@ -108,7 +108,7 @@ describe('what deserves a notification', () => {
     assert.equal(t.notes(NEWS_MS + 1)[0], null);
   });
 
-  test('two agents in one folder: the crew by name, never the file, the command or the other agent', () => {
+  test('two agents in one folder: the crew by name and number, never the file, the command or the other agent', () => {
     const t = town();
     const file = '/home/dev/code/api-server/src/secret-plan.ts';
     t.send('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: file, old_string: 'a', new_string: 'b' }, tool_response: {}, tool_use_id: 'e1' });
@@ -118,10 +118,10 @@ describe('what deserves a notification', () => {
     t.send('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'git stash' }, tool_use_id: 'b1' });
     const notes = t.notes().filter(Boolean);
     assert.deepEqual(notes.map((n) => [n?.title, n?.body]), [
-      ['Two agents in one folder', "api-server may be undoing another agent's work."],
-      ['Two agents in one folder', "api-server may be undoing another agent's work."],
-    ]);
-    assert.doesNotMatch(JSON.stringify(notes), /secret-plan|git stash|Foreman|crew 1/);
+      ['Two agents in one folder', "api-server (crew 2) may be undoing another agent's work."],
+      ['Two agents in one folder', "api-server (crew 1) may be undoing another agent's work."],
+    ], 'crews in one folder share a project name: the number tells which');
+    assert.doesNotMatch(JSON.stringify(notes), /secret-plan|git stash|Foreman/);
   });
 });
 
@@ -268,6 +268,6 @@ describe('installNotifications', () => {
     assert.ok(refreshes > before, '"just now" became "1 min ago" with no event');
     t.send('PostToolUse', { tool_name: 'Write', tool_input: { file_path: file, content: 'x' }, tool_response: {}, tool_use_id: 'w1' }, other);
     await settle();
-    assert.deepEqual(heard, ['api-server: Wrote over src/auth.ts, which Foreman (crew 1) changed 1 min ago']);
+    assert.deepEqual(heard, ['api-server: Foreman (crew 2) wrote over src/auth.ts, which Foreman (crew 1) changed 1 min ago']);
   });
 });

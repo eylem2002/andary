@@ -632,9 +632,9 @@ a command or a file, a request's, a stuck step's or another agent's ("Permission
 "Question for you", "Plan to approve", "Turn stopped", "Crews stopped", "Seems stuck", "Two agents
 in one folder", "Turn finished"; a stuck crew's says "<crew> seems stuck: the same step keeps
 failing." or, for rule 2, "<crew> seems stuck: it keeps repeating the same step."). Two agents on
-the same files (a Write over another agent's change, or a git command over its changes) read
-"<crew> may be undoing another agent's work."; an Edit's note is not counted, so it never pops
-up. An item's id is the notification's tag, so no id holds a path or a command: a file goes in
+the same files (a Write over another agent's change, or a git command over others' changes)
+read "<crew> (crew 2) may be undoing another agent's work." (crews in one folder share a project
+name, so the number tells which); an Edit's note is not counted, so it never pops up. An item's id is the notification's tag, so no id holds a path or a command: a file goes in
 hashed. An item the viewer could already see (the page in front, or notifications off) never pops
 up later, nor one that started to count more than two minutes ago (a reconnect or a page opened
 in the background); changes that arrive together (a reconnect's history) are checked once. A
@@ -823,14 +823,13 @@ Dialog { id, sessionId, agentId: string|null, kind: 'permission'|'question'|'pla
 Stuck { rule: 1|2|3, step /* short, for display: "npm test" */,
         since /* when the episode started */, count /* failures (rules 1, 3) or runs (rule 2) */,
         text /* "Seems stuck: `npm test` failed 3 times, nothing changed" */ }
-Hazard { id /* one per episode: kind:agentKey:otherKey:at, and a file's path hashed */,
+Hazard { id /* one per episode: kind:agentKey:at, and for a file the other's key and the path hashed */,
          kind: 'edit'|'write'|'git', sessionId, agentKey /* who changed the file or ran the command */,
-         otherSessionId, otherKey /* whose recent change it concerns */, at /* hook time */,
-         folder /* where: the hook's cwd, or the command's after cd or git -C */,
+         others: { key, sessionId, files /* how many of its changed files */, at /* its latest */ }[]
+           /* whose changes it is about: one for a file, one or more for a command */,
+         at /* hook time */, folder /* where: the hook's cwd, or the command's after cd or git -C */,
          path: string|null /* edit, write: the file, absolute */, tool: string|null /* edit, write */,
-         command: string|null /* git: "git stash", "git add -A && git commit" */,
-         theirsAt /* when the other last changed it (git: a file there) */,
-         files /* git: how many it changed there; else 1 */ }
+         command: string|null /* git: "git stash", "git add -A && git commit" */ }
 LogEntry { id, ts, sessionId, agentKey, agentName, color, kind /* a TownEvent kind, 'approval',
            'achievement', 'stuck' or 'conflict' */, icon, text, level: 'info'|'success'|'warn'|'error' }
 Achievement { id, title, description, icon, unlockedAt }
@@ -883,11 +882,11 @@ carries the episode's start), also while the agent waits for you on something el
 is listed at once and counted from `idle_prompt` (Codex: `CODEX_IDLE_MS`, a minute) for `READY_MS`
 (30 minutes). Stops by one rate limit (`cause: 'rate_limit'`) within ten minutes merge into one
 item for all their agents (two crews at least: a lead and its helper are one crew). A hazard
-(below) is a `conflict` item of level `alert`, listed for both of its agents (`agentKeys`: the one
-who did it, then the other): a `write` or `git` hazard is counted and dismissable, an `edit` one is
-a note, neither counted nor dismissable. It is left out once `CONFLICT_MS` (30 minutes) old, or
-when either crew is gone or either agent is done. Ended sessions and teammates' crews are left
-out. `ui/needs-you.js` adds the viewer's dismissals (stops, stuck alerts, finished turns and
+(below) is a `conflict` item of level `alert`, listed for every agent it names (`agentKeys`: the
+one who did it, then the others): a `write` or `git` hazard is counted and dismissable, an `edit`
+one is a note, neither counted nor dismissable. It is left out once `CONFLICT_MS` (30 minutes) old,
+or when the crew or agent that did it is gone or done; others that are, are left out of it. Ended
+sessions and teammates' crews are left out. `ui/needs-you.js` adds the viewer's dismissals (stops, stuck alerts, finished turns and
 conflicts, kept in `localStorage["andary:dismissed"]` for a day and shared with the town's other
 tabs; someone watching a team town with its view link gets no items, as they can answer nothing)
 and drives the masthead button (its name: the visible words, then where a click goes), the `I`
@@ -972,45 +971,64 @@ time, `e.ts` in the town, `hookTime` on the server) or a fresh start, `reset(age
 **Same files** (`core/conflicts.js` with `core/git-commands.js` and `core/paths.js`, all pure;
 docs/design/agent-health.md §6). The store keeps their memory in its model, runs them after each
 event and keeps what they find on `StoreState.hazards`, with a `conflict` log line (`warn`, or
-`info` for an edit) when one starts. Its words: "Wrote over src/auth.ts, which Scout 1 changed
-4 min ago" (the time counted from now), "Edited …", "Deleted …", "git stash in api-server, where
-Builder 1 has changed 3 files"; the other agent's crew number follows its name when it is of
-another crew ("Foreman (crew 2)").
+`info` for an edit) when one starts. Its words name who did it with its crew's number, and the
+others with theirs when of another crew (every lead is a Foreman), so every row, the inspector,
+the button's "Next:" and the announcements read right: "Foreman (crew 2) wrote over src/auth.ts,
+which Foreman (crew 1) changed 4 min ago" (the time counted from now), "… edited …", "…
+deleted …", "Builder 1 (crew 2) runs git stash in api-server, where Foreman (crew 1) and Scout 1
+have changed 5 files" (two names, or the first and "N others").
 
 - **A file change** is a successful (`PostToolUse`) Edit, MultiEdit, NotebookEdit or Write, or a
   Codex patch: an added file is a Write, an updated one an Edit or MultiEdit, a deleted one stays
-  `apply_patch` and counts as a write ("Deleted"). It is remembered by its path, normalised
+  `apply_patch` and counts as a write ("deleted"). It is remembered by its path, normalised
   (`normalizePath`: backslashes to slashes, `.` and `..` resolved, a relative path joined to the
   hook's `cwd`, a drive letter in capitals; nothing else, so case and links are compared as given;
   a path under `~` or a variable is not placed), with its agent, crew, folder (the `cwd`) and time.
 - **Same file**: an agent changes a path another agent changed at most 30 minutes before. An Edit
   (also MultiEdit, NotebookEdit) is an `edit` hazard, a Write (or a deletion) a `write` one. One
-  per pair of agents and file: the episode goes on while the agent changes it again, until the
-  other changes it again (a new episode) or an edit turns into a write (the write replaces the
-  note). Every other agent on the file is a pair of its own.
+  per pair of agents and file: the episode goes on while the agent changes it again; a new one
+  replaces it when the other changes it again or an edit turns into a write. A `write` stays
+  counted until it ends: an edit after it adds nothing.
 - **Git hazard**: when a Bash or PowerShell call starts (`PreToolUse`, so it shows while the
-  command asks for permission or runs), `gitHazardOf(command, cwd)` reads its line for the first
-  of: `git add -A|--all|-u|--update|.|:/|*` and a `git commit` later on the line, `git commit -a`
-  (also `-am`), `git stash` (`push`, `save`; not `list`, `show`, `pop`, `apply`, `drop`…),
-  `git checkout .|-- <path>|-f`, `git switch --discard-changes|-f`, `git restore <path>` (not
-  `--staged` alone), `git reset --hard`, `git clean -f…` (not `-n`). The line is split at `&&`,
-  `||`, `;`, `|`, `&`, newlines and parentheses outside quotes; `cd`, `pushd`, `chdir`,
-  `Set-Location` and `git -C` move the folder (to `~`, `-` or a variable: unknown, and what
-  follows is not judged); quotes, escapes (PowerShell's backtick), comments, redirections,
-  `$(…)` and here-document bodies are read as a shell reads them; `NAME=value`, shell keywords
-  (`then`, `do`…) and plain wrappers (`sudo`, `env`, `time`…) before a command are skipped.
-  Then one `git` hazard per other agent with changes there in the last 30 minutes: a
-  file in the command's folder, or, when the command runs inside the folder that agent worked
-  in, its files in that folder (git acts on the whole work tree from a subfolder). The same
-  command again by the same agent there is a new hazard only for changes newer than its last one.
-- **Active** agents only: an agent finishing (a helper's `SubagentStop`) or its crew leaving
-  (`SessionEnd`) forgets its changes and ends its hazards; a lead whose turn ended is still at
-  work. A hazard ends 30 minutes after it started. Teammates' crews (a team town) are left out:
-  their files are on their computers. Agents of different crews in one folder count, and so do a
-  lead and its own helper.
+  command asks for permission or runs), `gitHazardOf(command, { folder, sessionFolder })` reads
+  its line for the first command that sweeps changes up (`effect: 'sweep'`: `git add …` and a
+  `git commit` later on the line, `git commit -a`, `git commit <pathspec>`) or throws them away
+  (`'discard'`: `git stash` [push|save] [`--` pathspec], `git checkout .|-- <pathspec>|-f`,
+  `git switch --discard-changes|-f`, `git restore <pathspec>` (not `--staged` alone),
+  `git reset --hard`, `git clean -f…` (not `-n`)), with what it acts on: its pathspecs made
+  absolute (a glob stands for its folder; `git clean` without one, its folder), or the whole work
+  tree. The line is split at `&&`, `||`, `;`, `|`, `&`, newlines and parentheses outside quotes;
+  a shell's `-c` script (`bash -lc '…'`, as Codex sends it) is read one level deep; `cd`, `chdir`,
+  `Set-Location`, `sl`, `pushd`/`popd`, `Push-Location`/`Pop-Location` and `git -C` move the
+  folder (to `~`, `-` or a variable: unknown, and what follows is not judged; after 64 moves,
+  unknown), `cd "$(git rev-parse --show-toplevel)"` to the top of the work tree; quotes, escapes
+  (PowerShell's backtick), comments, redirections, `$(…)` and here-document bodies are read as a
+  shell reads them; `NAME=value`, shell keywords (`then`, `do`…) and wrappers with their options
+  (`sudo`, `env`, `nice`, `timeout 30`, `nohup`, `time`…) before a command are skipped.
+- **The work tree** (`core/paths.js`): a worktree Claude Code makes inside a repository
+  (`…/.claude/worktrees/<name>`) is one of its own, both ways; otherwise its top is guessed as the
+  crew's session folder (where it started) when that holds the command's folder, else that folder.
+  A command counts another agent's change only in the same work tree: under its pathspecs, or, with
+  none, under that top, or in the folder the other agent worked in when the command runs inside it.
+  One `git` hazard per command names every other agent with such changes in the last 30 minutes.
+  The same command in the same place by the same agent is a new hazard only for newer changes.
+- **Committed work**: when a Bash or PowerShell call that holds a `git commit` succeeds
+  (`PostToolUse`), `gitCommitsOf` says what each commit took in, and the committer's changes there
+  are forgotten: all of them in that work tree for `-a` or a whole-tree add, else those under the
+  paths it or the `git add` before it named (a commit of what was staged before the line, none).
+- **A hand-off**: what a helper's lead changed before the helper started (its `SubagentStart`) does
+  not count for the helper's file changes or its sweeping commands; a command that throws changes
+  away still counts it.
+- **Active** agents only: an agent finishing or its crew leaving (`SessionEnd`) forgets its changes
+  and ends its hazards (a git hazard about several goes on without it). A helper finishes with its
+  `SubagentStop`, with the end of the Agent call that started it (`PostToolUseFailure`, or a
+  `PostToolUse` not `async_launched`), or with its lead's interrupted `Stop`; a lead whose turn
+  ended is still at work. A hazard ends 30 minutes after it started. Teammates' crews (a team
+  town) are left out: their files are on their computers. Agents of different crews in one folder
+  count, and so do a lead and its own helper.
 - **Bounds**: 1,000 files (the one changed the longest ago goes first), 8 agents per file (the
-  latest), 100 hazards (the oldest note gives way, else the oldest alert); a command line is read
-  up to 20,000 characters.
+  latest), 100 hazards (the oldest note gives way, a new note too, else the oldest alert); a
+  command line is read up to 20,000 characters.
 
 `director.js`: `createDirector({ world, store, backlog?, humor?, random? }) → { dispose() }`
 subscribes to the store and drives the world. `recordChanges(store) → { stop() }` keeps the

@@ -3,7 +3,7 @@
 // links stay as given.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { baseName, isInside, normalizePath } from '../../../public/js/core/paths.js';
+import { baseName, isInside, nestedWorkTree, normalizePath, sameWorkTree, workTreeRoot } from '../../../public/js/core/paths.js';
 
 describe('normalizePath', () => {
   test('separators: backslashes become slashes, doubled and trailing ones go', () => {
@@ -59,5 +59,26 @@ describe('isInside and baseName', () => {
     assert.equal(baseName('/home/dev/code/api-server'), 'api-server');
     assert.equal(baseName('C:/work'), 'work');
     assert.equal(baseName('/'), '/');
+  });
+});
+
+describe('work trees', () => {
+  const repo = '/home/dev/code/api';
+  const tree = `${repo}/.claude/worktrees/feature`;
+
+  test('a worktree Claude Code made inside the repository is a work tree of its own', () => {
+    assert.equal(nestedWorkTree(`${tree}/src/a.ts`), tree);
+    assert.equal(nestedWorkTree(tree), tree);
+    assert.equal(nestedWorkTree(`${repo}/.claude/settings.json`), '');
+    assert.equal(nestedWorkTree(`${tree}/.claude/worktrees/inner/x.ts`), `${tree}/.claude/worktrees/inner`, 'the innermost');
+    assert.equal(sameWorkTree(`${repo}/a.ts`, `${repo}/b/c.ts`), true);
+    assert.equal(sameWorkTree(`${repo}/a.ts`, `${tree}/a.ts`), false);
+  });
+
+  test("its top is a guess: such a worktree, else the crew's session folder when it holds the folder, else the folder", () => {
+    assert.equal(workTreeRoot(`${repo}/packages/web`, repo), repo);
+    assert.equal(workTreeRoot(`${tree}/src`, repo), tree);
+    assert.equal(workTreeRoot('/srv/other', repo), '/srv/other');
+    assert.equal(workTreeRoot(`${repo}/packages/web`), `${repo}/packages/web`);
   });
 });
