@@ -5,6 +5,7 @@ import { TEAM_HEADER, verifyMemberKey } from './team.mjs';
 import { offeredSuggestions } from './approvals.mjs';
 import { sourceOf } from './adapters/index.mjs';
 import { ingestHook, ingestTeam } from './ingest.mjs';
+import { LIMITS_BODY_BYTES, parseLimitsReport } from './limits.mjs';
 import { APP_ID, LIMITS } from './config.mjs';
 import { publicSettings } from './browsers.mjs';
 import { BAD_TOKEN_PAGE, HttpError, readBody, sendHtml, sendJson, sendText } from './http-util.mjs';
@@ -150,6 +151,7 @@ const API_ROUTES = {
   },
   '/api/proof': { methods: ['GET'], handle: handleProof },
   '/api/hook': { methods: ['POST'], handle: handleHook },
+  '/api/limits': { methods: ['POST'], handle: handleLimits },
   '/api/team': { methods: ['POST'], handle: handleTeam },
 };
 
@@ -293,6 +295,39 @@ async function handleHook(ctx, req, res) {
     return;
   }
   sendHookReply(ctx, req, res, null);
+}
+
+/**
+ * POST /api/limits from the andary-limits mod (CONTRACTS §4.14): the plan limits and the exact
+ * context Claude Code reported to it. It proves itself as the forwarder does, with the hook
+ * secret from server.json (which no web page can read, nor send as a header without a preflight
+ * this server never answers), and it checks this server's proof before it sends that secret.
+ * Authentication comes before the rate limit, for the same reason as hooks.
+ * @param {TownContext} ctx
+ * @param {Request} req
+ * @param {Response} res
+ */
+async function handleLimits(ctx, req, res) {
+  if (!hasHookSecret(req, ctx.secret)) {
+    req.resume();
+    sendJson(res, 401, { error: 'Missing or wrong hook secret' });
+    return;
+  }
+  if (!ctx.hookLimiter.take()) {
+    req.resume();
+    sendJson(res, 429, { error: 'Too many reports' }, { 'Retry-After': '1' });
+    return;
+  }
+  let report;
+  try {
+    report = parseLimitsReport(await readBody(req, LIMITS_BODY_BYTES), Date.now());
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error;
+    sendJson(res, error.status, { error: error.message }, error.status === 413 ? { Connection: 'close' } : {});
+    return;
+  }
+  ctx.limits.observe(report);
+  sendJson(res, 200, { ok: true });
 }
 
 /**

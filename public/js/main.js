@@ -16,6 +16,7 @@ import { readCredentials } from './sources/credentials.js';
 import { createHud } from './ui/hud.js';
 import { loadPrefs } from './ui/prefs.js';
 import { createDemo } from './sources/demo.js';
+import { demoLimits } from './sources/demo-limits.js';
 import { resolveReducedMotion, timeOfDayFor } from './ui/appearance.js';
 
 const params = new URLSearchParams(location.search);
@@ -106,6 +107,7 @@ async function boot() {
       onSettings: (settings) => hud.setServerSettings(settings),
       onError: (message) => hud.notify({ tone: 'error', icon: 'warning', title: message }),
       onProgress: (progress) => hud.setProgress(progress),
+      onLimits: (limits) => hud.setLimits(limits),
       onNotifyTest: (ok) => hud.notify(ok ? { icon: 'bell', title: 'Test notification sent', body: 'Check the ntfy app on your phone.' } : { tone: 'error', icon: 'warning', title: 'The test notification was not sent', body: 'The server could not reach ntfy, or sent one a moment ago.' }),
       onDigest: (digest) => hud.setDigest(digest),
       onAway: (away, offset) => hud.setAway(away, offset),
@@ -117,6 +119,7 @@ async function boot() {
     const { createSimulation } = await import('./sim/simulation.js');
     const demo = createDemo({ store, createSimulation, speed: prefs.speed, seed: seedParam(), onProgress: (progress) => hud.setProgress(progress), onDigest: (digest) => hud.setDigest(digest) });
     source = demo;
+    hud.setLimits(demoLimits(Date.now()));
     app.mode = 'demo';
     hud.setMode('demo');
     hud.setConnection('demo');

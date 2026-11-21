@@ -2,7 +2,8 @@
 // Layer boundaries (docs/ARCHITECTURE.md): which part of the code may import which. Lint checks
 // each file; this checks the shape of the whole: the hook forwarder stands alone, core is pure and
 // shared, the server reuses only the pure core modules listed below, the HUD never reaches into
-// the 3D world, and the world's environment and characters only meet in world.js.
+// the 3D world, the world's environment and characters only meet in world.js, and a Claude Code
+// mod (mods/) stands alone: Claude Code copies only its folder and runs it with no Node.js APIs.
 // Runtime imports only: JSDoc `import('…')` type references are free to cross (they vanish at
 // run time). Usage: node scripts/check-boundaries.mjs
 import { execFileSync } from 'node:child_process';
@@ -26,6 +27,7 @@ export const SERVER_CORE = Object.freeze([
   'public/js/core/shell.js',
   'public/js/core/summaries.js',
   'public/js/core/digest.js',
+  'public/js/core/limits.js',
 ]);
 
 /**
@@ -37,6 +39,7 @@ const AREAS = Object.freeze([
   ['server/cli/', 'cli'],
   ['server/', 'server'],
   ['hooks/', 'hooks'],
+  ['mods/', 'mods'],
   ['scripts/', 'scripts'],
   ['public/js/main.js', 'main'],
   ['public/js/page.js', 'page'],
@@ -61,6 +64,7 @@ export const RULES = Object.freeze({
   cli: { areas: ['cli', 'server', 'sim', 'core'], bare: /^node:/ },
   server: { areas: ['server', 'core'], bare: /^node:/ },
   hooks: { areas: [], bare: /^node:/ },
+  mods: { areas: ['mods'], bare: null },
   scripts: { areas: ['scripts', 'server', 'core'], bare: /./ },
   main: { areas: ['core', 'page', 'sources', 'ui', 'sim', 'dev', 'world'], bare: null },
   page: { areas: ['core'], bare: null },

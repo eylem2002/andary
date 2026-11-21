@@ -15,9 +15,10 @@
 // no idle_prompt, that minute is counted here. An agent that seems stuck gets one note per
 // episode, from the very rules the town's alert follows (core/loops.js).
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterHook, createDialogs } from '../public/js/core/dialogs.js';
+import { HIGH_PERCENT, SAME_WINDOW_MS, limitName, resetWords, usedWords } from '../public/js/core/limits.js';
 import { agentKeyOf, normalizeAgentId } from '../public/js/core/ids.js';
 import { createLoops, stuckWords } from '../public/js/core/loops.js';
 import { clip, isObject, textOf } from '../public/js/core/text.js';
@@ -43,6 +44,8 @@ const DIALOG_RATE = 'dialog';
 const SEND_TIMEOUT_MS = 5000;
 /** A failure's text, for the stuck rules, is read this far: as far as the town gets it (sanitize.mjs). */
 const ERROR_TEXT_CHARS = MAX_STRING_CHARS;
+/** Limit windows remembered as noted (also in limit-notes.json, so a restart sends none again); the oldest give way. */
+const MAX_NOTED_WINDOWS = 64;
 
 /**
  * @typedef {object} Note
@@ -82,6 +85,22 @@ const noteOf = (kind) => ({ kind, ...NOTES[kind] });
  * @returns {Note}
  */
 const stuckNote = (rule) => ({ kind: 'stuck', title: 'Andary', body: `A crew seems stuck: ${stuckWords(rule)}.`, priority: 'default', tags: 'repeat' });
+
+/**
+ * The note for a plan limit at 90% or more: "Claude's 5-hour limit is 91% used. It resets at
+ * 15:40." It names the limit and its reset time, nothing about any crew; with two accounts or
+ * more, also which one, by its config folder's name. Each kind of limit has its own 30 s turn, so
+ * the 5-hour and the weekly limit never hold each other back.
+ * @param {import('../public/js/core/limits.js').Limit} limit
+ * @param {number} now
+ * @param {string|null} [account]  the account's name, when there are several
+ * @returns {Note}
+ */
+export function limitNote(limit, now, account = null) {
+  const whose = account ? ` (${account})` : '';
+  const body = `Claude's ${limitName(limit.kind).toLowerCase()}${whose} is ${usedWords(limit.percentUsed)}. It ${resetWords(limit.resetsAt, now)}.`;
+  return { kind: `limit-high:${limit.kind}`, title: 'Andary', body, priority: 'default', tags: 'chart_with_upwards_trend' };
+}
 
 /**
  * The note a hook event deserves at once, or null. A dialog's note (a permission request, a
@@ -297,6 +316,69 @@ function createIdleWatch(setTimer, clearTimer, onIdle) {
 }
 
 /**
+ * The windows that had their note, from limit-notes.json: account and kind → reset time. Windows
+ * that have reset are left behind; a damaged file starts over.
+ * @param {string|null} file
+ * @param {number} now
+ * @returns {Map<string, number>}
+ */
+function loadNotedWindows(file, now) {
+  /** @type {Map<string, number>} */
+  const noted = new Map();
+  if (!file || !existsSync(file)) return noted;
+  try {
+    const saved = JSON.parse(readFileSync(file, 'utf8'));
+    for (const item of Array.isArray(saved?.windows) ? saved.windows.slice(-MAX_NOTED_WINDOWS) : []) {
+      if (Array.isArray(item) && typeof item[0] === 'string' && Number.isFinite(item[1]) && item[1] > now - SAME_WINDOW_MS) noted.set(item[0], item[1]);
+    }
+  } catch {
+    // starts over: at worst one note again
+  }
+  return noted;
+}
+
+/**
+ * Writes the noted windows atomically (0600); on failure they stay in memory.
+ * @param {string|null} file
+ * @param {Map<string, number>} noted
+ */
+function saveNotedWindows(file, noted) {
+  if (!file) return;
+  try {
+    writeFileSync(`${file}.tmp`, JSON.stringify({ v: 1, windows: [...noted] }), { mode: 0o600 });
+    renameSync(`${file}.tmp`, file);
+  } catch {
+    // kept in memory
+  }
+}
+
+/**
+ * The 90% notes for plan limits: one per limit window (an account's limit of one kind, until its
+ * reset time), sent when the rate limits let it go; one held back is tried with the next report.
+ * @param {{ admit: (note: Note) => boolean, post: (note: Note) => void, now: () => number, file: string|null }} options
+ *   admit: whether the rate limits let a note go now; file: where noted windows are kept
+ * @returns {(account: import('../public/js/core/limits.js').AccountLimits, accounts: number) => void}
+ */
+function createLimitNotes({ admit, post, now, file }) {
+  const noted = loadNotedWindows(file, now());
+  return (account, accounts) => {
+    const t = now();
+    for (const limit of account.limits) {
+      const key = `${account.account}|${limit.kind}`;
+      const resetsAt = noted.get(key);
+      if (limit.percentUsed < HIGH_PERCENT || (resetsAt !== undefined && Math.abs(resetsAt - limit.resetsAt) < SAME_WINDOW_MS)) continue;
+      const note = limitNote(limit, t, accounts > 1 ? (account.label ?? 'default folder') : null);
+      if (!admit(note)) continue;
+      noted.delete(key);
+      noted.set(key, limit.resetsAt);
+      if (noted.size > MAX_NOTED_WINDOWS) noted.delete(noted.keys().next().value ?? '');
+      saveNotedWindows(file, noted);
+      post(note);
+    }
+  };
+}
+
+/**
  * Posts notes to the topic. A failure is logged once, until a post works again.
  * @param {string|null} url
  * @param {typeof fetch} fetchImpl
@@ -335,12 +417,14 @@ function createPoster(url, fetchImpl, log) {
  * @property {() => number} [now]
  * @property {(message: string) => void} [log]
  * @property {number} [delayMs]  how long a dialog's note waits (DIALOG_DELAY_MS)
+ * @property {boolean} [limitNotes]  a note when a plan limit reaches HIGH_PERCENT (off by default)
+ * @property {string|null} [limitNotesFile]  where the windows that had their note are kept (null: memory only)
  * @property {(fn: () => void, ms: number) => any} [setTimer]
  * @property {(timer: any) => void} [clearTimer]
  */
 
 /** @param {NotifierOptions} options */
-export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.now, log = () => {}, delayMs = DIALOG_DELAY_MS, setTimer = setTimeout, clearTimer = clearTimeout }) {
+export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.now, log = () => {}, delayMs = DIALOG_DELAY_MS, limitNotes = false, limitNotesFile = null, setTimer = setTimeout, clearTimer = clearTimeout }) {
   const rate = createRateLimit();
   const post = createPoster(url, fetchImpl, log);
   const dialogs = createDialogs({ max: MAX_DIALOGS });
@@ -349,21 +433,31 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
   const idle = createIdleWatch(setTimer, clearTimer, () => void send(noteOf('waiting')));
   /** The stuck rules' memory of this computer's agents (the town keeps its own, from the same rules). */
   const loops = createLoops();
+  const noteLimits = createLimitNotes({ admit: (note) => admit(note), post: (note) => void post(note), now, file: limitNotesFile });
   /** @type {any} */
   let timer = null;
   let disposed = false;
 
   /**
-   * Sends a note unless it is too soon after the same kind, or the hour's limit is reached.
+   * Whether a note may go out now (not too soon after the same kind, the hour's limit not
+   * reached); if so, it counts as sent from now.
    * @param {Note} note
-   * @returns {Promise<boolean>} whether it was sent
    */
-  async function send(note) {
+  function admit(note) {
     if (!url || disposed) return false;
     const t = now();
     if (t < rate.opensAt(note.kind) || (note.kind !== 'test' && !rate.hourLeft(t))) return false;
     rate.record(note.kind, t);
-    return post(note);
+    return true;
+  }
+
+  /**
+   * Sends a note unless the rate limits hold it back.
+   * @param {Note} note
+   * @returns {Promise<boolean>} whether it was sent
+   */
+  async function send(note) {
+    return admit(note) ? post(note) : false;
   }
 
   /** One timer, for the first dialog due, or later while a dialog note went out under 30 s ago. */
@@ -446,6 +540,18 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
       return Boolean(url);
     },
     url,
+    /** Whether plan limits at 90% send a note (--notify-limits); the topic never changes. */
+    limitNotes: Boolean(url) && limitNotes,
+    /**
+     * An account's limits changed (the andary-limits mod reported, §4.14): one note per limit
+     * window that reached 90%. A note the rate limits hold back is tried again with the next
+     * report, which comes after the next turn.
+     * @param {import('../public/js/core/limits.js').AccountLimits} account
+     * @param {number} [accounts]  how many accounts report: with two or more, the note names its own
+     */
+    limitsChanged(account, accounts = 1) {
+      if (url && !disposed && limitNotes) noteLimits(account, accounts);
+    },
     /**
      * @param {Record<string, any>} event  a local town payload, before it is sanitized
      * @param {number} [ts]  when the agent sent it (the forwarder's time): its dialogs go by it

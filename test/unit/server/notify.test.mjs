@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CODEX_IDLE_MS, DIALOG_DELAY_MS, checkNotifyUrl, createNotifier, noteFor, savedTopicUrl } from '../../../server/notify.mjs';
@@ -870,4 +870,76 @@ test('--notify-url takes only an http(s) topic URL without credentials', () => {
   assert.equal(checkNotifyUrl('https://user:pw@ntfy.sh/t'), null);
   assert.equal(parseNotifyUrl(undefined), null);
   assert.throws(() => parseNotifyUrl('nope'), /--notify-url takes/);
+});
+
+test('a plan limit at 90% sends one phone note per window, only when asked for (--notify-limits)', () => {
+  const HOUR = 3_600_000;
+  const account = (/** @type {number} */ percentUsed, /** @type {number} */ resetsAt, kind = 'five_hour') => ({ account: 'default', label: null, claudeVersion: '2.1.330', at: 0, limits: [{ kind, percentUsed, resetsAt, at: 0 }] });
+  // Off by default: no note however high the limit.
+  const quiet = testNotifier();
+  quiet.notifier.limitsChanged(account(95, 3 * HOUR));
+  assert.equal(quiet.posts.length, 0);
+  assert.equal(quiet.notifier.limitNotes, false);
+
+  const { notifier, posts, at } = testNotifier({ limitNotes: true });
+  assert.equal(notifier.limitNotes, true);
+  notifier.limitsChanged(account(89, 3 * HOUR));
+  assert.equal(posts.length, 0, 'under 90%: nothing');
+  notifier.limitsChanged(account(90, 3 * HOUR));
+  assert.equal(posts.length, 1);
+  assert.match(posts[0].body, /^Claude's 5-hour limit is 90% used\. It resets (at|tomorrow at) \d\d:\d\d\.$/);
+  assert.equal(posts[0].headers.Priority, 'default');
+  // The same window again, higher, or with its reset time a few minutes off: no second note.
+  at(60_000);
+  notifier.limitsChanged(account(97, 3 * HOUR));
+  notifier.limitsChanged(account(98, 3 * HOUR + 5 * 60_000));
+  assert.equal(posts.length, 1);
+  // The weekly limit is a note of its own, even right after the 5-hour one.
+  notifier.limitsChanged(account(91, 100 * HOUR, 'seven_day'));
+  assert.equal(posts.length, 2);
+  assert.match(posts[1].body, /^Claude's weekly limit is 91% used\./);
+  // The next 5-hour window can have its own note.
+  at(6 * HOUR);
+  notifier.limitsChanged(account(92, 8 * HOUR));
+  assert.equal(posts.length, 3);
+});
+
+test('a limit note held back by the 30-second rule goes out with a later report', () => {
+  const HOUR = 3_600_000;
+  const { notifier, posts, at } = testNotifier({ limitNotes: true });
+  const report = (/** @type {string} */ name) => ({ account: name, label: name, claudeVersion: null, at: 0, limits: [{ kind: 'five_hour', percentUsed: 93, resetsAt: 3 * HOUR, at: 0 }] });
+  notifier.limitsChanged(report('dir-a'));
+  notifier.limitsChanged(report('dir-b'));
+  assert.equal(posts.length, 1, 'two accounts\' 5-hour limits share the 30 s limit');
+  at(31_000);
+  notifier.limitsChanged(report('dir-b'));
+  assert.equal(posts.length, 2);
+  notifier.dispose();
+  notifier.limitsChanged({ ...report('dir-c') });
+  assert.equal(posts.length, 2, 'nothing after shutdown');
+});
+
+test('a limit note names the account when two or more report, and a restart sends no second note for a window', () => {
+  const HOUR = 3_600_000;
+  const limitNotesFile = join(mkdtempSync(join(tmpdir(), 'andary-notes-')), 'limit-notes.json');
+  const work = { account: 'dir-abc', label: '.claude-work', claudeVersion: null, at: 0, limits: [{ kind: 'five_hour', percentUsed: 99.5, resetsAt: 3 * HOUR, at: 0 }] };
+  const first = testNotifier({ limitNotes: true, limitNotesFile });
+  first.notifier.limitsChanged(work, 2);
+  assert.match(first.posts[0].body, /^Claude's 5-hour limit \(\.claude-work\) is 99\.5% used\. It resets /);
+  first.notifier.limitsChanged({ ...work, account: 'default', label: null }, 2);
+  first.at(31_000);
+  first.notifier.limitsChanged({ ...work, account: 'default', label: null }, 2);
+  assert.match(first.posts[1].body, /^Claude's 5-hour limit \(default folder\) is/);
+  // Windows has no POSIX modes; the user profile's permissions protect the file there.
+  if (process.platform !== 'win32') assert.equal(statSync(limitNotesFile).mode & 0o777, 0o600);
+  // The town restarts: the same windows were noted already.
+  const second = testNotifier({ limitNotes: true, limitNotesFile });
+  second.notifier.limitsChanged(work, 2);
+  second.notifier.limitsChanged({ ...work, account: 'default', label: null }, 1);
+  assert.equal(second.posts.length, 0);
+  // A damaged file starts over: at worst one note again.
+  writeFileSync(limitNotesFile, '{oops');
+  const third = testNotifier({ limitNotes: true, limitNotesFile });
+  third.notifier.limitsChanged(work, 1);
+  assert.match(third.posts[0].body, /^Claude's 5-hour limit is 99\.5% used\./);
 });

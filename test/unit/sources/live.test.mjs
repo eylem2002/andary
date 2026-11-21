@@ -95,6 +95,19 @@ describe('connectLive', () => {
     errorLog.mock.restore();
   });
 
+  test('plan limits reach the HUD whole: from the hello (empty after a restart) and from each limits message', () => {
+    /** @type {unknown[]} */
+    const seen = [];
+    connectLive({ store: fakeStore(), WebSocketImpl: /** @type {any} */ (FakeSocket), url: 'ws://x/ws', onLimits: (limits) => seen.push(limits) });
+    const socket = FakeSocket.all[0];
+    socket.open();
+    const limits = { accounts: [{ account: 'default', at: 1, limits: [] }], contexts: {} };
+    socket.receive({ t: 'hello', history: [], approvals: [], limits });
+    socket.receive({ t: 'limits', limits: { accounts: [], contexts: {} } });
+    socket.receive({ t: 'hello', history: [], approvals: [] });
+    assert.deepEqual(seen, [limits, { accounts: [], contexts: {} }, null]);
+  });
+
   test('decide and settings are sent only on an open socket', () => {
     const link = connectLive({ store: fakeStore(), WebSocketImpl: /** @type {any} */ (FakeSocket), url: 'ws://x/ws' });
     const socket = FakeSocket.all[0];

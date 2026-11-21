@@ -101,6 +101,17 @@ export default [
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
   {
+    // A Claude Code mod's hooks module runs in Claude Code's sandbox: plain JavaScript and a few web
+    // APIs, no Node.js, no timers, no fetch (it reaches files and the network through `$`).
+    files: ['mods/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'module',
+      globals: Object.fromEntries(['AbortController', 'AbortSignal', 'TextEncoder', 'TextDecoder', 'URL', 'URLSearchParams', 'atob', 'btoa', 'structuredClone', 'crypto', 'performance'].map((name) => [name, 'readonly'])),
+    },
+    rules: shared,
+  },
+  {
     // Test files describe scenarios in long blocks; function length is not a useful signal there.
     files: ['test/**/*.mjs', 'e2e/**/*.mjs'],
     rules: { 'max-lines-per-function': 'off', 'max-params': 'off' },

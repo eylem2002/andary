@@ -6,6 +6,7 @@ import { icon } from './icons.js';
 import { directorActive } from './cinema.js';
 import { panelsHidden } from './hud-actions.js';
 import { kbd } from './parts.js';
+import { meter, usageButtonWords } from './limits.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 
@@ -34,7 +35,7 @@ const TOOLS = [
   { id: 'cycle-time', label: 'Time of day', key: 'N', keyName: 'N', compact: true },
   { id: 'toggle-quality', label: 'High quality' },
   { id: 'toggle-sound', label: 'Sound', key: 'M', keyName: 'M', compact: true },
-  { id: 'usage', label: 'Usage and cost', key: 'U', keyName: 'U' },
+  { id: 'usage', label: 'Usage and cost', key: 'U', keyName: 'U', compact: true },
   { id: 'leaderboard', label: 'Leaderboard', key: 'L', keyName: 'L', compact: true },
   '|',
   { id: 'pause', label: 'Pause demo', key: 'Space', keyName: 'Space', only: 'demo', compact: true },
@@ -51,6 +52,8 @@ export function createToolbar(ctx) {
   const buttons = {};
   /** @type {Record<string, HTMLElement>} */
   const tips = {};
+  // The Usage button's gauge: the most used plan limit, when the andary-limits mod reports them.
+  const gauge = meter('usage-gauge');
   const children = TOOLS.map((tool) => (tool === '|' ? h('span', { class: 'hud-toolbar__sep', 'aria-hidden': 'true' }) : makeButton(tool)));
   const el = h('div', { class: 'hud hud-toolbar', role: 'toolbar', 'aria-label': 'Town controls' }, ...children);
 
@@ -63,7 +66,7 @@ export function createToolbar(ctx) {
       'data-tool': tool.id,
       'aria-keyshortcuts': tool.keyName,
       tabindex: '-1',
-    }, h('span', { class: 'hud-tool__face' }), tip));
+    }, h('span', { class: 'hud-tool__face' }), tool.id === 'usage' ? gauge.el : null, tip));
     button.addEventListener('click', () => {
       ctx.run(tool.id);
       setRoving(button);
@@ -130,7 +133,10 @@ export function createToolbar(ctx) {
     setButton('cycle-speed', `text:${prefs.speed}×`, `Demo speed: ${prefs.speed}×`, null);
     setText(/** @type {HTMLElement} */ (tips['cycle-speed'].firstElementChild), `Demo speed: ${prefs.speed}×`);
     setButton('help', 'help', 'Help and shortcuts', null);
-    setButton('usage', 'coins', 'Usage and cost', null);
+    const usage = usageButtonWords(view.limits ?? [], Date.now());
+    setButton('usage', 'coins', usage.name, null);
+    setText(/** @type {HTMLElement} */ (tips.usage.firstElementChild), usage.tip);
+    gauge.update(usage.gauge);
     setButton('leaderboard', 'trophy', 'Leaderboard', null);
     // Keep the toolbar's one tab stop on a button that is actually shown in this layout.
     const current = Object.values(buttons).find((b) => b.getAttribute('tabindex') === '0');

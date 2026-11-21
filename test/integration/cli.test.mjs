@@ -74,17 +74,19 @@ describe('CLI basics', () => {
     assert.equal(help.code, 0);
     for (const command of ['start', 'demo', 'install', 'uninstall', 'status', 'doctor', 'replay', 'simulate']) assert.match(help.stdout, new RegExp(`\\b${command}\\b`));
     const startHelp = await runCli(['start', '--help']);
-    for (const flag of ['--port', '--host', '--no-open', '--remote-approvals', '--approval-timeout', '--record']) assert.ok(startHelp.stdout.includes(flag), flag);
+    for (const flag of ['--port', '--host', '--no-open', '--remote-approvals', '--approval-timeout', '--record', '--notify-limits']) assert.ok(startHelp.stdout.includes(flag), flag);
     const installHelp = await runCli(['install', '-h']);
     for (const flag of ['--scope', '--dir', '--dry-run', '--print']) assert.ok(installHelp.stdout.includes(flag), flag);
   });
 
   it('exits 2 on usage errors', async () => {
-    for (const args of [['bogus'], ['start', '--port', 'abc'], ['install', '--scope', 'galaxy'], ['status', '--loud'], ['replay']]) {
+    for (const args of [['bogus'], ['start', '--port', 'abc'], ['install', '--scope', 'galaxy'], ['status', '--loud'], ['replay'], ['start', '--notify-limits', '--no-open']]) {
       const result = await runCli(args, sandbox(`usage-${args.join('-')}`));
       assert.equal(result.code, 2, args.join(' '));
       assert.ok(result.stderr.length > 0);
     }
+    // A phone note needs a phone: --notify-limits without --notify says so.
+    assert.match((await runCli(['start', '--notify-limits', '--no-open'], sandbox('notify-limits'))).stderr, /--notify-limits sends phone notes: add --notify/);
   });
 
   it('stays quiet when its reader goes away early (andary status | head -1)', async () => {

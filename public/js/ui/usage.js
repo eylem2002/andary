@@ -3,7 +3,9 @@
 // readers) and today's crews. Costs are estimates at API list prices (core/prices.js).
 // Also each agent's context in use, as tokens only: the window it fills is not known (today's
 // default models run 1M, the user may move the compaction point), so there is no percentage.
+// Plan limits, when the andary-limits mod reports them, come first (ui/limits.js).
 import { createDialog } from './dialogs.js';
+import { createLimitsSection } from './limits.js';
 import { h, setHidden, setText } from './dom.js';
 import { formatAgo } from './format.js';
 import { localDateBefore } from '../core/dates.js';
@@ -169,11 +171,12 @@ export function createUsageDialog(ctx) {
   const table = h('table', { class: 'hud-usage__table' });
   const numbers = h('details', { class: 'hud-usage__numbers' }, h('summary', { text: 'Numbers by day' }), table);
   const crews = h('ul', { class: 'hud-usage__crews' });
+  const limits = createLimitsSection(ctx);
   const crewsBox = h('section', { class: 'hud-usage__section' }, h('h3', { class: 'hud-usage__heading', text: 'Crews in town' }), crews);
   const dialog = createDialog({
     id: 'hud-usage',
     title: 'Usage',
-    body: [total, h('section', { class: 'hud-usage__section' }, h('h3', { class: 'hud-usage__heading', text: 'Last 14 days' }), chart, numbers), crewsBox, note],
+    body: [total, limits.el, h('section', { class: 'hud-usage__section' }, h('h3', { class: 'hud-usage__heading', text: 'Last 14 days' }), chart, numbers), crewsBox, note],
   });
 
   function render() {
@@ -184,6 +187,7 @@ export function createUsageDialog(ctx) {
     setText(note, ctx.view.mode === 'demo'
       ? 'The demo makes these numbers up. With your own Claude Code, Andary reads them from its transcripts on your computer.'
       : 'Estimated at API list prices from Claude Code\'s transcripts on this computer. On a Pro or Max plan you pay for the plan, not per token.');
+    limits.render(Date.now());
     drawChart(chart, days);
     table.replaceChildren(h('caption', { class: 'hud-sr', text: 'Estimated cost per day' }), h('tbody', {}, ...days.slice().reverse().map((day) => h('tr', {}, h('th', { scope: 'row', text: day.date }), h('td', { text: `${formatCost(day.costUsd)}, ${formatTokens(day.tokens)} tokens` })))));
     const rows = state.sessions.filter((session) => session.status !== 'ended').map((session) => ({ session, usage: crewUsage(state, session.id) })).filter((row) => row.usage && hasCounted(row.usage));

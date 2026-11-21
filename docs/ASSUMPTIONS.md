@@ -977,3 +977,92 @@ section.
      the 3D view's own keys are arrows, `+`/`-`, `Q`/`E`. Screen readers in browse mode keep
      letters for themselves, as they do for the town's other shortcuts; the masthead's button
      (while it is offered) and the help dialog's list of shortcuts lead there too.
+164. **Plan limits come from a Claude Code mod, not a status-line bridge.** Mods (v2.1.287+) read
+     `$.session.usage()` without touching the status line; a bridge would hide some of Claude
+     Code's footer hints in every session and would have to run the user's own status line for
+     them. Older Claude Code versions get no gauge (design §9).
+165. **The mod is a second plugin of the same marketplace (`andary-limits@andary`).** A mod runs
+     inside Claude Code with the user's rights, so it is opt-in: installing Andary (the plugin or
+     `andary install`) never brings it. It has no settings hooks, so it works beside either and
+     never sends an event twice. Its version follows the package's.
+166. **The mod proves the server as the forwarder does, with HMAC built on SHA-256.** Read in Claude
+     Code 2.1.330 itself: the hooks sandbox's `crypto.subtle` has `digest()` only (no `importKey`,
+     `sign`, `verify`), plus `crypto.getRandomValues`. So the mod builds HMAC-SHA256 (RFC 2104) on
+     `digest`, and the tests check it against the server's own `proveServer`. Running the
+     forwarder through `$.process.run` was the alternative; it would need `node` on the PATH, a
+     process per turn, and stdin, which `$.process.run` does not offer.
+167. **Limits are sent with the hook secret, after the server's proof.** The same `server.json`
+     (0600), the same challenge, the same secret, the same rate limit: a local web page cannot read
+     the file, nor send the header without a preflight the server never answers. The server's
+     answer is not signed: the mod takes no decision from it.
+168. **The hook does not wait for Andary.** `$.http.fetch` cannot be cut short from a mod (no
+     timers, no abort; Claude Code stops it after 30 s), so the hook starts the report and returns
+     `next(e)` at once. Readings that come while one report is on its way make one more report,
+     of the newest numbers. `$` may not be stored (Claude Code's static check refuses it), so
+     that report reuses the `$` of the one in flight, which stays valid, as timers' `$` does.
+169. **An account is a Claude config folder.** Limits belong to an account, and nothing a mod can
+     read names the account in a documented way (`$.session.identity()` exists but is not in the
+     reference). Two accounts on one computer almost always mean two `CLAUDE_CONFIG_DIR`s, so the
+     server keys limits by a hash of the folder and labels them by its name; the path itself is
+     not kept. No `CLAUDE_CONFIG_DIR`, or one that names `~/.claude` (the folder Claude Code uses
+     without it), is one account, "default". Two other folders signed in to one account show
+     twice; one folder that switches accounts shows the newest window's readings.
+170. **A report without limits keeps the account's, and a lower one within a window does not
+     replace a higher one.** Each session reports what it saw at its last answer, so a quiet
+     session can report 40% after a busy one reported 60%; use only grows within a window, so the
+     higher reading stands (with its own "as of") until a reading with a reset time an hour or
+     more away starts a new window. A session before its first answer, or one
+     on an API key, reports no limits; it must not wipe what another session of that account
+     reported. Each limit keeps its own "as of", and disappears once its reset time passes (as in
+     Claude Code).
+171. **Limits are kept in memory only.** A restart forgets them until the next turn of any
+     session (the mod reports after each turn); no file in `~/.andary` holds them
+     (`limit-notes.json` keeps only which windows had their phone note, 182).
+172. **The projection is the average pace since the window opened.** A window opens one length
+     before it resets (5 hours, 7 days); pace = percent used ÷ time since it opened, as of the
+     reading; run-out = when that pace reaches 100%. Shown only before the reset and after now,
+     after the first tenth of the window (an early pace says little), and never for a spend
+     limit, whose period is not reported. It needs no history, so it survives a reload; a burst
+     of work late in a window shows as a faster pace only gradually.
+173. **Gauge levels: warn from 75%, high from 90%.** 90% is the phone note's mark; 75% gives a
+     warning colour before Claude Code's own warning at 85%. The colour is never alone: the
+     button's name and the dialog say the percent.
+174. **The Usage button shows the most used limit of any account.** The first limit to run out is
+     the one that stops work. The dialog lists every limit, headed by the config folder's name
+     when there are two accounts.
+175. **Clock times are 24-hour, in this computer's time zone, in English.** "resets at 15:40",
+     "tomorrow", a weekday within the week, else "28 Nov"; the phone note says the same, from the
+     same shared module (`core/limits.js`, now shared with the server).
+176. **The 90% phone note is opt-in (`--notify-limits`), once per window, per kind of limit.** Each
+     kind has its own 30 s turn so the 5-hour and weekly notes never hold each other back; the
+     hour's limit counts them. Reset times under an hour apart are one window (a window lasts five
+     hours at least). It needs `--notify` or `--notify-url`, else the start fails with a message.
+177. **The exact context the mod sends is kept, not shown yet.** The town's context reading
+     (design §5, 125–132) comes from the transcripts, with no window and so no percentage; showing
+     the mod's exact count and window beside it is more than a one-line hookup (which reading wins,
+     how old each is), so it is left for later. The server keeps each session's newest exact count
+     and window and sends it to owners, so that change only adds the display. Assumed: the id from
+     `$.session.id()` is the hooks' `session_id`.
+178. **The doctor reads limits from the hello.** It already connects as the owner for its round
+     trip; a reading since the town started is "ok", an enabled mod with none is a warning, no
+     mod is "ok (optional)" with how to add it.
+179. **The demo makes up limits** (a 5-hour window whose pace runs out before it resets, a quiet
+     week), so the hosted demo shows the gauge; the dialog says they are made up.
+180. **The mod folder carries a `claude plugin test` file.** It runs the module in Claude Code's own
+     engine (no session, no network); the repository's checks use node:test, which does not need
+     Claude Code.
+181. **Figures are rounded down, with one decimal from 99.** 89.5% reads "89% used" and the
+     "warn" level, since the 90% note stays quiet for it; levels and the busiest limit go by the
+     reported percent. "Used up" only at 100: 99.5% leaves something.
+182. **The 90% note's windows survive a restart** (`limit-notes.json`, at most 64, windows that
+     reset are dropped on load), and with two accounts or more the note names the account by its
+     folder ("default folder" for the default one): a folder name is no project.
+183. **The mod reports only to a town on this computer.** It uses server.json's `host` only when it
+     is a loopback address, `localhost` or a wildcard (then 127.0.0.1). A town bound to a network
+     address alone (`--host 192.168.…`) gets no limits; plan limits never leave the computer.
+184. **The mod finds the town through Claude Code's own `ANDARY_HOME`, else `~/.andary`.** The
+     forwarder can also look next to its installed copy; the mod has no such folder. Claude Code
+     inherits `ANDARY_HOME` only from where it was started, so the README and `andary doctor` say
+     to set it in the shell profile.
+185. **A team viewer is not told to install the mod.** Limits are the host's and never reach a
+     viewer; their Usage dialog says only the host sees them.

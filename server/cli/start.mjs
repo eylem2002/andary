@@ -21,6 +21,7 @@ export const START_OPTIONS = Object.freeze({
   'remote-approvals': { type: 'boolean' },
   notify: { type: 'boolean' },
   'notify-url': { type: 'string' },
+  'notify-limits': { type: 'boolean' },
   team: { type: 'boolean' },
   'team-host': { type: 'string', multiple: true },
   'share-to': { type: 'string' },
@@ -40,6 +41,7 @@ export const START_OPTIONS = Object.freeze({
  * @property {boolean} remoteApprovals
  * @property {boolean} notify          --notify: a private ntfy.sh topic kept in ANDARY_HOME
  * @property {string|null} notifyUrl   --notify-url or ANDARY_NOTIFY_URL
+ * @property {boolean} notifyLimits    --notify-limits: a phone note when a plan limit reaches 90%
  * @property {boolean} team            --team: host a team town
  * @property {string[]} teamHosts      --team-host: other names teammates reach it by
  * @property {{ url: string, key: string, member: string }|null} shareTo  --share-to and --team-key
@@ -61,6 +63,8 @@ function startSettings(values, io, demo) {
   const shareTo = parseShareTo(values['share-to'] ?? io.env.ANDARY_SHARE_TO, values['team-key'] ?? io.env.ANDARY_TEAM_KEY);
   if (team && shareTo) throw new UsageError('A town either hosts the team (--team) or shares with one (--share-to), not both.');
   if (values['team-host'] && !team) throw new UsageError('--team-host only matters with --team.');
+  const notifyUrl = parseNotifyUrl(values['notify-url'] ?? io.env.ANDARY_NOTIFY_URL);
+  if (values['notify-limits'] && !values.notify && !notifyUrl) throw new UsageError('--notify-limits sends phone notes: add --notify (or --notify-url).');
   return {
     port: parsePort(values.port, io.env),
     // Teammates must be able to reach a team host, so --team listens on the network unless --host says where.
@@ -71,7 +75,8 @@ function startSettings(values, io, demo) {
     open: !values['no-open'],
     remoteApprovals: Boolean(values['remote-approvals']),
     notify: Boolean(values.notify),
-    notifyUrl: parseNotifyUrl(values['notify-url'] ?? io.env.ANDARY_NOTIFY_URL),
+    notifyUrl,
+    notifyLimits: Boolean(values['notify-limits']),
     approvalTimeoutMs: parseApprovalTimeout(values['approval-timeout'], (warning) => io.err(`Warning: ${warning}`)),
     tls: parseTls(values['tls-cert'] ?? io.env.ANDARY_TLS_CERT, values['tls-key'] ?? io.env.ANDARY_TLS_KEY),
     record: Boolean(values.record),
@@ -106,7 +111,7 @@ function linkFor(state, settings) {
 }
 
 /** Flags that only matter when a new server starts. */
-const SERVER_SHAPING = new Set(['port', 'host', 'remote-approvals', 'notify', 'notify-url', 'team', 'team-host', 'share-to', 'team-key', 'approval-timeout', 'tls-cert', 'tls-key', 'record']);
+const SERVER_SHAPING = new Set(['port', 'host', 'remote-approvals', 'notify', 'notify-url', 'notify-limits', 'team', 'team-host', 'share-to', 'team-key', 'approval-timeout', 'tls-cert', 'tls-key', 'record']);
 
 /**
  * @param {import('../state-file.mjs').ServerState} state
@@ -141,6 +146,7 @@ async function runForeground(settings, home, io) {
       home,
       remoteApprovals: settings.remoteApprovals,
       notifyUrl: settings.notifyUrl ?? (settings.notify ? savedTopicUrl(home) : null),
+      notifyLimits: settings.notifyLimits,
       team: settings.team,
       teamHosts: settings.teamHosts,
       shareTo: settings.shareTo,
@@ -247,6 +253,7 @@ function printBanner(server, settings, io) {
   io.out(`  Remote approvals: ${settings.remoteApprovals ? 'on' : 'off (switch them on in the town, or start with --remote-approvals)'}`);
   const { notifyUrl } = server;
   io.out(notifyUrl ? `  Phone notifications: on. In the free ntfy app, subscribe to ${notifyUrl}` : '  Phone notifications: off (start with --notify to get them in the free ntfy app)');
+  if (notifyUrl && settings.notifyLimits) io.out('  Also when a Claude plan limit reaches 90% (with the andary-limits mod).');
   if (server.viewUrl) {
     io.out(`  Team town: on. Invite a teammate with: ${cliInvocation()} team invite <name>`);
     io.out(`  Teammates watch (view only) at ${server.viewUrl}`);
@@ -363,6 +370,7 @@ function forwardedFlags(settings) {
   const flags = ['--port', String(settings.port), '--host', settings.host];
   if (settings.remoteApprovals) flags.push('--remote-approvals');
   if (settings.notify) flags.push('--notify');
+  if (settings.notifyLimits) flags.push('--notify-limits');
   if (settings.team) flags.push('--team');
   for (const name of settings.teamHosts) flags.push('--team-host', name);
   if (settings.approvalTimeoutMs !== undefined) flags.push('--approval-timeout', String(settings.approvalTimeoutMs / 1000));

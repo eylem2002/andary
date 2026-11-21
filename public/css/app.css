@@ -2863,6 +2863,93 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Plan limits (ui/limits.js): a meter per limit. The fill carries the level (the chart colour,
+   then the waiting amber from 75%, dark enough on light paper for 3:1, the error red from 90%) over a track of hairline; the words
+   beside it say the same, so the colour is never alone. */
+.hud-gauge {
+  display: block;
+  overflow: hidden;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--hairline);
+}
+
+.hud-gauge__fill {
+  display: block;
+  width: var(--gauge, 0%);
+  height: 100%;
+  border-radius: 4px;
+  background: var(--chart);
+}
+
+.hud-gauge[data-level="warn"] .hud-gauge__fill {
+  background: var(--waiting);
+}
+
+.hud-gauge[data-level="high"] .hud-gauge__fill {
+  background: var(--error);
+}
+
+/* On the Usage button: a thin meter under the coins. */
+.hud-tool .hud-gauge {
+  position: absolute;
+  right: 9px;
+  bottom: 5px;
+  left: 9px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.hud-tool .hud-gauge__fill {
+  border-radius: 2px;
+}
+
+.hud-limits {
+  display: grid;
+  gap: 10px;
+}
+
+.hud-limits__label {
+  margin-bottom: 4px;
+  color: var(--ink-2);
+  font: 700 13px/1.3 var(--font-ui);
+}
+
+.hud-limits__list {
+  display: grid;
+  gap: 10px;
+}
+
+.hud-limit__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.hud-limit__name {
+  font-weight: 700;
+}
+
+.hud-limit__figure {
+  flex: none;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-limit__when,
+.hud-limit__projection {
+  margin-top: 4px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.hud-limit__projection {
+  color: var(--ink);
+  font-weight: 700;
+}
+
 /* Leaderboard: the town's growth, records and the busiest agents. */
 .hud-board__section {
   margin-top: 16px;

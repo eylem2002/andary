@@ -63,8 +63,9 @@
  * @property {boolean} demoForced          the URL asked for the demo (?demo=1), e.g. `andary demo`
  * @property {boolean} hosted              a demo on a static host, with no server to connect to
  * @property {boolean} worldFailed         the 3D town could not start (no WebGL); the panels stay
- * @property {{ remoteApprovals?: boolean, approvalTimeoutMs?: number, notify?: boolean, notifyUrl?: string|null, team?: { role: 'owner'|'viewer', members: string[] }|null }} serverSettings
+ * @property {{ remoteApprovals?: boolean, approvalTimeoutMs?: number, notify?: boolean, notifyLimits?: boolean, notifyUrl?: string|null, team?: { role: 'owner'|'viewer', members: string[] }|null }} serverSettings
  * @property {{ points: number, days: string[] }|null} progress  the town's growth (§4.9)
+ * @property {import('../core/limits.js').AccountLimits[]} limits  plan limits from the andary-limits mod (§4.14)
  * @property {Selection|null} selection
  * @property {boolean} follow
  * @property {boolean} paused

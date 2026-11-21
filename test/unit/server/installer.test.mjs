@@ -326,6 +326,15 @@ describe('inspection helpers', () => {
     assert.equal(byScope.project.events.length, 0);
     assert.equal(byScope.local.plugin, true);
     assert.ok(report.plugin && report.installed);
+    assert.equal(report.limitsMod, false);
+  });
+
+  it('notices the andary-limits mod, which is no hooks of its own', () => {
+    writeJson(join(dir, 'project', '.claude', 'settings.json'), { enabledPlugins: { 'andary-limits@andary': true, 'andary@andary': false } });
+    const report = inspectInstallations({ dir: join(dir, 'project'), env, home });
+    assert.equal(report.limitsMod, true);
+    assert.equal(report.plugin, false, 'the mod is not the andary plugin');
+    assert.equal(report.installed, false, 'it sends limits, not events');
   });
 
   it('flags partial installs and unreadable files', () => {
