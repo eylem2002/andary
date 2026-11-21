@@ -131,7 +131,9 @@ function parsePayload(text) {
 }
 
 /**
- * Shortens long strings and arrays (the server would cut them anyway) so the body fits.
+ * Shortens long strings and arrays (the server would cut them anyway) so the body fits. A body
+ * shortened this way says so (`truncated: true`): the server cannot see what was cut (a list
+ * ends at 50 items either way), and must never let the town approve a request it cannot show.
  * @param {unknown} value
  * @param {number} depth
  * @returns {unknown}
@@ -152,7 +154,8 @@ function buildBody(event) {
   const source = SOURCE ? { source: SOURCE } : {};
   const body = JSON.stringify({ v: 1, ts, ...source, event });
   if (Buffer.byteLength(body) <= MAX_BODY_BYTES) return body;
-  const smaller = JSON.stringify({ v: 1, ts, ...source, event: shrink(event) });
+  const shortened = /** @type {Record<string, unknown>} */ (shrink(event));
+  const smaller = JSON.stringify({ v: 1, ts, ...source, event: { ...shortened, truncated: true } });
   if (Buffer.byteLength(smaller) <= MAX_BODY_BYTES) return smaller;
   // Still too big (a huge object): keep the identifying fields only.
   const essentials = Object.entries(event).filter(([, value]) => typeof value !== 'object');

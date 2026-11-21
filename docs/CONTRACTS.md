@@ -292,7 +292,8 @@ by `tool_name` or, for a call an adapter renamed, `andary_tool`, §4.12). At mos
 `ExitPlanMode` and `AskUserQuestion` requests are never held: a plain allow or deny cannot approve
 a plan or answer a question, so they are answered with `null` at once (`held: false`) and their
 `message` always says they are answered in the terminal. A request whose `tool_input` was changed
-by sanitising (a value redacted or cut) is never held, because the town could not show what would
+by sanitising (a value redacted or cut), that the forwarder had to shorten (`truncated`, §4.6), or
+that has no `tool_input` is never held, because the town could not show what would
 run: it is answered at once with `null`. When the town would otherwise have held it (remote
 approvals on, a browser signed in), its approval has `held: false` and
 `message: "The town cannot show this request in full (…)"`. In the browser, Allow/Deny ignore
@@ -316,8 +317,10 @@ Settled during implementation; they refine §4.3–§4.5.
   `serverOrigin` (the bound address, or `127.0.0.1` for a wildcard). With `--host`, `start` also
   prints an `https://` sign-in link for other computers. WebSocket `Origin` may be `http://` or
   `https://` with an allowed host. Stopping ends every connection, stalled ones included.
-- The forwarder shrinks payloads over 1 MiB instead of dropping them, and also looks for
-  `server.json` next to itself (plugin installs).
+- The forwarder shrinks payloads over 1 MiB instead of dropping them (strings to 2,000 characters,
+  lists to 50 items, 8 levels deep; if that is not enough, only the top-level fields that are not
+  objects) and marks such a body `truncated: true`, so the server never holds what it was not sent
+  in full. It also looks for `server.json` next to itself (plugin installs).
 - Approvals: `SubagentStop` also resolves that subagent's terminal-answered approvals; approval
   `agentId` has no `agent-` prefix. A held approval goes back to the terminal (`held: false`,
   still pending) when remote approvals are switched off, no browser has been connected for 5 s,

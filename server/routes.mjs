@@ -287,7 +287,7 @@ async function handleHook(ctx, req, res) {
   }
   const request = ingestHook(ctx, body).find((envelope) => envelope.event.hook_event_name === 'PermissionRequest');
   if (request) {
-    await answerPermissionRequest(ctx, req, res, request.event, shownInFull(body.event.tool_input, request.event.tool_input));
+    await answerPermissionRequest(ctx, req, res, request.event, shownInFull(body.event, request.event));
     return;
   }
   sendHookReply(ctx, req, res, null);
@@ -344,16 +344,19 @@ const TERMINAL_ONLY = new Map([
 ]);
 
 /**
- * Whether sanitizing left a tool input exactly as Claude Code sent it. Redaction and truncation
- * hide text, and hidden text can run: `TOKEN="$(curl … | sh)"` is shown as `TOKEN=[redacted]`, and
- * a command padded past 2,000 characters loses its tail. Such a request must not be approved from
- * a card that does not show it.
- * @param {unknown} raw
- * @param {unknown} sanitized
+ * Whether the town shows a request's tool input exactly as the agent will run it. The forwarder
+ * marks a body it had to shorten (`truncated`), and past its last step it drops the input
+ * altogether; then sanitizing must leave the input as it came. Redaction and truncation hide text,
+ * and hidden text can run: `TOKEN="$(curl … | sh)"` is shown as `TOKEN=[redacted]`, and a command
+ * padded past 2,000 characters loses its tail. Such a request must not be approved from a card
+ * that does not show it.
+ * @param {Record<string, any>} raw        the event as the forwarder sent it
+ * @param {Record<string, any>} sanitized  its town payload, sanitized
  * @returns {boolean}
  */
 function shownInFull(raw, sanitized) {
-  return JSON.stringify(raw ?? null) === JSON.stringify(sanitized ?? null);
+  if (raw.truncated || raw.tool_input === undefined || raw.tool_input === null) return false;
+  return JSON.stringify(raw.tool_input) === JSON.stringify(sanitized.tool_input ?? null);
 }
 
 /**

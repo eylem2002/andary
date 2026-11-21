@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { after, before, describe, it } from 'node:test';
 import { decisionOutput } from '../../server/approvals.mjs';
 import { HOOK_SOURCE } from '../../server/config.mjs';
-import { closeBrowser, connectBrowser, hookPayload, startTown, waitForMessage } from './helpers.mjs';
+import { closeBrowser, connectBrowser, hookPayload, postHook, startTown, waitForMessage } from './helpers.mjs';
 
 /** @type {Awaited<ReturnType<typeof startTown>>} */
 let town;
@@ -217,6 +217,48 @@ describe('requests the town cannot show in full', () => {
       browser.send(JSON.stringify({ t: 'decide', id: approval.a.id, decision: 'allow' }));
       const refusal = await waitForMessage(browser, (m) => m?.t === 'error');
       assert.match(refusal.message, /terminal/);
+      await closeBrowser(browser);
+    });
+  }
+
+  /** @type {[string, Record<string, any>][]} */
+  const tooBig = [
+    // 3,000 short items: no string is cut, the list ends at 50 items, and then the body fits.
+    ['the forwarder cut a long list short', { files: Array.from({ length: 3000 }, (_, i) => `file-${i}-${'x'.repeat(400)}`) }],
+    // 2,000 keys of 800 characters: 1.6 MB that no shortening brings under 1 MiB, so the input is dropped.
+    ['the forwarder had to drop the input', Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`key${i}`, 'y'.repeat(800)]))],
+  ];
+  for (const [name, input] of tooBig) {
+    it(`goes to the terminal when ${name}`, async () => {
+      const browser = await connectBrowser(town);
+      await waitForMessage(browser, (m) => m?.t === 'hello');
+      const payload = permissionRequest({ tool_name: 'mcp__deploy__run', tool_input: input });
+      const started = Date.now();
+      assert.deepEqual(await town.sendHook(payload), { code: 0, stdout: '', stderr: '' }, 'answered at once, with no decision');
+      assert.ok(Date.now() - started < 5000);
+      const approval = await approvalFor(browser, payload.session_id);
+      assert.deepEqual([approval.a.status, approval.a.held], ['pending', false]);
+      assert.match(approval.a.message, /cannot show this request in full/);
+      await closeBrowser(browser);
+    });
+  }
+
+  /** @type {[string, (payload: Record<string, any>) => Record<string, any>][]} */
+  const shapes = [
+    ['its body is marked shortened', (payload) => ({ ...payload, truncated: true })],
+    ['it has no input', ({ tool_input: _dropped, ...payload }) => payload],
+    ['its input is null', (payload) => ({ ...payload, tool_input: null })],
+  ];
+  for (const [name, shape] of shapes) {
+    it(`goes to the terminal when ${name}`, async () => {
+      const browser = await connectBrowser(town);
+      await waitForMessage(browser, (m) => m?.t === 'hello');
+      const payload = shape(permissionRequest({ tool_name: 'mcp__deploy__run', tool_input: { target: 'prod' } }));
+      const answer = await postHook(town, payload);
+      assert.equal(JSON.parse(answer.text).output, null, 'answered at once, with no decision');
+      const approval = await approvalFor(browser, payload.session_id);
+      assert.deepEqual([approval.a.status, approval.a.held], ['pending', false]);
+      assert.match(approval.a.message, /cannot show this request in full/);
       await closeBrowser(browser);
     });
   }

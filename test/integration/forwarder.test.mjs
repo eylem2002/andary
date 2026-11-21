@@ -75,6 +75,18 @@ describe('forwarder delivery', () => {
     const message = await waitForMessage(browser, (m) => m?.t === 'hook' && m.e.event.session_id === 'big-1');
     assert.equal(message.e.event.tool_input.file_path, 'src/huge.json');
     assert.ok(message.e.event.tool_input.content.length < 2100);
+    assert.equal(message.e.event.truncated, true, 'and says so, so the town never approves what it cannot show');
+  });
+
+  it('keeps only the identifying fields when shortening is not enough, and says so', async () => {
+    const payload = hookPayload('PostToolUse', {
+      session_id: 'big-2',
+      tool_name: 'mcp__deploy__run',
+      tool_input: Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`key${i}`, 'y'.repeat(800)])),
+    });
+    assert.equal((await town.sendHook(payload)).code, 0);
+    const message = await waitForMessage(browser, (m) => m?.t === 'hook' && m.e.event.session_id === 'big-2');
+    assert.deepEqual([message.e.event.tool_name, message.e.event.tool_input, message.e.event.truncated], ['mcp__deploy__run', undefined, true]);
   });
 
   it('finds the server from its own folder when installed there', async () => {
