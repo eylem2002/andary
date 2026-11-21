@@ -219,7 +219,7 @@ test("Codex's list commands still prove their dialog answered", async () => {
   }
 });
 
-test("Codex's renamed calls prove their dialog answered", { todo: 'core/dialogs.js: result() never matches a call whose input cannot be compared (null) to a request with a known input' }, async () => {
+test("Codex's renamed calls prove their dialog answered", async () => {
   const patch = '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** Add File: src/b.ts\n+fresh\n*** End Patch';
   /** @type {[string, Record<string, any>][]} */
   const renamed = [['apply_patch', { command: patch }], ['spawn_agent', { message: 'look around' }]];

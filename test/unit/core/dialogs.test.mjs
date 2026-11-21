@@ -20,6 +20,13 @@ describe('createDialogs', () => {
     assert.deepEqual(d.list(), []);
   });
 
+  test("a call an adapter renamed (its input rewritten) answers the request asked under its own name", () => {
+    const d = createDialogs();
+    d.ask({ sessionId: S, agentId: null, tools: ['apply_patch'], input: inputKey({ patch: '*** Begin Patch' }) }, 1);
+    assert.equal(d.result({ sessionId: S, agentId: null, tools: ['Edit', 'apply_patch'], input: null }).length, 1);
+    assert.deepEqual(d.list(), []);
+  });
+
   test('parallel requests from one agent each stay open until their own answer', () => {
     const d = createDialogs();
     d.ask(lead(['Read'], { file_path: '../a' }), 1);

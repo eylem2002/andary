@@ -6,7 +6,8 @@
 // or a session's own "needs your permission" notice when nothing of that session is known to be
 // open. It closes only on proof of an answer:
 //   - the same call reporting back: a tool name in common and the same input (questions and plans
-//     by name only: Claude Code adds your answer to their input);
+//     by name only, as Claude Code adds your answer to their input; a call an adapter renamed by
+//     name too, as its input was rewritten);
 //   - the town deciding the request it holds for it;
 //   - your prompt (the lead's dialogs only: a helper's request held in the town does not stop you
 //     typing), the agent's turn ending, or the session ending.
@@ -65,12 +66,12 @@ function sameAgent(d, call) {
   return d.kind !== 'unknown' && d.sessionId === call.sessionId && d.agentId === call.agentId && d.tools.some((t) => call.tools.includes(t));
 }
 
-/** A result answers a dialog only for the very same call. @param {Dialog} d @param {Call} call */
-function answers(d, call) {
-  return sameAgent(d, call) && (d.input === null || d.input === call.input);
-}
-
-/** A request or an approval belongs to a dialog unless their inputs differ. @param {Dialog} d @param {Call} call */
+/**
+ * A call belongs to a dialog unless their inputs differ: the same agent, a tool name in common,
+ * and the same input where both are known. A side without one (a question or plan; a call an
+ * adapter renamed, its input rewritten) goes by the name.
+ * @param {Dialog} d @param {Call} call
+ */
 function fits(d, call) {
   return sameAgent(d, call) && (d.input === null || call.input === null || d.input === call.input);
 }
@@ -144,9 +145,9 @@ export function createDialogs({ max = 200 } = {}) {
       return close((d) => d.approvalId === approvalId);
     },
 
-    /** A tool call reported back: the oldest dialog for that very call. @param {Call} call @returns {Dialog[]} */
+    /** A tool call reported back: the oldest open dialog it fits. @param {Call} call @returns {Dialog[]} */
     result(call) {
-      const dialog = open.find((d) => answers(d, call));
+      const dialog = open.find((d) => fits(d, call));
       return dialog ? close((d) => d === dialog) : [];
     },
 

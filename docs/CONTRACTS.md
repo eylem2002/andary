@@ -398,8 +398,7 @@ the WebSocket `hello`. Only this computer's events count (§4.11).
   - The notifier passes each call as `{ sessionId, agentId, tools: [tool_name, andary_tool],
     input }`, where `input` is null for a call an adapter renamed (its input cannot be compared),
     and links the town's requests to their dialogs as the broker reports them. A renamed result
-    does not close its request yet (the model matches a null input only to a dialog without one):
-    such a dialog closes with the agent's turn or your prompt.
+    is matched by its tool names alone.
 - **Dialog notes** (priority high): due 10 s after the dialog opens, sent if it is still open: "A
   crew needs your permission.", "A crew has a question for you." or "A crew has a plan for you to
   approve.". Dialogs due together make one note with a crew count ("3 crews need your
