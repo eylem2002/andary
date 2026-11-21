@@ -320,28 +320,37 @@ section.
     oldest without a button goes first, then a crew arrival, and an approval's toast last.
 86. **The page title counts approvals only.** "(2) Andary" is for things that block an agent
     until you answer; failures and finished work do not change the title.
-87. **A phone note for a permission request waits ten seconds.** Most prompts are answered within
-    a few seconds by someone at the computer; a note that arrives after you answered is noise.
-    Each request has its own ten seconds. Requests whose seconds run out together become one note,
-    and a finished turn sends nothing by itself: Claude Code's `idle_prompt`, a minute later,
-    covers a turn nobody came back to.
+87. **A phone note for a dialog waits ten seconds.** Most prompts are answered within a few seconds
+    by someone at the computer; a note that arrives after you answered is noise. Each dialog (a
+    permission request, a question, a plan) has its own ten seconds. Dialogs whose seconds run out
+    together become one note, which also covers the other dialogs their crews have open, since
+    parallel calls ask a moment apart. A finished turn sends nothing by itself: Claude Code's
+    `idle_prompt`, a minute later, covers a turn nobody came back to.
 88. **Plans and questions are never held in the town.** A plain allow cannot approve a plan
     (`ExitPlanMode`) or answer a question (`AskUserQuestion`); both wait in the terminal, and the card
-    always says so, also when remote approvals are off.
-89. **A permission note is dropped only on proof of an answer.** Proof is the same call reporting
-    back (the same tool and input), your next prompt, the turn or the session ending, or a
-    decision in the town. A request that timed out in the town or went back to the terminal is no
-    proof: the agent still waits there. Nor is the broker's "answered in the terminal", which goes
-    by the tool's name only. Andary sees a yes in the terminal only when the tool finishes, and a
-    "No" only at your next prompt, so a note can come after you answered: one note too many is
-    better than none for an agent that waits. A tool result too big for the forwarder (over 1 MiB)
-    arrives shortened; if its input was cut, it no longer matches its request.
+    always says so, also when remote approvals are off. On the phone they have notes of their own
+    ("A crew has a question for you.").
+89. **A dialog's note is dropped only on proof of an answer.** Proof is that very call reporting
+    back (the same tool and input; questions and plans by name, since your answer changes their
+    input), your prompt (for the lead's dialogs: a helper's request held in the town does not
+    stop you typing to the lead), the agent's turn or the session ending, or a decision in the
+    town. A new request from the same agent is no proof, because parallel calls each ask on their
+    own. Nor is a request that timed out in the town or went back to the terminal (the agent still
+    waits there), or the broker's "answered in the terminal", which goes by the tool's name only.
+    Andary sees a yes in the terminal only when the tool finishes, a "No" only at your next prompt,
+    and a diff you change in your IDE not at all (its result has another input), so a note can
+    come after you answered: one note too many is better than none for an agent that waits. A tool
+    result too big for the forwarder (over 1 MiB) arrives shortened; if its input was cut, it no
+    longer matches its request.
 90. **A dialog that has had its note is remembered for 30 minutes at most.** Until its proof it
     sends no second note, not even for Claude Code's own `permission_prompt` about it. A crashed
-    session sends no SessionEnd, so after 30 minutes its dialogs are forgotten; one still open
-    then would get a second note. At most 100 dialogs are kept.
+    session sends no SessionEnd, so after 30 minutes its dialogs are forgotten. Claude Code sends
+    that notice once per dialog, so in practice a forgotten dialog brings no second note. At most
+    100 dialogs are kept; the oldest give way.
 91. **Codex gets its "waiting" note after a minute.** Codex sends no Notification events, so no
     `idle_prompt`. After a Codex lead's Stop (an interrupt too), Andary waits the same 60 seconds
-    as Claude Code and sends the note unless anything else came from that session meanwhile.
+    as Claude Code. A helper still at work starts the minute again; the lead's prompt or tool use,
+    or the session starting or ending, cancels it. Andary cannot see you typing in Codex, so a
+    reply that takes you over a minute to write still sends the note.
 92. **The waiting note names no agent.** "A crew is waiting for your next prompt." fits Claude Code
-    and Codex alike, as the permission note does.
+    and Codex alike, as the notes for permission requests, questions and plans do.

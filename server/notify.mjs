@@ -5,32 +5,37 @@
 // a tool, because anyone who knows the topic can read them. At most one of a kind every 30
 // seconds and 30 an hour (CONTRACTS §4.10).
 //
-// They follow the town's attention rules (docs/design/agent-health.md §2). Every agent that asks
-// for permission is tracked here, from its request until something proves the dialog was
-// answered: the same call reporting back, a prompt, the turn or the session ending, or a decision
-// in the town. Its note waits PERMISSION_DELAY_MS and goes out unless that proof came first; a
-// request that timed out in the town or went back to the terminal is no proof, because the agent
-// still waits there. Notes due together become one ("3 crews need your permission."). A finished
-// turn is no news by itself: Claude Code's idle_prompt says so a minute later if nobody answered,
-// and for Codex, which sends no idle_prompt, the same minute is counted here.
-import { createHash, randomBytes } from 'node:crypto';
+// They follow the town's attention rules (docs/design/agent-health.md §2). What an agent has asked
+// you and had no answer to is decided by core/dialogs.js, the model the town uses too: a dialog
+// per call (a permission request, a question, a plan), closed only on proof of an answer. This
+// module keeps only its own part: a dialog's note waits DIALOG_DELAY_MS and goes out if the dialog
+// is still open then; dialogs due together become one note. A finished turn is no news by itself:
+// Claude Code's idle_prompt says so a minute later if nobody answered, and for Codex, which sends
+// no idle_prompt, that minute is counted here.
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { INTERACTIVE_TOOLS, createDialogs, inputKey } from '../public/js/core/dialogs.js';
 import { normalizeAgentId } from '../public/js/core/ids.js';
-import { isObject, shellWords } from '../public/js/core/text.js';
+import { isObject } from '../public/js/core/text.js';
+
+/** @typedef {import('../public/js/core/dialogs.js').Dialog} Dialog */
+/** @typedef {import('../public/js/core/dialogs.js').Dialogs} Dialogs */
 
 export const NTFY_SERVER = 'https://ntfy.sh';
-/** A permission note waits this long; a request answered meanwhile (often within seconds) needs none. */
-export const PERMISSION_DELAY_MS = 10_000;
+/** A dialog's note waits this long; one answered meanwhile (often within seconds) needs none. */
+export const DIALOG_DELAY_MS = 10_000;
 /** Codex sends no idle_prompt: a Codex lead that stopped and heard nothing for this long is waiting for you. */
 export const CODEX_IDLE_MS = 60_000;
 const SAME_KIND_MS = 30_000;
 const HOUR_MS = 3_600_000;
 const HOURLY_LIMIT = 30;
-/** A dialog that has had its note is remembered this long at most: a crashed session sends no SessionEnd. */
-const ASK_MAX_AGE_MS = 30 * 60_000;
-/** Dialogs remembered at once; the oldest give way. */
-const MAX_ASKING = 100;
+/** A dialog that has had its note is forgotten this long after it opened: a crashed session sends no SessionEnd. */
+const NOTED_MAX_AGE_MS = 30 * 60_000;
+/** Open dialogs kept at once; the oldest give way. */
+const MAX_DIALOGS = 100;
+/** Every dialog note shares one 30 s limit, whatever it says. */
+const DIALOG_RATE = 'dialog';
 const SEND_TIMEOUT_MS = 5000;
 
 /**
@@ -42,32 +47,38 @@ const SEND_TIMEOUT_MS = 5000;
  * @property {string} tags   ntfy emoji tags
  */
 
-/** @type {Readonly<Record<string, Omit<Note, 'kind'>>>} */
+/** Notes sent at once. @type {Readonly<Record<string, Omit<Note, 'kind'>>>} */
 const NOTES = Object.freeze({
-  permission: { title: 'Andary', body: 'A crew needs your permission.', priority: 'high', tags: 'raised_hand' },
   waiting: { title: 'Andary', body: 'A crew is waiting for your next prompt.', priority: 'default', tags: 'hourglass' },
   limit: { title: 'Andary', body: 'Claude Code stopped: it hit a usage or rate limit.', priority: 'high', tags: 'warning' },
   stopped: { title: 'Andary', body: 'Claude Code stopped with an error.', priority: 'high', tags: 'warning' },
   test: { title: 'Andary', body: 'This is a test notification from your town.', priority: 'default', tags: 'tada' },
 });
 
+/**
+ * What a note for open dialogs says, by their kind: for one crew, and for several. Dialogs of
+ * several kinds share the plain one.
+ * @type {Readonly<Record<string, { one: string, many: (crews: number) => string, tags: string }>>}
+ */
+const DIALOG_WORDS = Object.freeze({
+  permission: { one: 'A crew needs your permission.', many: (n) => `${n} crews need your permission.`, tags: 'raised_hand' },
+  question: { one: 'A crew has a question for you.', many: (n) => `${n} crews have a question for you.`, tags: 'question' },
+  plan: { one: 'A crew has a plan for you to approve.', many: (n) => `${n} crews have a plan for you to approve.`, tags: 'clipboard' },
+  mixed: { one: 'A crew needs you.', many: (n) => `${n} crews need you.`, tags: 'raised_hand' },
+});
+
 /** @param {string} kind @returns {Note} */
 const noteOf = (kind) => ({ kind, ...NOTES[kind] });
 
 /**
- * The note a hook event deserves, or null. A permission note is not sent at once: see
- * createNotifier.
+ * The note a hook event deserves at once, or null. A dialog's note (a permission request, a
+ * question, a plan) waits instead: see createNotifier.
  * @param {Record<string, any>} event  a raw hook payload
  * @returns {Note|null}
  */
 export function noteFor(event) {
   const name = event?.hook_event_name;
-  if (name === 'PermissionRequest') return noteOf('permission');
-  if (name === 'Notification') {
-    if (event.notification_type === 'permission_prompt') return noteOf('permission');
-    if (event.notification_type === 'idle_prompt') return noteOf('waiting');
-    return null;
-  }
+  if (name === 'Notification' && event.notification_type === 'idle_prompt') return noteOf('waiting');
   if (name === 'StopFailure') return noteOf(/rate|limit|quota|overload/i.test(String(event.error ?? '')) ? 'limit' : 'stopped');
   return null;
 }
@@ -107,92 +118,78 @@ export function checkNotifyUrl(raw) {
 }
 
 /**
- * One agent's permission dialog, from its PermissionRequest (or Claude Code's permission_prompt,
- * when the request never reached the town) until something proves it was answered.
- * @typedef {object} Ask
- * @property {string} sessionId
- * @property {number} since              when the dialog was first seen
- * @property {number} due                when its note goes out
- * @property {string[]|null} tool        the names its tool goes by; null when unknown
- * @property {string|null} inputHash     SHA-256 of the tool input (a big Write is not kept); null when unknown
- * @property {string|null} approvalId    the held approval the town made for it
- * @property {boolean} notified          its note went out (or the hour's limit dropped it)
- */
-
-/**
- * Read like the approval broker reads ids, so a town decision finds its dialog.
+ * Read like the approval broker reads ids, so the town's requests find their dialogs.
  * @param {unknown} value
  */
 const text = (value) => (typeof value === 'string' ? value : '');
 
 /**
- * One dialog at a time per agent: "session\0agent".
- * @param {string} sessionId
- * @param {string|null} agentId  normalised (no "agent-" prefix), null for the lead
- */
-const askKey = (sessionId, agentId) => `${sessionId}\0${agentId ?? 'main'}`;
-
-/**
- * The names a tool call goes by: its own and, for a call an adapter renamed (Codex's apply_patch
- * shown as an Edit), the name it was asked under.
+ * A hook event's tool call, as core/dialogs.js identifies it. A call an adapter renamed
+ * (andary_tool) no longer has the input it was asked with, so its input cannot be compared.
  * @param {Record<string, any>} event
- * @returns {string[]}
+ * @returns {import('../public/js/core/dialogs.js').Call}
  */
-function toolNames(event) {
-  return [text(event.tool_name), text(event.andary_tool)].filter(Boolean);
+function callOf(event) {
+  return {
+    sessionId: text(event.session_id),
+    agentId: normalizeAgentId(event.agent_id),
+    tools: [text(event.tool_name), text(event.andary_tool)].filter(Boolean),
+    input: event.andary_tool ? null : inputKey(event.tool_input),
+  };
 }
 
 /**
- * A tool input's fingerprint. Codex may send a shell command as a list; its adapter joins the list
- * in tool results but never in the request (the town shows a request as it came), so a list is
- * joined here on both sides.
- * @param {unknown} input
- * @returns {string}
+ * Whether an event opens a dialog: a permission request, or a question or plan starting (they
+ * stop the agent until you answer, permission or not).
+ * @param {Record<string, any>} event
  */
-function inputHash(input) {
-  const same = isObject(input) && Array.isArray(input.command) ? { ...input, command: shellWords(input.command) } : input;
-  return createHash('sha256').update(JSON.stringify(same ?? null)).digest('base64url');
+function asks(event) {
+  if (event.hook_event_name === 'PermissionRequest') return true;
+  return event.hook_event_name === 'PreToolUse' && [event.tool_name, event.andary_tool].some((tool) => typeof tool === 'string' && Object.hasOwn(INTERACTIVE_TOOLS, tool));
 }
 
 /**
- * @param {string} sessionId
- * @param {number} since
- * @param {number} due
- * @param {Record<string, any>|null} request  the PermissionRequest; null for a permission_prompt
- * @returns {Ask}
+ * The dialogs an event proves answered, or null when it proves nothing.
+ * @param {Dialogs} dialogs
+ * @param {Record<string, any>} event
+ * @returns {Dialog[]|null}
  */
-function newAsk(sessionId, since, due, request) {
-  const names = request ? toolNames(request) : [];
-  const known = names.length > 0;
-  return { sessionId, since, due, tool: known ? names : null, inputHash: known ? inputHash(request?.tool_input) : null, approvalId: null, notified: false };
+function closedBy(dialogs, event) {
+  const sessionId = text(event.session_id);
+  switch (event.hook_event_name) {
+    case 'PostToolUse':
+    case 'PostToolUseFailure':
+    case 'PermissionDenied':
+      return dialogs.result(callOf(event));
+    case 'UserPromptSubmit':
+      return dialogs.prompted(sessionId);
+    case 'Stop':
+      // Codex's Interrupt arrives as an interrupted Stop: you are at that session's terminal.
+      return event.stop_reason === 'interrupted' ? dialogs.closeSession(sessionId) : dialogs.stopped(sessionId, normalizeAgentId(event.agent_id));
+    case 'SubagentStop':
+      return dialogs.stopped(sessionId, normalizeAgentId(event.agent_id));
+    case 'SessionEnd':
+      return dialogs.closeSession(sessionId);
+    default:
+      return null;
+  }
 }
 
 /**
- * Whether a tool result proves the agent's dialog was answered: the same call reported back. A
- * parallel call with another input proves nothing. A call an adapter renamed (andary_tool) no
- * longer has the input it was asked with, so its name has to do; so does any result when the
- * dialog's tool is unknown.
- * @param {Record<string, any>} event  PostToolUse, PostToolUseFailure or PermissionDenied
- * @param {Ask|undefined} ask
- * @returns {boolean}
- */
-function answers(event, ask) {
-  if (!ask) return false;
-  if (!ask.tool) return true;
-  const { tool } = ask;
-  if (!toolNames(event).some((name) => tool.includes(name))) return false;
-  return Boolean(event.andary_tool) || inputHash(event.tool_input) === ask.inputHash;
-}
-
-/**
- * A permission note, for one crew or several.
+ * The note for some open dialogs: worded by their kind (a session's own permission notice reads
+ * as a permission), counted by crew.
+ * @param {Dialog[]} covered
  * @param {number} crews
  * @returns {Note}
  */
-function permissionNote(crews) {
-  const note = noteOf('permission');
-  return crews === 1 ? note : { ...note, body: `${crews} crews need your permission.` };
+function dialogNote(covered, crews) {
+  const kinds = new Set(covered.map((dialog) => (dialog.kind === 'unknown' ? 'permission' : dialog.kind)));
+  const words = DIALOG_WORDS[kinds.size === 1 ? [...kinds][0] : 'mixed'];
+  return { kind: DIALOG_RATE, title: 'Andary', body: crews === 1 ? words.one : words.many(crews), priority: 'high', tags: words.tags };
 }
+
+/** Events that show a Codex lead at work again. */
+const LEAD_AT_WORK = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'PermissionDenied']);
 
 /**
  * Codex sends no idle_prompt: its lead's finished turn (Stop, an interrupt included) starts the
@@ -226,8 +223,7 @@ function createRateLimit() {
 }
 
 /**
- * Codex leads that stopped, each with the timer of its "waiting" note. Anything later from the
- * session (a prompt, a tool, its end) stops the timer.
+ * Codex leads that stopped, each with the timer of its "waiting" note.
  * @param {(fn: () => void, ms: number) => any} setTimer
  * @param {(timer: any) => void} clearTimer
  * @param {() => void} onIdle
@@ -235,15 +231,16 @@ function createRateLimit() {
 function createIdleWatch(setTimer, clearTimer, onIdle) {
   /** @type {Map<string, any>} */
   const timers = new Map();
-  return {
+  const watch = {
     /** @param {string} sessionId */
     stop(sessionId) {
       if (!timers.has(sessionId)) return;
       clearTimer(timers.get(sessionId));
       timers.delete(sessionId);
     },
-    /** @param {string} sessionId */
+    /** (Re)starts the minute. @param {string} sessionId */
     start(sessionId) {
+      watch.stop(sessionId);
       const timer = setTimer(() => {
         timers.delete(sessionId);
         onIdle();
@@ -251,11 +248,16 @@ function createIdleWatch(setTimer, clearTimer, onIdle) {
       timer?.unref?.();
       timers.set(sessionId, timer);
     },
+    /** Starts the minute again if it is running: a helper still works. @param {string} sessionId */
+    restart(sessionId) {
+      if (timers.has(sessionId)) watch.start(sessionId);
+    },
     clear() {
       for (const timer of timers.values()) clearTimer(timer);
       timers.clear();
     },
   };
+  return watch;
 }
 
 /**
@@ -296,20 +298,21 @@ function createPoster(url, fetchImpl, log) {
  * @property {typeof fetch} [fetchImpl]
  * @property {() => number} [now]
  * @property {(message: string) => void} [log]
- * @property {number} [delayMs]  how long a permission note waits (PERMISSION_DELAY_MS)
+ * @property {number} [delayMs]  how long a dialog's note waits (DIALOG_DELAY_MS)
  * @property {(fn: () => void, ms: number) => any} [setTimer]
  * @property {(timer: any) => void} [clearTimer]
  */
 
 /** @param {NotifierOptions} options */
-export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.now, log = () => {}, delayMs = PERMISSION_DELAY_MS, setTimer = setTimeout, clearTimer = clearTimeout }) {
+export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.now, log = () => {}, delayMs = DIALOG_DELAY_MS, setTimer = setTimeout, clearTimer = clearTimeout }) {
   const rate = createRateLimit();
   const post = createPoster(url, fetchImpl, log);
-  /** Dialogs waiting for their proof, oldest first. @type {Map<string, Ask>} */
-  const asking = new Map();
+  const dialogs = createDialogs({ max: MAX_DIALOGS });
+  /** This notifier's part of each open dialog: when its note is due, and whether it went out. @type {Map<number, { due: number, noted: boolean }>} */
+  const notes = new Map();
   const idle = createIdleWatch(setTimer, clearTimer, () => void send(noteOf('waiting')));
   /** @type {any} */
-  let askTimer = null;
+  let timer = null;
   let disposed = false;
 
   /**
@@ -325,87 +328,89 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
     return post(note);
   }
 
-  /** One timer, for the first dialog due, or later while a permission note went out under 30 s ago. */
+  /** One timer, for the first dialog due, or later while a dialog note went out under 30 s ago. */
   function schedule() {
-    if (askTimer !== null) clearTimer(askTimer);
-    askTimer = null;
-    const waiting = [...asking.values()].filter((ask) => !ask.notified);
-    if (waiting.length === 0) return;
-    const at = Math.max(Math.min(...waiting.map((ask) => ask.due)), rate.opensAt('permission'));
-    askTimer = setTimer(flushDue, Math.max(0, at - now()));
-    askTimer?.unref?.();
+    if (timer !== null) clearTimer(timer);
+    timer = null;
+    const open = new Set(dialogs.list().map((dialog) => dialog.id));
+    let next = Infinity;
+    for (const [id, note] of notes) {
+      // The oldest give way when too many are open: their part goes with them.
+      if (!open.has(id)) notes.delete(id);
+      else if (!note.noted) next = Math.min(next, note.due);
+    }
+    if (next === Infinity) return;
+    timer = setTimer(flushDue, Math.max(0, Math.max(next, rate.opensAt(DIALOG_RATE)) - now()));
+    timer?.unref?.();
   }
 
-  /** One note for the crews whose dialogs are due; past the hour's limit they count as noted, unsent. */
+  /**
+   * One note for the crews with a dialog due. It covers every dialog those crews have open, so a
+   * crew's parallel requests make one note. Past the hour's limit they count as noted, unsent.
+   */
   function flushDue() {
-    askTimer = null;
+    timer = null;
     const t = now();
-    const due = [...asking.values()].filter((ask) => !ask.notified && ask.due <= t);
-    if (due.length > 0 && t >= rate.opensAt('permission')) {
-      for (const ask of due) ask.notified = true;
+    const waiting = dialogs.list().flatMap((dialog) => {
+      const note = notes.get(dialog.id);
+      return note && !note.noted ? [{ dialog, note }] : [];
+    });
+    const crews = new Set(waiting.filter(({ note }) => note.due <= t).map(({ dialog }) => dialog.sessionId));
+    if (crews.size > 0 && t >= rate.opensAt(DIALOG_RATE)) {
+      const covered = waiting.filter(({ dialog }) => crews.has(dialog.sessionId));
+      for (const { note } of covered) note.noted = true;
       if (rate.hourLeft(t)) {
-        rate.record('permission', t);
-        void post(permissionNote(new Set(due.map((ask) => ask.sessionId)).size));
+        rate.record(DIALOG_RATE, t);
+        void post(dialogNote(covered.map(({ dialog }) => dialog), crews.size));
       }
     }
     schedule();
   }
 
-  /** @param {string} key @param {Ask} ask */
-  function remember(key, ask) {
-    asking.delete(key);
-    asking.set(key, ask);
-    for (const oldest of asking.keys()) {
-      if (asking.size <= MAX_ASKING) break;
-      asking.delete(oldest);
+  /** Forgets dialogs that had their note half an hour ago or more. @param {number} t */
+  function forgetNoted(t) {
+    for (const dialog of [...dialogs.list()]) {
+      if (!notes.get(dialog.id)?.noted || t - dialog.at < NOTED_MAX_AGE_MS) continue;
+      dialogs.forget(dialog.id);
+      notes.delete(dialog.id);
     }
   }
 
-  /** @param {string} sessionId */
-  function forgetSession(sessionId) {
-    for (const [key, ask] of asking) if (ask.sessionId === sessionId) asking.delete(key);
-  }
-
   /**
-   * Starts, replaces or ends the dialog this event concerns.
+   * Opens or closes the dialogs this event concerns.
    * @param {Record<string, any>} event
    * @param {number} t
    */
   function track(event, t) {
-    const sessionId = text(event.session_id);
-    const key = askKey(sessionId, normalizeAgentId(event.agent_id));
-    switch (event.hook_event_name) {
-      case 'PermissionRequest':
-        // A new request from the same agent: its previous dialog was answered.
-        remember(key, newAsk(sessionId, t, t + delayMs, event));
-        break;
-      case 'Notification':
-        // Claude Code's own notice of a dialog: news only if its request never reached the town.
-        if (event.notification_type !== 'permission_prompt' || [...asking.values()].some((ask) => ask.sessionId === sessionId)) return;
-        remember(key, newAsk(sessionId, t, t + delayMs, null));
-        break;
-      case 'PostToolUse':
-      case 'PostToolUseFailure':
-      case 'PermissionDenied':
-        if (!answers(event, asking.get(key))) return;
-        asking.delete(key);
-        break;
-      case 'Stop':
-        // Codex's Interrupt arrives as an interrupted Stop: you are at that session's terminal.
-        if (event.stop_reason === 'interrupted') forgetSession(sessionId);
-        else asking.delete(key);
-        break;
-      case 'SubagentStop':
-        asking.delete(key);
-        break;
-      case 'UserPromptSubmit':
-      case 'SessionEnd':
-        forgetSession(sessionId);
-        break;
-      default:
-        return;
+    /** @type {Dialog|null} */
+    let opened = null;
+    if (asks(event)) {
+      // The permission request Claude Code sends for an open question or plan joins it.
+      const asked = dialogs.ask(callOf(event), t);
+      opened = asked.opened ? asked.dialog : null;
+    } else if (event.hook_event_name === 'Notification' && event.notification_type === 'permission_prompt') {
+      opened = dialogs.notice(text(event.session_id), t);
+    } else {
+      const closed = dialogs.list().length > 0 ? closedBy(dialogs, event) : null;
+      if (!closed?.length) return;
+      for (const dialog of closed) notes.delete(dialog.id);
     }
+    if (opened) notes.set(opened.id, { due: t + delayMs, noted: false });
     schedule();
+  }
+
+  /**
+   * The Codex waiting note: a lead's Stop starts its minute, a helper's event starts it again
+   * (the crew still works), and the lead at work again or the session starting or ending stops it.
+   * @param {Record<string, any>} event
+   */
+  function watchIdle(event) {
+    const sessionId = text(event.session_id);
+    const name = event.hook_event_name;
+    if (name === 'SessionStart' || name === 'SessionEnd') idle.stop(sessionId);
+    else if (isCodexLeadStop(event)) idle.start(sessionId);
+    else if (normalizeAgentId(event.agent_id) !== null) idle.restart(sessionId);
+    else if (LEAD_AT_WORK.has(name)) idle.stop(sessionId);
   }
 
   return {
@@ -417,32 +422,27 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
     observe(event) {
       if (!url || disposed || !isObject(event)) return;
       const t = now();
-      for (const [key, ask] of asking) if (t - ask.since >= ASK_MAX_AGE_MS) asking.delete(key);
-      const sessionId = text(event.session_id);
-      idle.stop(sessionId);
+      forgetNoted(t);
+      watchIdle(event);
       track(event, t);
-      if (isCodexLeadStop(event)) idle.start(sessionId);
       const note = noteFor(event);
-      if (note && note.kind !== 'permission') void send(note);
+      if (note) void send(note);
     },
     /**
-     * Every change of an approval (the broker's onChange). Only a decision in the town proves a
-     * dialog answered. An expired or released approval went back to the terminal, where the agent
-     * still waits; a resolved one is the broker's guess, by tool name only, from the same tool
-     * results observe() has already judged by their input.
+     * Every change of an approval (the broker's onChange). A new one links to its dialog (again
+     * for a release: linking is idempotent per approval). Only a decision in the town is proof:
+     * an expired or released approval went back to the terminal, where the agent still waits,
+     * and a resolved one is the broker's guess by tool name, from results observe() has judged.
      * @param {import('./approvals.mjs').Approval} approval
      */
     approvalChanged(approval) {
       if (!url || disposed) return;
       if (approval.status === 'pending') {
-        // Only a held approval can be decided in the town. A release republishes one as pending
-        // with held false: not a new dialog.
-        const ask = asking.get(askKey(approval.sessionId, approval.agentId));
-        if (approval.held && ask && ask.approvalId === null) ask.approvalId = approval.id;
+        dialogs.link({ sessionId: approval.sessionId, agentId: approval.agentId, tools: [approval.toolName].filter(Boolean), input: null }, approval.id);
         return;
       }
       if (approval.status !== 'allowed' && approval.status !== 'denied') return;
-      for (const [key, ask] of asking) if (ask.approvalId === approval.id) asking.delete(key);
+      for (const dialog of dialogs.decided(approval.id)) notes.delete(dialog.id);
       schedule();
     },
     /** A test note, from the town's Settings. */
@@ -450,9 +450,10 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
     /** Drops every note still waiting and sends none afterwards (server shutdown). */
     dispose() {
       disposed = true;
-      if (askTimer !== null) clearTimer(askTimer);
-      askTimer = null;
-      asking.clear();
+      if (timer !== null) clearTimer(timer);
+      timer = null;
+      for (const dialog of [...dialogs.list()]) dialogs.forget(dialog.id);
+      notes.clear();
       idle.clear();
     },
   };

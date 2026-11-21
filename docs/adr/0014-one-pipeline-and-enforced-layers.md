@@ -19,7 +19,7 @@ An independent architecture review (2026-11-20) found the design sound but the s
 - `server/ingest.mjs` is the only way an event enters the town, with a per-origin `POLICIES`
   table. Source adapters (ADR 0013) run before it.
 - Rules both sides must agree on live once, in pure core modules the server may import
-  (`ids`, `dates`, `text`, `prices`, `growth`, `dialogs`).
+  (`ids`, `dates`, `text`, `prices`, `growth`).
 - The browser's sources sit in `public/js/sources/` behind one `TownSource` shape (named `EventSource` until part 27).
 - `core/events.js`, `store.js` and `director.js` are split by job (`text`, `summaries`; `crews`,
   `changes`, `store-model`; `director-queue`), and the store's types are defined once.
@@ -35,3 +35,11 @@ An independent architecture review (2026-11-20) found the design sound but the s
   "where to find things" table.
 - The server depends on a handful of browser-side core modules; the boundary check keeps that
   list explicit.
+
+## Update (2026-11)
+
+Modules that joined the server's list since this decision (`SERVER_CORE` in
+`scripts/check-boundaries.mjs` keeps the full list): `dialogs` (`public/js/core/dialogs.js`), the
+one model of what an agent has asked you and had no answer to. The phone notes and the town's
+"needs you" must agree on when an agent waits for you, so that rule lives once, in core, where
+both read it.

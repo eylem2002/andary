@@ -66,8 +66,8 @@ describe('Phone notifications', () => {
   });
 });
 
-describe('Phone notes for permission requests, through the real server', () => {
-  /** How long a permission note waits here (ten seconds in real use). */
+describe('Phone notes for open dialogs, through the real server', () => {
+  /** How long a dialog's note waits here (ten seconds in real use). */
   const DELAY_MS = 1000;
   /** @type {Post[]} */
   const received = [];
@@ -136,6 +136,17 @@ describe('Phone notes for permission requests, through the real server', () => {
     assert.equal(post.body, 'A crew needs your permission.');
     assert.equal(post.headers.priority, 'high');
     assert.ok(!JSON.stringify(post).includes('deploy'), 'the note never names the command');
+  });
+
+  it('posts "A crew has a question for you." for a question nobody answered', async () => {
+    const town = await townPosting('question');
+    const asked = { session_id: 'crew-question', tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which port?' }] } };
+    await postHook(town, hookPayload('PreToolUse', asked));
+    // Claude Code asks for permission too: the town leaves a question to the terminal.
+    assert.equal(JSON.parse((await postHook(town, hookPayload('PermissionRequest', asked))).text).output, null);
+    const post = await firstPostTo('question');
+    assert.deepEqual([post.body, post.headers.priority], ['A crew has a question for you.', 'high']);
+    assert.ok(!JSON.stringify(post).includes('port'), 'the note never quotes the question');
   });
 
   it('posts nothing for a request decided in the town within the wait', async () => {

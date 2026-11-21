@@ -27,7 +27,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {string} [publicDir]
  * @property {boolean} [remoteApprovals]
  * @property {string|null} [notifyUrl]    ntfy topic URL for phone notifications (null: off)
- * @property {number} [notifyDelayMs]      how long a permission note waits (PERMISSION_DELAY_MS); for tests, no CLI flag
+ * @property {number} [notifyDelayMs]      how long a dialog's phone note waits (DIALOG_DELAY_MS); for tests, no CLI flag
  * @property {string} [claudeDir]          Claude Code's config folder, for reading token usage from transcripts
  * @property {boolean} [team]              host a team town: teammates' Andarys may send their events here
  * @property {string[]} [teamHosts]        names teammates reach a team host by (a VPN name), besides its addresses
@@ -197,7 +197,7 @@ function createContext(config, options) {
       maxSettled: LIMITS.settledApprovals,
       onChange: (approval) => {
         hub.broadcastOwners({ t: 'approval', a: approval });
-        // A request decided in the town needs no phone note.
+        // Links a request to its dialog; one decided in the town needs no phone note.
         notifier.approvalChanged(approval);
       },
     }),

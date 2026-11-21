@@ -375,37 +375,47 @@ most one note of a kind per 30 s and 30 an hour (test notes aside); a failed pos
 `settings.notify` (also in the unauthenticated `/api/hello`) is a boolean; the topic URL is only in
 the WebSocket `hello`. Only this computer's events count (§4.11).
 
-- **Permission**: "A crew needs your permission." (priority high). The notifier keeps one dialog
-  per agent (session + agent). A dialog starts with a `PermissionRequest`, or with a `Notification`
-  (`permission_prompt`) when the session has no dialog yet (its request never reached the town: a
-  429, a failed proof, a restart). A new request from the same agent replaces its dialog: the old
-  one was answered. The note is due 10 s after the dialog starts. It is dropped only on proof of
-  an answer:
-  - the same agent's `PostToolUse`, `PostToolUseFailure` or `PermissionDenied` for the same call: a
-    tool name in common (`tool_name` or `andary_tool`) and the same `tool_input`, compared as a
-    SHA-256 of its JSON before sanitising (a list command joined as the Codex adapter joins it). A
-    call an adapter renamed is matched by name only. A dialog known only from `permission_prompt`
-    is answered by any tool result of that agent. A parallel call with another input proves nothing;
-  - `UserPromptSubmit`, `SessionEnd` or a Codex interrupt (the `Stop` with
-    `stop_reason: "interrupted"`): every dialog of the session. `Stop`: the lead's. `SubagentStop`:
-    that agent's;
-  - the town deciding (`allowed` or `denied`) the held approval made for that request.
-
-  An approval that expired or was released is no proof: the agent waits in its terminal. Nor is
-  the broker's `resolved`, which matches by tool name only. Dialogs due at the same time become one
-  note for their crews ("3 crews need your permission."). While the 30 s limit holds a permission
-  note back, the due dialogs wait and go out when it allows; past the hour's limit they count as
-  noted, unsent. A noted dialog is kept until its proof, at most 30 minutes after it started (a
-  crashed session sends no `SessionEnd`), so its `permission_prompt` sends nothing more. At most 100
-  dialogs are kept; the oldest go first.
+- **Open dialogs** are decided by `public/js/core/dialogs.js`, the model the town uses too: what
+  an agent has asked you and had no answer to, one dialog per call.
+  - A dialog opens with a `PermissionRequest`, or with the `PreToolUse` of a question
+    (`AskUserQuestion`) or a plan (`ExitPlanMode`), whose own `PermissionRequest` then joins it. A
+    `Notification` (`permission_prompt`) opens one, naming no tool, only when nothing of its
+    session is open (its request never reached the town: a 429, a failed proof, a restart).
+  - It closes only on proof of an answer: that very call reporting back (`PostToolUse`,
+    `PostToolUseFailure` or `PermissionDenied` from the same agent, with a tool name in common and
+    the same `inputKey()` of its input; questions and plans by name only, as your answer changes
+    their input); the town deciding (`allowed`, `denied`) the request it held for it; your prompt
+    (`UserPromptSubmit`: the lead's dialogs and the session's notice, never a helper's); the
+    agent's turn ending (`Stop` for the lead and the notice, `SubagentStop` for that helper); the
+    session ending (`SessionEnd`) or a Codex interrupt (the `Stop` with
+    `stop_reason: "interrupted"`).
+  - No proof: a new request (parallel calls each ask on their own), a request that expired or was
+    released (the agent waits in its terminal), the broker's `resolved` (it matches by tool name
+    only), and any tool result for a dialog that names no tool.
+  - The notifier passes each call as `{ sessionId, agentId, tools: [tool_name, andary_tool],
+    input }`, where `input` is null for a call an adapter renamed (its input cannot be compared),
+    and links the town's requests to their dialogs as the broker reports them. A renamed result
+    does not close its request yet (the model matches a null input only to a dialog without one):
+    such a dialog closes with the agent's turn or your prompt.
+- **Dialog notes** (priority high): due 10 s after the dialog opens, sent if it is still open: "A
+  crew needs your permission.", "A crew has a question for you." or "A crew has a plan for you to
+  approve.". Dialogs due together make one note with a crew count ("3 crews need your
+  permission."; of mixed kinds "3 crews need you."), and a note covers every dialog its crews have
+  open then. One 30 s limit holds for all dialog notes: while it holds one back, the dialogs wait
+  and go out when it allows; past the hour's limit they count as noted, unsent. A noted dialog
+  stays open until its proof, at most 30 minutes after it opened (a crashed session sends no
+  `SessionEnd`), so a later `permission_prompt` for it sends nothing. At most 100 dialogs are
+  kept; the oldest give way.
 
   What cannot be seen: a yes in the terminal shows only when the tool finishes (approve a 30 s
-  `npm test` in 1 s and the note still goes out), and a "No" sends no event before your next
-  prompt. Either can still send a note.
+  `npm test` in 1 s and the note still goes out); a "No" sends no event before your next prompt or
+  the agent's turn ending; a diff you change in your IDE before accepting it reports back with
+  another input, so it is not taken for the answer. Any of these can still send a note.
 - **Waiting**: "A crew is waiting for your next prompt.", for Claude Code's `idle_prompt`. Codex
-  sends no `Notification` events: after a Codex lead's `Stop` (an interrupt too), the notifier
-  waits 60 s (`CODEX_IDLE_MS`) and sends the same note unless another event of that session comes
-  first.
+  sends no `Notification` events: a Codex lead's `Stop` (an interrupt too) starts a 60 s wait
+  (`CODEX_IDLE_MS`) that ends in the same note. A helper's event in that session starts the wait
+  again; the lead's prompt or tool use, `SessionStart` or `SessionEnd` cancels it. Andary cannot
+  see you typing in Codex, so a reply that takes over a minute still sends the note.
 - **Stopped**: `StopFailure` posts a limit or an error note.
 - A finished turn posts nothing by itself. Stopping the server drops every note still waiting.
 
