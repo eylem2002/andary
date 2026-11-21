@@ -11,17 +11,19 @@
 //   PreToolUse           a tool call (a Codex patch over several files is one)
 //   PostToolUseFailure   a failed tool call, unless you interrupted it; a test run failing
 //   PostToolUse          a file changed (Edit, MultiEdit, Write, NotebookEdit, a Codex patch that
-//                        deletes one); a test run passing; each commit; each push
+//                        deletes one); a test run passing; each commit (not an amend); each push
+//                        (not a deletion, nor one that found everything up to date). From Codex,
+//                        only when its adapter found the exit code (`andary_exit_known`)
 //   PermissionRequest    a permission asked for (a question or a plan to approve is not one)
 //   SubagentStart, SubagentStop   a helper started, a helper finished
 // A permission answered is read from the approval itself (answered()): allowed or denied in the
-// town, answered in the terminal, or answered there after it expired in the town.
+// town, or run or denied after it went to the terminal (its `proof`).
 //
-// Frequent counts (turns, tool calls, helpers) are kept in five-minute buckets, each with the time
-// of the latest thing it counted; rare ones (failures, permissions, commits, pushes, stops) keep
+// Frequent counts (tool calls, helpers) are kept in five-minute buckets, each with the time of the
+// latest thing it counted; the rest (turns, failures, permissions, commits, pushes, stops) keep
 // each one's time, and so do the latest message, the latest test result and each changed file. A
-// summary is exact for the rare ones and starts at a bucket's start for the frequent ones: it says
-// where (`from`).
+// summary counts everything from one time: the time asked for, or the start of the five-minute
+// bucket it falls in when a bucket counted something since then (`from`).
 import { INTERACTIVE_TOOLS, inputKey } from './dialogs.js';
 import { isDoctorSession } from './ids.js';
 import { gitAction, isTestRun, shellCommands } from './shell.js';
@@ -40,28 +42,34 @@ const MAX_CREWS = 100;
 const MAX_FILES = 200;
 /** Times kept per crew of each rare count, and of its stops; the oldest give way. */
 const MAX_TIMES = 200;
+/** A crew's folder, as kept: at most this long. */
+const CWD_CHARS = 1000;
 /** A finished turn's last message: one line, at most this long. */
 const MESSAGE_CHARS = 200;
 /** A stop's kind comes from the hook (StopFailure's error code): at most this long. */
 const KIND_CHARS = 40;
 /** The town's crew for hooks without a session id (NO_SESSION in core/events.js). */
 const NO_SESSION = 'unknown';
-/** An approval settled by an answer, in the town or the terminal (an expiry is none). */
-const ANSWERED = new Set(['allowed', 'denied', 'resolved']);
-/** What shows that a request which expired in the town was answered in the terminal after all. */
-const LATE_ANSWERS = new Set(['ran', 'denied']);
+/** An approval decided in the town. */
+const DECIDED = new Set(['allowed', 'denied']);
+/** What shows that a request in the terminal was answered there (`stopped` may be abandoned). */
+const PROOFS_OF_ANSWER = new Set(['ran', 'denied']);
+/** Arguments of a test command that runs no tests: it lists, collects, explains, or may find nothing. */
+const NO_RUN_ARGS = new Set(['--no-run', '--collect-only', '--co', '-l', 'list', '--help', '-h', '--version', '--if-present']);
+/** What git push says when it had nothing to send. */
+const UP_TO_DATE = /Everything up-to-date/g;
 
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 /** Tools that change a file when they succeed: the town's diffs (core/changes.js), and a Codex patch that deletes one. */
 const FILE_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'apply_patch']);
 
-/** @typedef {'turns'|'toolCalls'|'helpersStarted'|'helpersFinished'} BucketedName */
-/** @typedef {'failures'|'asked'|'answered'|'commits'|'pushes'} TimedName */
+/** @typedef {'toolCalls'|'helpersStarted'|'helpersFinished'} BucketedName */
+/** @typedef {'turns'|'failures'|'asked'|'answered'|'commits'|'pushes'} TimedName */
 /** @typedef {BucketedName|TimedName} CountName */
 /** @type {readonly BucketedName[]} */
-const BUCKETED = Object.freeze(['turns', 'toolCalls', 'helpersStarted', 'helpersFinished']);
+const BUCKETED = Object.freeze(['toolCalls', 'helpersStarted', 'helpersFinished']);
 /** @type {readonly TimedName[]} */
-const TIMED = Object.freeze(['failures', 'asked', 'answered', 'commits', 'pushes']);
+const TIMED = Object.freeze(['turns', 'failures', 'asked', 'answered', 'commits', 'pushes']);
 
 /**
  * @typedef {object} Tally  what one hook adds to its crew's counts
@@ -153,23 +161,47 @@ const isPatchPart = (event) => event.andary_tool === 'apply_patch' && /#\d+$/.te
 const one = (name, extra = {}) => ({ ...extra, count: name });
 
 /**
+ * A test command that runs no tests (core/shell.js words): it lists or collects them, only builds,
+ * explains itself, may find no script (`--if-present`), or is go's `-run`, which may select none.
+ * @param {string[]} words
+ */
+function runsNoTests([name, ...args]) {
+  return args.some((arg) => NO_RUN_ARGS.has(arg) || arg.startsWith('--list') || (name === 'go' && (arg === '-run' || arg.startsWith('-run='))));
+}
+
+/** A commit that makes a new one (an amend rewrites the last). @param {string[]} words */
+const isNewCommit = (words) => gitAction(words) === 'commit' && !words.includes('--amend');
+
+/** A push that sends something rather than deleting (`--delete`, `-d`, `:branch`). @param {string[]} words */
+const isSendingPush = (words) => gitAction(words) === 'push' && !words.some((word) => word === '--delete' || word === '-d' || word.startsWith(':'));
+
+/** How many pushes said they had nothing to send. @param {Record<string, any>} event */
+function upToDate(event) {
+  const response = event.tool_response;
+  const parts = typeof response === 'string' ? [response] : isObject(response) ? [response.stdout, response.stderr, response.output] : [];
+  return parts.filter((part) => typeof part === 'string').join('\n').match(UP_TO_DATE)?.length ?? 0;
+}
+
+/**
  * A tool that ran: the file it changed, or what its shell command did. Tests passed when every
- * test run in the line must have succeeded for the line to (core/shell.js); each commit and push
- * that must have succeeded counts.
+ * test run in the line must have succeeded for the line to (core/shell.js) and each runs tests;
+ * each new commit and each push that sent something counts, when it must have succeeded. A Codex
+ * command proves that only when its exit code was found.
  * @param {Record<string, any>} event
  * @returns {Tally|null}
  */
 function ranTool(event) {
   const file = changedFile(event);
   if (file) return { file };
+  if (event.andary_source === 'codex' && event.andary_exit_known !== true) return null;
   const commands = commandsOf(event);
   const tests = commands.filter((c) => isTestRun(c.words));
   const done = commands.filter((c) => c.succeeded);
   /** @type {Tally} */
   const tally = {};
-  if (tests.length && tests.every((c) => c.succeeded)) tally.passed = true;
-  const commits = done.filter((c) => gitAction(c.words) === 'commit').length;
-  const pushes = done.filter((c) => gitAction(c.words) === 'push').length;
+  if (tests.length && tests.every((c) => c.succeeded && !runsNoTests(c.words))) tally.passed = true;
+  const commits = done.filter((c) => isNewCommit(c.words)).length;
+  const pushes = Math.max(0, done.filter((c) => isSendingPush(c.words)).length - upToDate(event));
   if (commits) tally.commits = commits;
   if (pushes) tally.pushes = pushes;
   return Object.keys(tally).length ? tally : null;
@@ -177,14 +209,16 @@ function ranTool(event) {
 
 /**
  * A tool that failed, unless you interrupted it. The tests are red when the line's failure can
- * only be a test run's, and it did not time out (the town calls that a timeout, core/summaries.js).
+ * only be a test run's that runs tests, and it did not time out (the town calls that a timeout,
+ * core/summaries.js).
  * @param {Record<string, any>} event
  * @returns {Tally|null}
  */
 function failedTool(event) {
   if (event.is_interrupt === true) return null;
-  const test = commandsOf(event).some((c) => c.decides && isTestRun(c.words));
-  return one('failures', test && classifyError(str(event.error), false, 'test') === 'tests' ? { passed: false } : {});
+  const tests = commandsOf(event).filter((c) => isTestRun(c.words));
+  const red = tests.some((c) => c.decides) && !tests.some((c) => runsNoTests(c.words)) && classifyError(str(event.error), false, 'test') === 'tests';
+  return one('failures', red ? { passed: false } : {});
 }
 
 /** A finished turn's last message, one line, clipped. @param {Record<string, any>} event */
@@ -218,10 +252,10 @@ export function tallyOf(event) {
 const bucketStart = (at) => Math.floor(at / BUCKET_MS) * BUCKET_MS;
 
 /** @param {number} at @returns {Bucket} */
-const emptyBucket = (at) => ({ lastAt: at, turns: 0, toolCalls: 0, helpersStarted: 0, helpersFinished: 0 });
+const emptyBucket = (at) => ({ lastAt: at, toolCalls: 0, helpersStarted: 0, helpersFinished: 0 });
 
 /** @returns {Record<TimedName, number[]>} */
-const emptyTimes = () => ({ failures: [], asked: [], answered: [], commits: [], pushes: [] });
+const emptyTimes = () => ({ turns: [], failures: [], asked: [], answered: [], commits: [], pushes: [] });
 
 /** Keeps one more, the latest MAX_TIMES. @template T @param {T[]} list @param {T} item */
 function keep(list, item) {
@@ -237,20 +271,21 @@ function countFrom(times = [], start) {
 }
 
 /**
- * A crew's frequent counts from `start` on: every bucket that counted something since then, and
- * where the earliest of those begins.
- * @param {Crew} crew @param {number} start
+ * A crew's frequent counts from `from` on: every bucket that counted something since then (each
+ * begins at `from` or later, as summary() chooses `from`).
+ * @param {Crew} crew @param {number} from
  */
-function bucketedFrom(crew, start) {
+function bucketedFrom(crew, from) {
   const n = /** @type {Record<BucketedName, number>} */ (Object.fromEntries(BUCKETED.map((name) => [name, 0])));
-  let from = start;
-  for (const [begins, bucket] of crew.buckets) {
-    if (bucket.lastAt < start) continue;
+  for (const bucket of crew.buckets.values()) {
+    if (bucket.lastAt < from) continue;
     for (const name of BUCKETED) n[name] += bucket[name];
-    from = Math.min(from, begins);
   }
-  return { n, from };
+  return n;
 }
+
+/** Whether a crew's bucket began before `start` and counted something since: counts then reach back. @param {Crew} crew @param {number} start */
+const reachesBack = (crew, start) => [...crew.buckets].some(([begins, bucket]) => begins < start && bucket.lastAt >= start);
 
 /** A crew's stopped turns from `start` on, by kind. @param {Crew} crew @param {number} start */
 function stopsFrom(crew, start) {
@@ -271,22 +306,21 @@ function filesFrom(crew, start) {
 const latest = (crew, name) => crew.times?.[name].at(-1) ?? 0;
 
 /**
- * One crew's work from `start` on, and where its counts start (a bucket's start, when one that
- * counted something since `start` began before it), or null when it did nothing then.
- * @param {string} sessionId @param {Crew} crew @param {number} start
- * @returns {{ digest: CrewDigest, from: number }|null}
+ * One crew's work from `from` on, or null when it did nothing then.
+ * @param {string} sessionId @param {Crew} crew @param {number} from
+ * @returns {CrewDigest|null}
  */
-function crewDigest(sessionId, crew, start) {
-  const { n, from } = bucketedFrom(crew, start);
-  const timed = /** @type {Record<TimedName, number>} */ (Object.fromEntries(TIMED.map((name) => [name, countFrom(crew.times?.[name], start)])));
-  const stops = stopsFrom(crew, start);
-  const files = filesFrom(crew, start);
-  const lastMessage = crew.message && crew.message.at >= start && crew.message.text ? crew.message.text : null;
-  const tests = crew.test && crew.test.at >= start ? (crew.test.passed ? 'passed' : 'failed') : null;
+function crewDigest(sessionId, crew, from) {
+  const n = bucketedFrom(crew, from);
+  const timed = /** @type {Record<TimedName, number>} */ (Object.fromEntries(TIMED.map((name) => [name, countFrom(crew.times?.[name], from)])));
+  const stops = stopsFrom(crew, from);
+  const files = filesFrom(crew, from);
+  const lastMessage = crew.message && crew.message.at >= from && crew.message.text ? crew.message.text : null;
+  const tests = crew.test && crew.test.at >= from ? (crew.test.passed ? 'passed' : 'failed') : null;
   const counted = [...Object.values(n), ...Object.values(timed), files, Object.keys(stops).length].some((value) => value > 0);
   if (!counted && tests === null && lastMessage === null) return null;
   const allPushed = timed.pushes > 0 && latest(crew, 'pushes') >= latest(crew, 'commits');
-  return { from, digest: { sessionId, cwd: crew.cwd, title: crew.title, lastAt: crew.lastAt, ...n, ...timed, lastMessage, stops, tests, allPushed, files } };
+  return { sessionId, cwd: crew.cwd, title: crew.title, lastAt: crew.lastAt, ...n, ...timed, lastMessage, stops, tests, allPushed, files };
 }
 
 /** Keeps a file's latest change last; past MAX_FILES the oldest goes. @param {Map<string, number>} files @param {string} key @param {number} at */
@@ -394,11 +428,11 @@ export function createDigest({ startedAt = 0 } = {}) {
      */
     observe(event, at) {
       if (!isObject(event)) return;
-      const sessionId = oneLine(event.session_id) || NO_SESSION;
+      const sessionId = fresh(oneLine(event.session_id)) || NO_SESSION;
       if (isDoctorSession(sessionId)) return;
       const crew = crewOf(sessionId, at);
       // Named like the town names a crew: its first folder, its latest title.
-      if (!crew.cwd) crew.cwd = str(event.cwd);
+      if (!crew.cwd) crew.cwd = fresh(clip(str(event.cwd), CWD_CHARS));
       const title = fresh(clip(oneLine(event.session_title), 120));
       if (title) crew.title = title;
       const tally = tallyOf(event);
@@ -407,18 +441,20 @@ export function createDigest({ startedAt = 0 } = {}) {
 
     /**
      * An approval changed (the broker's onChange, or the demo's): a permission answered counts
-     * once, when it settles by an answer, or when one that expired turns out to have been
-     * answered in the terminal (its `proof`, server/approvals.mjs).
+     * once, when it is allowed or denied in the town, or when one in the terminal (resolved, or
+     * expired first) shows it ran or was denied (its `proof`, server/approvals.mjs). One the agent
+     * moved on from (`stopped`) may have been abandoned: it is not counted.
      * @param {unknown} approval  CONTRACTS §4.5 Approval
      * @param {number} at
      */
     answered(approval, at) {
       if (!isObject(approval) || Object.hasOwn(INTERACTIVE_TOOLS, str(approval.toolName))) return;
-      if (!ANSWERED.has(approval.status) && !(approval.status === 'expired' && LATE_ANSWERS.has(approval.proof))) return;
-      const sessionId = oneLine(approval.sessionId) || NO_SESSION;
+      const inTerminal = (approval.status === 'resolved' || approval.status === 'expired') && PROOFS_OF_ANSWER.has(approval.proof);
+      if (!DECIDED.has(approval.status) && !inTerminal) return;
+      const sessionId = fresh(oneLine(approval.sessionId)) || NO_SESSION;
       if (isDoctorSession(sessionId)) return;
       const crew = crewOf(sessionId, at);
-      if (!crew.cwd) crew.cwd = str(approval.cwd);
+      if (!crew.cwd) crew.cwd = fresh(clip(str(approval.cwd), CWD_CHARS));
       add(crew, { count: 'answered' }, at);
     },
 
@@ -435,19 +471,18 @@ export function createDigest({ startedAt = 0 } = {}) {
       const start = Math.min(at, Math.max(asked, floor));
       /** @type {Digest['limit']} */
       const limit = asked >= floor ? null : startedAt > at - KEEP_MS ? 'started' : 'day';
-      let from = start;
+      for (const [sessionId, crew] of [...crews]) {
+        if (crew.lastAt <= at - KEEP_MS) crews.delete(sessionId);
+        else dropOld(crew, at);
+      }
+      // Everything is counted from one time, so the counts are never mixed: from the bucket's
+      // start when a five-minute count reaches back before the time asked for.
+      const from = [...crews.values()].some((crew) => reachesBack(crew, start)) ? bucketStart(start) : start;
       /** @type {CrewDigest[]} */
       const out = [];
-      for (const [sessionId, crew] of [...crews]) {
-        if (crew.lastAt <= at - KEEP_MS) {
-          crews.delete(sessionId);
-          continue;
-        }
-        dropOld(crew, at);
-        const result = crewDigest(sessionId, crew, start);
-        if (!result) continue;
-        out.push(result.digest);
-        from = Math.min(from, result.from);
+      for (const [sessionId, crew] of crews) {
+        const digest = crewDigest(sessionId, crew, from);
+        if (digest) out.push(digest);
       }
       return { since: start, from, until: at, limit, crews: out.sort((a, b) => b.lastAt - a.lastAt) };
     },

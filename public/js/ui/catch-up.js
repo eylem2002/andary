@@ -29,8 +29,15 @@ import { stopWords } from '../core/waits.js';
 /** @typedef {'looked'|'left'|'all'} Reason  where a period starts: when you last looked, when you left, or as far back as the town remembers */
 
 export const CAUGHT_UP_KEY = 'andary:caught-up';
-/** The absence (its `since`) this browser last said "Welcome back" for, so a reload does not say it again. */
+/**
+ * The absence this browser last said "Welcome back" for (`<since>:<tab>`), so a reload does not say
+ * it again, and the tab that claimed it, so only one of several open tabs says it.
+ */
 export const WELCOMED_KEY = 'andary:welcomed-back';
+/** A tab's claim on "Welcome back" holds if no other tab wrote one within this long. */
+const CLAIM_MS = 150;
+/** This tab, for its claim. */
+const TAB = Math.random().toString(36).slice(2, 10);
 /** After you come back, the masthead offers to catch you up for this long, or until you look. */
 export const OFFER_MS = 30 * 60_000;
 /** A summary that has not come by then will not: the dialog says so. */
@@ -119,6 +126,15 @@ export function crewWords(crew) {
 
 /** Nothing came since you last looked, and the town remembers all of that time. @param {Reason} reason @param {Digest} digest */
 export const nothingNew = (reason, digest) => reason === 'looked' && digest.limit === null && digest.crews.length === 0;
+
+/**
+ * What the dialog says when no crew did anything: since a restart, when the town remembers no
+ * further back than that.
+ * @param {Reason} reason @param {Digest} digest
+ */
+export function emptyNote(reason, digest) {
+  return digest.limit === 'started' && reason !== 'all' ? 'No crew did anything since it restarted.' : 'No crew did anything in that time.';
+}
 
 /**
  * The period a catch-up covers, in words: "Since you last looked, 25m ago." It says when the town
@@ -274,12 +290,25 @@ function readTime(storage, key) {
   }
 }
 
-/** @param {Pick<Storage, 'getItem'|'setItem'>|null} storage @param {string} key @param {number} value */
-function writeTime(storage, key, value) {
+/**
+ * Keeps a value in this browser; false when it cannot (no storage, or it is full or disabled).
+ * @param {Pick<Storage, 'getItem'|'setItem'>|null} storage @param {string} key @param {number|string} value
+ */
+function write(storage, key, value) {
   try {
     storage?.setItem(key, String(value));
+    return Boolean(storage);
   } catch {
-    // storage full or disabled: remembered until the page reloads
+    return false;
+  }
+}
+
+/** A value kept in this browser, or null. @param {Pick<Storage, 'getItem'|'setItem'>|null} storage @param {string} key */
+function readText(storage, key) {
+  try {
+    return storage?.getItem(key) ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -306,7 +335,8 @@ function createLooked(storage, onChange) {
         return;
       }
       looked.live = Math.max(looked.live ?? 0, until);
-      writeTime(storage, CAUGHT_UP_KEY, looked.live);
+      // Not kept (storage full or disabled): remembered until the page reloads.
+      write(storage, CAUGHT_UP_KEY, looked.live);
     },
   };
 }
@@ -337,7 +367,7 @@ function rowElement(row, onGo) {
  */
 function createLines(onGo) {
   const list = h('ul', { class: 'hud-catchup__crews' });
-  const empty = h('p', { class: 'hud-catchup__note', text: 'No crew did anything in that time.', hidden: true });
+  const empty = h('p', { class: 'hud-catchup__note', 'data-testid': 'catch-up-empty', hidden: true });
   const quiet = h('p', { class: 'hud-catchup__note', 'data-testid': 'catch-up-quiet', hidden: true });
   let drawn = '';
   return {
@@ -350,17 +380,19 @@ function createLines(onGo) {
     },
     /**
      * @param {{ rows: CatchUpRow[], quiet: string[] }} lines
-     * @param {{ fallback: HTMLElement|null, said: boolean }} options  fallback: takes focus when the
-     *   focused crew no longer needs you; said: the period already says nothing happened
+     * @param {{ fallback: HTMLElement|null, said: boolean, none: string }} options  fallback: takes
+     *   focus when the focused crew no longer needs you; said: the period already says nothing
+     *   happened; none: the note when no crew did anything (emptyNote)
      */
-    draw({ rows, quiet: names }, { fallback, said }) {
-      const key = JSON.stringify([rows.map((r) => [r.sessionId, r.name, r.words, r.said, r.item?.id, r.number]), names, said]);
+    draw({ rows, quiet: names }, { fallback, said, none }) {
+      const key = JSON.stringify([rows.map((r) => [r.sessionId, r.name, r.words, r.said, r.item?.id, r.number]), names, said, none]);
       if (key === drawn) return;
       drawn = key;
       const active = document.activeElement;
       const focusedId = active instanceof HTMLElement && list.contains(active) ? active.closest('.hud-catchup__crew')?.getAttribute('data-session-id') : null;
       list.replaceChildren(...rows.map((row) => rowElement(row, onGo)));
       if (focusedId) (/** @type {HTMLElement|null} */ (list.querySelector(`[data-session-id="${CSS.escape(focusedId)}"] button`)) ?? fallback)?.focus();
+      setText(empty, none);
       setHidden(empty, rows.length > 0 || said);
       setText(quiet, names.length ? `Quiet: ${listJoin(names)}.` : '');
       setHidden(quiet, names.length === 0);
@@ -426,7 +458,7 @@ export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } =
     const state = ctx.store.getState();
     const { digest, since, reason } = shown;
     setText(period, periodText(reason, since, digest, (ts) => formatClock(ts - offset)));
-    lines.draw(catchUpRows(state, digest, ctx.needsYou.items(state)), { fallback: body, said: nothingNew(reason, digest) });
+    lines.draw(catchUpRows(state, digest, ctx.needsYou.items(state)), { fallback: body, said: nothingNew(reason, digest), none: emptyNote(reason, digest) });
     content.removeAttribute('aria-busy');
   }
 
@@ -438,11 +470,14 @@ export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } =
     if (left > 0) offerTimer = setTimeout(() => ctx.refresh(), left + 1000);
   }
 
-  /** "Welcome back", once per absence in this browser, however often the page reloads. */
+  /** "Welcome back", once per absence in this browser, however often the page reloads and in however many tabs. */
   function welcome() {
-    if (!away || readTime(storage, WELCOMED_KEY) === away.since) return;
-    writeTime(storage, WELCOMED_KEY, away.since);
-    ctx.announcer.polite('Welcome back. Catch me up, or press W, to see what your crews did while you were away.');
+    if (!away || Number(readText(storage, WELCOMED_KEY)?.split(':')[0]) === away.since) return;
+    const say = () => ctx.announcer.polite('Welcome back. Catch me up, or press W, to see what your crews did while you were away.');
+    const claim = `${away.since}:${TAB}`;
+    // Every open tab hears of your return: the last to claim it says it, once.
+    if (!write(storage, WELCOMED_KEY, claim)) say();
+    else setTimeout(() => readText(storage, WELCOMED_KEY) === claim && say(), CLAIM_MS);
   }
 
   return {

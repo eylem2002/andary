@@ -759,13 +759,15 @@ it is kept in memory, never on disk (it holds your agents' last messages); a res
 - **Away** (`createAwayWatch`): nothing from you in any local session for `AWAY_MS` (20 minutes)
   or more, while crews kept working. You are a prompt (`UserPromptSubmit`, or a manual
   `PreCompact`, as the dialog model reads your prompt, §4.6), a `SessionStart` with `source`
-  `startup`, `resume` or `clear`, a `SessionEnd` with `reason` `prompt_input_exit` or `clear`, and
-  a decision (an approval `allowed` or `denied` with `decidedBy: 'town'`). Crews kept working: a
+  `startup`, `resume` or `clear`, a `SessionEnd` with `reason` `prompt_input_exit` or `clear`, an
+  interrupted `Stop` (Codex's `Interrupt`), a decision (an approval `allowed` or `denied` with
+  `decidedBy: 'town'`), and an answer in the terminal (an approval `resolved` with
+  `decidedBy: 'terminal'` and `proof` `'ran'` or `'denied'`). Crews kept working: a
   hook that adds to the counts below (`tallyOf` is not null) arrived since you were last seen (the
   doctor's probe aside). Before you first do something, the town's start counts as when you were
   last seen. An absence begins at the 20-minute mark (on a timer) or with the first counted hook
-  after it, and the next thing you do ends it. A yes in the terminal, an interrupt, an expiry and a
-  release are not counted as you.
+  after it, and the next thing you do ends it. A request the agent moved on from
+  (`proof: 'stopped'`), an expiry and a release are not counted as you.
 
   ```js
   Away { since /* the last thing you did before it */, until: number|null /* the first thing after it; null while away */ }
@@ -779,14 +781,14 @@ it is kept in memory, never on disk (it holds your agents' last messages); a res
 
   | Hook | Counts as |
   | --- | --- |
-  | `Stop` | a finished turn (`turns`), and the latest turn's `last_assistant_message`, one line, ≤ 200 characters (`lastMessage`, null when that turn said nothing); not with `stop_reason: "interrupted"`; with `stop_hook_active: true` its words only, as the same turn goes on |
+  | `Stop` | a finished turn (`turns`, by its time), and the latest turn's `last_assistant_message`, one line, ≤ 200 characters (`lastMessage`, null when that turn said nothing); not with `stop_reason: "interrupted"`; with `stop_hook_active: true` its words only, as the same turn goes on |
   | `StopFailure` | a stop, by its `error` (`stops: { rate_limit: 2 }`) |
   | `PreToolUse` | a tool call (`toolCalls`); a Codex patch's later files (`andary_tool: 'apply_patch'`, `tool_use_id` ending in `#2`, `#3`…) are the same call |
-  | `PostToolUseFailure` | a failed tool call (`failures`), unless `is_interrupt`; a test run that alone could have failed it, with an error that is not a timeout (`classifyError`): `tests: 'failed'` |
-  | `PostToolUse` | a file changed (`files`: distinct paths of `Edit`, `MultiEdit`, `Write`, `NotebookEdit`, and a Codex `apply_patch` that deletes one); test runs that all must have succeeded: `tests: 'passed'`; each commit and push that must have succeeded |
+  | `PostToolUseFailure` | a failed tool call (`failures`), unless `is_interrupt`; a test run that alone could have failed it and runs tests, with an error that is not a timeout (`classifyError`): `tests: 'failed'` |
+  | `PostToolUse` | a file changed (`files`: distinct paths of `Edit`, `MultiEdit`, `Write`, `NotebookEdit`, and a Codex `apply_patch` that deletes one); test runs that all must have succeeded and run tests: `tests: 'passed'`; each new commit and each push that sends something, that must have succeeded; from Codex (`andary_source: 'codex'`), these only with `andary_exit_known` (its adapter found the exit code) |
   | `PermissionRequest` | a permission asked for (`asked`); not for `AskUserQuestion` or `ExitPlanMode` |
   | `SubagentStart`, `SubagentStop` | a helper started (`helpersStarted`), finished (`helpersFinished`) |
-  | an approval settling `allowed`, `denied` or `resolved`, or an `expired` one getting `proof` `'ran'` or `'denied'` (the broker's `onChange`) | a permission answered (`answered`) |
+  | an approval settling `allowed` or `denied`, or `resolved` or `expired` with `proof` `'ran'` or `'denied'` (the broker's `onChange`; `'stopped'` is not an answer) | a permission answered (`answered`) |
 
   A `Bash` or `PowerShell` command (a line, or a Codex argument list) is read by `shellCommands`
   (core/shell.js, the shared reader) as a shell runs it: quoted strings, heredoc bodies, comments
@@ -798,14 +800,18 @@ it is kept in memory, never on disk (it holds your agents' last messages); a res
   with `&`, and is the last of its pipeline, or any of it after `set -o pipefail`), and `decides`
   when the line failing proves it failed (it succeeded in that sense and every other such command
   is one that does not fail in practice: `cd`, `export`, `set`, `echo`, `tail`, `head`, `tee`…). A
-  test run is `isTestRun` (a runner, a package's `test` script, a tool's `test` subcommand); a
-  commit or a push is `gitAction` (git in command position after its own options such as `-C` and
-  `-c`; not `--dry-run` or push's `-n`). `allPushed` says a push came after the latest commit. A
+  test run is `isTestRun` (a runner, a package's `test` script, a tool's `test` subcommand); it runs
+  no tests with `--no-run`, `--collect-only`, `--co`, `--list…`, `-l`, a `list` argument, `--help`,
+  `-h`, `--version`, `--if-present`, or as `go test -run`, and then gives no result. A commit or a
+  push is `gitAction` (git in command position after its own options such as `-C` and `-c`; not
+  `--dry-run` or push's `-n`); a commit with `--amend` is not a new one, a push with `--delete`,
+  `-d` or a `:branch` refspec sends nothing, and each "Everything up-to-date" in the tool's output
+  is one push less. `allPushed` says a push came after the latest commit. A
   command sent to the background (`run_in_background`) has only started when its hook comes, so it
   is a tool call and nothing more.
 
-  Turns, tool calls and helpers are kept in five-minute buckets (`BUCKET_MS`), each with the time
-  of the latest thing it counted; failures, permissions asked and answered, commits, pushes and
+  Tool calls and helpers are kept in five-minute buckets (`BUCKET_MS`), each with the time of the
+  latest thing it counted; turns, failures, permissions asked and answered, commits, pushes and
   stops keep each one's time (the latest 200 of each per crew), and changed files (200 per crew,
   by a short key of the path), the latest message and the latest test result keep theirs. Bounds:
   100 crews (the one quiet for longest gives way), a day of buckets each.
@@ -813,11 +819,12 @@ it is kept in memory, never on disk (it holds your agents' last messages); a res
   `{ t: 'error', message: 'digest.since must be a time in milliseconds' }`). The answer goes to the
   browser that asked only. The period starts at `since`, or later when the town remembers no
   further back (`max(server start, now − 24 h)`, and `limit` says which); one after now counts from
-  now. What has its own time counts from that start exactly; a bucket counts, whole, when it
-  counted anything since then, so `from` may be up to five minutes before it:
+  now. Everything is counted from `from`: `since`, or the start of the bucket `since` falls in when
+  any crew's bucket began before `since` and counted something since then (up to five minutes
+  earlier), so the counts are never mixed:
 
   ```js
-  Digest { since /* the period's start */, from /* where its earliest count starts: since, or a bucket's start before it */,
+  Digest { since /* the period's start */, from /* where every count starts: since, or a bucket's start before it */,
            until /* now, the server's clock */, limit: 'started'|'day'|null /* why since is later than asked */,
            crews: CrewDigest[] /* those that did something, the most recently active first */ }
   CrewDigest { sessionId, cwd, title: string|null, lastAt /* its latest hook */, turns, lastMessage: string|null,
@@ -1141,27 +1148,31 @@ have changed 5 files" (two names, or the first and "N others").
   commands, 16 adds for each of 200 agents, 64 pathspecs a command; a command line is read up to
   20,000 characters.
 
-**Catch me up** (`ui/catch-up.js`, §4.13). The source asks (`TownSource.requestDigest(since) →
-boolean`: live sends `{ t: 'digest', since }`; the demo answers from its own `createDigest({
-startedAt })`) and the answer comes back through the source's `onDigest`; live's `onAway(away,
-offset)` also gives the server's clock minus the page's, measured at `hello` (`serverTime`). A
-period starts when you last looked (the `until` of the last summary shown, in the server's time,
-kept in `localStorage["andary:caught-up"]` and shared with the town's other tabs) or when you left
-(`away.since`), whichever is later: the first look ever (nothing kept) asks for `away.since` when
-an absence is known, and `since: 0` (everything kept) otherwise. The period's words follow the
-answer: "Since you last looked, 25m ago."; "Since about 10:00 (you last looked 3m ago)." when
-`from` is before `since`; "Nothing new since you last looked, …" when no crew did anything since;
-"… The town only remembers since 09:12 (it restarted)." or "… the last day." when `limit` is set
-(times of day on this computer's clock, from the server's times and the offset); the first look:
-"Everything the town remembers: since 09:12, when it started." (or "the last day"). The masthead's
-"need you" area offers **Catch me up** while you are away and for `OFFER_MS` (30 minutes, on the
-server's clock) after you came back, unless this browser has looked since you left, and keeps it
-while the dialog is open if it was offered when it opened; when it goes, focus on it moves to the
-"need you" button, or else the toolbar's. Screen readers hear "Welcome back…" once per absence in a
-browser (the absence's `since`, kept in `localStorage["andary:welcomed-back"]`). `W` opens it any
-time. One line per crew ("api-server: 3 turns, tests passing, 1 commit pushed, 2 files changed",
-then "Last turn:" and the latest turn's words, when it said something): crews with a counted "needs
-you" item first, the most urgent first, each with a button that goes to that item as the "need you"
+**Catch me up** (`ui/catch-up.js`, §4.13). The source asks
+(`TownSource.requestDigest(since) → boolean`: live sends `{ t: 'digest', since }`; the demo answers
+from its own `createDigest({ startedAt })`) and the answer comes back through the source's
+`onDigest`; live's `onAway(away, offset)` also gives the server's clock minus the page's, measured
+at `hello` (`serverTime`). A period starts when you last looked (the `until` of the last summary
+shown, in the server's time, kept in `localStorage["andary:caught-up"]` and shared with the town's
+other tabs) or when you left (`away.since`), whichever is later: the first look ever (nothing kept)
+asks for `away.since` when an absence is known, and `since: 0` (everything kept) otherwise. The
+period's words follow the answer: "Since you last looked, 25m ago."; "Since about 10:00 (you last
+looked 3m ago)." when `from` is before `since` (every count is from `from`); "Nothing new since you
+last looked, …" when no crew did anything since; "… The town only remembers since 09:12 (it
+restarted)." or "… the last day." when `limit` is set, with "No crew did anything since it
+restarted." under it when `limit` is `'started'` and no crew did anything (times of day on this
+computer's clock, from the server's times and the offset); the first look: "Everything the town
+remembers: since 09:12, when it started." (or "the last day"). The masthead's "need you" area
+offers **Catch me up** while you are away and for `OFFER_MS` (30 minutes, on the server's clock)
+after you came back, unless this browser has looked since you left, and keeps it while the dialog
+is open if it was offered when it opened; when it goes, focus on it moves to the "need you" button,
+or else the toolbar's. Screen readers hear "Welcome back…" once per absence in a browser: each tab
+that hears of your return writes its claim (`<since>:<tab>`) in
+`localStorage["andary:welcomed-back"]`, and only the one whose claim is still there 150 ms later
+says it; a tab that finds that absence's `since` already there says nothing. `W` opens it any time.
+One line per crew ("api-server: 3 turns, tests passing, 1 commit pushed, 2 files changed", then
+"Last turn:" and the latest turn's words, when it said something): crews with a counted "needs you"
+item first, the most urgent first, each with a button that goes to that item as the "need you"
 button does; then the crews that did something, the most recently active first (one that has left
 town too, named by its folder); then your other crews in one line ("Quiet: web-app and
 docs-site."). Someone watching a team town with its view link is told that only the host can catch

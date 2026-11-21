@@ -1,11 +1,12 @@
 // The server's "Catch me up" (docs/design/agent-health.md §7): whether you were away, and what
 // each of your crews did meanwhile. The server decides that you were away, because it sees every
 // prompt and every decision you make in the town: away means nothing from you (a prompt, a
-// /compact you ran, a session you started, resumed, cleared or left, a request decided in the
-// town) in any local session for AWAY_MS or more while crews kept working (hooks that count,
-// core/digest.js). The counts are core/digest.js's (the demo keeps them the same way), held here
-// for this computer's crews only (server/ingest.mjs leaves teammates' out), in memory: they hold
-// your agents' last messages, so like the history they never go to disk (ADR 0006).
+// /compact you ran, a session you started, resumed, cleared or left, a Codex turn you
+// interrupted, a request decided in the town or answered in the terminal) in any local session
+// for AWAY_MS or more while crews kept working (hooks that count, core/digest.js). The counts
+// are core/digest.js's (the demo keeps them the same way), held here for this computer's crews
+// only (server/ingest.mjs leaves teammates' out), in memory: they hold your agents' last
+// messages, so like the history they never go to disk (ADR 0006).
 import { createDigest, tallyOf } from '../public/js/core/digest.js';
 import { isDoctorSession } from '../public/js/core/ids.js';
 
@@ -19,8 +20,8 @@ const YOUR_ENDS = new Set(['prompt_input_exit', 'clear']);
 
 /**
  * Something you did at a terminal: a prompt as the dialog model reads one (core/dialogs.js: what
- * you typed, or a `/compact` you ran; an automatic one is the agent's own), or a session you
- * started, resumed, cleared or left.
+ * you typed, or a `/compact` you ran; an automatic one is the agent's own), a session you
+ * started, resumed, cleared or left, or a Codex turn you interrupted.
  * @param {Record<string, any>} event
  */
 function isYou(event) {
@@ -33,6 +34,9 @@ function isYou(event) {
       return YOUR_STARTS.has(event.source);
     case 'SessionEnd':
       return YOUR_ENDS.has(event.reason);
+    case 'Stop':
+      // Codex's Interrupt (the adapter makes it an interrupted Stop): you pressed Esc.
+      return event.stop_reason === 'interrupted';
     default:
       return false;
   }
@@ -122,11 +126,14 @@ export function createAwayWatch({ awayMs = AWAY_MS, now = Date.now, onChange = (
       else if (tallyOf(event)) work(at);
     },
     /**
-     * An approval changed (the broker's onChange): a request allowed or denied in the town is you.
-     * @param {{ status: string, decidedBy?: string }} approval
+     * An approval changed (the broker's onChange): a request allowed or denied in the town is you,
+     * and so is one answered in the terminal (resolved there, and its tool ran or was denied).
+     * @param {{ status: string, decidedBy?: string, proof?: string }} approval
      */
     approvalChanged(approval) {
-      if (approval.decidedBy === 'town' && (approval.status === 'allowed' || approval.status === 'denied')) present(now());
+      const inTown = approval.decidedBy === 'town' && (approval.status === 'allowed' || approval.status === 'denied');
+      const inTerminal = approval.decidedBy === 'terminal' && approval.status === 'resolved' && (approval.proof === 'ran' || approval.proof === 'denied');
+      if (inTown || inTerminal) present(now());
     },
     /** The latest absence, going on or over, or null. @returns {Away|null} */
     current() {

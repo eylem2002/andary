@@ -461,9 +461,15 @@ async function recordAnnouncements(page) {
   await page.addInitScript(() => {
     /** @type {string[]} */
     const said = [];
+    /** What each live region said last, so each announcement is kept once. @type {Map<Element, string>} */
+    const last = new Map();
     Object.assign(window, { __said: said });
     new MutationObserver(() => {
-      for (const region of document.querySelectorAll('.hud-sr[aria-live]')) if (region.textContent && said.at(-1) !== region.textContent) said.push(region.textContent);
+      for (const region of document.querySelectorAll('.hud-sr[aria-live]')) {
+        const text = region.textContent ?? '';
+        if (text && last.get(region) !== text) said.push(text);
+        last.set(region, text);
+      }
     }).observe(document, { subtree: true, childList: true, characterData: true });
   });
 }
@@ -489,11 +495,20 @@ async function goAway(page) {
   return api;
 }
 
-test('after time away: the masthead offers Catch me up, says welcome back once, and keeps focus when it goes', async ({ page }) => {
+test('after time away: the masthead offers Catch me up, says welcome back once, and keeps focus when it goes', async ({ page, context }) => {
   await recordAnnouncements(page);
   const api = await goAway(page);
+  // A second tab of the same town hears of your return too, but only one of them says it.
+  const second = await context.newPage();
+  await recordAnnouncements(second);
+  await second.goto(`${town.baseUrl}/?${PAGE_OPTIONS}`);
+  await expect(second.getByTestId('catch-up-button')).toBeVisible();
   expect(await town.sendHook(api('UserPromptSubmit', { prompt: 'I am back' }))).toMatchObject({ code: 0 });
-  await expect.poll(() => announced(page)).toContainEqual(expect.stringMatching(/^Welcome back\. Catch me up, or press W/));
+  const welcomes = async () => [...(await announced(page)), ...(await announced(second))].filter((text) => /^Welcome back\. Catch me up, or press W/.test(text)).length;
+  await expect.poll(welcomes).toBe(1);
+  await page.waitForTimeout(500);
+  expect(await welcomes()).toBe(1);
+  await second.close();
   // A reload within the half hour offers it still, but says nothing again.
   await page.reload();
   await expect(page.getByTestId('connection-status')).toContainText('Live');

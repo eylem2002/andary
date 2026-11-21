@@ -216,15 +216,17 @@ ignores case, can hide one.
 
 ### Catch up
 
-Away for a while? If 20 minutes pass with nothing from you in any session (no prompt, no session
-started or left, no request answered in the town) while your crews keep working, the town counts
-you as away. When you come back (your next prompt or answer there, or opening the town), a
+Away for a while? If 20 minutes pass with nothing from you in any session while your crews keep
+working, the town counts you as away. Anything of yours ends it: a prompt or a `/compact` you
+run, a session you start, resume, clear or leave, an interrupt in Codex, or a request you
+answer, in the town or in the terminal. Then, and when you open the town within half an hour, a
 **Catch me up** button sits beside the "need you" one. It shows one line per crew, such as
 "api-server: 3 turns, tests passing, 1 commit pushed, 2 files changed", with what each one's
 latest turn said: crews that need you first (a click goes to what they need), quiet ones in a
 line at the end. Press `W` any time for what happened since you last looked. The server keeps
-the counts for the last day, in memory only, so a page reload loses nothing; a teammate's crews
-in a team town are theirs and left out.
+the counts for the last day, in memory only: a page reload loses nothing, a restart of Andary
+forgets them (the dialog then says it only remembers since the restart). A teammate's crews in a
+team town are theirs and left out.
 
 ### Everything else
 

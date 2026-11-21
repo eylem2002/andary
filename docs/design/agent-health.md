@@ -224,7 +224,7 @@ time, both for files and for git commands; a command refused before it ran ends 
 
 **When you were away** is decided by the server, which sees every prompt and every answer you
 give: away means nothing from you (a prompt, a session you start, resume, clear or leave, a
-decision in the town) in any local session for 20 minutes or more while crews kept working (hooks
+Codex interrupt, a request answered in the town or the terminal) in any local session for 20 minutes or more while crews kept working (hooks
 that add to the counts).
 
 **What**: `server/digest.mjs` keeps per-crew counts for the last 24 hours (turns finished with the

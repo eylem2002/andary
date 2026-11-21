@@ -76,6 +76,14 @@ describe('what each hook counts for', () => {
       [ran('npm test && git push', 'PostToolUseFailure'), null],
       // A timeout is a timeout, as the town calls it, not red tests.
       [ran('npm test', 'PostToolUseFailure', { error: 'Command timed out after 2m 0.0s' }), null],
+      // A test command that runs no tests says nothing of them.
+      ...['cargo test --no-run', 'pytest --collect-only -q', 'pytest --co', 'npx playwright test --list', 'npx jest --listTests', 'npx vitest --list-tags', 'pytest -l', 'tox list', 'npx vitest --help', 'pytest -h', 'npx jest --version', 'npm test --if-present', 'go test -run NONE ./...', 'go test -run=TestX']
+        .flatMap((command) => /** @type {[Record<string, any>, null][]} */ ([[ran(command), null], [ran(command, 'PostToolUseFailure'), null]])),
+      // A name filter still runs tests (go's -run aside): a filter matching none fails in most runners.
+      [ran('pytest -k login'), 'passed'],
+      [ran('npx jest -t "logs in"'), 'passed'],
+      [ran('npx mocha --grep login'), 'passed'],
+      [ran('npx jest --testNamePattern=login', 'PostToolUseFailure'), 'failed'],
     ];
     for (const [event, expected] of table) assert.equal(crewAfter([event])?.tests ?? null, expected, `${event.hook_event_name}: ${event.tool_input.command}`);
     assert.equal(crewAfter([FIXTURES.PostToolUseFailure, FIXTURES.PostToolUse])?.tests, 'passed', 'the latest decides');
@@ -99,16 +107,33 @@ describe('what each hook counts for', () => {
       ['grep -rn "git commit" docs/', [0, 0]],
       // The line succeeding says nothing of a commit before `;`: it may have had nothing to commit.
       ['git commit -m x; git push', [0, 1]],
+      // An amend rewrites a commit; a deletion sends nothing.
+      ['git commit --amend --no-edit && git push --force-with-lease', [0, 1]],
+      ['git push --delete origin old-branch', [0, 0]],
+      ['git push -d origin old-branch', [0, 0]],
+      ['git push origin :old-branch', [0, 0]],
     ];
     for (const [command, expected] of table) {
       const crew = crewAfter([ran(command)]);
       assert.deepEqual([crew?.commits ?? 0, crew?.pushes ?? 0], expected, command);
     }
+    // A push that had nothing to send is no push.
+    const same = crewAfter([ran('git push', 'PostToolUse', { tool_response: { stdout: '', stderr: 'Everything up-to-date\n' } })]);
+    assert.equal(same?.pushes ?? 0, 0);
+    const two = crewAfter([ran('git push origin a && git push origin b', 'PostToolUse', { tool_response: { stdout: '', stderr: 'Everything up-to-date\nTo github.com:x/y.git\n' } })]);
+    assert.equal(two?.pushes, 1, 'one of two sent nothing');
     const later = crewAfter([ran('git push'), ran('git commit -am "more"')]);
     assert.deepEqual([later?.commits, later?.pushes, later?.allPushed], [1, 1, false]);
     assert.equal(crewAfter([ran('git commit -am "more" && git push')])?.allPushed, true);
     const failed = crewAfter([ran('git push', 'PostToolUseFailure', { error: 'Exit code 1' })]);
     assert.deepEqual([failed?.pushes, failed?.failures], [0, 1]);
+  });
+
+  test('a Codex command proves a result only when its adapter found the exit code', () => {
+    const codex = (/** @type {string} */ command, /** @type {Record<string, any>} */ extra = {}) => ({ ...ran(command), andary_source: 'codex', ...extra });
+    assert.equal(crewAfter([codex('npm test && git commit -am x && git push')]), undefined, 'no exit code: nothing proved');
+    const known = crewAfter([codex('npm test && git commit -am x && git push', { andary_exit_known: true })]);
+    assert.deepEqual([known?.tests, known?.commits, known?.pushes], ['passed', 1, 1]);
   });
 
   test('files changed: distinct files, by Edit, MultiEdit, Write, NotebookEdit and a Codex patch that deletes one', () => {
@@ -143,15 +168,15 @@ describe('what each hook counts for', () => {
     assert.deepEqual([crew?.toolCalls, crew?.asked, crew?.helpersStarted, crew?.helpersFinished], [2, 1, 2, 1]);
   });
 
-  test('permissions answered come from the approval: when it settles by an answer, or ran or was denied after it expired', () => {
+  test('permissions answered: decided in the town, or run or denied in the terminal; one the agent moved on from is not', () => {
     const digest = createDigest();
     const approval = { id: 'a1', sessionId: SESSION, toolName: 'Bash', cwd: CWD };
     for (const status of ['pending', 'allowed', 'denied', 'resolved', 'expired']) digest.answered({ ...approval, status }, T0);
-    for (const proof of ['ran', 'denied', 'stopped']) digest.answered({ ...approval, status: 'expired', proof }, T0);
+    for (const status of ['resolved', 'expired']) for (const proof of ['ran', 'denied', 'stopped']) digest.answered({ ...approval, status, proof }, T0);
     digest.answered({ ...approval, status: 'resolved', toolName: 'AskUserQuestion' }, T0);
     digest.answered({ ...approval, status: 'allowed', sessionId: 'andary-doctor-1' }, T0);
     const [crew] = digest.summary(0, T0 + 1).crews;
-    assert.deepEqual([crew.sessionId, crew.answered, crew.cwd], [SESSION, 5, CWD]);
+    assert.deepEqual([crew.sessionId, crew.answered, crew.cwd], [SESSION, 6, CWD]);
   });
 
   test('hooks that count for nothing; the doctor\'s probe leaves no crew', () => {
@@ -180,21 +205,21 @@ describe('what each hook counts for', () => {
 });
 
 describe('where a summary starts', () => {
-  test('rare things by their exact time; frequent counts by a bucket, from its start (`from`)', () => {
+  test('turns and rare things by their exact time; when a five-minute count reaches back, everything counts from its start', () => {
     const digest = createDigest();
     digest.observe(ran('git commit -m a && git push'), T0 + 60_000);
     digest.observe(FIXTURES.Stop, T0 + 60_000);
-    digest.observe(FIXTURES.PreToolUse, T0 + 3 * 60_000);
+    digest.observe({ ...FIXTURES.Stop, last_assistant_message: 'Again.' }, T0 + 3 * 60_000);
     const at = T0 + 4 * 60_000;
-    const after = digest.summary(T0 + 2 * 60_000, at);
-    // The commit, the push and the turn's words came before; the tool call after, in a bucket that
-    // began before the time asked for, so the turn in it is counted too.
-    assert.deepEqual([after.since, after.from, after.until, after.limit], [T0 + 2 * 60_000, T0, at, null]);
-    const [crew] = after.crews;
-    assert.deepEqual([crew.commits, crew.pushes, crew.lastMessage, crew.toolCalls, crew.turns], [0, 0, null, 1, 1]);
-    // Asked from the bucket's start, nothing reaches back.
-    const whole = digest.summary(T0, at);
-    assert.deepEqual([whole.since, whole.from, whole.crews[0].commits, whole.crews[0].lastMessage], [T0, T0, 1, 'All done.']);
+    // Only exact times since then: counted to the moment.
+    const exact = digest.summary(T0 + 2 * 60_000, at);
+    assert.deepEqual([exact.since, exact.from, exact.until, exact.limit], [T0 + 2 * 60_000, T0 + 2 * 60_000, at, null]);
+    assert.deepEqual([exact.crews[0].turns, exact.crews[0].commits, exact.crews[0].pushes, exact.crews[0].lastMessage], [1, 0, 0, 'Again.']);
+    // A tool call since then, in a bucket that began before: all of it counts from the bucket's start.
+    digest.observe(FIXTURES.PreToolUse, T0 + 3 * 60_000);
+    const back = digest.summary(T0 + 2 * 60_000, at);
+    assert.deepEqual([back.since, back.from], [T0 + 2 * 60_000, T0]);
+    assert.deepEqual([back.crews[0].turns, back.crews[0].commits, back.crews[0].pushes, back.crews[0].toolCalls], [2, 1, 1, 1], 'not mixed: the commit and the first turn since that start too');
   });
 
   test('a second look right after the first finds nothing new, though the bucket is the same', () => {
@@ -208,7 +233,13 @@ describe('where a summary starts', () => {
     // Something new in that bucket: counted, from the bucket's start.
     digest.observe(FIXTURES.PreToolUse, T0 + 5000);
     const third = digest.summary(first.until, T0 + 6000);
-    assert.deepEqual([third.crews[0].toolCalls, third.crews[0].turns, third.crews[0].tests, third.from], [1, 1, null, T0]);
+    assert.deepEqual([third.crews[0].toolCalls, third.crews[0].turns, third.crews[0].tests, third.from], [1, 1, 'passed', T0], 'counted from the bucket\'s start, the period says so');
+    // A new turn alone is counted to the moment: only what is new.
+    const fourth = digest.summary(third.until, T0 + 8000);
+    assert.deepEqual(fourth.crews, []);
+    digest.observe(FIXTURES.Stop, T0 + 9000);
+    const fifth = digest.summary(third.until, T0 + 10_000);
+    assert.deepEqual([fifth.from, fifth.crews[0].turns, fifth.crews[0].toolCalls, fifth.crews[0].tests], [third.until, 1, 0, null]);
   });
 
   test('never before the town started, nor more than a day back: the digest says which', () => {

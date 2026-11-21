@@ -1063,10 +1063,15 @@ const APPROVAL_SHOWS = Object.freeze({
   },
 });
 
-/** @param {Director} d @param {Approval} approval */
-function onApproval(d, approval) {
+/**
+ * A town approval settling: the agent reacts once, when its status changes. The same status sent
+ * again (an expired request that later ran or was denied in the terminal gets its `proof`) plays
+ * nothing.
+ * @param {Director} d @param {Approval} approval @param {string|null} previous  its status before
+ */
+function onApproval(d, approval, previous) {
   const show = own(APPROVAL_SHOWS, approval?.status);
-  if (!show) return;
+  if (!show || previous === approval.status) return;
   const rt = d.crew.get(agentKeyOf(str(approval.sessionId), normalizeAgentId(approval.agentId)));
   if (!rt || rt.leaving) return;
   d.historic = false;
@@ -1107,7 +1112,7 @@ function onReset(d) {
 /** @type {Readonly<Record<string, (d: Director, change: any) => void>>} */
 const CHANGE_SHOWS = Object.freeze({
   event: (d, change) => onEvent(d, change.event),
-  approval: (d, change) => onApproval(d, change.approval),
+  approval: (d, change) => onApproval(d, change.approval, change.previous ?? null),
   achievement: (d, change) => onAchievement(d, change.achievement),
   reset: (d) => onReset(d),
 });

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { createStore } from '../../../public/js/core/store.js';
-import { OFFER_MS, catchUpOffered, catchUpRows, catchUpStart, crewWords, nothingNew, periodText, readAway, readDigest } from '../../../public/js/ui/catch-up.js';
+import { OFFER_MS, catchUpOffered, catchUpRows, catchUpStart, crewWords, emptyNote, nothingNew, periodText, readAway, readDigest } from '../../../public/js/ui/catch-up.js';
 import { createNeedsYou } from '../../../public/js/ui/needs-you.js';
 import { SESSION, envelope, hook } from '../core/helpers.mjs';
 
@@ -78,6 +78,14 @@ describe('the period', () => {
     assert.equal(periodText('looked', 0, digestOf({ since: 2900 * MINUTE, until: twoDays, limit: 'started' }), clock), 'Since you last looked, 2d ago. The town only remembers since 2900min (it restarted).');
     assert.equal(periodText('looked', 0, digestOf({ since: twoDays / 2, until: twoDays, limit: 'day' }), clock), 'Since you last looked, 2d ago. The town only remembers the last day.');
     assert.equal(periodText('looked', 0, digestOf({ since: 2900 * MINUTE, until: twoDays, limit: 'started', crews: [] }), clock), 'Since you last looked, 2d ago. The town only remembers since 2900min (it restarted).', 'not "nothing new": the town cannot know');
+  });
+
+  test('with no crew at work, says since a restart when that is all the town remembers', () => {
+    const empty = { crews: [] };
+    assert.equal(emptyNote('looked', digestOf({ ...empty, limit: 'started' })), 'No crew did anything since it restarted.');
+    assert.equal(emptyNote('left', digestOf({ ...empty, limit: 'started' })), 'No crew did anything since it restarted.');
+    assert.equal(emptyNote('all', digestOf({ ...empty, limit: 'started' })), 'No crew did anything in that time.', 'the first look: it may have just started');
+    assert.equal(emptyNote('left', digestOf({ ...empty, limit: 'day' })), 'No crew did anything in that time.');
   });
 
   test('says when a five-minute count reaches back before it, and when nothing came since you last looked', () => {

@@ -107,7 +107,6 @@ describe('away: nothing from you for 20 minutes while crews kept working', () =>
       { ...FIXTURES.SessionStart, source: 'compact' },
       { ...FIXTURES.SessionEnd, reason: 'other' },
       FIXTURES.PreCompact,
-      hook('Stop', { stop_reason: 'interrupted' }),
     ]) send(event);
     await at(90 * MINUTE);
     assert.deepEqual(changes, []);
@@ -125,11 +124,11 @@ describe('away: nothing from you for 20 minutes while crews kept working', () =>
     assert.deepEqual(changes, [{ since: 0, until: null }]);
   });
 
-  test('a decision in the town is you; an answer in the terminal, an expiry or a release is not', async () => {
+  test('a decision in the town or an answer in the terminal is you; an expiry, a release or a request left behind is not', async () => {
     const { away, changes, at, send } = watch();
     send(FIXTURES.PreToolUse);
     await at(10 * MINUTE);
-    for (const approval of [{ status: 'resolved', decidedBy: 'terminal' }, { status: 'expired', decidedBy: 'timeout' }, { status: 'pending', held: false }]) away.approvalChanged(approval);
+    for (const approval of [{ status: 'resolved', decidedBy: 'terminal', proof: 'stopped' }, { status: 'expired', decidedBy: 'timeout' }, { status: 'expired', decidedBy: 'timeout', proof: 'ran' }, { status: 'pending', held: false }]) away.approvalChanged(approval);
     await at(25 * MINUTE);
     assert.deepEqual(changes, [{ since: 0, until: null }], 'away 20 minutes after the town started');
     away.approvalChanged({ status: 'allowed', decidedBy: 'town' });
@@ -142,6 +141,20 @@ describe('away: nothing from you for 20 minutes while crews kept working', () =>
     assert.equal(changes.length, 2, 'the denial was you too: away 20 minutes after it, not after the allow');
     await at(60 * MINUTE);
     assert.deepEqual(changes.at(-1), { since: 40 * MINUTE, until: null });
+    for (const proof of ['ran', 'denied']) {
+      await at(90 * MINUTE + (proof === 'ran' ? 0 : 30 * MINUTE));
+      send(FIXTURES.PreToolUse);
+      away.approvalChanged({ status: 'resolved', decidedBy: 'terminal', proof });
+      assert.equal(changes.at(-1).until, 90 * MINUTE + (proof === 'ran' ? 0 : 30 * MINUTE), `answered in the terminal (${proof}): you are back`);
+    }
+  });
+
+  test('a Codex turn you interrupted is you', async () => {
+    const { changes, at, send } = watch();
+    send(FIXTURES.PreToolUse);
+    await at(25 * MINUTE);
+    send({ ...FIXTURES.Stop, stop_reason: 'interrupted', andary_source: 'codex' });
+    assert.deepEqual(changes.at(-1), { since: 0, until: 25 * MINUTE });
   });
 
   test('a /compact you ran is a prompt, as the dialog model reads one; an automatic one is not you', async () => {
