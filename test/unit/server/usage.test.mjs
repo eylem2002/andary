@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSy
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { contextTokens, createUsageTracker, isCompactBoundary, isInside, readAppended, readUsageLine, resolveInside, subagentTranscript } from '../../../server/usage.mjs';
+import { contextTokens, createUsageTracker, inSubfolder, isInside, readAppended, readCompactBoundary, readUsageLine, resolveInside, subagentTranscript } from '../../../server/usage.mjs';
 import { resolveClaudeConfigDir } from '../../../server/config.mjs';
 import { localDate as dayOf } from '../../../public/js/core/dates.js';
 import { messageCost } from '../../../public/js/core/prices.js';
@@ -129,14 +129,14 @@ test('the tracker counts each message once, per agent and per day, reading only 
   rmSync(root, { recursive: true, force: true });
 });
 
-test('a message copied into another transcript (a resumed session) or read by another name counts once', { skip: CANNOT_SYMLINK }, async () => {
+test('a message copied into another transcript (a forked session) or read by another name counts once', { skip: CANNOT_SYMLINK }, async () => {
   const { root, claudeDir, project } = fixture();
   const first = join(project, 's1.jsonl');
-  const resumed = join(project, 's2.jsonl');
+  const forked = join(project, 's2.jsonl');
   writeFileSync(first, line('m1', { input_tokens: 1000, output_tokens: 10 }));
-  // The resumed session starts with a copy of the old message, then a later line of it reports
+  // The forked session starts with a copy of the old message, then a later line of it reports
   // more output, then a new message.
-  writeFileSync(resumed, line('m1', { input_tokens: 1000, output_tokens: 10 }) + line('m1', { input_tokens: 1000, output_tokens: 40 }) + line('m2', { output_tokens: 5 }));
+  writeFileSync(forked, line('m1', { input_tokens: 1000, output_tokens: 10 }) + line('m1', { input_tokens: 1000, output_tokens: 40 }) + line('m2', { output_tokens: 5 }));
   const alias = join(project, 'alias.jsonl');
   symlinkSync(first, alias);
   const stateFile = join(root, 'usage.json');
@@ -145,12 +145,12 @@ test('a message copied into another transcript (a resumed session) or read by an
   await wait(30);
   tracker.observe({ session_id: 'sA', transcript_path: alias });
   await wait(30);
-  tracker.observe({ session_id: 's2', transcript_path: resumed });
+  tracker.observe({ session_id: 's2', transcript_path: forked });
   await wait(30);
   const day = tracker.snapshot().days.at(-1);
   assert.equal(day?.tokens, 1000 + 40 + 5, 'm1 once with its final output, m2 once');
   tracker.dispose();
-  // The ids survive a restart, so a resumed copy read later is not counted again either.
+  // The ids survive a restart, so a forked copy read later is not counted again either.
   const later = join(project, 's3.jsonl');
   writeFileSync(later, line('m2', { output_tokens: 5 }));
   const again = createUsageTracker({ claudeDir, stateFile, throttleMs: 5, onChange: () => assert.fail('nothing new to count') });
@@ -167,10 +167,11 @@ const at = (/** @type {number} */ minutes) => new Date(NOW - 60 * 60_000 + minut
 
 /**
  * An assistant line with every field Claude Code writes to a transcript: a turn deep into a
- * session, cache-heavy, so almost all of its context is read from the cache.
- * @param {{ id?: string, input?: number, write?: number, read?: number, output?: number, ts?: string, sidechain?: boolean, agentId?: string }} [fields]
+ * session, cache-heavy, so almost all of its context is read from the cache. `iterations` lists
+ * the reply's sampling iterations (an advisor's, a fallback's), `unmetered` marks it unmetered.
+ * @param {{ id?: string, model?: string, input?: number, write?: number, read?: number, output?: number, ts?: string, sidechain?: boolean, agentId?: string, iterations?: Record<string, unknown>[], unmetered?: boolean }} [fields]
  */
-function realLine({ id = 'msg_01XFDUDYJgAACzvnptvVoYEL', input = 4, write = 1520, read = 180_816, output = 312, ts = at(0), sidechain = false, agentId } = {}) {
+function realLine({ id = 'msg_01XFDUDYJgAACzvnptvVoYEL', model = 'claude-opus-5-5', input = 4, write = 1520, read = 180_816, output = 312, ts = at(0), sidechain = false, agentId, iterations, unmetered } = {}) {
   return `${JSON.stringify({
     parentUuid: '6f1c0d2e-5b7a-4c1e-9a43-0c2b8d7e1f90',
     isSidechain: sidechain,
@@ -180,11 +181,12 @@ function realLine({ id = 'msg_01XFDUDYJgAACzvnptvVoYEL', input = 4, write = 1520
     version: '2.1.12',
     gitBranch: 'main',
     ...(agentId ? { agentId } : {}),
+    ...(unmetered ? { isUnmetered: true } : {}),
     message: {
       id,
       type: 'message',
       role: 'assistant',
-      model: 'claude-opus-5-5',
+      model,
       content: [{ type: 'tool_use', id: 'toolu_01', name: 'Bash', input: { command: 'npm test' } }],
       stop_reason: 'tool_use',
       stop_sequence: null,
@@ -195,6 +197,7 @@ function realLine({ id = 'msg_01XFDUDYJgAACzvnptvVoYEL', input = 4, write = 1520
         cache_creation: { ephemeral_5m_input_tokens: write, ephemeral_1h_input_tokens: 0 },
         output_tokens: output,
         service_tier: 'standard',
+        ...(iterations ? { iterations } : {}),
       },
     },
     requestId: `req_${id}`,
@@ -203,6 +206,10 @@ function realLine({ id = 'msg_01XFDUDYJgAACzvnptvVoYEL', input = 4, write = 1520
     timestamp: ts,
   })}\n`;
 }
+
+/** One sampling iteration of a reply, as `usage.iterations` lists it. */
+const iteration = (/** @type {string} */ type, /** @type {number} */ input, /** @type {number} */ write, /** @type {number} */ read, /** @type {number} */ output, /** @type {string} */ model = '') =>
+  ({ type, ...(model ? { model } : {}), input_tokens: input, cache_creation_input_tokens: write, cache_read_input_tokens: read, output_tokens: output });
 
 /** The lines Claude Code writes where it compacted: the boundary, then the summary as a user turn. */
 function compactionLines(/** @type {string} */ ts) {
@@ -220,20 +227,63 @@ function contextFixture() {
   after(() => tracker.dispose());
   const transcript = join(project, 's1.jsonl');
   const hook = (/** @type {string} */ name, /** @type {Record<string, unknown>} */ extra = {}) => ({ session_id: 's1', transcript_path: transcript, hook_event_name: name, ...extra });
-  const contextOf = (/** @type {string} */ agentId = '') => tracker.snapshot().agents.find((r) => (r.agentId ?? '') === agentId)?.context;
-  return { project, transcript, tracker, changes, hook, contextOf };
+  const recordOf = (/** @type {string} */ agentId = '') => tracker.snapshot().agents.find((r) => r.sessionId === 's1' && (r.agentId ?? '') === agentId);
+  const contextOf = (/** @type {string} */ agentId = '') => recordOf(agentId)?.context;
+  return { project, transcript, tracker, changes, hook, recordOf, contextOf };
 }
 
 test('the context in use is a message\'s input, cache writes and cache reads, as Claude Code\'s status line counts it', async () => {
   const seen = readUsageLine(realLine().trim());
   assert.ok(seen);
   // 4 + 1,520 + 180,816: the 312 output tokens are not in the context yet.
-  assert.equal(contextTokens(seen.tokens), 182_340);
+  assert.equal(seen.context, 182_340);
+  assert.equal(contextTokens(seen.tokens), seen.context, 'a reply without iterations: its top level');
   const { transcript, tracker, changes, hook } = contextFixture();
   writeFileSync(transcript, realLine());
   tracker.observe(hook('PostToolUse'));
   await wait(40);
   assert.deepEqual(changes.at(-1).context, { tokens: 182_340, at: Date.parse(at(0)) });
+});
+
+test('a reply that consulted an advisor: the context is its last executor iteration, the cost every iteration at its own model', () => {
+  // The top level adds up both executor iterations, each of which re-sent the whole conversation.
+  const executor1 = iteration('message', 4, 1200, 149_702, 89);
+  const advisor = iteration('advisor_message', 823, 0, 0, 1612, 'claude-opus-5-5');
+  const executor2 = iteration('message', 6, 1694, 150_906, 442);
+  const seen = readUsageLine(realLine({ model: 'claude-sonnet-5-5', input: 10, write: 2894, read: 300_608, output: 531, iterations: [executor1, advisor, executor2] }).trim());
+  assert.ok(seen);
+  assert.equal(seen.context, 152_606, 'not the 303,512 the top level adds up to');
+  assert.deepEqual(seen.tokens, { input: 833, output: 2143, cacheRead: 300_608, cacheWrite: 2894 }, 'the advisor\'s tokens are not in the top level');
+  const expected = /** @type {number} */ (messageCost('claude-sonnet-5-5', executor1)) + /** @type {number} */ (messageCost('claude-opus-5-5', advisor)) + /** @type {number} */ (messageCost('claude-sonnet-5-5', executor2));
+  assert.ok(Math.abs(/** @type {number} */ (seen.cost) - expected) < 1e-12, 'the advisor at its own model\'s price');
+  assert.ok(/** @type {number} */ (seen.cost) > /** @type {number} */ (messageCost('claude-sonnet-5-5', { input_tokens: 10, cache_creation_input_tokens: 2894, cache_read_input_tokens: 300_608, output_tokens: 531 })));
+  const unknownAdvisor = readUsageLine(realLine({ iterations: [executor1, { ...advisor, model: 'mystery-advisor' }, executor2] }).trim());
+  assert.equal(unknownAdvisor?.cost, null, 'an advisor model without a known price leaves the reply unpriced');
+  // A line written while the executor waits for the advice: the advisor's iteration is not its context.
+  assert.equal(readUsageLine(realLine({ iterations: [executor1, advisor] }).trim())?.context, 150_906);
+});
+
+test('compaction and fallback iterations: a compaction is no context, a fallback model\'s iteration is; an empty list means the top level', () => {
+  // As the compaction docs show it: the top level leaves the compaction's iteration out.
+  const compaction = iteration('compaction', 180_000, 0, 0, 3500);
+  const message = iteration('message', 23_000, 0, 0, 1000);
+  const compacted = readUsageLine(realLine({ input: 23_000, write: 0, read: 0, output: 1000, iterations: [compaction, message] }).trim());
+  assert.equal(compacted?.context, 23_000);
+  assert.equal(compacted?.tokens.input, 203_000, 'the compaction is billed too, at the message\'s model');
+  assert.ok(Math.abs(/** @type {number} */ (compacted?.cost) - /** @type {number} */ (messageCost('claude-opus-5-5', compaction)) - /** @type {number} */ (messageCost('claude-opus-5-5', message))) < 1e-12);
+  const fallback = readUsageLine(realLine({ iterations: [iteration('message', 5, 0, 40_000, 10), iteration('fallback_message', 5, 0, 41_000, 300, 'claude-sonnet-5-5')] }).trim());
+  assert.equal(fallback?.context, 41_005);
+  assert.equal(readUsageLine(realLine({ iterations: [] }).trim())?.context, 182_340);
+});
+
+test('a line Claude Code marks unmetered counts nothing and is no reading', async () => {
+  assert.equal(readUsageLine(realLine({ unmetered: true }).trim()), null);
+  const { transcript, tracker, hook, contextOf } = contextFixture();
+  writeFileSync(transcript, realLine({ id: 'm1' }) + realLine({ id: 'm2', read: 5000, ts: at(1), unmetered: true }));
+  tracker.observe(hook('Stop'));
+  await wait(40);
+  assert.equal(contextOf()?.tokens, 182_340);
+  assert.equal(tracker.snapshot().days.at(-1)?.tokens, 4 + 1520 + 180_816 + 312);
 });
 
 test('each agent keeps its newest reading; a helper\'s transcript counts for the helper, not its lead', async () => {
@@ -267,14 +317,15 @@ test('each agent keeps its newest reading; a helper\'s transcript counts for the
   assert.equal(changes.at(-1).tokens.cacheRead, 100_000 + 120_000 + 130_000 + 9000, 'its usage still counts');
 });
 
-test('a resumed session\'s copy of a message counts nothing again but tells the new session\'s context', async () => {
+test('a forked session\'s copy of a message counts nothing again but tells the new session\'s context', async () => {
   const { project, transcript, tracker } = contextFixture();
   writeFileSync(transcript, realLine({ id: 'm1', read: 50_000 }));
   tracker.observe({ session_id: 's1', transcript_path: transcript, hook_event_name: 'Stop' });
   await wait(40);
-  const resumed = join(project, 's2.jsonl');
-  writeFileSync(resumed, realLine({ id: 'm1', read: 50_000 }));
-  tracker.observe({ session_id: 's2', transcript_path: resumed, hook_event_name: 'SessionStart', source: 'resume' });
+  // `claude --resume … --fork-session` starts a new session whose transcript copies the old one.
+  const forked = join(project, 's2.jsonl');
+  writeFileSync(forked, realLine({ id: 'm1', read: 50_000 }));
+  tracker.observe({ session_id: 's2', transcript_path: forked, hook_event_name: 'SessionStart', source: 'fork' });
   await wait(40);
   const session = (/** @type {string} */ id) => tracker.snapshot().agents.find((r) => r.sessionId === id);
   assert.equal(session('s2')?.tokens.cacheRead, 0, 'counted once, for the first session');
@@ -283,22 +334,23 @@ test('a resumed session\'s copy of a message counts nothing again but tells the 
 });
 
 test('a compaction makes the context unknown until the next message, even with an older message still to read', async () => {
-  const { transcript, tracker, changes, hook, contextOf } = contextFixture();
+  const { transcript, tracker, changes, hook, recordOf, contextOf } = contextFixture();
   writeFileSync(transcript, realLine({ id: 'm1' }));
   tracker.observe(hook('PostToolUse'));
   await wait(40);
   assert.equal(contextOf()?.tokens, 182_340);
-  // The turn's last message is written, then the compaction starts before anything read it.
-  appendFileSync(transcript, realLine({ id: 'm2', read: 190_000, ts: at(1) }));
-  tracker.observe(hook('PreCompact', { trigger: 'auto', custom_instructions: '' }), Date.parse(at(2)));
+  // PreCompact proves nothing yet: another hook can still stop the compaction.
+  tracker.observe(hook('PreCompact', { trigger: 'auto', custom_instructions: '' }), Date.parse(at(1)));
+  await wait(40);
+  assert.equal(contextOf()?.tokens, 182_340);
+  // The turn's last message is written, and the compaction ends before anything read it.
+  appendFileSync(transcript, realLine({ id: 'm2', read: 190_000, ts: at(2) }));
+  tracker.observe(hook('PostCompact', { trigger: 'auto', compact_summary: 'Fixed the login test.' }), Date.parse(at(3)));
   assert.equal(changes.at(-1).context, null, 'dropped at once, before the next read');
+  assert.equal(changes.at(-1).compactedAt, Date.parse(at(3)));
   await wait(40);
   assert.equal(contextOf(), null, 'the read the hook scheduled brings back nothing from before it');
   assert.equal(changes.at(-1).tokens.cacheRead, 180_816 + 190_000, 'its usage still counts');
-  appendFileSync(transcript, compactionLines(at(3)));
-  tracker.observe(hook('PostCompact', { trigger: 'auto', compact_summary: 'Fixed the login test.' }), Date.parse(at(3)));
-  await wait(40);
-  assert.equal(contextOf(), null);
   appendFileSync(transcript, realLine({ id: 'm3', input: 9, write: 23_000, read: 8000, ts: at(4) }));
   tracker.observe(hook('PostToolUse'));
   await wait(40);
@@ -306,21 +358,47 @@ test('a compaction makes the context unknown until the next message, even with a
   // The session restarting from the summary is a compaction too.
   tracker.observe(hook('SessionStart', { source: 'compact' }), Date.parse(at(5)));
   assert.equal(contextOf(), null);
+  assert.equal(recordOf()?.compactedAt, Date.parse(at(5)));
+});
+
+test('a compaction hook dated in the future is taken as now, so later messages still give a reading', async () => {
+  const { transcript, tracker, hook, recordOf, contextOf } = contextFixture();
+  writeFileSync(transcript, realLine({ id: 'm1', ts: new Date(NOW + 60_000).toISOString() }));
+  // The first hook the tracker sees for this agent: its record starts knowing of the compaction.
+  tracker.observe(hook('PostCompact', { trigger: 'manual', compact_summary: '' }), NOW + 3_600_000);
+  await wait(40);
+  assert.equal(contextOf()?.tokens, 182_340);
+  assert.equal(recordOf()?.compactedAt, NOW);
 });
 
 test('a compaction boundary in the transcript drops the reading when no hook said so', async () => {
-  const { transcript, tracker, hook, contextOf } = contextFixture();
-  assert.equal(isCompactBoundary(compactionLines(at(0)).split('\n')[0]), true);
-  assert.equal(isCompactBoundary(compactionLines(at(0)).split('\n')[1]), false, 'the summary is a user turn');
-  assert.equal(isCompactBoundary(JSON.stringify({ type: 'assistant', message: { content: '"subtype":"compact_boundary"' } })), false);
+  const { transcript, tracker, hook, recordOf, contextOf } = contextFixture();
+  assert.deepEqual(readCompactBoundary(compactionLines(at(1)).split('\n')[0]), { at: Date.parse(at(1)) });
+  assert.equal(readCompactBoundary(compactionLines(at(0)).split('\n')[1]), null, 'the summary is a user turn');
+  assert.equal(readCompactBoundary(JSON.stringify({ type: 'assistant', message: { content: '"subtype":"compact_boundary"' } })), null);
   writeFileSync(transcript, realLine({ id: 'm1' }) + compactionLines(at(1)));
   tracker.observe(hook('Stop'));
   await wait(40);
   assert.equal(contextOf(), null);
+  assert.equal(recordOf()?.compactedAt, Date.parse(at(1)));
   appendFileSync(transcript, realLine({ id: 'm2', read: 12_000, ts: at(2) }) + compactionLines(at(3)) + realLine({ id: 'm3', read: 15_000, ts: at(4) }));
   tracker.observe(hook('Stop'));
   await wait(40);
   assert.equal(contextOf()?.tokens, 16_524, 'what follows the last boundary');
+  assert.equal(recordOf()?.compactedAt, Date.parse(at(3)));
+});
+
+test('a helper\'s transcript one folder down in subagents/ is found too', async () => {
+  const { project, transcript, tracker, hook, contextOf } = contextFixture();
+  const folder = join(project, 's1', 'subagents', 'workflow-1');
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'agent-def.jsonl'), realLine({ id: 'h1', read: 30_000, sidechain: true, agentId: 'def' }));
+  const projects = join(project, '..');
+  assert.equal(inSubfolder(join(project, 's1', 'subagents', 'agent-none.jsonl'), projects), null);
+  tracker.observe(hook('PostToolUse', { agent_id: 'def', agent_type: 'general-purpose' }));
+  await wait(40);
+  assert.equal(contextOf('def')?.tokens, 31_524);
+  assert.equal(subagentTranscript(transcript, 'def'), join(project, 's1', 'subagents', 'agent-def.jsonl'), 'where it is looked for first');
 });
 
 test('a message that read nothing is no reading', async () => {

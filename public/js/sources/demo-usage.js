@@ -8,7 +8,8 @@ import { localDate } from '../core/dates.js';
 import { normalizeAgentId } from '../core/ids.js';
 
 const COUNTED = new Set(['UserPromptSubmit', 'PreToolUse', 'Stop', 'SubagentStop']);
-const COMPACTIONS = new Set(['PreCompact', 'PostCompact']);
+/** As on the server: the compaction has happened (at PreCompact another hook could still stop it). */
+const COMPACTIONS = new Set(['PostCompact']);
 /** A made-up conversation starts with the system prompt and tools; after a compaction, with its summary too. */
 const CONTEXT_START = 18_000;
 const CONTEXT_AFTER_COMPACT = 26_000;
@@ -34,8 +35,9 @@ export function createDemoUsage(store, now) {
   function compacted(key) {
     contexts.set(key, CONTEXT_AFTER_COMPACT);
     const record = records.get(key);
-    if (!record?.context) return;
+    if (!record) return;
     record.context = null;
+    record.compactedAt = now();
     store.setUsage?.({ ...record, tokens: { ...record.tokens } });
   }
 
@@ -57,7 +59,7 @@ export function createDemoUsage(store, now) {
       cache_creation_input_tokens: turn % 5 === 0 ? 2500 + ((turn * 131) % 4000) : 0,
     };
     const cost = messageCost(model, usage) ?? 0;
-    const record = records.get(key) ?? { sessionId: session, agentId, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0, unpriced: false, model, context: null };
+    const record = records.get(key) ?? { sessionId: session, agentId, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0, unpriced: false, model, context: null, compactedAt: null };
     record.tokens.input += usage.input_tokens;
     record.tokens.output += usage.output_tokens;
     record.tokens.cacheRead += usage.cache_read_input_tokens;

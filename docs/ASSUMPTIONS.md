@@ -637,44 +637,65 @@ section.
     folder knows nothing of it, so its calls made before that change count: that could invent a
     loop, but only if its very first hooks arrive after another agent's later edit.
 125. **The context in use is shown in tokens, never as a share of a window, and raises no alert.**
-    It is the newest message's input, cache writes and cache reads, as Claude Code's status line
-    counts it. Today's default models run a 1M window with no `[1m]` in the model id and the user
-    can move the compaction point, so the window cannot be told from what Andary sees: a percentage
-    would be a guess. `/context` in Claude Code gives the whole picture; a percentage waits for
-    exact numbers from the status line (design §9).
+    It is what the newest reply's last executor iteration read (input, cache writes and cache
+    reads), as Claude Code's status line reads it: an advisor's or a compaction's iteration is not
+    the context, and neither is the top level, which adds up every executor iteration. Today's
+    default models run a 1M window with no `[1m]` in the model id and the user can move the
+    compaction point, so the window cannot be told from what Andary sees: a percentage would be a
+    guess. `/context` in Claude Code gives the whole picture; a percentage waits for exact numbers
+    from the status line (design §9).
 126. **The newest reading is the last message read from the agent's own transcript.** Lines are
     written in order, so file order is time order; timestamps are not compared, since a clock
     change could reorder them. A helper's transcript gives the helper's reading. A line marked
     `isSidechain` in a lead's transcript (older Claude Code wrote helpers' messages there) is not
-    the lead's, and a message that read no tokens is no reading. A resumed session's copy of an
-    earlier message gives that session's reading though its usage is not counted again (the
-    resumed conversation holds it); a record with a reading and nothing counted shows no cost,
-    rather than "0 tokens".
+    the lead's, and a message that read no tokens is no reading. A forked session's
+    (`--fork-session`) copy of an earlier message gives that session's reading though its usage
+    is not counted again (the new conversation holds it); a record with a reading and nothing
+    counted shows no cost, rather than "0 tokens".
 127. **A compaction makes the context unknown until the next message, cut at the hook's start
-    time.** `PreCompact`, `PostCompact` and `SessionStart` with `source: "compact"` drop the
-    reading at once. The transcript is read a moment after a hook, so a message written before the
-    compaction may still be waiting: messages written before the latest compaction hook started
-    give no reading (their usage still counts). Both times come from this computer's clock (the
-    forwarder's start time, Claude Code's timestamps). The first message after a compaction comes
-    an API round trip after `PostCompact`; should a hook start later than it, that one reading is
-    skipped and the next message brings one. A `compact_boundary` line in the transcript drops the
-    reading too, for setups without those hooks.
-128. **A reading that no longer holds is hidden, not labelled.** A finished helper's or an ended
-    crew's last reading describes a context that is gone, and a crew line has no room for
-    "(old)". A lead that finished its turn keeps its reading: its conversation is still there, and
-    that is when the number helps most, before the next prompt. The browser does not judge
-    compactions itself: the server and the demo drop the reading at the compaction hook, before the
-    town shows it. "Read 2m ago" is when the message was written; Andary reads it about a second
-    after the hook that follows it.
+    time.** `PostCompact` and `SessionStart` with `source: "compact"` drop the reading at once and
+    say when. `PreCompact` changes nothing: another hook can still stop the compaction then, and
+    the old count holds while it runs. The transcript is read a moment after a hook, so a message
+    written before the compaction may still be waiting: messages written before the latest
+    compaction hook started give no reading (their usage still counts). Both times come from this
+    computer's clock (the forwarder's start time, Claude Code's timestamps); a hook dated after the
+    server's clock counts as now. The first message after a compaction comes an API round trip
+    after `PostCompact`; should a hook start later than it, that one reading is skipped and the
+    next message brings one. A `compact_boundary` line in the transcript drops the reading too, at
+    its own time, for setups without those hooks.
+128. **A reading that no longer holds is hidden, or says what happened.** A finished helper's or
+    an ended crew's last reading describes a context that is gone, so it is hidden. After a
+    compaction the lead's row says "context compacted" and the inspector when, until the next
+    reading: a blank would look like a fault. The browser also treats a reading older than the last
+    compaction as gone, however it arrived. A lead that finished its turn keeps its reading: its
+    conversation is still there, and that is when the number helps most, before the next prompt.
+    "As of 2m ago" is how old the message that used it is; Andary reads it about a second after the
+    hook that follows it.
 129. **No context for Codex.** Andary reads no Codex usage yet (65), so there is nothing to count.
     When its rollouts are read, the sum needs its own check: OpenAI's usage counts cached input
     inside the input tokens, Claude's counts it apart.
 130. **After a restart, the context shows again with the next message.** Readings are not kept in
     `usage.json`, like agent totals, and the tracker reads each transcript only from where it
     stopped, so it does not see the last message again.
-131. **The crew line shows the context on its own line under the model.** "Opus 5.5 · 182k in
-    context" on one line would take room from the crew's name in a 268–320 px panel.
+131. **The crew's context sits on its lead's row, under the time.** In the crew's heading it shared
+    an auto-width column with the model and cost, so its width came off every crew's name (141 →
+    103 px at a 268 px panel). Under the time it widens only the time: the doing line below keeps
+    its width, and the lead with a reading is always the Foreman (a teammate's or a Codex crew has
+    no usage), whose name keeps its room at 268 px, beside a set-aside button too.
 132. **The demo's context is made up apart from its costs.** It starts at 18k (system prompt and
-    tools), grows by 0.6k–3.6k a step, starts again at 26k after a compaction, and stops at 950k: a
-    demo crew can go a long time without compacting, and Claude Code would compact before a 1M
-    window filled. The demo's costs are unchanged.
+    tools), grows by 0.6k–3.6k a step, starts again at 26k after a compaction (`PostCompact`), and
+    stops at 950k: a demo crew can go a long time without compacting, and Claude Code would compact
+    before a 1M window filled. The demo's costs are unchanged.
+133. **A reply's iterations are counted one by one, each at its own model's price.** The top level
+    of a reply's usage adds up its executor iterations alone. An advisor's iteration names its
+    model and is billed at that model's price, and a compaction's is billed at the message's model
+    (Anthropic's advisor tool and compaction documentation), so the tokens and cost add up every
+    listed iteration; a fallback model's iteration is priced at its own model when it names one. If
+    one of those models has no known price, the whole reply is unpriced, as a message from an
+    unknown model already was. A line Claude Code marks `isUnmetered` counts nothing. As before, a
+    later line of a split message adds only its extra output to the token totals (the cost
+    difference in full), so a reply whose later lines add iterations can count less input than it
+    used.
+134. **A helper's transcript may sit one folder down in `subagents/`.** When `agent-<id>.jsonl` is
+    not directly in its session's `subagents/` folder, the first folder there (of at most 50, links
+    not followed) that holds that name is read.

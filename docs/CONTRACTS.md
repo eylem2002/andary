@@ -502,55 +502,71 @@ Settled during implementation; they refine §4.3–§4.5.
 ### 4.8 Token usage and cost
 
 `server/usage.mjs`. Every hook's `transcript_path` (and, for a subagent, `agent_transcript_path`
-or `<transcript without .jsonl>/subagents/agent-<id>.jsonl`) is read 0.8 s after the first hook
+or `<transcript without .jsonl>/subagents/agent-<id>.jsonl`, else the first folder of `subagents/`
+that holds that file name) is read 0.8 s after the first hook
 that asks for it (later hooks in that window share the read: a throttle, not a debounce), from
 where the last read of that file stopped (at most 16 MB at a time, whole lines only; a single
 line longer than that is skipped). Only regular `.jsonl` files whose real path is inside
 `<CLAUDE_CONFIG_DIR or ~/.claude>/projects` are read, opened without following links or blocking,
 and offsets are kept per real path. Each `type: "assistant"` line's `message.usage` is counted
 once per `message.id` + `requestId` across all transcripts (Claude Code splits one message over
-several lines, and a resumed session copies earlier messages into its new file); a later line of
-the same message reporting more output tokens adds the difference. It is priced with
+several lines, and a forked session, `--fork-session`, copies earlier messages into its new
+file); a later line of the same message reporting more output tokens adds the difference. A line
+with `isUnmetered: true` counts nothing (Claude Code skips it too). It is priced with
 `public/js/core/prices.js` (API list prices; 5-minute cache writes 1.25× input, 1-hour 2×,
 Haiku 5.5's long-prompt rate over 100,000 tokens) and added to its agent and to the local day of
-its `timestamp`. Day totals (last 30), read offsets by transcript path and the newest 4,000
+its `timestamp`. A reply that lists its sampling iterations (`usage.iterations`) is counted as
+their sum, each priced at the model it names (an advisor's) or else the message's: the top level
+adds up the executor's iterations (`message`, `fallback_message`) alone, leaving out an advisor's
+(`advisor_message`, billed at its own model's price) and a compaction's (`compaction`). One with
+a model without a known price makes the whole reply unpriced. Day totals (last 30), read offsets
+by transcript path and the newest 4,000
 message ids are kept in `<ANDARY_HOME>/usage.json` (mode 0600; numbers, ids and transcript paths,
 which name your project folders) so a restart counts nothing twice; agent totals live in memory.
 
 ```js
 UsageRecord { sessionId, agentId: string|null, tokens: { input, output, cacheRead, cacheWrite },
               costUsd /* estimated */, unpriced: boolean /* a model without a known price */, model,
-              context: { tokens, at /* ms: when that message was written */ } | null }
+              context: { tokens, at /* ms: when that message was written */ } | null,
+              compactedAt: number|null /* when it last compacted, as far as the tracker saw */ }
 UsageDay { date: 'YYYY-MM-DD', tokens, costUsd }
 ```
 
-**Context in use** (docs/design/agent-health.md §5). An assistant message's context is its
-`input_tokens + cache_creation_input_tokens + cache_read_input_tokens` (the formula Claude Code's
-status line uses; output is not in it yet). `context` is the agent's newest reading: the last
-message read from its own transcript (lines are read in the order they were written, so a later
-line wins), its `timestamp` as `at`. A subagent's transcript gives the subagent's reading. Not a
-reading: a message whose three counts add up to 0, and, for a lead, a line with
-`isSidechain: true` (older Claude Code wrote helpers' messages into the session's transcript). A
-message counted before still gives one: a resumed session's copies are its context. A compaction
-makes it `null` until the agent's next message: a `PreCompact`, `PostCompact` or
-`SessionStart` with `source: "compact"` hook drops the agent's reading at once (a `usage` message
-goes out), and messages written before the latest such hook started (its `ts`, §4.3) give no
-reading, so a read already due cannot bring an old one back; a
-`type: "system", subtype: "compact_boundary"` line in the transcript drops it too. No window size
-is assumed, so there is no percentage and no alert: today's default models run a 1M window with
-no `[1m]` in the model id, and the user may move the compaction point. Readings are not kept in
-`usage.json`: after a restart an agent has one again from its next message. Codex sends no usage
-the tracker reads (§4.12), so its crews have none.
+**Context in use** (docs/design/agent-health.md §5). A message's context is what its last
+executor iteration read, `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`
+(output is not in it yet), as Claude Code's status line reads it: the last `message` or
+`fallback_message` entry of `usage.iterations`, never an `advisor_message` or a `compaction`, and
+the top level when the list is missing or empty (the top level alone would be twice too high
+after a reply that consulted an advisor: each executor iteration re-sends the whole context).
+`context` is the agent's newest reading: the last message read from its own transcript (lines
+are read in the order they were written, so a later line wins), its `timestamp` as `at`. A
+subagent's transcript gives the subagent's reading. Not a reading: a message whose three counts
+add up to 0, an unmetered line, and, for a lead, a line with `isSidechain: true` (older Claude
+Code wrote helpers' messages into the session's transcript). A message counted before still gives
+one: a forked session's copies are its context. A compaction makes it `null` until the agent's
+next message and sets `compactedAt`: a `PostCompact` or a `SessionStart` with
+`source: "compact"` hook does so at once (a `usage` message goes out), and messages written
+before the latest such hook started (its `ts`, §4.3, at most the server's clock) give no reading,
+so a read already due cannot bring an old one back; a `type: "system", subtype: "compact_boundary"`
+line in the transcript does so too, at its `timestamp`. `PreCompact` changes nothing: another hook
+can still stop the compaction then. No window size is assumed, so there is no percentage and no
+alert: today's default models run a 1M window with no `[1m]` in the model id, and the user may
+move the compaction point. Readings are not kept in `usage.json`: after a restart an agent has one
+again from its next message. Codex sends no usage the tracker reads (§4.12), so its crews have
+none.
 
 The browser store keeps `usage` (agentKey → totals, `context` read defensively: a positive token
-count and a positive time, else `null`) and `usageDays`; the demo makes up repeatable numbers
-(`public/js/sources/demo-usage.js`), and a context that grows with each step and is `null` from a
-`PreCompact` or `PostCompact` to the next step. The HUD shows a reading only while it can still be
-true (`liveContext`, `public/js/ui/usage.js`): not for a finished helper, nor for an ended crew,
-whose agents leave the store. The crew line shows its lead's under the model ("182k in context",
+count and a positive time, else `null`; `compactedAt` a positive time or `null`) and `usageDays`;
+the demo makes up repeatable numbers (`public/js/sources/demo-usage.js`), and a context that grows
+with each step and is `null`, with `compactedAt`, from a `PostCompact` to the next step. The HUD
+shows a context only while it can still be true (`liveContext`, `public/js/ui/usage.js`): not for
+a finished helper, nor for an ended crew, whose agents leave the store; a reading from before
+`compactedAt` shows as "context compacted" until the next one. The lead's row in Crews shows it
+under its time, where it takes no room from the crew's name ("182k in context",
 `[data-testid="crew-context"]`); the inspector's Usage section shows any agent's exact count and
-how long ago its message was written ("182,340 tokens in context, read 2m ago.",
-`[data-testid="agent-context"]`). A record with a reading but nothing counted shows no cost.
+how old the message that used it is ("182,340 tokens in context, as of 2m ago.", or "Context
+compacted 1m ago; the new count comes with the next message.", `[data-testid="agent-context"]`). A
+record with a reading but nothing counted shows no cost.
 
 ### 4.9 The town's growth
 
@@ -770,7 +786,8 @@ StoreState {
   usageDays: UsageDay[]
 }
 AgentUsage { tokens: { input, output, cacheRead, cacheWrite }, costUsd, unpriced: boolean, model: string|null,
-             context: { tokens, at } | null /* §4.8: the newest reading; null when unknown */ }
+             context: { tokens, at } | null /* §4.8: the newest reading; null when unknown */,
+             compactedAt: number|null /* §4.8: when it last compacted */ }
 Session { id, number /* the crew's number: lowest free when it arrived, never changed */,
           project /* cwd basename */, cwd, title?, color, model?, permissionMode?,
           member?: string|null /* §4.11 */, source?: 'claude'|'codex' /* §4.12 */,
@@ -1138,8 +1155,8 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="connection-status"]` | status pill; text contains `Live`, `Demo`, `Connecting`, `Offline` or `Sign in` |
 | `[data-testid="login-hint"]` | shown when a server is running but the browser has no valid token |
 | `[data-testid="demo-button"]` | starts the simulation (shown when there is nothing live to watch) |
-| `[data-testid="crew-list"]` | crews panel; children `[data-testid="crew"][data-session-id]`, each with its lead's context in use in `[data-testid="crew-context"]` (hidden without a reading, §4.8) |
-| `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects; `data-need` is the level of what it needs you for |
+| `[data-testid="crew-list"]` | crews panel; children `[data-testid="crew"][data-session-id]` |
+| `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects; `data-need` is the level of what it needs you for; a lead's row holds its context in use in `[data-testid="crew-context"]` (hidden without one, §4.8) |
 | `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn, stop or stuck alert aside; `[data-testid="agent-context"]` holds the exact context in use (§4.8) |
 | `[data-testid="waiting-for-you"]` | the masthead's "N need you" button (`data-level` is the most urgent level); click goes to the next item |
 | `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn, a stop or a stuck alert aside |

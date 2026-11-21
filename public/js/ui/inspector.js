@@ -222,13 +222,14 @@ function createNeedLine(ctx, focusAfter) {
 }
 
 /**
- * The Usage section's lines: the context in use, while it can still be true, with when it was
- * read (that ages, so it is redrawn every second), then what the agent has used and cost so far.
+ * The Usage section's lines: the context in use while it can still be true, or that it was
+ * compacted, with how long ago (that ages, so it is redrawn every second), then what the agent
+ * has used and cost so far.
  */
 function createUsageLines() {
   const context = h('p', { class: 'hud-inspector__context', 'data-testid': 'agent-context', hidden: true });
   const totals = h('p', { class: 'hud-inspector__usage', 'data-testid': 'agent-usage' });
-  /** @type {import('./types.js').AgentUsage['context']} */
+  /** @type {import('./usage.js').ContextView|null} */
   let reading = null;
   /** @param {number} now */
   const tick = (now) => {

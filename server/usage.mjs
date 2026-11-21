@@ -1,15 +1,15 @@
 // Tokens and estimated cost per agent, read from Claude Code's own transcripts (CONTRACTS §4.8).
 // Hooks carry the transcript's path; each assistant message there records its token usage. The
 // tracker reads only what was appended since its last look, counts every message once (one
-// message is often split over several lines, and a resumed session copies earlier messages into
+// message is often split over several lines, and a forked session copies earlier messages into
 // its new transcript), and prices it with the API list prices in prices.js.
 // The newest message also tells how much context the agent is using. A compaction makes that
 // unknown until the next message: no window size is guessed, so there is no percentage.
 // It reads only regular files inside <Claude config>/projects, and keeps the day totals, how far
 // it read each file (by its real path) and the ids of recent messages in <ANDARY_HOME>/usage.json,
 // so a restart does not count anything twice.
-import { closeSync, constants, existsSync, fstatSync, openSync, readFileSync, readSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join, sep } from 'node:path';
+import { closeSync, constants, existsSync, fstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { localDate } from '../public/js/core/dates.js';
 import { agentKeyOf, normalizeAgentId } from '../public/js/core/ids.js';
 import { messageCost } from '../public/js/core/prices.js';
@@ -26,12 +26,14 @@ import { messageCost } from '../public/js/core/prices.js';
  * @property {boolean} unpriced    some messages came from a model without a known price
  * @property {string|null} model   the last model seen
  * @property {ContextReading|null} context  null until a message is read, and again after a compaction
+ * @property {number|null} compactedAt  when the agent last compacted, as far as the tracker saw
  * @typedef {{ date: string, tokens: number, costUsd: number }} UsageDay
  * @typedef {object} UsageLine     what one assistant line of a transcript says (readUsageLine)
  * @property {string} id           message id and request id: the same message, wherever it was copied
  * @property {string} model
- * @property {Tokens} tokens
- * @property {number|null} cost
+ * @property {Tokens} tokens       every sampling iteration of the reply
+ * @property {number|null} cost    every iteration, each at its own model's price; null if one has none
+ * @property {number} context      the context its last executor iteration used
  * @property {number|null} ts      when it was written
  * @property {boolean} sidechain   a helper's message (older Claude Code wrote them into the session's transcript)
  */
@@ -43,6 +45,14 @@ const SAVED_IDS = 4000;
 const MAX_FILES = 2000;
 const MAX_AGENTS = 1000;
 const DAYS_KEPT = 30;
+/** Folders of `subagents/` looked through for a helper's transcript that is not directly in it. */
+const MAX_SUBFOLDERS = 50;
+/**
+ * A reply's own sampling iterations (`usage.iterations`): the executor's, and a fallback model's
+ * when it took over. Claude Code's status line reads the context from the last of these; an
+ * advisor's or a compaction's iteration is a request of its own.
+ */
+const EXECUTOR_ITERATIONS = new Set(['message', 'fallback_message']);
 
 /** @param {unknown} n */
 function count(n) {
@@ -57,6 +67,28 @@ function count(n) {
  */
 export function subagentTranscript(sessionTranscript, agentId) {
   return join(sessionTranscript.replace(/\.jsonl$/, ''), 'subagents', `agent-${normalizeAgentId(agentId)}.jsonl`);
+}
+
+/**
+ * A helper's transcript that is not where it was looked for but one folder further down (Claude
+ * Code keeps some helpers' transcripts in a folder of their own under `subagents/`): the real path
+ * of the first `<folder>/<that name>` inside `root`, or null. Links to folders are not followed.
+ * @param {string} file
+ * @param {string} root
+ * @returns {string|null}
+ */
+export function inSubfolder(file, root) {
+  let entries;
+  try {
+    entries = readdirSync(dirname(file), { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries.filter((e) => e.isDirectory()).slice(0, MAX_SUBFOLDERS)) {
+    const real = resolveInside(join(dirname(file), entry.name, basename(file)), root);
+    if (real) return real;
+  }
+  return null;
 }
 
 /**
@@ -111,44 +143,102 @@ function openTranscript(real) {
 }
 
 /**
- * One transcript line's usage: an assistant message's id, model, tokens, estimated cost and time.
- * Null for any other line.
+ * One transcript line's usage: an assistant message's id, model, tokens, estimated cost, context
+ * and time. Null for any other line, and for one Claude Code marks unmetered (it skips those too).
+ * A reply can list its sampling iterations (`usage.iterations`): the executor's, a fallback
+ * model's, an advisor's (billed at the advisor model's price, which it names) and a compaction's
+ * (at the message's model). The top level adds up the executor's alone, each of which re-sent the
+ * whole conversation; so the tokens and cost are summed over every iteration, each at its own
+ * model's price, and the context is the last executor iteration's.
  * @param {string} line
  * @returns {UsageLine|null}
  */
 export function readUsageLine(line) {
-  if (!line.includes('"usage"')) return null;
-  let entry;
-  try {
-    entry = JSON.parse(line);
-  } catch {
-    return null;
-  }
-  const message = entry?.message;
-  const usage = message?.usage;
-  if (entry?.type !== 'assistant' || !usage || typeof usage !== 'object') return null;
+  const entry = meteredAssistantEntry(line);
+  if (!entry) return null;
+  const { message } = entry;
   const model = typeof message.model === 'string' ? message.model : '';
   if (model === '<synthetic>') return null;
   const ts = Date.parse(entry.timestamp);
+  const { parts, last } = iterationsOf(message.usage);
   return {
     // A message id with its request id: the same message, wherever it was copied, is one message.
     id: message.id || entry.requestId ? `${message.id ?? ''}:${entry.requestId ?? ''}` : String(entry.uuid ?? ''),
     model,
-    tokens: {
-      input: count(usage.input_tokens),
-      output: count(usage.output_tokens),
-      cacheRead: count(usage.cache_read_input_tokens),
-      cacheWrite: count(usage.cache_creation_input_tokens),
-    },
-    cost: messageCost(model, usage),
+    tokens: parts.map(tokensOf).reduce(addTokens),
+    cost: costOf(parts, model),
+    context: contextTokens(tokensOf(last)),
     ts: Number.isFinite(ts) ? ts : null,
     sidechain: entry.isSidechain === true,
   };
 }
 
 /**
- * The context a message used: everything the model read to write it. Claude Code's status line
- * counts it the same way: input, cache writes and cache reads (its output is not in it yet).
+ * A transcript line's assistant message with its usage, parsed; null for any other line and for
+ * one Claude Code marks unmetered.
+ * @param {string} line
+ * @returns {Record<string, any>|null}
+ */
+function meteredAssistantEntry(line) {
+  if (!line.includes('"usage"')) return null;
+  try {
+    const entry = JSON.parse(line);
+    const usage = entry?.message?.usage;
+    return entry?.type === 'assistant' && usage && typeof usage === 'object' && entry.isUnmetered !== true ? entry : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A reply's sampling iterations (the reply itself when it lists none), and the one its context
+ * is read from: the last executor iteration.
+ * @param {Record<string, any>} usage
+ * @returns {{ parts: Record<string, any>[], last: Record<string, any> }}
+ */
+function iterationsOf(usage) {
+  const iterations = Array.isArray(usage.iterations) ? usage.iterations.filter((it) => it && typeof it === 'object') : [];
+  return {
+    parts: iterations.length ? iterations : [usage],
+    last: iterations.filter((it) => EXECUTOR_ITERATIONS.has(it.type)).at(-1) ?? usage,
+  };
+}
+
+/** @param {Record<string, any>} usage  a message's usage, or one of its iterations @returns {Tokens} */
+function tokensOf(usage) {
+  return {
+    input: count(usage.input_tokens),
+    output: count(usage.output_tokens),
+    cacheRead: count(usage.cache_read_input_tokens),
+    cacheWrite: count(usage.cache_creation_input_tokens),
+  };
+}
+
+/** @param {Tokens} a @param {Tokens} b @returns {Tokens} */
+function addTokens(a, b) {
+  return { input: a.input + b.input, output: a.output + b.output, cacheRead: a.cacheRead + b.cacheRead, cacheWrite: a.cacheWrite + b.cacheWrite };
+}
+
+/**
+ * The estimated cost of a reply's iterations, each at the price of the model it names (an
+ * advisor's), else of the message's; null when one of those models has no known price.
+ * @param {Record<string, any>[]} parts
+ * @param {string} model
+ * @returns {number|null}
+ */
+function costOf(parts, model) {
+  let total = 0;
+  for (const part of parts) {
+    const cost = messageCost(typeof part.model === 'string' && part.model ? part.model : model, part);
+    if (cost === null) return null;
+    total += cost;
+  }
+  return total;
+}
+
+/**
+ * The context a request used: everything the model read to answer it, which Claude Code's status
+ * line counts as input, cache writes and cache reads (its output is not in it yet).
  * @param {Tokens} tokens
  */
 export function contextTokens(tokens) {
@@ -156,27 +246,31 @@ export function contextTokens(tokens) {
 }
 
 /**
- * True for the line Claude Code writes where it compacted the conversation: what came before it
- * is now a summary, so a reading from before it no longer holds.
+ * The line Claude Code writes where it compacted the conversation (what came before it is now a
+ * summary, so a reading from before it no longer holds), with its time; null for any other line.
  * @param {string} line
+ * @returns {{ at: number|null }|null}
  */
-export function isCompactBoundary(line) {
-  if (!line.includes('"compact_boundary"')) return false;
+export function readCompactBoundary(line) {
+  if (!line.includes('"compact_boundary"')) return null;
   try {
     const entry = JSON.parse(line);
-    return entry?.type === 'system' && entry.subtype === 'compact_boundary';
+    if (entry?.type !== 'system' || entry.subtype !== 'compact_boundary') return null;
+    const at = Date.parse(entry.timestamp);
+    return { at: Number.isFinite(at) ? at : null };
   } catch {
-    return false;
+    return null;
   }
 }
 
 /**
- * A hook that says the agent's conversation is being, or was just, compacted.
+ * A hook that says the agent's conversation was just compacted. Not PreCompact: another hook can
+ * still stop the compaction then.
  * @param {Record<string, any>} event
  */
 function isCompaction(event) {
   const name = event.hook_event_name;
-  return name === 'PreCompact' || name === 'PostCompact' || (name === 'SessionStart' && event.source === 'compact');
+  return name === 'PostCompact' || (name === 'SessionStart' && event.source === 'compact');
 }
 
 /**
@@ -295,7 +389,7 @@ export function createUsageTracker({ claudeDir, stateFile, onChange, throttleMs 
     compactions.set(key, at);
     if (compactions.size > MAX_AGENTS) compactions.delete(compactions.keys().next().value ?? '');
     const record = agents.get(key);
-    if (record && dropContext(record)) onChange(record, dayList());
+    if (record && markCompacted(record, at)) onChange(record, dayList());
   }
 
   /**
@@ -306,7 +400,7 @@ export function createUsageTracker({ claudeDir, stateFile, onChange, throttleMs 
    */
   function scan(file, sessionId, agentId) {
     // Keyed by real path: two names for one transcript share one offset.
-    const real = resolveInside(file, projects);
+    const real = resolveInside(file, projects) ?? (agentId ? inSubfolder(file, projects) : null);
     if (!real) return;
     const state = files.get(real) ?? { offset: 0 };
     files.delete(real);
@@ -318,9 +412,10 @@ export function createUsageTracker({ claudeDir, stateFile, onChange, throttleMs 
       return;
     }
     const key = agentKeyOf(sessionId, agentId);
-    const record = agents.get(key) ?? { sessionId, agentId, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0, unpriced: false, model: null, context: null };
+    const since = compactions.get(key) ?? 0;
+    const record = agents.get(key) ?? { sessionId, agentId, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0, unpriced: false, model: null, context: null, compactedAt: since || null };
     /** @type {LineScan} */
-    const lineScan = { days, seenIds, lead: !agentId, since: compactions.get(key) ?? 0, now: now() };
+    const lineScan = { days, seenIds, lead: !agentId, since, now: now() };
     let changed = false;
     for (const line of text.split('\n')) {
       if (applyLine(line, record, lineScan)) changed = true;
@@ -382,11 +477,12 @@ export function createUsageTracker({ claudeDir, stateFile, onChange, throttleMs 
  * @returns {boolean} whether the record changed
  */
 function applyLine(line, record, scan) {
-  if (isCompactBoundary(line)) return dropContext(record);
+  const boundary = readCompactBoundary(line);
+  if (boundary) return markCompacted(record, boundary.at ?? scan.now);
   const seen = readUsageLine(line);
   if (!seen) return false;
   const counted = countUsage(seen, record, scan);
-  // A message counted before (a resumed session's copy of it) still tells this agent's context.
+  // A message counted before (a forked session's copy of it) still tells this agent's context.
   return takeContext(seen, record, scan) || counted;
 }
 
@@ -435,14 +531,14 @@ function remember(seenIds, id, entry) {
 /**
  * Makes a message's context the agent's reading. Not when the message read nothing, when it is a
  * helper's message in its lead's transcript, or when it was written before the agent's last
- * compaction (a read that was already due when the compaction began brings those).
+ * compaction (a read that was already due when the compaction ended can bring those).
  * @param {UsageLine} seen
  * @param {UsageRecord} record
  * @param {LineScan} scan
  * @returns {boolean} whether the reading changed
  */
 function takeContext(seen, record, { lead, since, now }) {
-  const tokens = contextTokens(seen.tokens);
+  const tokens = seen.context;
   const at = seen.ts ?? now;
   if (tokens === 0 || (lead && seen.sidechain) || at <= since) return false;
   if (record.context?.tokens === tokens && record.context.at === at) return false;
@@ -450,10 +546,18 @@ function takeContext(seen, record, { lead, since, now }) {
   return true;
 }
 
-/** @param {UsageRecord} record @returns {boolean} whether there was a reading to drop */
-function dropContext(record) {
-  if (!record.context) return false;
+/**
+ * The agent compacted at `at`: its reading goes until its next message (the latest compaction
+ * is the one kept; a boundary line and its PostCompact hook tell of the same one).
+ * @param {UsageRecord} record
+ * @param {number} at
+ * @returns {boolean} whether the record changed
+ */
+function markCompacted(record, at) {
+  const latest = Math.max(record.compactedAt ?? 0, at);
+  if (!record.context && record.compactedAt === latest) return false;
   record.context = null;
+  record.compactedAt = latest;
   return true;
 }
 

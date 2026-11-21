@@ -117,7 +117,7 @@ test('hook events show up as a crew, agent rows and log entries', async ({ page 
   expect(await page.getByTestId('log-entry').count()).toBeGreaterThan(0);
 });
 
-test('the context in use: the crew line and the inspector read it from the transcript, a compaction clears it', async ({ page }) => {
+test('the context in use: the lead\'s row and the inspector read it from the transcript, a compaction clears it', async ({ page }) => {
   await signIn(page);
   // The town's own throw-away Claude Code folder (helpers/town.mjs), where transcripts are read.
   const project = join(dirname(town.home), 'claude', 'projects', '-work-e2e-app');
@@ -129,21 +129,22 @@ test('the context in use: the crew line and the inspector read it from the trans
   const send = async (/** @type {string} */ name, /** @type {Record<string, unknown>} */ extra = {}) => expect(await town.sendHook(hook(name, { transcript_path: transcript, ...extra }))).toMatchObject({ code: 0 });
   await send('SessionStart', { source: 'startup', model: 'claude-opus-5-5' });
   await send('PostToolUse', { tool_name: 'Bash', tool_use_id: 'tu-1', tool_input: { command: 'npm test' }, tool_response: {} });
-  const crew = page.locator('[data-testid="crew"][data-session-id="e2e-session"]');
-  await expect(crew.getByTestId('crew-context')).toHaveText('182k in context');
-  await page.locator('[data-testid="agent-row"][data-agent-key="e2e-session:main"]').click();
+  const lead = page.locator('[data-testid="agent-row"][data-agent-key="e2e-session:main"]');
+  // On the lead's row, under its time: the crew's name keeps its room.
+  await expect(lead.getByTestId('crew-context')).toHaveText('182k in context');
+  await lead.click();
   const exact = page.getByTestId('agent-inspector').getByTestId('agent-context');
-  await expect(exact).toHaveText('182,340 tokens in context, read 2m ago.');
-  // A compaction: the old count no longer holds, and nothing is shown until the next message.
+  await expect(exact).toHaveText('182,340 tokens in context, as of 2m ago.');
+  // A compaction (PreCompact alone proves nothing): the old count no longer holds until the next message.
   await send('PreCompact', { trigger: 'manual', custom_instructions: '' });
-  await expect(crew.getByTestId('crew-context')).toBeHidden();
-  await expect(exact).toBeHidden();
   await send('PostCompact', { trigger: 'manual', compact_summary: 'Fixed the flaky test.' });
+  await expect(lead.getByTestId('crew-context')).toHaveText('context compacted');
+  // "just now" for ten seconds: a slow machine may already read "10s ago".
+  await expect(exact).toHaveText(/^Context compacted (just now|\d0s ago); the new count comes with the next message\.$/);
   appendFileSync(transcript, message('msg_2', { input_tokens: 9, cache_creation_input_tokens: 23_000, cache_read_input_tokens: 8000, output_tokens: 40 }, Date.now()));
   await send('Stop', { last_assistant_message: 'Done.', stop_hook_active: false });
-  await expect(crew.getByTestId('crew-context')).toHaveText('31k in context');
-  // "just now" for ten seconds: a slow machine may already read "10s ago".
-  await expect(exact).toHaveText(/^31,009 tokens in context, read (just now|\d0s ago)\.$/);
+  await expect(lead.getByTestId('crew-context')).toHaveText('31k in context');
+  await expect(exact).toHaveText(/^31,009 tokens in context, as of (just now|\d0s ago)\.$/);
 });
 
 for (const decision of /** @type {const} */ (['allow', 'deny'])) {

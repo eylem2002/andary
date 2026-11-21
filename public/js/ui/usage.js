@@ -7,7 +7,6 @@ import { createDialog } from './dialogs.js';
 import { h, setHidden, setText } from './dom.js';
 import { formatAgo } from './format.js';
 import { localDateBefore } from '../core/dates.js';
-import { agentKeyOf } from '../core/ids.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -32,7 +31,8 @@ export function formatCost(usd) {
 export function formatTokens(n) {
   if (!Number.isFinite(n) || n <= 0) return '0';
   if (n < 1000) return String(Math.round(n));
-  if (n < 1e6) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0).replace(/\.0$/, '')}k`;
+  // From 999,500 the thousands would round to "1000k": that is a million.
+  if (n < 999_500) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0).replace(/\.0$/, '')}k`;
   return `${(n / 1e6).toFixed(n < 1e7 ? 1 : 0).replace(/\.0$/, '')}M`;
 }
 
@@ -42,7 +42,7 @@ export function totalTokens(tokens) {
 }
 
 /**
- * True once anything was counted. A record can carry a context reading alone: a resumed
+ * True once anything was counted. A record can carry a context reading alone: a forked
  * session's first messages are copies, already counted for the session they came from.
  * @param {AgentUsage} usage
  */
@@ -62,7 +62,7 @@ export function crewUsage(state, sessionId) {
   for (const [key, usage] of Object.entries(state.usage ?? {})) {
     if (!key.startsWith(`${sessionId}:`)) continue;
     // Each agent has a context of its own: there is no crew total of it.
-    sum ??= { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0, unpriced: false, model: usage.model, context: null };
+    sum ??= { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0, unpriced: false, model: usage.model, context: null, compactedAt: null };
     sum.tokens.input += usage.tokens.input;
     sum.tokens.output += usage.tokens.output;
     sum.tokens.cacheRead += usage.tokens.cacheRead;
@@ -84,39 +84,49 @@ export function usageShort(usage) {
 }
 
 /**
- * An agent's context reading while it can still be true. A finished helper's or an ended
- * crew's last reading describes a context that is gone, so it is not shown: a finished helper
- * stays listed for a while, an ended crew's agents leave the store. (A compaction drops the
- * reading where it is read, on the server or in the demo: none here is older than one.)
+ * @typedef {{ tokens: number|null, at: number }} ContextView  an agent's context in use as the
+ *   HUD shows it: a reading (`at`: when the message that used it was written), or `tokens: null`
+ *   from a compaction (`at`: when) to its next message
+ */
+
+/**
+ * An agent's context in use while it can still be true. A finished helper's or an ended crew's
+ * describes a context that is gone, so there is none: a finished helper stays listed for a while,
+ * an ended crew's agents leave the store. A reading from before the last compaction no longer
+ * holds either (the server drops it then); the compaction shows until the next reading.
  * @param {StoreState} state
  * @param {string} agentKey
- * @returns {AgentUsage['context']}
+ * @returns {ContextView|null}
  */
 export function liveContext(state, agentKey) {
-  const context = state.usage?.[agentKey]?.context ?? null;
+  const usage = state.usage?.[agentKey];
   const agent = state.agents[agentKey];
-  return context && agent && agent.status !== 'done' ? context : null;
+  if (!usage || !agent || agent.status === 'done') return null;
+  const { context, compactedAt } = usage;
+  if (context && (compactedAt === null || context.at > compactedAt)) return context;
+  return compactedAt ? { tokens: null, at: compactedAt } : null;
 }
 
 /**
- * What a crew line shows under the model: its lead's context, "182k in context".
- * @param {StoreState} state
- * @param {string} sessionId
+ * What the lead's row shows under its time: "182k in context", or "context compacted" until the
+ * next reading.
+ * @param {ContextView|null} view
  */
-export function crewContext(state, sessionId) {
-  const context = liveContext(state, agentKeyOf(sessionId, null));
-  return context ? `${formatTokens(context.tokens)} in context` : '';
+export function contextShort(view) {
+  if (!view) return '';
+  return view.tokens === null ? 'context compacted' : `${formatTokens(view.tokens)} in context`;
 }
 
 /**
- * The inspector's sentence: the exact count and when the message that used it was written,
- * "182,340 tokens in context, read 2m ago."
- * @param {NonNullable<AgentUsage['context']>} context
+ * The inspector's sentence: the exact count and how old the message that used it is ("as of":
+ * Andary read it later), "182,340 tokens in context, as of 2m ago."; or when it compacted.
+ * @param {ContextView} view
  * @param {number} now
  */
-export function contextSentence(context, now) {
-  const count = `${context.tokens.toLocaleString('en-US')} ${context.tokens === 1 ? 'token' : 'tokens'}`;
-  return `${count} in context, read ${formatAgo(context.at, now)}.`;
+export function contextSentence(view, now) {
+  const ago = formatAgo(view.at, now);
+  if (view.tokens === null) return `Context compacted ${ago}; the new count comes with the next message.`;
+  return `${view.tokens.toLocaleString('en-US')} ${view.tokens === 1 ? 'token' : 'tokens'} in context, as of ${ago}.`;
 }
 
 /**

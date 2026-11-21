@@ -2,12 +2,13 @@
 // and its agents are the stations along it. A station shows the agent's status, what it is doing
 // and for how long; clicking it selects the agent and points the camera at it. An agent that waits
 // for you or seems stuck ("needs you", core/attention.js) says what for and since when instead,
-// and a finished turn, a stop or a stuck alert can be set aside from its row. Under the model, the
-// lead's context in use.
-import { crewContext, crewUsage, usageShort } from './usage.js';
+// and a finished turn, a stop or a stuck alert can be set aside from its row. The lead's row also
+// shows the crew's context in use, under its time, where it takes no room from the crew's name.
+import { contextShort, crewUsage, liveContext, usageShort } from './usage.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from './dom.js';
 import { icon } from './icons.js';
 import { modelLabel } from '../core/catalog.js';
+import { agentKeyOf } from '../core/ids.js';
 import { doingText, formatDuration, isCommandText, plural, truncate } from './format.js';
 import { approvalAgentKey, roundel, setCurrent, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 import { itemsByAgent, waitedText } from './needs-you.js';
@@ -63,7 +64,6 @@ export function createCrewsPanel(ctx) {
     const title = h('span', { class: 'hud-line__title' });
     const name = h('h3', { class: 'hud-line__name' }, number, title);
     const model = h('span', { class: 'hud-line__model' });
-    const context = h('span', { class: 'hud-line__context', 'data-testid': 'crew-context', hidden: true });
     const memberName = h('span', {});
     const member = h('span', { class: 'hud-line__member', 'data-testid': 'crew-member' }, srOnly('Shared by '), memberName);
     // Codex crews say so; Claude Code is the town's default and carries no badge.
@@ -78,8 +78,8 @@ export function createCrewsPanel(ctx) {
       render(ctx.store.getState());
     });
     const line = h('li', { class: 'hud-line', 'data-testid': 'crew', 'data-session-id': session.id },
-      h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, member, agent, model, context, cost)), goal, stations, more);
-    parts.set(line, { mark, number, title, name, model, context, cost, member, memberName, agent, goal, stations, more });
+      h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, member, agent, model, cost)), goal, stations, more);
+    parts.set(line, { mark, number, title, name, model, cost, member, memberName, agent, goal, stations, more });
     return line;
   }
 
@@ -88,9 +88,9 @@ export function createCrewsPanel(ctx) {
    * @param {Session} session
    * @param {StoreState} state
    * @param {number} number
-   * @param {Waits} waits
+   * @param {RowFacts} facts
    */
-  function updateLine(line, session, state, number, waits) {
+  function updateLine(line, session, state, number, facts) {
     const p = parts.get(line);
     setCrewColor(line, session.color);
     updateRoundel(p.mark, number, session.color);
@@ -103,9 +103,6 @@ export function createCrewsPanel(ctx) {
     setHidden(p.member, !session.member);
     setHidden(p.agent, session.source !== 'codex');
     setText(p.model, ended ? 'Ended' : modelLabel(session.model));
-    const inContext = crewContext(state, session.id);
-    setText(p.context, inContext);
-    setHidden(p.context, !inContext);
     const spent = usageShort(crewUsage(state, session.id));
     setText(p.cost, spent);
     setAttr(p.cost, 'aria-label', spent ? `Estimated cost ${spent}. Show usage` : null);
@@ -114,7 +111,7 @@ export function createCrewsPanel(ctx) {
     setHidden(p.goal, !session.goal || ended);
     const showAll = unfolded.has(session.id);
     const shown = ended ? [] : visibleAgents(session, state, showAll);
-    renderList(p.stations, shown, (agent) => agent.key, (agent) => createStation(ctx, parts, agent), (item, agent) => updateStation(ctx, parts, item, agent, waits));
+    renderList(p.stations, shown, (agent) => agent.key, (agent) => createStation(ctx, parts, agent), (item, agent) => updateStation(ctx, parts, item, agent, facts));
     const hiddenCount = Math.max(0, countFinished(session, state) - FINISHED_SHOWN);
     setHidden(p.more, ended || hiddenCount === 0);
     setText(p.more, showAll ? 'Hide finished agents' : `Show ${plural(hiddenCount, 'more finished agent')}`);
@@ -128,12 +125,16 @@ export function createCrewsPanel(ctx) {
     setText(count, active.length ? `${active.length} active` : '');
     setText(empty, emptyText(ctx));
     setHidden(empty, state.sessions.length > 0);
-    /** @type {Waits} */
-    const waits = { needs: itemsByAgent(state, ctx.needsYou, Date.now()), asking: new Map() };
+    /** @type {RowFacts} */
+    const facts = { needs: itemsByAgent(state, ctx.needsYou, Date.now()), asking: new Map(), contexts: new Map() };
     for (const approval of state.approvals) {
-      if (approval.status === 'pending' && !waits.asking.has(approvalAgentKey(approval))) waits.asking.set(approvalAgentKey(approval), approval);
+      if (approval.status === 'pending' && !facts.asking.has(approvalAgentKey(approval))) facts.asking.set(approvalAgentKey(approval), approval);
     }
-    renderList(lines, [...active, ...ended], (session) => session.id, createLine, (line, session) => updateLine(line, session, state, session.number, waits));
+    for (const session of active) {
+      const lead = agentKeyOf(session.id, null);
+      facts.contexts.set(lead, contextShort(liveContext(state, lead)));
+    }
+    renderList(lines, [...active, ...ended], (session) => session.id, createLine, (line, session) => updateLine(line, session, state, session.number, facts));
     applyCollapsed();
   }
 
@@ -152,9 +153,10 @@ export function createCrewsPanel(ctx) {
 }
 
 /**
- * @typedef {object} Waits  what the agents wait for, by agent key
+ * @typedef {object} RowFacts  what the rows show besides each agent's own state, by agent key
  * @property {Map<string, import('../core/attention.js').AttentionItem>} needs  their "needs you" item
  * @property {Map<string, import('./types.js').Approval>} asking  their pending approval
+ * @property {Map<string, string>} contexts  a lead's context in use ("182k in context")
  */
 
 /**
@@ -168,7 +170,9 @@ function createStation(ctx, parts, agent) {
   const name = h('span', { class: 'hud-station__name' });
   const clock = h('span', {});
   const clockWords = srOnly('');
-  const time = h('span', { class: 'hud-station__time' }, clock, clockWords);
+  // A lead's: on its own line under the time, so it widens the time a little, never the name.
+  const context = h('span', { class: 'hud-station__context', 'data-testid': 'crew-context', hidden: true });
+  const time = h('span', { class: 'hud-station__time' }, clock, clockWords, context);
   const doing = h('span', { class: 'hud-station__doing' });
   const button = h('button', { type: 'button', class: 'hud-station', 'data-testid': 'agent-row', 'data-agent-key': agent.key },
     h('span', { class: 'hud-station__mark' }, chip), name, time, doing);
@@ -185,7 +189,7 @@ function createStation(ctx, parts, agent) {
     ctx.announcer.polite(`Set aside: ${need.text}`);
     ctx.refresh();
   });
-  parts.set(item, { chip, name, clock, clockWords, doing, button, dismiss });
+  parts.set(item, { chip, name, clock, clockWords, context, doing, button, dismiss });
   return item;
 }
 
@@ -194,16 +198,19 @@ function createStation(ctx, parts, agent) {
  * @param {WeakMap<HTMLElement, any>} parts
  * @param {HTMLElement} item
  * @param {AgentState} agent
- * @param {Waits} waits
+ * @param {RowFacts} facts
  */
-function updateStation(ctx, parts, item, agent, waits) {
+function updateStation(ctx, parts, item, agent, facts) {
   const p = parts.get(item);
-  const need = waits.needs.get(agent.key) ?? null;
+  const need = facts.needs.get(agent.key) ?? null;
   updateStatusChip(p.chip, agent.status);
   setText(p.name, agent.name);
-  const doing = need ? truncate(need.text, 90) : doingText(agent, waits.asking.get(agent.key));
+  const doing = need ? truncate(need.text, 90) : doingText(agent, facts.asking.get(agent.key));
   setText(p.doing, doing);
   p.doing.classList.toggle('hud-mono', isCommandText(doing));
+  const inContext = facts.contexts.get(agent.key) ?? '';
+  setText(p.context, inContext);
+  setHidden(p.context, !inContext);
   setAttr(p.button, 'data-status', agent.status);
   setAttr(p.button, 'data-need', need?.level ?? null);
   setCurrent(p.button, ctx.view.selection?.type === 'agent' && ctx.view.selection.id === agent.key);

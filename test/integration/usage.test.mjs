@@ -50,9 +50,12 @@ describe('Token usage from transcripts', () => {
     await hook('PostToolUse', { tool_name: 'Bash', tool_use_id: 'tu-1', tool_input: { command: 'npm test' }, tool_response: {} });
     const first = await waitForMessage(browser, (m) => m?.t === 'usage' && m.u.sessionId === 'session-c', 5000);
     assert.deepEqual(first.u.context, { tokens: 182_340, at: Date.parse(written) });
-    // A compaction: unknown at once, before the next read of the transcript.
-    await hook('PreCompact', { trigger: 'manual', custom_instructions: '' });
-    await waitForMessage(browser, (m) => m?.t === 'usage' && m.u.sessionId === 'session-c' && m.u.context === null, 2000);
+    assert.equal(first.u.compactedAt, null);
+    // A compaction: unknown at once, before the next read of the transcript, and when it was.
+    const before = Date.now();
+    await hook('PostCompact', { trigger: 'manual', compact_summary: 'Fixed the flaky test.' });
+    const compacted = await waitForMessage(browser, (m) => m?.t === 'usage' && m.u.sessionId === 'session-c' && m.u.context === null, 2000);
+    assert.ok(compacted.u.compactedAt >= before && compacted.u.compactedAt <= Date.now());
     await new Promise((r) => setTimeout(r, 20));
     writeFileSync(transcript, message('msg_c2', { input_tokens: 9, cache_creation_input_tokens: 23_000, cache_read_input_tokens: 8000, output_tokens: 40 }, new Date().toISOString()), { flag: 'a' });
     await hook('Stop', { last_assistant_message: 'done', stop_hook_active: false });

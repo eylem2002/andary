@@ -150,6 +150,7 @@ export { ACHIEVEMENTS };
  * @property {string|null} model
  * @property {{ tokens: number, at: number }|null} context  the context its newest message used, and
  *   when that was written; null until one is read and after a compaction (§4.8)
+ * @property {number|null} compactedAt  when it last compacted, as far as the server saw
  */
 
 /** @typedef {{ date: string, tokens: number, costUsd: number }} UsageDay */
@@ -932,6 +933,7 @@ function readUsage(raw) {
       unpriced: raw.unpriced === true,
       model: typeof raw.model === 'string' ? raw.model : null,
       context: readContext(raw.context),
+      compactedAt: amount(raw.compactedAt) || null,
     },
   };
 }

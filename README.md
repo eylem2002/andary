@@ -200,12 +200,12 @@ ps`) never count.
 - **Cost and tokens:** each crew shows what it has cost so far, estimated at API list prices from
   Claude Code's own transcripts (on a Pro or Max plan, a measure of value, not a bill). `U` opens
   today's total and the last 14 days.
-- **Context in use:** under the model, each crew shows how much context its lead is using
-  ("182k in context"), counted from its latest message the way Claude Code's status line counts
-  it; an agent's details give the exact count and when it was read, for helpers too. There is no
-  percentage: Andary cannot tell how large the window is or where you set compaction (`/context`
-  in Claude Code shows the full picture). A compaction clears the count until the agent's next
-  message. Not for Codex yet.
+- **Context in use:** each crew's lead shows how much context it is using, under its time
+  ("182k in context"): what its latest request read, the way Claude Code's status line counts it.
+  An agent's details give the exact count and how old it is ("as of 2m ago"), for helpers too.
+  There is no percentage: Andary cannot tell how large the window is or where you set compaction
+  (`/context` in Claude Code shows the full picture). After a compaction it says "context
+  compacted" until the agent's next message. Not for Codex yet.
 - **Weather:** rain when commands fail, a storm when they keep failing, a rainbow when tests pass
   again, fog while a crew thinks for a long time; a storm cloud over an agent that seems stuck.
 - **The town grows:** finished turns and tasks earn points, and points build landmarks, from
