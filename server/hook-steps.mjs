@@ -27,7 +27,7 @@ export function withCallKey(event) {
     return rest;
   }
   if (typeof event.andary_key === 'string') return event;
-  return { ...event, andary_key: event.andary_tool ? null : inputKey(event.tool_input, event.tool_name) };
+  return { ...event, andary_key: event.andary_tool ? null : inputKey(event.tool_input, { tool: event.tool_name, source: event.andary_source }) };
 }
 
 /**
@@ -50,13 +50,18 @@ export function callOf(event) {
   };
 }
 
-/** The oldest a hook's own time may be, before its arrival: a forwarder delivers within seconds. */
-export const MAX_HOOK_AGE_MS = 60_000;
+/**
+ * The oldest a hook's own time may be, before its arrival. A forwarder may be held back for long:
+ * a computer that sleeps or suspends between its start and its post delivers a hook stamped
+ * minutes ago, and it must still find its own dialog. The stamp is this computer's own clock, so
+ * an hour bounds a forged or broken one without misplacing a hook that was only late.
+ */
+export const MAX_HOOK_AGE_MS = 60 * 60_000;
 
 /**
- * A hook's own time: when the agent sent it (the forwarder's `ts`), kept between a minute before
+ * A hook's own time: when the agent sent it (the forwarder's `ts`), kept between an hour before
  * now (MAX_HOOK_AGE_MS) and now, so a wrong clock or a forged stamp cannot place a hook ahead of
- * every other or behind them all; its arrival when it has none. A permission request is sent at
+ * every other or far behind them all; its arrival when it has none. A permission request is sent at
  * once and a PreToolUse or a notice in the background, so a later hook can arrive first: the
  * dialog rules go by this time.
  * @param {unknown} ts @param {number} now

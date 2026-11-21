@@ -74,24 +74,26 @@ export const FORM_NOTICES = Object.freeze(['elicitation_dialog', 'elicitation_ur
  */
 
 /**
- * Tools whose `description` only labels the call: it changes nothing that runs, and Codex sends
- * one with a request only, not with the call's PreToolUse or result. Any other tool's (an MCP
- * tool's) may be what it acts on.
+ * Claude Code's tools whose `description` only labels the call: it changes nothing that runs. Any
+ * other tool's (an MCP tool's) may be what it acts on.
  */
 const LABELLED_TOOLS = Object.freeze(['Bash', 'PowerShell']);
 
 /**
  * A short key for a tool input, equal for equal inputs. A command sent as an argument list
- * (Codex) is joined first, as the request and its result may differ in that alone, and a
- * command's `description` is left out (LABELLED_TOOLS).
+ * (Codex) is joined first, as the request and its result may differ in that alone. A
+ * `description` is left out of every Codex call's key, as Codex adds one, its reason for asking,
+ * to a request of any tool and never to the call's PreToolUse or result; and out of a command's
+ * (LABELLED_TOOLS), whoever sent it.
  * @param {unknown} input
- * @param {unknown} [tool]  the tool's name
+ * @param {{ tool?: unknown, source?: unknown }} [call]  its tool's name; its source ('codex')
  * @returns {string}
  */
-export function inputKey(input, tool) {
+export function inputKey(input, { tool, source } = {}) {
   if (!isObject(input)) return hash53(JSON.stringify(input ?? null));
   const { description: _label, ...rest } = input;
-  const kept = typeof tool === 'string' && LABELLED_TOOLS.includes(tool) ? rest : input;
+  const labelOnly = source === 'codex' || (typeof tool === 'string' && LABELLED_TOOLS.includes(tool));
+  const kept = labelOnly ? rest : input;
   return hash53(JSON.stringify(Array.isArray(kept.command) ? { ...kept, command: shellWords(kept.command) } : kept));
 }
 
@@ -103,6 +105,13 @@ function kindOf(tools) {
 
 /** A session's notice: no tool, so no call can be matched to it. @param {Dialog} d */
 const isNotice = (d) => d.tools.length === 0;
+
+/**
+ * Whether a session's notice sent at `noticeAt` came before a call the lead started at `callAt`,
+ * by ORDER_SLACK_MS at least: only then does that call show the notice was answered.
+ * @param {number} noticeAt @param {number} callAt
+ */
+const cameBefore = (noticeAt, callAt) => noticeAt <= callAt - ORDER_SLACK_MS;
 
 /** @param {Dialog} d @param {Call} call */
 function sameAgent(d, call) {
@@ -120,12 +129,23 @@ function fits(d, call) {
 }
 
 /**
- * @param {{ max?: number }} [options]  max: open dialogs kept; the oldest give way
+ * @param {{ max?: number }} [options]  max: open dialogs kept, and sessions whose lead's newest
+ *   call start is kept; the oldest give way
  */
 export function createDialogs({ max = 200 } = {}) {
   /** @type {Dialog[]} oldest first */
   let open = [];
   let seq = 0;
+  /** @type {Map<string, number>} each session's lead's newest call start, the least recent first */
+  const leadStarts = new Map();
+
+  /** @param {string} sessionId @param {number} at */
+  function leadStarted(sessionId, at) {
+    const newest = Math.max(at, leadStarts.get(sessionId) ?? at);
+    leadStarts.delete(sessionId);
+    leadStarts.set(sessionId, newest);
+    if (leadStarts.size > max) leadStarts.delete(/** @type {string} */ (leadStarts.keys().next().value));
+  }
 
   /** @param {Omit<Dialog, 'id'|'approvalId'|'held'>} fields */
   function add(fields) {
@@ -203,11 +223,14 @@ export function createDialogs({ max = 200 } = {}) {
     /**
      * The session says something waits for you, without saying whose: a permission dialog
      * ('unknown', a dialog of its own only when nothing of that session is known to be open), or
-     * an MCP server's form ('question', unless one is already open).
+     * an MCP server's form ('question', unless one is already open). One that came before a call
+     * the lead has started since (it may arrive after that call's PreToolUse) was answered already.
      * @param {string} sessionId @param {number} at @param {string} [text] @param {DialogKind} [kind]
      * @returns {Dialog|null} the new dialog
      */
     notice(sessionId, at, text = '', kind = 'unknown') {
+      const started = leadStarts.get(sessionId);
+      if (started !== undefined && cameBefore(at, started)) return null;
       const known = kind === 'unknown' ? open.some((d) => d.sessionId === sessionId) : open.some((d) => d.sessionId === sessionId && isNotice(d) && d.kind === kind);
       if (known) return null;
       return add({ sessionId, agentId: null, kind, tools: [], input: null, at, text, requested: false, begun: false });
@@ -269,17 +292,20 @@ export function createDialogs({ max = 200 } = {}) {
     },
 
     /**
-     * The lead started a new tool call: a session's notice that came before it (by ORDER_SLACK_MS
-     * at least) was answered (an agent waiting on a dialog starts nothing). Tool results prove
-     * nothing for such a dialog: a parallel call may finish while it still waits.
+     * The lead started a new tool call: a session's notice that came before it (cameBefore) was
+     * answered (an agent waiting on a dialog starts nothing), and so is one that arrives later but
+     * was sent before it (notice). Tool results prove nothing for such a dialog: a parallel call
+     * may finish while it still waits.
      * @param {string} sessionId @param {number} at @returns {Dialog[]}
      */
     movedOn(sessionId, at) {
-      return close((d) => d.sessionId === sessionId && isNotice(d) && d.at <= at - ORDER_SLACK_MS);
+      leadStarted(sessionId, at);
+      return close((d) => d.sessionId === sessionId && isNotice(d) && cameBefore(d.at, at));
     },
 
     /** The session ended or was interrupted: all of its dialogs. @param {string} sessionId @returns {Dialog[]} */
     closeSession(sessionId) {
+      leadStarts.delete(sessionId);
       return close((d) => d.sessionId === sessionId);
     },
 

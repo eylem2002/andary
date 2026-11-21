@@ -375,6 +375,15 @@ describe('the dialog model decides what the terminal answered (core/dialogs.js)'
     }
   });
 
+  it("a question's PreToolUse held back ten minutes by sleep still finds its own dialog", () => {
+    const { broker, advance } = setup();
+    const question = { session_id: 's1', tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which port?' }] } };
+    broker.create(keyed(request(question)), { hold: false, at: 1_000 });
+    advance(10 * 60_000);
+    assert.equal(broker.observe(keyed({ hook_event_name: 'PreToolUse', ...question }), 995), 0, 'its own start answers nothing');
+    assert.equal(broker.list()[0].status, 'pending');
+  });
+
   it("a held request whose turn or session ended meanwhile is answered once it goes back to the terminal", () => {
     /** @type {[string, Record<string, any>][]} */
     const ends = [

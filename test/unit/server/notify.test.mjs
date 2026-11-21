@@ -288,6 +288,33 @@ test("Codex's renamed calls prove their dialog answered", async () => {
   }
 });
 
+test("a Codex request with its reason for asking is answered by its call's start and result, whatever the tool", async () => {
+  // Codex adds `description`, its reason, to a request only: never to the call's other hooks.
+  const patch = '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** End Patch';
+  /** @type {[string, Record<string, any>][]} */
+  const calls = [['apply_patch', { command: patch }], ['mcp__gh__create_issue', { repo: 'a/b', title: 'Flaky test' }]];
+  for (const [tool, input] of calls) {
+    const town = testNotifier();
+    const broker = brokerFor(town);
+    const [asked] = codex({ hook_event_name: 'PermissionRequest', tool_name: tool, tool_input: { ...input, description: 'It needs to change the file' } });
+    town.notifier.observe(asked);
+    broker.create(asked, { hold: false });
+    for (const event of codex({ hook_event_name: 'PreToolUse', tool_use_id: 'call_1', tool_name: tool, tool_input: input })) {
+      town.notifier.observe(event);
+      broker.observe(event);
+    }
+    await town.at(2_000);
+    let resolved = 0;
+    for (const event of codex({ hook_event_name: 'PostToolUse', tool_use_id: 'call_1', tool_name: tool, tool_input: input, tool_response: { output: 'ok' } })) {
+      town.notifier.observe(event);
+      resolved += broker.observe(event);
+    }
+    await town.at(60_000);
+    assert.equal(town.posts.length, 0, `${tool}: answered in 2 s, no note`);
+    assert.deepEqual([resolved, broker.list()[0].status, broker.list()[0].proof], [1, 'resolved', 'ran'], tool);
+  }
+});
+
 test('the broker follows the same rules: a parallel call settles neither the note nor the request', async () => {
   const town = testNotifier();
   const broker = brokerFor(town);

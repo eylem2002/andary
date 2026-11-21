@@ -47,8 +47,8 @@ export function fromCodex(payload) {
  */
 function toolEvents(event) {
   // Keyed before its input is rewritten: each payload made from it keeps the call's own key.
-  if (event.tool_name === 'apply_patch') return patchEvents({ ...event, andary_tool: 'apply_patch', andary_key: inputKey(event.tool_input, event.tool_name) });
-  if (event.tool_name === 'spawn_agent') return [spawnEvent({ ...event, andary_tool: 'spawn_agent', andary_key: inputKey(event.tool_input, event.tool_name) })];
+  if (event.tool_name === 'apply_patch') return patchEvents({ ...event, andary_tool: 'apply_patch', andary_key: inputKey(event.tool_input, { tool: event.tool_name, source: 'codex' }) });
+  if (event.tool_name === 'spawn_agent') return [spawnEvent({ ...event, andary_tool: 'spawn_agent', andary_key: inputKey(event.tool_input, { tool: event.tool_name, source: 'codex' }) })];
   const shell = event.tool_name === 'Bash' ? withShellCommand(event) : event;
   return [failed(shell) ?? shell];
 }

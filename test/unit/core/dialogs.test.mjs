@@ -136,6 +136,26 @@ describe('createDialogs', () => {
     assert.equal(afterHook(d, { hook: 'PreToolUse', call: lead(['Read'], { file_path: 'y' }), at: 10_000 + ORDER_SLACK_MS }).closed.length, 1);
   });
 
+  test("a notice that arrives after the lead's next call started opens nothing: it was answered", () => {
+    // A sandbox's prompt sent at 2,000 arrives after the PreToolUse of a call the lead started at
+    // 3,000, once it got past that prompt.
+    const d = createDialogs();
+    afterHook(d, { hook: 'PreToolUse', call: lead(['Read'], { file_path: 'x' }), at: 3_000 });
+    afterHook(d, { hook: 'PreToolUse', call: lead(['Read'], { file_path: 'y' }), at: 2_500 });
+    assert.equal(d.notice(S, 3_000 - ORDER_SLACK_MS), null, 'the newest start counts');
+    assert.equal(afterHook(d, { hook: 'Notification', notice: 'elicitation_dialog', call: lead([]), at: 2_000 }).opened, null);
+    assert.equal(d.notice(S, 3_001 - ORDER_SLACK_MS)?.kind, 'unknown', 'one sent too close to it may be its own');
+    assert.equal(d.notice('other', 2_000)?.kind, 'unknown', 'another session is another lead');
+    afterHook(d, { hook: 'PreToolUse', call: helper(['Read']), at: 9_000 });
+    assert.equal(d.notice(S, 5_000, '', 'question')?.kind, 'question', "a helper's call is not the lead's");
+    d.closeSession(S);
+    assert.equal(d.notice(S, 1_000)?.kind, 'unknown', 'an ended session is forgotten');
+    // Bounded: the least recent session's start gives way.
+    const few = createDialogs({ max: 2 });
+    for (const session of ['a', 'b', 'c']) few.movedOn(session, 5_000);
+    assert.deepEqual(['a', 'b', 'c'].map((session) => few.notice(session, 1_000) !== null), [true, false, false]);
+  });
+
   test("a session's notice counts only when nothing of that session is known to be open", () => {
     const d = createDialogs();
     d.ask(helper(['Bash'], { command: 'npm run lint -- --fix' }), 1);
@@ -226,17 +246,23 @@ describe('inputKey', () => {
 
   test("a command's description is left out: it changes nothing that runs, and Codex sends one with a request only", () => {
     for (const tool of ['Bash', 'PowerShell']) {
-      assert.equal(inputKey({ command: 'git push', description: 'Push the branch' }, tool), inputKey({ command: 'git push' }, tool), tool);
-      assert.equal(inputKey({ command: ['git', 'push'], description: 'Push' }, tool), inputKey({ command: 'git push' }, tool), tool);
+      assert.equal(inputKey({ command: 'git push', description: 'Push the branch' }, { tool }), inputKey({ command: 'git push' }, { tool }), tool);
+      assert.equal(inputKey({ command: ['git', 'push'], description: 'Push' }, { tool }), inputKey({ command: 'git push' }, { tool }), tool);
     }
-    assert.notEqual(inputKey({ command: 'git push', timeout: 5 }, 'Bash'), inputKey({ command: 'git push' }, 'Bash'), 'every other field counts');
-    assert.equal(inputKey('description', 'Bash'), inputKey('description'), 'an input that is not an object is keyed as it is');
+    assert.notEqual(inputKey({ command: 'git push', timeout: 5 }, { tool: 'Bash' }), inputKey({ command: 'git push' }, { tool: 'Bash' }), 'every other field counts');
+    assert.equal(inputKey('description', { tool: 'Bash' }), inputKey('description'), 'an input that is not an object is keyed as it is');
   });
 
   test("any other tool's description is part of its call: an MCP tool's may be what it acts on", () => {
-    const issue = (/** @type {string} */ description) => inputKey({ repo: 'a/b', title: 'Flaky test', description }, 'mcp__gh__create_issue');
+    const issue = (/** @type {string} */ description) => inputKey({ repo: 'a/b', title: 'Flaky test', description }, { tool: 'mcp__gh__create_issue' });
     assert.notEqual(issue('Seen on CI'), issue('Seen locally'), 'two parallel calls differing only in it');
     assert.notEqual(inputKey({ description: 'x' }), inputKey({}), 'nor without a tool name');
+  });
+
+  test("a Codex call's description is left out whatever its tool: Codex adds its reason for asking to a request only", () => {
+    for (const tool of ['apply_patch', 'mcp__gh__create_issue', 'Bash']) {
+      assert.equal(inputKey({ title: 'x', description: 'Needs to write the file' }, { tool, source: 'codex' }), inputKey({ title: 'x' }, { tool, source: 'codex' }), tool);
+    }
   });
 });
 

@@ -177,22 +177,27 @@ export function quoted(text, max = 32) {
 /**
  * Characters that change how text looks without being seen: controls, format characters
  * (bidirectional overrides and isolates, "Trojan Source"; zero-width characters; Unicode tags),
- * line and paragraph separators, spaces, every default-ignorable code point, assigned or not
- * (browsers draw an unassigned one, such as U+2065 or U+E0080, with no width), and characters
- * that draw nothing though Unicode gives them a glyph (the Braille blank; the Hangul fillers and
- * the tags are default-ignorable too, but named). The combining ones that draw nothing (variation
- * selectors, the combining grapheme joiner, the Mongolian free variation selectors, the Khmer
- * inherent vowels) come with Default_Ignorable_Code_Point: named in a class, they would read as
- * joined to the character before them. One class, so a long run of them is read one way only and
- * costs no backtracking. The plain space, tab and newline are left out where they are no secret.
+ * private-use characters (whatever a font draws for them), line and paragraph separators, spaces,
+ * every default-ignorable code point, assigned or not (browsers draw an unassigned one, such as
+ * U+2065 or U+E0080, with no width), and characters that draw nothing though Unicode gives them a
+ * glyph (the Khitan filler, the Braille blank; the Hangul fillers and the tags are
+ * default-ignorable too, but named). The combining ones that draw nothing (variation selectors,
+ * the combining grapheme joiner, the Mongolian free variation selectors, the Khmer inherent
+ * vowels) come with Default_Ignorable_Code_Point: named in a class after another character, they
+ * would read as joined to it, which is why the Khitan filler, a combining mark, is named first.
+ * One class, so a long run of them is read one way only and costs no backtracking. The plain
+ * space, tab and newline are left out where they are no secret.
  */
-const UNSEEN = String.raw`[\p{Cc}\p{Cf}\p{Z}\p{Default_Ignorable_Code_Point}\u115F\u1160\u2800\u3164\uFFA0\u{E0000}-\u{E007F}]`;
+const UNSEEN_CHARS = String.raw`\u{16FE4}\p{Cc}\p{Cf}\p{Co}\p{Z}\p{Default_Ignorable_Code_Point}\u115F\u1160\u2800\u3164\uFFA0\u{E0000}-\u{E007F}`;
+const UNSEEN = `[${UNSEEN_CHARS}]`;
 /** One hidden character: any of those but the plain space, the tab and the newline. */
 const HIDDEN = String.raw`(?![\t\n ])${UNSEEN}`;
 /** Every hidden character. */
 const HIDDEN_CHAR = new RegExp(HIDDEN, 'gu');
 /** A combining mark that draws (the hidden ones, such as variation selectors, are HIDDEN). */
 const MARK = String.raw`(?!${UNSEEN})\p{M}`;
+/** Whether text holds a combining mark. */
+const HAS_MARK = /\p{M}/u;
 /** More combining marks on one base than any script needs: a stack that paints over other lines. */
 const MAX_MARKS = 3;
 /**
@@ -200,14 +205,28 @@ const MAX_MARKS = 3;
  * The two start with different characters, so neither can take the other's place.
  */
 const UNSEEN_RUN = new RegExp(`((?:${HIDDEN})+)|(?:${MARK}){${MAX_MARKS + 1},}`, 'gu');
-/** Characters that JavaScript and some tools read as a line break: the marker breaks the line too. */
+/**
+ * Characters other than the newline that some readers take for a line break: U+2028 and U+2029
+ * end a line in JavaScript and in Python's str.splitlines(); NEL (U+0085) in splitlines() and in
+ * some editors, not in JavaScript. Their marker breaks the line too.
+ */
 const LINE_BREAK = /[\u0085\u2028\u2029]/u;
-/** A line that shows nothing: only spaces, tabs and hidden characters. */
-const BLANK_LINE = new RegExp(String.raw`^(?:(?!\n)${UNSEEN})*$`, 'u');
+/**
+ * A carriage return that is not part of a CRLF, nor the last character of its line or text: it
+ * ends a line in JavaScript, in Python source and in most editors, so its marker breaks the line.
+ */
+const LONE_CR = /\r(?!$)/u;
+/**
+ * One character of a line that shows nothing: a space, a tab, a hidden character or a combining
+ * mark (on such a line it has nothing to sit on that shows). One class: no backtracking.
+ */
+const BLANK_CHAR = String.raw`(?:(?!\n)[${UNSEEN_CHARS}\p{M}])`;
+/** A line that shows nothing. */
+const BLANK_LINE = new RegExp(String.raw`^${BLANK_CHAR}*$`, 'u');
 /** Lines that show nothing in a row, from this many on, become one marker line. */
 export const BLANK_RUN_LINES = 3;
 /** BLANK_RUN_LINES or more lines in a row that show nothing, with the line breaks around them. */
-const BLANK_RUN = new RegExp(String.raw`\n(?:(?:(?!\n)${UNSEEN})*\n){${BLANK_RUN_LINES},}`, 'gu');
+const BLANK_RUN = new RegExp(String.raw`\n(?:${BLANK_CHAR}*\n){${BLANK_RUN_LINES},}`, 'gu');
 /** At most this many characters are named in a marker; the rest are counted. */
 const MAX_NAMES = 3;
 
@@ -238,8 +257,8 @@ function sentence(items) {
 }
 
 /**
- * Whether a line shows nothing (only spaces, tabs and hidden characters), so that a run of such
- * lines is collapsed where text is judged by eye (see blankLines).
+ * Whether a line shows nothing (only spaces, tabs, hidden characters and combining marks), so
+ * that a run of such lines is collapsed where text is judged by eye (see blankLines).
  * @param {string} line
  */
 export function looksBlank(line) {
@@ -248,8 +267,8 @@ export function looksBlank(line) {
 
 /**
  * The one marker line that stands for `count` lines that show nothing, naming the hidden
- * characters they hold (to a shell a line of no-break spaces is a word, not a blank) and, after a
- * colon, any `parts` the caller counts ("80 added", "40 removed").
+ * characters they hold (to a shell a line of no-break spaces is a word, not a blank), and any
+ * combining marks, and, after a colon, any `parts` the caller counts ("80 added", "40 removed").
  * @param {number} count
  * @param {string} text  those lines
  * @param {string[]} [parts]
@@ -257,34 +276,38 @@ export function looksBlank(line) {
  */
 export function blankLines(count, text, parts = []) {
   const named = namesOf(Array.from(text.matchAll(HIDDEN_CHAR), ([ch]) => ch));
+  if (HAS_MARK.test(text.replace(HIDDEN_CHAR, ''))) named.push('combining marks');
   const held = named.length ? ` with ${sentence(named)}` : '';
   return `⟨${count} blank lines${held}${parts.length ? `: ${parts.join(', ')}` : ''}⟩`;
 }
 
 /**
  * The marker for a run of hidden characters: the ones it holds and its length (⟨U+00A0 ×1900⟩,
- * ⟨U+00A0 U+3000 ×2000⟩). One that JavaScript reads as a line break (U+2028, U+2029, NEL) also
- * breaks the line after the marker, so the lines you read are the lines the tool reads.
+ * ⟨U+00A0 U+3000 ×2000⟩), followed by a line break when the run holds one that a reader may take
+ * for a line break (LINE_BREAK, LONE_CR), so the lines you read are the lines it reads.
  * @param {string} run
+ * @param {string} next  the character after the run ('' at the end of the text)
  * @returns {string}
  */
-function hiddenMarker(run) {
+function hiddenMarker(run, next) {
   const count = codePoints(run);
   const marker = `⟨${namesOf(run).join(' ')}${count > 1 ? ` ×${count}` : ''}⟩`;
-  return LINE_BREAK.test(run) ? `${marker}\n` : marker;
+  const lone = LONE_CR.test(run) || (run.endsWith('\r') && next !== '' && next !== '\n');
+  return lone || LINE_BREAK.test(run) ? `${marker}\n` : marker;
 }
 
 /**
  * Makes text safe to judge by eye: runs of lines that show nothing (which can push the end of a
  * command out of view) are collapsed into one marker line, every run of hidden characters becomes
- * one visible marker such as ⟨U+202E⟩ or ⟨U+00A0 ×1900⟩, and a stack of more than three
- * combining marks on one base, which paints over the lines around it, becomes ⟨N combining
- * marks⟩. Used where the viewer approves exactly what they read. Linear in the text's length.
+ * one visible marker such as ⟨U+202E⟩ or ⟨U+00A0 ×1900⟩ (breaking the line after one that a
+ * reader takes for a line break), and a stack of more than three combining marks on one base,
+ * which paints over the lines around it, becomes ⟨N combining marks⟩. Used where the viewer
+ * approves exactly what they read. Linear in the text's length.
  * @param {unknown} text
  * @returns {string}
  */
 export function revealHidden(text) {
   return String(text ?? '')
     .replace(BLANK_RUN, (run) => `\n${blankLines(run.split('\n').length - 2, run)}\n`)
-    .replace(UNSEEN_RUN, (run, hidden) => (hidden ? hiddenMarker(run) : `⟨${codePoints(run)} combining marks⟩`));
+    .replace(UNSEEN_RUN, (run, hidden, offset, whole) => (hidden ? hiddenMarker(run, whole.charAt(offset + run.length)) : `⟨${codePoints(run)} combining marks⟩`));
 }
