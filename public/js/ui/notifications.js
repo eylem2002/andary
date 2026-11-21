@@ -1,10 +1,10 @@
 // Notifications on this computer while the town is in a background tab, following "needs you"
 // (core/attention.js): an agent asks for your permission, asks a question, has a plan for you, a
-// turn stopped, an agent seems stuck, or a finished turn waited with nobody answering. Off until
-// the viewer turns them on (the browser then asks for permission); clicking one brings the town
-// back. They name the crew (its title, or its project's folder) and never show a command or a
-// file, a request's or a stuck step's: they can show on a locked screen. Phone notifications are
-// the server's (server/notify.mjs).
+// turn stopped, an agent seems stuck, two agents work on the same files, or a finished turn
+// waited with nobody answering. Off until the viewer turns them on (the browser then asks for
+// permission); clicking one brings the town back. They name the crew (its title, or its project's
+// folder) and never show a command or a file, a request's, a stuck step's or another agent's:
+// they can show on a locked screen. Phone notifications are the server's (server/notify.mjs).
 //
 // The same watcher keeps the page title's count current: the HUD renders on animation frames,
 // which a background tab does not get, yet a background tab's title is the one you look at.
@@ -52,6 +52,9 @@ export function notificationFor(item, state, now) {
     case 'stuck':
       // The item's own words name the command: these may show on a locked screen.
       return note('Seems stuck', `${crew} seems stuck: ${stuckWords(state.agents[item.agentKey]?.stuck?.rule ?? 1)}.`);
+    case 'conflict':
+      // The item's own words name the file or the command: these may show on a locked screen.
+      return note('Two agents in one folder', `${crew} may be undoing another agent's work.`);
     case 'finished':
       // With one crew at work you are probably at its terminal already.
       return activeCrews(state) > 1 ? note('Turn finished', `${crew} is waiting for your next prompt.`) : null;
@@ -93,14 +96,16 @@ function show(note) {
 const SETTLE_MS = 3000;
 /**
  * New items a screen reader hears of (approvals are announced with their cards). A stuck agent's
- * storm is in the town only, and its row changes without a sound, so it is announced too.
+ * storm is in the town only, and two agents on the same files change their rows without a sound,
+ * so both are announced too.
  */
-const ANNOUNCED = new Set(['question', 'plan', 'stopped', 'stuck']);
+const ANNOUNCED = new Set(['question', 'plan', 'stopped', 'stuck', 'conflict']);
 
 /**
  * Watches the store and the clock: keeps the title's count and the HUD current, notifies each new
- * item once, and tells screen readers of new questions, plans, stops and stuck agents. An item the
- * viewer could already see (the tab in front, or notifications off) never pops up later.
+ * item once, and tells screen readers of new questions, plans, stops, stuck agents and agents on
+ * the same files. An item the viewer could already see (the tab in front, or notifications off)
+ * never pops up later.
  * @param {Pick<HudContext, 'store'|'needsYou'|'prefs'|'refresh'|'announcer'>} ctx
  * @param {{ now?: () => number, every?: number }} [options]  the clock and how often it is read (tests)
  * @returns {() => void} stops watching
@@ -109,18 +114,20 @@ export function installNotifications(ctx, { now: clock = Date.now, every = CHECK
   /** @type {Set<string>} */
   const seen = new Set();
   let queued = false;
-  let shownIds = '';
+  let shown = '';
   const check = () => {
     queued = false;
     const state = ctx.store.getState();
     const now = clock();
-    const counted = countedItems(ctx.needsYou.items(state, now));
+    const items = ctx.needsYou.items(state, now);
+    const counted = countedItems(items);
     updateTitle(counted.length);
-    // The clock alone can change the list (a Codex turn starts to count, a finished one stops):
-    // the HUD then renders without a store change to wake it.
-    const ids = counted.map((item) => item.id).join('\n');
-    if (ids !== shownIds) ctx.refresh();
-    shownIds = ids;
+    // The clock alone can change what the HUD shows (a Codex turn starts to count, a finished one
+    // stops, a note's "4 min ago" or its half hour ends): the HUD then renders without a store
+    // change to wake it.
+    const words = items.map((item) => `${item.id}\t${item.counted}\t${item.text}`).join('\n');
+    if (words !== shown) ctx.refresh();
+    shown = words;
     const notify = wanted(ctx);
     for (const item of counted) {
       if (seen.has(item.id) || (!item.settled && now - item.since < SETTLE_MS)) continue;

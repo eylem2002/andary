@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { CODEX_IDLE_MS, READY_MS, STALE_DIALOG_MS, attentionItems, countedItems } from '../../../public/js/core/attention.js';
+import { CONFLICT_MS } from '../../../public/js/core/conflicts.js';
 import { createStore } from '../../../public/js/core/store.js';
 import { CODEX_IDLE_MS as PHONE_CODEX_IDLE_MS } from '../../../server/notify.mjs';
-import { SESSION, envelope, hook } from './helpers.mjs';
+import { CWD, SESSION, envelope, hook } from './helpers.mjs';
 
 const T0 = 1_000_000;
 const LEAD = `${SESSION}:main`;
@@ -413,5 +414,88 @@ describe('open dialogs: the cases a second review found', () => {
     t.send('StopFailure', { error: 'rate_limit' }, T0 + 1, helper);
     t.send('StopFailure', { error: 'rate_limit' }, T0 + 2);
     assert.deepEqual(t.items().map((i) => i.text), ['Rate limited', 'Rate limited']);
+  });
+});
+
+describe('two agents on the same files (core/conflicts.js)', () => {
+  const OTHER = '7c1d0e3f-2e5b-4d44-8f20-1b8c7d6e5f40';
+  const FIRST = `${SESSION}:main`;
+  const SECOND = `${OTHER}:main`;
+  const file = `${CWD}/src/auth.ts`;
+  /** @param {string} tool @param {Record<string, any>} input @returns {Record<string, any>} */
+  const done = (tool, input) => ({ tool_name: tool, tool_input: input, tool_response: {}, tool_use_id: `${tool}-${input.file_path ?? input.command}` });
+  const edit = done('Edit', { file_path: file, old_string: 'a', new_string: 'b' });
+  const write = done('Write', { file_path: file, content: 'all new' });
+  const other = { session: OTHER };
+
+  test('a write over the other crew\'s change: an alert on both agents, counted and dismissable', () => {
+    const t = town();
+    t.send('PostToolUse', edit, T0);
+    t.send('PostToolUse', write, T0 + 4 * 60_000, other);
+    const [item] = t.items(T0 + 4 * 60_000);
+    assert.deepEqual([item.kind, item.level, item.counted, item.dismissable, item.settled], ['conflict', 'alert', true, true, true]);
+    assert.deepEqual([item.agentKey, item.agentKeys, item.sessionId, item.crews], [SECOND, [SECOND, FIRST], OTHER, 2]);
+    assert.equal(item.text, 'Wrote over src/auth.ts, which Foreman (crew 1) changed 4 min ago');
+    assert.match(item.id, /^conflict:write:/);
+  });
+
+  test('an edit over it is a note: listed for both, counted for nothing, nothing to set aside', () => {
+    const t = town();
+    t.send('PostToolUse', edit, T0);
+    t.send('PostToolUse', edit, T0 + 1000, other);
+    const [note] = t.items(T0 + 2000);
+    assert.deepEqual([note.kind, note.level, note.counted, note.dismissable, note.agentKeys], ['conflict', 'alert', false, false, [SECOND, FIRST]]);
+    assert.equal(note.text, 'Edited src/auth.ts, which Foreman (crew 1) changed just now');
+    assert.deepEqual(countedItems(t.items(T0 + 2000)), []);
+  });
+
+  test('a git command over the other crew\'s changes: an alert naming both', () => {
+    const t = town();
+    t.send('PostToolUse', edit, T0);
+    t.send('PostToolUse', done('Write', { file_path: `${CWD}/src/new.ts`, content: 'x' }), T0 + 1);
+    t.send('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'git add -A && git commit -m "Save"' }, tool_use_id: 'c1' }, T0 + 2, other);
+    const [item] = t.items(T0 + 3);
+    assert.deepEqual([item.kind, item.counted, item.agentKeys], ['conflict', true, [SECOND, FIRST]]);
+    assert.equal(item.text, 'git add -A && git commit in api-server, where Foreman (crew 1) has changed 2 files');
+  });
+
+  test('set aside, it stays away; a new episode is a new item', () => {
+    const t = town();
+    t.send('PostToolUse', edit, T0);
+    t.send('PostToolUse', write, T0 + 1000, other);
+    const dismissed = new Set(t.items(T0 + 2000).map((i) => i.id));
+    assert.deepEqual(t.items(T0 + 2000, dismissed), []);
+    t.send('PostToolUse', write, T0 + 3000, other);
+    assert.deepEqual(t.items(T0 + 4000, dismissed), [], 'writing again is the same episode');
+    t.send('PostToolUse', edit, T0 + 5000);
+    t.send('PostToolUse', write, T0 + 6000, other);
+    assert.deepEqual(t.items(T0 + 7000, dismissed).filter((i) => i.counted).map((i) => i.text), ['Wrote over src/auth.ts, which Foreman (crew 1) changed just now'], 'over a newer change');
+  });
+
+  test('it lasts half an hour, words its time from now, and ranks after what blocks or stopped', () => {
+    const t = town();
+    t.send('PostToolUse', edit, T0);
+    t.send('PostToolUse', write, T0 + 1000, other);
+    t.send('StopFailure', { error: 'server_error' }, T0 + 2000, { session: 's-stopped' });
+    t.send('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: {}, tool_use_id: 'q' }, T0 + 3000, { session: 's-asks' });
+    assert.deepEqual(t.items(T0 + 10 * 60_000).map((i) => i.level), ['blocked', 'stopped', 'alert']);
+    assert.match(t.items(T0 + 10 * 60_000)[2].text, /changed 10 min ago$/);
+    assert.equal(t.items(T0 + 1000 + CONFLICT_MS - 1).some((i) => i.kind === 'conflict'), true);
+    assert.equal(t.items(T0 + 1000 + CONFLICT_MS).some((i) => i.kind === 'conflict'), false, 'without an event to end it');
+  });
+
+  test("a crew no longer in town, or an agent that finished, takes it away; teammates' crews never have any", () => {
+    const t = town();
+    t.send('PostToolUse', edit, T0);
+    t.send('PostToolUse', write, T0 + 1000, other);
+    const state = t.store.getState();
+    const ended = { ...state, sessions: state.sessions.map((s) => (s.id === SESSION ? { ...s, status: /** @type {const} */ ('ended') } : s)) };
+    assert.deepEqual(attentionItems(ended, T0 + 2000), []);
+    const finished = { ...state, agents: { ...state.agents, [FIRST]: { ...state.agents[FIRST], status: /** @type {const} */ ('done') } } };
+    assert.deepEqual(attentionItems(finished, T0 + 2000), []);
+    const team = town();
+    team.store.ingest(envelope({ ...hook('PostToolUse', edit), andary_member: 'sam', session_id: 'sam~s1' }, T0));
+    team.send('PostToolUse', write, T0 + 1000, other);
+    assert.deepEqual(team.items(T0 + 2000), []);
   });
 });

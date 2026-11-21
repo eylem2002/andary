@@ -195,6 +195,17 @@ step that kept failing, the step working at last. Steps that wait by nature (rea
 task's output, `sleep` loops, `gh run watch` and other CI checks, health checks, `ps` or `docker
 ps`) never count.
 
+**Two agents on the same files.** Several sessions in one repository can undo each other's work.
+When an agent writes a whole file over a change another agent made in the last half hour, or runs
+a git command that sweeps up or throws away another agent's changes in that folder (`git add -A`
+with a commit, `git commit -a`, `git stash`, `git checkout .`, `git restore`, `git reset --hard`,
+`git clean -f`), both agents' rows say so ("Wrote over src/auth.ts, which Scout 1 changed 4 min
+ago", "git stash in api-server, where Builder 1 has changed 3 files") and it counts in **need you**
+until you set it aside. A git command shows as soon as it starts, while it may still ask for your
+permission. An edit of such a file is only a note under both rows, as an edit must match what is
+in the file. It lasts half an hour, or until one of the two agents finishes. Andary compares paths
+as written: a symbolic link, or a disk that ignores case, can hide one.
+
 ### Everything else
 
 - **Cost and tokens:** each crew shows what it has cost so far, estimated at API list prices from

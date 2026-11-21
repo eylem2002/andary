@@ -7,8 +7,12 @@
 //            a plan to approve, an MCP server's form
 //   stopped  a turn ended in an error; crews stopped by one rate limit together are one item
 //   alert    an agent seems stuck (core/loops.js): counted until you set it aside
+//   alert    two agents on the same files (core/conflicts.js): a Write over another agent's
+//            change, or a git command over its changes, counted until you set it aside; an Edit
+//            of such a file is a note that counts for nothing
 //   ready    a lead finished its turn and nobody has answered: counted once Claude Code says so
 //            (idle_prompt, a minute later; Codex has no such signal: a minute too), for 30 minutes
+import { CONFLICT_MS, hazardText } from './conflicts.js';
 import { agentKeyOf } from './ids.js';
 
 /** @typedef {import('./store.js').StoreState} StoreState */
@@ -16,7 +20,8 @@ import { agentKeyOf } from './ids.js';
 /** @typedef {import('./store.js').Session} Session */
 /** @typedef {import('./store.js').Approval} Approval */
 /** @typedef {import('./dialogs.js').Dialog} Dialog */
-/** @typedef {'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'finished'} AttentionKind */
+/** @typedef {import('./conflicts.js').Hazard} Hazard */
+/** @typedef {'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'finished'} AttentionKind */
 /** @typedef {'blocked'|'stopped'|'alert'|'ready'} AttentionLevel */
 
 /**
@@ -26,7 +31,7 @@ import { agentKeyOf } from './ids.js';
  * @property {AttentionLevel} level
  * @property {string} sessionId
  * @property {string} agentKey      who to show (the first, for a group)
- * @property {string[]} agentKeys   everyone it stands for (a shared rate limit: every crew's agent)
+ * @property {string[]} agentKeys   everyone it stands for (a shared rate limit: every crew's agent; the same files: both agents)
  * @property {string|null} approvalId  the request to open in Approvals (kind 'approval')
  * @property {number} since         when the agent stopped for you
  * @property {number} countedSince  when it started to count (since, or idle_prompt for a finished turn)
@@ -79,6 +84,10 @@ export function attentionItems(state, now, { dismissed } = {}) {
       items.push(item);
       if (item.kind === 'stopped' && agent.wait?.cause === 'rate_limit') limited.push(item);
     }
+  }
+  for (const hazard of state.hazards ?? []) {
+    const item = conflictItem(hazard, state, yours, now);
+    if (item) items.push(item);
   }
   // A dismissed item stays away until the situation changes (a new episode has a new id).
   return mergeSharedStops(items, limited)
@@ -209,6 +218,40 @@ function finishedItem(item, wait, session, now) {
   const idleAt = wait.idleAt ?? (session.source === 'codex' && now - wait.since >= CODEX_IDLE_MS ? wait.since + CODEX_IDLE_MS : null);
   const counted = idleAt !== null && now - wait.since < READY_MS;
   return item('finished', 'ready', { counted, countedSince: idleAt ?? wait.since, dismissable: true });
+}
+
+/**
+ * Two agents on the same files (core/conflicts.js), listed for both: a Write over the other's
+ * change or a git command over its changes is an alert, counted until set aside; an Edit is a
+ * note that counts for nothing. The store ends a hazard when either agent finishes; this also
+ * leaves out one that is half an hour old, or whose agents or crews are gone.
+ * @param {Hazard} hazard
+ * @param {StoreState} state
+ * @param {Map<string, Session>} yours  your crews still in town
+ * @param {number} now
+ * @returns {AttentionItem|null}
+ */
+function conflictItem(hazard, state, yours, now) {
+  const agentKeys = [hazard.agentKey, hazard.otherKey];
+  if (now - hazard.at >= CONFLICT_MS || !yours.has(hazard.sessionId) || !yours.has(hazard.otherSessionId)) return null;
+  if (agentKeys.some((key) => !state.agents[key] || state.agents[key].status === 'done')) return null;
+  const alert = hazard.kind !== 'edit';
+  return {
+    id: `conflict:${hazard.id}`,
+    kind: 'conflict',
+    level: 'alert',
+    sessionId: hazard.sessionId,
+    agentKey: hazard.agentKey,
+    agentKeys,
+    approvalId: null,
+    since: hazard.at,
+    countedSince: hazard.at,
+    text: hazardText(hazard, state, now),
+    counted: alert,
+    dismissable: alert,
+    crews: hazard.sessionId === hazard.otherSessionId ? 1 : 2,
+    settled: true,
+  };
 }
 
 /**

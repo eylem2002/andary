@@ -1,13 +1,14 @@
 // The agent inspector: everything known about the selected agent — role, crew, status, what it is
-// doing (or waiting for you on, or why it seems stuck, and since when), its brief, its context in
-// use and what it cost, which tools it used how often, recent files and activity, its last message.
+// doing (or waiting for you on, or why it seems stuck, and since when; and a note when another
+// agent changed a file it edits), its brief, its context in use and what it cost, which tools it
+// used how often, recent files and activity, its last message.
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { doingText, formatAgo, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
 import { changeSummary } from './changes.js';
 import { contextSentence, hasCounted, liveContext, usageSentence } from './usage.js';
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
-import { waitedText } from './needs-you.js';
+import { isNote, waitedText } from './needs-you.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -39,6 +40,7 @@ export function createInspector(ctx) {
   const since = h('span', { class: 'hud-inspector__since' });
   const now = h('p', { class: 'hud-inspector__now' });
   const need = createNeedLine(ctx, name);
+  const note = h('p', { class: 'hud-inspector__note', 'data-testid': 'inspector-note', hidden: true });
   const brief = h('p', { class: 'hud-inspector__brief' });
   const tools = h('ul', { class: 'hud-bars' });
   const files = h('ul', { class: 'hud-files' });
@@ -47,7 +49,7 @@ export function createInspector(ctx) {
   const message = h('p', { class: 'hud-inspector__message' });
   const usage = createUsageLines();
   const sections = {
-    now: section('Now', h('div', {}, now, need.el)),
+    now: section('Now', h('div', {}, now, need.el, note)),
     brief: section('Brief', brief),
     usage: section('Usage', usage.el),
     tools: section('Tools used', tools),
@@ -115,7 +117,12 @@ export function createInspector(ctx) {
     setText(role, `${roleLabel(agent)}${session ? ` in ${session.project}` : ''}`);
     updateStatusChip(chip, agent.status);
     const asking = state.approvals.find((approval) => approval.status === 'pending' && approvalAgentKey(approval) === agent.key);
-    need.update(ctx.needsYou.items(state).find((item) => item.agentKeys.includes(agent.key)) ?? null);
+    const items = ctx.needsYou.items(state).filter((item) => item.agentKeys.includes(agent.key));
+    need.update(items.find((item) => !isNote(item)) ?? null);
+    // A note sits under what the agent does: the newest one.
+    const newest = items.filter(isNote).sort((a, b) => b.since - a.since)[0];
+    setText(note, newest?.text ?? '');
+    setHidden(note, !newest);
     renderSections(agent, session?.cwd, asking);
     setHidden(sections.usage, !usage.update(state, agent.key, Date.now()));
     setAttr(follow, 'aria-pressed', String(ctx.view.follow));

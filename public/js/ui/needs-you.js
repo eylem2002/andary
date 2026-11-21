@@ -98,17 +98,45 @@ const WAITED_WORDS = {
   finished: (waited) => `finished ${waited} ago`,
   // A stuck agent is not waiting for you: it has been going round for that long.
   stuck: (waited) => `stuck for ${waited}`,
+  // Two agents on the same files: it happened that long ago, nobody waits.
+  conflict: (waited) => `${waited} ago`,
 };
 
 /**
- * Each agent's most urgent item (an item for several crews counts for each of their agents).
+ * A note counts for nothing and blocks nobody: an alert that is not counted (an edit of a file
+ * another agent changed, core/conflicts.js). A crew row shows it beside what the agent does, not
+ * instead of it, as it may last half an hour.
+ * @param {AttentionItem} item
+ */
+export function isNote(item) {
+  return item.level === 'alert' && !item.counted;
+}
+
+/**
+ * Each agent's most urgent item, notes aside (an item for several crews or agents counts for each
+ * of them).
  * @param {StoreState} state @param {ReturnType<typeof createNeedsYou>} needsYou @param {number} now
  */
 export function itemsByAgent(state, needsYou, now) {
   /** @type {Map<string, AttentionItem>} */
   const byAgent = new Map();
   for (const item of needsYou.items(state, now)) {
+    if (isNote(item)) continue;
     for (const key of item.agentKeys) if (!byAgent.has(key)) byAgent.set(key, item);
+  }
+  return byAgent;
+}
+
+/**
+ * Each agent's newest note (isNote), for the line under what it does.
+ * @param {StoreState} state @param {ReturnType<typeof createNeedsYou>} needsYou @param {number} now
+ */
+export function notesByAgent(state, needsYou, now) {
+  /** @type {Map<string, AttentionItem>} */
+  const byAgent = new Map();
+  for (const item of needsYou.items(state, now)) {
+    if (!isNote(item)) continue;
+    for (const key of item.agentKeys) if ((byAgent.get(key)?.since ?? -Infinity) < item.since) byAgent.set(key, item);
   }
   return byAgent;
 }

@@ -199,6 +199,15 @@ symbolic links or know whether a disk ignores case, so those can be missed (writ
 
 **Decision:** do. Size: small–medium.
 
+**As built** (CONTRACTS §5.1, ASSUMPTIONS 135–143), where it adds to the above: the attention
+kind is `conflict` (§3's sketch says `same-file`), level `alert`, for the git hazard too. A Codex
+patch that deletes a file counts as a Write. The git list also has `git add -u`, `git checkout
+-f` and `git switch --discard-changes`; a hazard is found when the command starts (PreToolUse),
+one per other agent, and the same command again alerts only for newer changes. A command in a
+repository's subfolder counts the changes of an agent that works in the folder above. The Edit
+note is shown under what both agents do rather than in its place, as it may last half an hour. A
+lead whose turn ended is still active: its changes are still in the tree.
+
 ## 7. Catch me up
 
 **When you were away** is decided by the server, which sees every prompt and every answer you

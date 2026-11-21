@@ -1,16 +1,19 @@
 // The single source of truth the HUD renders and the director follows (CONTRACTS.md §5.1).
 // It applies TownEvents to crews (sessions), agents, todos/tasks, approvals, the activity log and
 // stats; works out who each event belongs to (subagent labels, teammate names); keeps what each
-// agent has asked you (store-dialogs.js) or waits for you on (waits.js), and whether it seems
-// stuck (loops.js); and unlocks achievements. The town may open mid-session, so every session or
-// agent an event mentions is created on first sight.
+// agent has asked you (store-dialogs.js) or waits for you on (waits.js), whether it seems stuck
+// (loops.js), and where two agents work on the same files (conflicts.js); and unlocks
+// achievements. The town may open mid-session, so every session or agent an event mentions is
+// created on first sight.
 
 import { ACHIEVEMENTS, achievementFor } from './achievements.js';
 import { BUILDINGS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
 import { LEAD_NAME, MAX_APPROVALS, MAX_RECENT, MAX_RETIRED, MAX_SPAWNS_PER_SESSION, boundedPush, createModel } from './store-model.js';
 import { agentFor, assignSpawn, attribute, dropAgent, place, pruneDoneHelpers, pruneEndedSessions, reconcileTeammate, repairGuesses, sessionFor, sessionStatus } from './crews.js';
 import { recordChange, rememberFile } from './changes.js';
+import { hazardText } from './conflicts.js';
 import { NO_SESSION, normalize } from './events.js';
+import { gitHazardOf } from './git-commands.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { rulesText } from './permission-rules.js';
 import { summarizeTool } from './summaries.js';
@@ -62,7 +65,7 @@ export { ACHIEVEMENTS };
  * @property {string} agentKey
  * @property {string} agentName
  * @property {string} color
- * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck'
+ * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict'
  * @property {string} icon
  * @property {string} text
  * @property {'info'|'success'|'warn'|'error'} level
@@ -135,6 +138,7 @@ export { ACHIEVEMENTS };
  * @property {Record<string, AgentState>} agents
  * @property {Approval[]} approvals        pending first, then most recent
  * @property {readonly import('./dialogs.js').Dialog[]} dialogs  open: asked and not answered yet, oldest first
+ * @property {readonly import('./conflicts.js').Hazard[]} hazards  two agents on the same files now, oldest first
  * @property {LogEntry[]} log              newest last
  * @property {Stats} stats
  * @property {Achievement[]} achievements
@@ -589,12 +593,14 @@ function apply(m, input) {
   // A teammate's crew (a team town) is theirs to answer: its dialogs are not kept.
   if (!s.member && dialogsAfterEvent(m.dialogs, e, a ? a.agentId : e.agentId)) m.state.dialogs = m.dialogs.list();
   const newlyStuck = followLoops(m, e, s, a);
+  const hazards = followConflicts(m, e, s, a);
   if (relabels.length) e.data.relabels = relabels;
   s.lastActivity = Math.max(s.lastActivity, e.ts);
   if (a) a.lastActivity = Math.max(a.lastActivity, e.ts);
   if (s.status !== 'ended') s.status = sessionStatus(m, s);
   if (draft) pushLog(m, e, s, a, draft);
   for (const change of newlyStuck) logStuck(m, e, s, change);
+  for (const hazard of hazards) logHazard(m, e, s, hazard);
   return e;
 }
 
@@ -676,6 +682,63 @@ function setWait(a, e) {
   const next = waitAfter(a, e);
   if (next !== undefined) a.wait = next;
   if (movesOn(e)) a.movedAt = Math.max(a.movedAt, e.ts);
+}
+
+/** Shell tools whose command line may hold a git command (git-commands.js). */
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
+
+/**
+ * Keeps what the same-file and git rules need (conflicts.js), and the hazards they find on
+ * state.hazards: a file change or a git command may start one; a helper finishing or its crew
+ * leaving ends its own, and they end after half an hour. A teammate's crew (a team town) works
+ * on their computer, so its files are left out.
+ * @param {Model} m
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {AgentState|undefined} a
+ * @returns {import('./conflicts.js').Hazard[]} the hazards that just started
+ */
+function followConflicts(m, e, s, a) {
+  if (s.member) return [];
+  let ended = m.conflicts.expire(e.ts);
+  /** @type {import('./conflicts.js').Hazard[]} */
+  let started = [];
+  if (e.kind === 'session.end') ended = m.conflicts.ended(s.id) || ended;
+  else if (a && e.kind === 'subagent.stop') ended = m.conflicts.finished(a.key) || ended;
+  else if (a) started = hazardsOf(m, e, s, a);
+  if (ended || started.length) m.state.hazards = m.conflicts.list();
+  return started;
+}
+
+/**
+ * The hazards an event starts: a finished file change, or a shell command starting (a git hazard
+ * shows while the command asks for permission or runs).
+ * @param {Model} m
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {AgentState} a
+ */
+function hazardsOf(m, e, s, a) {
+  const by = { agent: a.key, session: s.id, at: e.ts };
+  const folder = e.cwd || s.cwd;
+  if (e.kind === 'tool.end') return m.conflicts.changed({ ...by, tool: e.data.tool, path: e.data.file, folder });
+  if (e.kind !== 'tool.start' || !SHELL_TOOLS.has(e.data.tool)) return [];
+  const git = gitHazardOf(e.data.input.command, folder, { powershell: e.data.tool === 'PowerShell' });
+  return git ? m.conflicts.command({ ...by, ...git }) : [];
+}
+
+/**
+ * The activity log's line when two agents start to work on the same files, after the line of the
+ * event that did it: a warning for an alert, information for an edit's note.
+ * @param {Model} m
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {import('./conflicts.js').Hazard} hazard
+ */
+function logHazard(m, e, s, hazard) {
+  /** @type {LogDraft} */
+  const draft = { icon: '👥', text: hazardText(hazard, m.state, e.ts), level: hazard.kind === 'edit' ? 'info' : 'warn' };
+  pushLog(m, { ...e, kind: 'conflict' }, s, m.state.agents[hazard.agentKey], draft);
 }
 
 // ---------------------------------------------------------------------------------------------
