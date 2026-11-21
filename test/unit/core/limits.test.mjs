@@ -57,8 +57,34 @@ describe('runOutAt: the average pace since the window opened', () => {
     const weekly = { kind: 'seven_day', percentUsed: 80, resetsAt: at(9, 0, 24), at: NOW };
     const runOut = runOutAt(weekly, NOW);
     assert.ok(runOut && runOut > NOW && runOut < weekly.resetsAt);
-    assert.match(limitGauges([weekly], NOW)[0].projection ?? '', /^At this pace it runs out (tomorrow|Mon) around \d\d:\d\d, before it resets\.$/);
+    assert.match(limitGauges([weekly], NOW)[0].projection ?? '', /^At this pace it runs out (tomorrow|on Mon) around \d\d:\d\d, before it resets\.$/);
     assert.equal(runOutAt({ kind: 'spend_limit', percentUsed: 95, resetsAt: at(9, 0, 30), at: NOW }, NOW), null);
+  });
+});
+
+describe('figures and levels go by the reported percent', () => {
+  const gauge = (/** @type {number} */ percentUsed) => limitGauges([{ kind: 'five_hour', percentUsed, resetsAt: at(15, 40), at: NOW }], NOW)[0];
+
+  it('rounds down, so 89.5 never reads 90 while the 90% note stays quiet', () => {
+    assert.deepEqual([gauge(89.5).used, gauge(89.5).level, gauge(89.5).percent], ['89% used', 'warn', 89]);
+    assert.deepEqual([gauge(90).used, gauge(90).level], ['90% used', 'high']);
+    assert.deepEqual([gauge(74.9).level, gauge(75).level], ['ok', 'warn']);
+  });
+
+  it('keeps one decimal from 99, and says "used up" only at 100', () => {
+    assert.equal(gauge(98.9).used, '98% used');
+    assert.equal(gauge(99).used, '99% used');
+    assert.equal(gauge(99.5).used, '99.5% used');
+    assert.equal(gauge(99.9).used, '99.9% used');
+    assert.equal(gauge(100).used, 'used up');
+  });
+
+  it('puts the higher reported percent on the button, even when both read the same figure', () => {
+    const accounts = [
+      { account: 'a', label: null, claudeVersion: null, at: NOW, limits: [{ kind: 'five_hour', percentUsed: 80.2, resetsAt: at(15, 40), at: NOW }] },
+      { account: 'b', label: null, claudeVersion: null, at: NOW, limits: [{ kind: 'seven_day', percentUsed: 80.7, resetsAt: at(9, 0, 24), at: NOW }] },
+    ];
+    assert.equal(busiestGauge(accounts, NOW)?.kind, 'seven_day');
   });
 });
 
@@ -72,7 +98,7 @@ describe('gauges', () => {
   it('lists the limits that still apply, 5-hour first, with their words and level', () => {
     const gauges = limitGauges(limits, NOW);
     assert.deepEqual(gauges.map((g) => [g.name, g.used, g.asOf, g.resets, g.level]), [
-      ['5-hour limit', '92% used', 'as of 13:58', 'resets at 15:40', 'high'],
+      ['5-hour limit', '91% used', 'as of 13:58', 'resets at 15:40', 'high'],
       ['Weekly limit', '12% used', 'as of 13:50', 'resets on Tue at 09:00', 'ok'],
     ]);
     assert.equal(limitGauges([{ kind: 'five_hour', percentUsed: 100, resetsAt: at(15, 40), at: NOW }], NOW)[0].used, 'used up');
@@ -84,7 +110,7 @@ describe('gauges', () => {
       { account: 'default', label: null, claudeVersion: '2.1.330', at: NOW, limits: [limits[0]] },
       { account: 'dir-x', label: '.claude-work', claudeVersion: null, at: NOW, limits: [limits[1]] },
     ];
-    assert.equal(busiestGauge(accounts, NOW)?.percent, 92);
+    assert.equal(busiestGauge(accounts, NOW)?.percent, 91);
     assert.equal(busiestGauge([], NOW), null);
     assert.equal(busiestGauge([{ ...accounts[0], limits: [limits[2]] }], NOW), null);
   });

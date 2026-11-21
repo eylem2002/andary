@@ -642,7 +642,9 @@ the WebSocket `hello`. Only this computer's events count (§4.11).
 - **Plan limits** (§4.14), only with `--notify-limits` (off by default; it needs `--notify` or
   `--notify-url`): when the mod reports a limit at 90% or more, "Claude's 5-hour limit is 91%
   used. It resets at 15:40." (priority default), once per window: an account's limit of one kind
-  until its reset time (reset times less than an hour apart are one window). Each kind of limit
+  until its reset time (reset times less than an hour apart are one window), remembered across
+  restarts in `<ANDARY_HOME>/limit-notes.json` (0600, at most 64 windows); with two accounts or
+  more the note names the account by its folder ("5-hour limit (.claude-work)"). Each kind of limit
   has its own 30 s turn (`limit-high:<kind>`) and the hour's limit counts them; a note the rate
   limits hold back goes out with a later report. `settings.notifyLimits` says whether it is on.
 - A finished turn posts nothing by itself. Stopping the server drops every note still waiting.
@@ -858,7 +860,9 @@ would have to run the user's own status line (design §9).
 ("after each turn, and when a plan limit's percent used changes"). It starts a report and returns
 `next(e)` at once (the report never holds the session up; the hook's 10 s limit is far away), and
 nothing it does can throw into the session. A report: read `<ANDARY_HOME or $HOME/.andary>/server.json`
-with `$.fs.read` (none: stop); challenge `GET /api/proof` exactly as the forwarder does (§4.3) and
+with `$.fs.read` (none: stop; ANDARY_HOME as Claude Code's own environment has it: unlike the
+forwarder the mod has no install folder to look in); use its `host` only when it is a loopback
+address, `localhost` or a wildcard (127.0.0.1), else send nothing; challenge `GET /api/proof` exactly as the forwarder does (§4.3) and
 check the proof with HMAC-SHA256 built on `crypto.subtle.digest` (the hooks sandbox has `digest`,
 `getRandomValues` and `randomUUID`, but no `importKey`, `sign` or `verify`); read
 `$.session.usage()`, `$.session.id()`, `$.session.version()` and `$.env.get('CLAUDE_CONFIG_DIR')`;
@@ -871,7 +875,8 @@ check the proof with HMAC-SHA256 built on `crypto.subtle.digest` (the hooks sand
 ```
 
 Numbers and identifiers only (no cost, nothing of the conversation). Readings that come while a
-report is on its way make one more report, of the newest numbers. `$` is never stored (Claude
+report is on its way make one more report, of the newest numbers; the flight is freed in the step
+that finds no newer reading. `$` is never stored (Claude
 Code's static check refuses that), so that report reuses the `$` of the one in flight.
 `claude plugin validate mods/andary-limits` lists exactly `$.env.get` (ANDARY_HOME,
 CLAUDE_CONFIG_DIR, HOME, USERPROFILE), `$.fs.read`, `$.http.fetch`, `$.session.id`,
@@ -883,9 +888,10 @@ kind once, at most 8; `percentUsed` clamped to 0–100, one decimal; `resetsAt` 
 past and at most 32 days ahead; `sessionId` `[\w.:-]{1,200}`; `claudeVersion` `\d+.\d+.\d+…` ≤ 64;
 `context` whole numbers ≤ 100,000,000, window ≥ 1; anything else dropped or null). **Accounts**:
 limits belong to a Claude account, told apart by the config folder (`account: "default"`
-without `CLAUDE_CONFIG_DIR`, else `"dir-" + base64url(sha256(folder))[0..16]`, `label` the folder's
+without `CLAUDE_CONFIG_DIR` or when it names `~/.claude` itself, else `"dir-" + base64url(sha256(folder))[0..16]`, `label` the folder's
 name; the path itself is not kept). A report updates the kinds it carries, each with its own
-`at` (arrival time); one that carries none (an API key, a session before its first answer) keeps
+`at` (arrival time); within one window (reset times less than an hour apart) a lower reading
+does not replace a higher one, as each session reports what it saw last; one that carries none (an API key, a session before its first answer) keeps
 the account's. At most 8 accounts and the exact context of 100 sessions are kept, newest first,
 in memory only (a restart forgets them until the next turn). Limits whose `resetsAt` has passed
 are left out of every snapshot.
@@ -900,20 +906,22 @@ AccountLimits { account, label: string|null, claudeVersion: string|null, at: num
 **The town** (`public/js/core/limits.js`, shared with the server for the phone note;
 `ui/limits.js`): the Usage button carries a gauge (`usage-gauge`) of the most used limit of any
 account, and its name says it ("Usage and cost. 5-hour limit 42% used, resets at 15:40"). The Usage
-dialog opens with "Plan limits": per limit (`limit-gauge`) its name, "42% used" (or "used up"), a
-meter, "as of 14:02, resets at 15:40" (24-hour, this computer's time zone; "tomorrow", a weekday
-within the week, else a date), and a projection when the pace would run it out first. Levels:
-`ok`, `warn` from 75%, `high` from 90%. **Projection rule** (`runOutAt`): the average pace since
+dialog opens with "Plan limits": per limit (`limit-gauge`) its name, "42% used" (rounded down;
+one decimal from 99, "99.5% used"; "used up" only at 100), a meter, "as of 14:02, resets at 15:40" (24-hour, this computer's time zone; "tomorrow", a weekday
+within the week, else a date), and a projection when the pace would run it out first. Levels, from
+the reported percent: `ok`, `warn` from 75%, `high` from 90%. Projection words: "around 15:20",
+"tomorrow around 09:10", "on Mon around 12:00". **Projection rule** (`runOutAt`): the average pace since
 the window opened, as of the reading; a window opens one length before it resets (5 hours, 7
 days; a spend limit's period is not reported, so it gets none). Run-out = opened + (reading time −
 opened) × 100 / percent used, shown only when it falls before the reset and after now, the
 reading came after the first tenth of the window, and the limit is neither at 0 nor used up. Not
 counted in "needs you": Claude Code warns at 85% itself. With no reading the dialog says how to
-add the mod (`limits-note`); the demo makes a reading up (`sources/demo-limits.js`).
+add the mod (`limits-note`), except to a team viewer: "Only the town's host sees plan limits."; the demo makes a reading up (`sources/demo-limits.js`).
 
 **Doctor**: from the hello's `limits`, "the andary-limits mod reported 4 min ago from Claude Code
 2.1.330"; a warning when a settings file enables `andary-limits@…` but nothing came since the
-town started; otherwise how to add it (optional).
+town started (with `ANDARY_HOME` set, that Claude Code must be started with the same one);
+otherwise how to add it (optional).
 
 ## 5. Browser: events, store, director
 

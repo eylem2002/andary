@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CODEX_IDLE_MS, DIALOG_DELAY_MS, checkNotifyUrl, createNotifier, noteFor, savedTopicUrl } from '../../../server/notify.mjs';
@@ -917,4 +917,28 @@ test('a limit note held back by the 30-second rule goes out with a later report'
   notifier.dispose();
   notifier.limitsChanged({ ...report('dir-c') });
   assert.equal(posts.length, 2, 'nothing after shutdown');
+});
+
+test('a limit note names the account when two or more report, and a restart sends no second note for a window', () => {
+  const HOUR = 3_600_000;
+  const limitNotesFile = join(mkdtempSync(join(tmpdir(), 'andary-notes-')), 'limit-notes.json');
+  const work = { account: 'dir-abc', label: '.claude-work', claudeVersion: null, at: 0, limits: [{ kind: 'five_hour', percentUsed: 99.5, resetsAt: 3 * HOUR, at: 0 }] };
+  const first = testNotifier({ limitNotes: true, limitNotesFile });
+  first.notifier.limitsChanged(work, 2);
+  assert.match(first.posts[0].body, /^Claude's 5-hour limit \(\.claude-work\) is 99\.5% used\. It resets /);
+  first.notifier.limitsChanged({ ...work, account: 'default', label: null }, 2);
+  first.at(31_000);
+  first.notifier.limitsChanged({ ...work, account: 'default', label: null }, 2);
+  assert.match(first.posts[1].body, /^Claude's 5-hour limit \(default folder\) is/);
+  assert.equal(statSync(limitNotesFile).mode & 0o777, 0o600);
+  // The town restarts: the same windows were noted already.
+  const second = testNotifier({ limitNotes: true, limitNotesFile });
+  second.notifier.limitsChanged(work, 2);
+  second.notifier.limitsChanged({ ...work, account: 'default', label: null }, 1);
+  assert.equal(second.posts.length, 0);
+  // A damaged file starts over: at worst one note again.
+  writeFileSync(limitNotesFile, '{oops');
+  const third = testNotifier({ limitNotes: true, limitNotesFile });
+  third.notifier.limitsChanged(work, 1);
+  assert.match(third.posts[0].body, /^Claude's 5-hour limit is 99\.5% used\./);
 });

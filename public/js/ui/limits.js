@@ -54,9 +54,24 @@ export function meter(testId) {
 /** What the dialog says when there is no reading, by why. */
 const NO_READING = Object.freeze({
   demo: 'The demo makes these limits up.',
+  viewer: 'Only the town\'s host sees plan limits.',
   none: 'Your 5-hour and weekly limits can show here: add the andary-limits mod to Claude Code (/plugin install andary-limits@andary, from the andary marketplace). It sends them after each turn.',
   empty: 'No plan limits reported. Claude Code reports them on a Pro or Max plan after its first answer, or a gateway\'s spend limit.',
 });
+
+/**
+ * What the dialog says under the limits, or '' when they speak for themselves.
+ * @param {{ mode: string, serverSettings: { team?: { role: string }|null } }} view
+ * @param {number} accounts  accounts that reported
+ * @param {number} shown     accounts with a limit that still applies
+ */
+export function limitsNote(view, accounts, shown) {
+  // A teammate watching with the view link gets no limits (they are the host's): no hint to install anything.
+  if (view.serverSettings.team?.role === 'viewer') return NO_READING.viewer;
+  if (view.mode === 'demo') return NO_READING.demo;
+  if (!accounts) return NO_READING.none;
+  return shown ? '' : NO_READING.empty;
+}
 
 /**
  * One limit's row: its name and figure, the meter, and the words under it.
@@ -90,10 +105,7 @@ export function createLimitsSection(ctx) {
       list.replaceChildren(...shown.map(({ account, gauges }) => h('div', { class: 'hud-limits__account' },
         shown.length > 1 ? h('h4', { class: 'hud-limits__label', text: account.label ?? 'Default Claude folder' }) : null,
         h('ul', { class: 'hud-limits__list' }, ...gauges.map(gaugeRow)))));
-      let words = '';
-      if (ctx.view.mode === 'demo') words = NO_READING.demo;
-      else if (!accounts.length) words = NO_READING.none;
-      else if (!shown.length) words = NO_READING.empty;
+      const words = limitsNote(ctx.view, accounts.length, shown.length);
       setText(note, words);
       setHidden(note, !words);
     },

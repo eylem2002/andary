@@ -1,7 +1,7 @@
 // What the Usage button and the Usage dialog say about plan limits (public/js/ui/limits.js).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { gaugeLine, usageButtonWords } from '../../../public/js/ui/limits.js';
+import { gaugeLine, limitsNote, usageButtonWords } from '../../../public/js/ui/limits.js';
 import { demoLimits } from '../../../public/js/sources/demo-limits.js';
 import { limitGauges } from '../../../public/js/core/limits.js';
 
@@ -29,4 +29,14 @@ test('the demo makes up a 5-hour limit whose pace runs out before it resets', ()
   // The window opened at 09:30 (five hours before 14:30): 64% in 2 h 28 min runs out at 13:21.
   assert.match(fiveHour.projection ?? '', /^At this pace it runs out around 13:21, before it resets\.$/);
   assert.equal(weekly.projection, null);
+});
+
+test('the dialog says why there are no limits, and a team viewer is never told to install anything', () => {
+  const live = { mode: 'live', serverSettings: {} };
+  assert.match(limitsNote(live, 0, 0), /add the andary-limits mod/);
+  assert.match(limitsNote(live, 1, 0), /^No plan limits reported/);
+  assert.equal(limitsNote(live, 1, 1), '');
+  assert.equal(limitsNote({ mode: 'demo', serverSettings: {} }, 1, 1), 'The demo makes these limits up.');
+  assert.equal(limitsNote({ mode: 'live', serverSettings: { team: { role: 'viewer' } } }, 0, 0), 'Only the town\'s host sees plan limits.');
+  assert.match(limitsNote({ mode: 'live', serverSettings: { team: { role: 'owner' } } }, 0, 0), /andary-limits/);
 });

@@ -206,6 +206,31 @@ describe('the andary-limits mod', () => {
     assert.equal(windows.fetches.at(-1)?.url, 'http://[::1]:4747/api/limits');
   });
 
+  it('reports only to a town on this computer: a loopback address, localhost or a wildcard', async () => {
+    for (const [host, url] of [['localhost', 'http://localhost:4747/api/proof'], ['127.0.0.2', 'http://127.0.0.2:4747/api/proof'], ['[::1]', 'http://[::1]:4747/api/proof'], ['::', 'http://127.0.0.1:4747/api/proof']]) {
+      const { $, fetches } = fakeMods({ files: { '/home/u/.andary/server.json': JSON.stringify({ ...SERVER, host }) } });
+      await measureHook()($, {}, next);
+      await settled();
+      assert.equal(fetches[0]?.url, url, host);
+    }
+    for (const host of ['192.168.1.20', 'andary.example', '127.0.0.1.example', '10.0.0.1']) {
+      const { $, fetches } = fakeMods({ files: { '/home/u/.andary/server.json': JSON.stringify({ ...SERVER, host }) } });
+      await measureHook()($, {}, next);
+      await settled();
+      assert.deepEqual(fetches, [], host);
+    }
+  });
+
+  it('starts a new report for a reading that comes after the last one ended', async () => {
+    const { $, fetches } = fakeMods();
+    const hook = measureHook();
+    await hook($, {}, next);
+    await settled();
+    await hook($, {}, next);
+    await settled();
+    assert.equal(fetches.filter((f) => f.url.endsWith('/api/limits')).length, 2);
+  });
+
   it('sends only well-formed limits, and no context before the first answer', async () => {
     const { $, fetches } = fakeMods({ usage: { context: { window: 1_000_000 }, rateLimits: [{ kind: 'five_hour', percentUsed: 'lots', resetsAt: 'x' }, { kind: 'spend_limit', percentUsed: 7, resetsAt: '2026-12-01T00:00:00.000Z', usedUsd: 70 }, 'junk'] } });
     await measureHook()($, {}, next);

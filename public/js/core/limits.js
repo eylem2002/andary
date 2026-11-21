@@ -25,6 +25,11 @@ const EARLIEST_PROJECTION = 0.1;
 /** From here a gauge reads "warn", and from HIGH_PERCENT "high" (the optional phone note's mark). */
 const WARN_PERCENT = 75;
 export const HIGH_PERCENT = 90;
+/**
+ * Two reset times this close belong to one window (a window lasts five hours at the least), so a
+ * few seconds' difference between two sessions' readings is the same window.
+ */
+export const SAME_WINDOW_MS = HOUR_MS;
 
 const WEEKDAYS = Object.freeze(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
 const MONTHS = Object.freeze(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']);
@@ -44,9 +49,10 @@ const MONTHS = Object.freeze(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', '
  * @typedef {object} Gauge          what the town shows for one limit
  * @property {string} kind
  * @property {string} name          "5-hour limit"
- * @property {number} percent       0–100, whole
+ * @property {number} percent       0–100, whole, rounded down (the figure the meter draws)
+ * @property {number} percentUsed   as reported (one decimal): the level and the order go by it
  * @property {'ok'|'warn'|'high'} level
- * @property {string} used          "42% used"
+ * @property {string} used          "42% used", "99.5% used", "used up"
  * @property {string} asOf          "as of 14:02"
  * @property {string} resets        "resets at 15:40"
  * @property {string|null} projection  "At this pace it runs out around 15:10, before it resets."
@@ -128,7 +134,18 @@ export function runOutAt(limit, now) {
   return runOut < limit.resetsAt && runOut > now ? runOut : null;
 }
 
-/** @param {number} percent @returns {'ok'|'warn'|'high'} */
+/**
+ * The figure for a percent used: rounded down, so 89.5 never reads as 90 while the phone note (at
+ * 90) stays quiet, and with one decimal from 99, where a whole number would hide what is left.
+ * "used up" only at 100.
+ * @param {number} raw
+ */
+export function usedWords(raw) {
+  if (raw >= 100) return 'used up';
+  return raw >= 99 ? `${Math.floor(raw * 10) / 10}% used` : `${Math.floor(raw)}% used`;
+}
+
+/** @param {number} percent  as reported @returns {'ok'|'warn'|'high'} */
 function levelOf(percent) {
   if (percent >= HIGH_PERCENT) return 'high';
   return percent >= WARN_PERCENT ? 'warn' : 'ok';
@@ -146,6 +163,17 @@ export function currentLimits(limits, now) {
 }
 
 /**
+ * "around 15:20", "tomorrow around 09:10", "on Mon around 12:00".
+ * @param {number} runOut
+ * @param {number} now
+ */
+function runOutWhen(runOut, now) {
+  const day = dayWords(runOut, now);
+  if (!day) return `around ${clock(runOut)}`;
+  return day === 'tomorrow' ? `tomorrow around ${clock(runOut)}` : `on ${day} around ${clock(runOut)}`;
+}
+
+/**
  * What the town shows for each limit that still applies.
  * @param {Limit[]} limits
  * @param {number} now
@@ -153,17 +181,17 @@ export function currentLimits(limits, now) {
  */
 export function limitGauges(limits, now) {
   return currentLimits(limits, now).map((limit) => {
-    const percent = Math.round(limit.percentUsed);
     const runOut = runOutAt(limit, now);
     return {
       kind: limit.kind,
       name: limitName(limit.kind),
-      percent,
-      level: levelOf(percent),
-      used: percent >= 100 ? 'used up' : `${percent}% used`,
+      percent: Math.floor(limit.percentUsed),
+      percentUsed: limit.percentUsed,
+      level: levelOf(limit.percentUsed),
+      used: usedWords(limit.percentUsed),
       asOf: asOfWords(limit.at, now),
       resets: resetWords(limit.resetsAt, now),
-      projection: runOut === null ? null : `At this pace it runs out ${dayWords(runOut, now) ? `${dayWords(runOut, now)} ` : ''}around ${clock(runOut)}, before it resets.`,
+      projection: runOut === null ? null : `At this pace it runs out ${runOutWhen(runOut, now)}, before it resets.`,
     };
   });
 }
@@ -179,7 +207,7 @@ export function busiestGauge(accounts, now) {
   /** @type {Gauge|null} */
   let busiest = null;
   for (const account of accounts) {
-    for (const gauge of limitGauges(account.limits, now)) if (!busiest || gauge.percent > busiest.percent) busiest = gauge;
+    for (const gauge of limitGauges(account.limits, now)) if (!busiest || gauge.percentUsed > busiest.percentUsed) busiest = gauge;
   }
   return busiest;
 }

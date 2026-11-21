@@ -17,6 +17,9 @@ test('doctor warns when the mod is enabled but nothing came, and says how to add
   const silent = limitsCheck({ accounts: [] }, true, NOW);
   assert.equal(silent.status, 'warn');
   assert.match(silent.detail, /v2\.1\.287 or newer/);
+  assert.doesNotMatch(silent.detail, /ANDARY_HOME/);
+  // The mod finds a town in another folder only through Claude Code's own ANDARY_HOME.
+  assert.match(limitsCheck({ accounts: [] }, true, NOW, true).detail, /started with the same ANDARY_HOME/);
   const off = limitsCheck(undefined, false, NOW);
   assert.equal(off.status, 'ok');
   assert.equal(off.title, 'Plan limits: not set up (optional)');

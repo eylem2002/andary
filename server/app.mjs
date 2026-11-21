@@ -188,7 +188,13 @@ function createHttpServer(ctx, tls) {
  */
 function createContext(config, options) {
   const hub = createHub(LIMITS.wsClients);
-  const notifier = createNotifier({ url: options.notifyUrl ?? null, log: config.log, delayMs: options.notifyDelayMs, limitNotes: Boolean(options.notifyLimits) });
+  const notifier = createNotifier({
+    url: options.notifyUrl ?? null,
+    log: config.log,
+    delayMs: options.notifyDelayMs,
+    limitNotes: Boolean(options.notifyLimits),
+    limitNotesFile: config.writeState ? join(config.home, 'limit-notes.json') : null,
+  });
   // Your absences are yours: only signed-in browsers hear of them.
   const digest = createTownDigest({ awayMs: options.awayMs, onAway: (away) => hub.broadcastOwners({ t: 'away', away }) });
   /** @type {TownContext} */
@@ -236,7 +242,7 @@ function createContext(config, options) {
     limits: createLimitsTracker({
       onChange: (snapshot, account) => {
         hub.broadcastOwners({ t: 'limits', limits: snapshot });
-        notifier.limitsChanged(account);
+        notifier.limitsChanged(account, snapshot.accounts.length);
       },
     }),
     progress: createProgress({

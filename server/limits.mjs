@@ -5,13 +5,17 @@
 // everything that arrives over the wire.
 //
 // An account is told apart by the Claude config folder the session runs with (CLAUDE_CONFIG_DIR,
-// or the default one): limits belong to an account, not to a session, and two accounts on one
-// computer almost always mean two config folders. A report updates the limits it carries; one
-// that carries none (an API key, or a session before its first answer) keeps what the account
-// had, until each limit's reset time passes.
+// or the default ~/.claude, also when CLAUDE_CONFIG_DIR names it): limits belong to an account,
+// not to a session, and two accounts on one computer almost always mean two config folders. A
+// report updates the limits it carries; one that carries none (an API key, or a session before its
+// first answer) keeps what the account had, until each limit's reset time passes. Every session
+// of an account reports what it saw last, so within one window the higher reading stands: use
+// only grows until the reset.
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { HttpError } from './http-util.mjs';
-import { currentLimits } from '../public/js/core/limits.js';
+import { SAME_WINDOW_MS, currentLimits } from '../public/js/core/limits.js';
 import { isObject } from '../public/js/core/text.js';
 
 /** @typedef {import('../public/js/core/limits.js').Limit} Limit */
@@ -31,8 +35,7 @@ const LATEST_RESET_MS = 32 * DAY_MS;
 
 /**
  * @typedef {object} LimitsReport  a report as the server reads it
- * @property {string} account
- * @property {string|null} label
+ * @property {string|null} configDir  CLAUDE_CONFIG_DIR as the session had it (null: the default)
  * @property {string|null} sessionId
  * @property {string|null} claudeVersion
  * @property {{ kind: string, percentUsed: number, resetsAt: number }[]} limits
@@ -69,15 +72,19 @@ function readLimits(raw, now) {
   return out;
 }
 
+/** A folder without trailing separators (the root keeps its one). @param {string} path */
+const trimmed = (path) => path.replace(/(.)[\\/]+$/, '$1');
+
 /**
- * The account a config folder stands for: "default" without one, else a key derived from it
- * (the path itself never leaves the server) and the folder's name as its label.
- * @param {unknown} configDir
+ * The account a config folder stands for: "default" without one or for the default folder
+ * itself, else a key derived from it (the path never leaves the server) and the folder's name as
+ * its label.
+ * @param {string|null} configDir
+ * @param {string} defaultDir  the folder Claude Code uses without CLAUDE_CONFIG_DIR
  */
-function accountOf(configDir) {
-  // eslint-disable-next-line no-control-regex -- a NUL in a path is not a path
-  if (typeof configDir !== 'string' || configDir === '' || configDir.length > 4096 || /\u0000/.test(configDir)) return { account: 'default', label: null };
-  const folder = configDir.replace(/(.)[\\/]+$/, '$1');
+export function accountOf(configDir, defaultDir) {
+  const folder = configDir === null ? null : trimmed(configDir);
+  if (folder === null || folder === trimmed(defaultDir)) return { account: 'default', label: null };
   const name = folder.split(/[\\/]/).pop() || folder;
   return { account: `dir-${createHash('sha256').update(folder).digest('base64url').slice(0, 16)}`, label: name.slice(0, 40) };
 }
@@ -99,8 +106,10 @@ export function parseLimitsReport(raw, now) {
   }
   if (!isObject(body) || body.v !== 1) throw new HttpError(400, 'Body must look like {"v":1,"limits":[...]}');
   const context = isObject(body.context) && wholeIn(body.context.tokens, 0, MAX_TOKENS) && wholeIn(body.context.window, 1, MAX_TOKENS) ? { tokens: body.context.tokens, window: body.context.window } : null;
+  // eslint-disable-next-line no-control-regex -- a NUL in a path is not a path
+  const configDir = typeof body.configDir === 'string' && body.configDir !== '' && body.configDir.length <= 4096 && !/\u0000/.test(body.configDir) ? body.configDir : null;
   return {
-    ...accountOf(body.configDir),
+    configDir,
     sessionId: textOrNull(body.sessionId, /^[\w.:-]+$/, 200),
     claudeVersion: textOrNull(body.claudeVersion, /^\d+\.\d+\.\d+[\w.+-]*$/, 64),
     limits: readLimits(body.limits, now),
@@ -130,9 +139,21 @@ function keepNewest(map, key, value, max) {
  */
 
 /**
- * @param {{ onChange?: (snapshot: LimitsSnapshot, account: AccountLimits) => void, now?: () => number }} [options]
+ * Whether a reading should replace the one kept: always for a new window (its reset time moved
+ * on), within one window only when it is not lower, as another session may have seen less.
+ * @param {Limit|undefined} kept
+ * @param {{ percentUsed: number, resetsAt: number }} incoming
  */
-export function createLimitsTracker({ onChange = () => {}, now = Date.now } = {}) {
+function replaces(kept, incoming) {
+  if (!kept || Math.abs(kept.resetsAt - incoming.resetsAt) >= SAME_WINDOW_MS) return true;
+  return incoming.percentUsed >= kept.percentUsed;
+}
+
+/**
+ * @param {{ onChange?: (snapshot: LimitsSnapshot, account: AccountLimits) => void, now?: () => number, defaultConfigDir?: string }} [options]
+ *   defaultConfigDir: the folder Claude Code uses without CLAUDE_CONFIG_DIR (~/.claude)
+ */
+export function createLimitsTracker({ onChange = () => {}, now = Date.now, defaultConfigDir = join(homedir(), '.claude') } = {}) {
   /** @type {Map<string, { account: string, label: string|null, claudeVersion: string|null, at: number, limits: Map<string, Limit> }>} */
   const accounts = new Map();
   /** @type {Map<string, { tokens: number, window: number, at: number }>} */
@@ -157,12 +178,13 @@ export function createLimitsTracker({ onChange = () => {}, now = Date.now } = {}
      */
     observe(report) {
       const t = now();
-      const kept = accounts.get(report.account) ?? { account: report.account, label: report.label, claudeVersion: null, at: t, limits: new Map() };
-      for (const limit of report.limits) kept.limits.set(limit.kind, { ...limit, at: t });
-      Object.assign(kept, { label: report.label, at: t, claudeVersion: report.claudeVersion ?? kept.claudeVersion });
-      keepNewest(accounts, report.account, kept, MAX_ACCOUNTS);
+      const { account, label } = accountOf(report.configDir, defaultConfigDir);
+      const kept = accounts.get(account) ?? { account, label, claudeVersion: null, at: t, limits: new Map() };
+      for (const limit of report.limits) if (replaces(kept.limits.get(limit.kind), limit)) kept.limits.set(limit.kind, { ...limit, at: t });
+      Object.assign(kept, { label, at: t, claudeVersion: report.claudeVersion ?? kept.claudeVersion });
+      keepNewest(accounts, account, kept, MAX_ACCOUNTS);
       if (report.sessionId && report.context) keepNewest(contexts, report.sessionId, { ...report.context, at: t }, MAX_SESSIONS);
-      onChange(snapshot(), accountRecord(report.account, t));
+      onChange(snapshot(), accountRecord(account, t));
     },
     snapshot,
   };

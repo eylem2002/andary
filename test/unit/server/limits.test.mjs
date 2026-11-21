@@ -2,7 +2,7 @@
 // account (server/limits.mjs).
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { LIMITS_BODY_BYTES, createLimitsTracker, parseLimitsReport } from '../../../server/limits.mjs';
+import { LIMITS_BODY_BYTES, accountOf, createLimitsTracker, parseLimitsReport } from '../../../server/limits.mjs';
 
 const NOW = Date.parse('2026-11-21T12:00:00.000Z');
 const HOUR = 3_600_000;
@@ -25,12 +25,19 @@ describe('parseLimitsReport', () => {
     assert.equal(report.sessionId, 'b3f1c2d4-1111-2222-3333-444455556666');
     assert.equal(report.claudeVersion, '2.1.330');
     assert.deepEqual(report.context, { tokens: 182_340, window: 1_000_000 });
+    assert.equal(report.configDir, '/home/u/.claude-work');
+  });
+
+  it('tells accounts apart by config folder; the default folder is one account however it is named', () => {
+    const work = accountOf('/home/u/.claude-work', '/home/u/.claude');
     // The folder's path stays on the server: a key made from it, and its name.
-    assert.match(report.account, /^dir-[\w-]{16}$/);
-    assert.equal(report.label, '.claude-work');
-    assert.ok(!JSON.stringify(report).includes('/home/u'));
-    assert.equal(parse({ v: 1, configDir: '/home/u/.claude-work/' }).account, report.account, 'a trailing slash names the same folder');
-    assert.notEqual(parse({ v: 1, configDir: '/home/u/.claude' }).account, report.account);
+    assert.match(work.account, /^dir-[\w-]{16}$/);
+    assert.equal(work.label, '.claude-work');
+    assert.ok(!JSON.stringify(work).includes('/home/u'));
+    assert.deepEqual(accountOf('/home/u/.claude-work/', '/home/u/.claude'), work, 'a trailing slash names the same folder');
+    assert.deepEqual(accountOf(null, '/home/u/.claude'), { account: 'default', label: null });
+    assert.deepEqual(accountOf('/home/u/.claude', '/home/u/.claude'), { account: 'default', label: null });
+    assert.deepEqual(accountOf('/home/u/.claude/', '/home/u/.claude'), { account: 'default', label: null });
   });
 
   it('refuses what is not a version-1 JSON object', () => {
@@ -62,7 +69,7 @@ describe('parseLimitsReport', () => {
     assert.deepEqual(report.limits.map((l) => [l.kind, l.percentUsed]), [['five_hour', 100], ['seven_day', 0]]);
     assert.equal(report.sessionId, null);
     assert.equal(report.claudeVersion, null);
-    assert.deepEqual([report.account, report.label], ['default', null]);
+    assert.equal(report.configDir, null);
     assert.equal(report.context, null);
     const many = parse({ v: 1, limits: Array.from({ length: 20 }, (_, i) => ({ kind: `k${i}`, percentUsed: 1, resetsAt: iso(NOW + HOUR) })) });
     assert.equal(many.limits.length, 8);
@@ -93,6 +100,24 @@ describe('createLimitsTracker', () => {
     assert.deepEqual(changes[2].account, account);
     now = NOW + 2 * HOUR;
     assert.deepEqual(tracker.snapshot().accounts[0].limits.map((l) => l.kind), ['seven_day']);
+  });
+
+  it('keeps the higher reading within one window: another session of the account may have seen less', () => {
+    let now = NOW;
+    const tracker = createLimitsTracker({ now: () => now, defaultConfigDir: '/home/u/.claude' });
+    const send = (/** @type {number} */ percentUsed, /** @type {number} */ resetsAt, configDir = '/home/u/.claude') => tracker.observe(parse({ v: 1, configDir, limits: [{ kind: 'five_hour', percentUsed, resetsAt: iso(resetsAt) }] }));
+    send(60, NOW + 3 * HOUR);
+    now += 60_000;
+    // Another session, last answered a while ago, reports 40% of the same window (a few seconds' difference in its reset time).
+    send(40, NOW + 3 * HOUR + 5000, null);
+    assert.deepEqual(tracker.snapshot().accounts.map((a) => [a.account, a.limits[0].percentUsed, a.limits[0].at]), [['default', 60, NOW]]);
+    now += 60_000;
+    send(61, NOW + 3 * HOUR);
+    assert.deepEqual(tracker.snapshot().accounts[0].limits[0], { kind: 'five_hour', percentUsed: 61, resetsAt: NOW + 3 * HOUR, at: NOW + 120_000 });
+    // A new window: its reset time moved on, so a lower reading replaces the old one.
+    now = NOW + 4 * HOUR;
+    send(3, NOW + 8 * HOUR);
+    assert.deepEqual(tracker.snapshot().accounts[0].limits.map((l) => l.percentUsed), [3]);
   });
 
   it('tells accounts apart by their config folder, newest first, and keeps at most eight', () => {

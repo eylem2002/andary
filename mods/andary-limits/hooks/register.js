@@ -10,8 +10,11 @@
 // its own (no waiting on Andary, well inside the hook's 10-second limit); nothing it does can
 // throw into the session; with no Andary running it reads one small file and stops.
 //
-// It proves itself to the server exactly as the hook forwarder does (hooks/hook.mjs, §4.3): it
-// reads server.json, which only this user can read, asks the server to prove it holds that file's
+// It finds Andary's folder as ANDARY_HOME in Claude Code's own environment, else ~/.andary. Unlike
+// the forwarder it has no install folder of its own to look in, and Claude Code sees ANDARY_HOME
+// only when it was started with it (a shell profile, not one terminal's export), so a town with
+// another folder may go unseen: `andary doctor` says so. Like the forwarder it then proves the
+// server (hooks/hook.mjs, §4.3): it reads server.json, which only this user can read, asks the server to prove it holds that file's
 // response key (HMAC-SHA256 over a fresh nonce, built here on crypto.subtle.digest, the one part of
 // Web Crypto the hooks sandbox has) before it sends anything, and
 // then sends the hook secret with the report. A stale server.json whose port someone else now
@@ -60,9 +63,7 @@ async function measured($, e, next) {
     flight.again = true;
   } else {
     flight.busy = true;
-    flight.done = reportAll($).then(() => {
-      flight.busy = false;
-    });
+    flight.done = reportAll($);
   }
   return next(e);
 }
@@ -77,7 +78,8 @@ export function settled() {
 
 /**
  * Sends reports until no newer reading has come. Never rejects: Andary not running, a refused
- * call or a network error ends that report and nothing else.
+ * call or a network error ends that report and nothing else. It frees the flight in the same
+ * step that finds no newer reading, so a reading can never land between the two and be lost.
  * @param {ModsApi} $
  */
 async function reportAll($) {
@@ -89,6 +91,7 @@ async function reportAll($) {
       // nothing to do: the next turn reports again
     }
   } while (flight.again);
+  flight.busy = false;
 }
 
 /**
@@ -99,7 +102,7 @@ async function reportOnce($) {
   const state = await readServerState($);
   if (!state) return;
   const base = baseUrl(state);
-  if (!(await serverProves($, base, state.responseKey))) return;
+  if (!base || !(await serverProves($, base, state.responseKey))) return;
   const report = await readReport($);
   await $.http.fetch(`${base}/api/limits`, {
     method: 'POST',
@@ -139,12 +142,18 @@ async function readServerState($) {
 }
 
 /**
- * Where this computer reaches the server: a wildcard address means 127.0.0.1.
+ * Where this computer reaches the server: a wildcard address means 127.0.0.1; a loopback address
+ * or `localhost` is used as it is. Anything else (a town bound to a network address only) gets
+ * no report: plan limits never leave this computer.
  * @param {{ port: number, host: string }} state
+ * @returns {string|null}
  */
 function baseUrl({ port, host }) {
-  const name = !host || host === '0.0.0.0' || host === '::' || host === '[::]' ? '127.0.0.1' : host.replace(/^\[|\]$/g, '');
-  return `http://${name.includes(':') ? `[${name}]` : name}:${port}`;
+  const bare = host.replace(/^\[|\]$/g, '');
+  if (!bare || bare === '0.0.0.0' || bare === '::') return `http://127.0.0.1:${port}`;
+  const loopback = bare === 'localhost' || bare === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bare);
+  if (!loopback) return null;
+  return `http://${bare.includes(':') ? `[${bare}]` : bare}:${port}`;
 }
 
 /** @param {Uint8Array} bytes */

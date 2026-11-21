@@ -1003,15 +1003,21 @@ section.
 169. **An account is a Claude config folder.** Limits belong to an account, and nothing a mod can
      read names the account in a documented way (`$.session.identity()` exists but is not in the
      reference). Two accounts on one computer almost always mean two `CLAUDE_CONFIG_DIR`s, so the
-     server keys limits by a hash of the folder (none: "default") and labels them by its name;
-     the path itself is not kept. Two folders signed in to one account show twice; one folder
-     that switches accounts shows the newest reading.
-170. **A report without limits keeps the account's.** A session before its first answer, or one
+     server keys limits by a hash of the folder and labels them by its name; the path itself is
+     not kept. No `CLAUDE_CONFIG_DIR`, or one that names `~/.claude` (the folder Claude Code uses
+     without it), is one account, "default". Two other folders signed in to one account show
+     twice; one folder that switches accounts shows the newest window's readings.
+170. **A report without limits keeps the account's, and a lower one within a window does not
+     replace a higher one.** Each session reports what it saw at its last answer, so a quiet
+     session can report 40% after a busy one reported 60%; use only grows within a window, so the
+     higher reading stands (with its own "as of") until a reading with a reset time an hour or
+     more away starts a new window. A session before its first answer, or one
      on an API key, reports no limits; it must not wipe what another session of that account
      reported. Each limit keeps its own "as of", and disappears once its reset time passes (as in
      Claude Code).
 171. **Limits are kept in memory only.** A restart forgets them until the next turn of any
-     session (the mod reports after each turn); no file in `~/.andary` holds them.
+     session (the mod reports after each turn); no file in `~/.andary` holds them
+     (`limit-notes.json` keeps only which windows had their phone note, 182).
 172. **The projection is the average pace since the window opened.** A window opens one length
      before it resets (5 hours, 7 days); pace = percent used ÷ time since it opened, as of the
      reading; run-out = when that pace reaches 100%. Shown only before the reset and after now,
@@ -1045,3 +1051,18 @@ section.
 180. **The mod folder carries a `claude plugin test` file.** It runs the module in Claude Code's own
      engine (no session, no network); the repository's checks use node:test, which does not need
      Claude Code.
+181. **Figures are rounded down, with one decimal from 99.** 89.5% reads "89% used" and the
+     "warn" level, since the 90% note stays quiet for it; levels and the busiest limit go by the
+     reported percent. "Used up" only at 100: 99.5% leaves something.
+182. **The 90% note's windows survive a restart** (`limit-notes.json`, at most 64, windows that
+     reset are dropped on load), and with two accounts or more the note names the account by its
+     folder ("default folder" for the default one): a folder name is no project.
+183. **The mod reports only to a town on this computer.** It uses server.json's `host` only when it
+     is a loopback address, `localhost` or a wildcard (then 127.0.0.1). A town bound to a network
+     address alone (`--host 192.168.…`) gets no limits; plan limits never leave the computer.
+184. **The mod finds the town through Claude Code's own `ANDARY_HOME`, else `~/.andary`.** The
+     forwarder can also look next to its installed copy; the mod has no such folder. Claude Code
+     inherits `ANDARY_HOME` only from where it was started, so the README and `andary doctor` say
+     to set it in the shell profile.
+185. **A team viewer is not told to install the mod.** Limits are the host's and never reach a
+     viewer; their Usage dialog says only the host sees them.

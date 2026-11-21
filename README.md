@@ -83,9 +83,11 @@ reports limits for Pro and Max plans, after its first answer.
 
 - **What it sends:** numbers only (each limit's percent and reset time, the session's context size,
   its id and Claude Code's version), to the Andary server on this computer, which first proves
-  it is yours, as the hook forwarder does. Nothing leaves your computer.
+  it is yours, as the hook forwarder does. Nothing leaves your computer, unless you turn on the
+  phone note below.
 - **A phone note at 90%:** start with `andary start --notify --notify-limits` (off by default; one
-  note per limit window).
+  note per limit window). The note carries the limit's name, its percent and its reset time to
+  the ntfy server, like every phone note.
 - **Check it:** `andary doctor` says when the mod last reported, and from which Claude Code.
 - **Remove it:** `/plugin uninstall andary-limits@andary` (or turn it off in `/plugin`).
 
@@ -392,6 +394,7 @@ The full model: [docs/INTEGRATION.md](docs/INTEGRATION.md).
 | Events arrive twice | The plugin and `andary install` are both active, or one agent is installed in two scopes: `andary doctor` says which; uninstall one. |
 | A teammate's view link says "Forbidden" | Start the host with `--team-host <the name in the link>`, or use the IP address the invite printed. |
 | No plan limits on the Usage button | Install the [andary-limits mod](#plan-limits-optional), then finish a turn in a session started afterwards (Claude Code v2.1.287 or newer; an API key has no plan limits). `andary doctor` says whether it reported. |
+| Plan limits never arrive, with `ANDARY_HOME` set | The mod looks for the town in Claude Code's own `ANDARY_HOME`, else `~/.andary`. Set `ANDARY_HOME` where Claude Code inherits it too (your shell profile), and restart Claude Code. |
 | The 3D view is blank or slow | Settings → Graphics → Low power; the boards and log keep working without WebGL. |
 
 ## 8. Command reference

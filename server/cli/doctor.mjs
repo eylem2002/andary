@@ -42,7 +42,7 @@ export async function runDoctor(_values, _positionals, io) {
   const state = await checkServer(report, home);
   if (state) {
     const hello = await checkRoundTrip(report, home, io);
-    const limits = hello ? limitsCheck(hello.limits, installs.limitsMod, Date.now()) : null;
+    const limits = hello ? limitsCheck(hello.limits, installs.limitsMod, Date.now(), Boolean(io.env.ANDARY_HOME)) : null;
     if (limits) report(limits.status, limits.title, limits.detail);
   }
   io.out('');
@@ -201,9 +201,11 @@ function age(ms) {
  * @param {unknown} limits     the hello's `limits`
  * @param {boolean} enabled    a Claude Code settings file enables the mod
  * @param {number} now
+ * @param {boolean} [ownHome]  Andary's folder comes from ANDARY_HOME: the mod finds it only if
+ *   Claude Code was started with the same ANDARY_HOME
  * @returns {{ status: 'ok'|'warn', title: string, detail: string }}
  */
-export function limitsCheck(limits, enabled, now) {
+export function limitsCheck(limits, enabled, now, ownHome = false) {
   const accounts = readAccounts(limits);
   const newest = accounts.reduce((/** @type {typeof accounts[number]|null} */ best, account) => (!best || account.at > best.at ? account : best), null);
   if (newest) {
@@ -215,7 +217,7 @@ export function limitsCheck(limits, enabled, now) {
     return {
       status: 'warn',
       title: 'Plan limits: the andary-limits mod is enabled, but has not reported since the town started',
-      detail: 'It reports after each turn, from Claude Code v2.1.287 or newer: finish a turn in a session started after you installed it (/plugin should list it as an active mod).',
+      detail: `It reports after each turn, from Claude Code v2.1.287 or newer: finish a turn in a session started after you installed it (/plugin should list it as an active mod).${ownHome ? ' This town uses ANDARY_HOME: the mod finds it only if Claude Code was started with the same ANDARY_HOME (set it in your shell profile).' : ''}`,
     };
   }
   return { status: 'ok', title: 'Plan limits: not set up (optional)', detail: `To see your 5-hour and weekly limits in the town: ${ADD_MOD}` };
