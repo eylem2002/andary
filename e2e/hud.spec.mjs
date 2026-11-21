@@ -260,7 +260,7 @@ test.describe('keyboard', () => {
     await card.getByTestId('approve-always').focus();
     await page.keyboard.press('Enter');
     await expect(card).toHaveAttribute('data-status', 'allowed');
-    await expect(card).toContainText('Allowed always from the town');
+    await expect(card).toContainText('Allowed; asked Claude Code to save');
     await expect(card).toBeFocused();
   });
 });

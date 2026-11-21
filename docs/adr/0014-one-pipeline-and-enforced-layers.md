@@ -39,9 +39,15 @@ An independent architecture review (2026-11-20) found the design sound but the s
 ## Update (2026-11)
 
 Modules that joined the server's list since this decision (`SERVER_CORE` in
-`scripts/check-boundaries.mjs` keeps the full list): `dialogs` (`public/js/core/dialogs.js`), the
-one model of what an agent has asked you and had no answer to. The phone notes, the approval
-broker and the town's "needs you" must agree on when an agent waits for you and what the terminal
-answered, so that rule lives once, in core, where all three read it. `card-fields` (`public/js/core/card-fields.js`), the
-input fields an approval card shows for each tool: the server holds a request only when the card
-shows every field of it, so the card and that rule read one list.
+`scripts/check-boundaries.mjs` keeps the full list):
+
+- `dialogs` (`public/js/core/dialogs.js`), the one model of what an agent has asked you and had
+  no answer to. The phone notes, the approval broker and the town's "needs you" must agree on
+  when an agent waits for you and what the terminal answered, so that rule lives once, in core,
+  where all three read it.
+- `card-fields` (`public/js/core/card-fields.js`), the input fields an approval card shows for
+  each tool: the server holds a request only when the card shows every field of it, so the card
+  and that rule read one list.
+- `permission-rules` (`public/js/core/permission-rules.js`), which says which permission rules an
+  approval may offer to save with "Allow always". The server decides, and the demo plays the
+  server's part, so both read the same rule.

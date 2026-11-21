@@ -61,7 +61,7 @@ const MAX_DIALOGS = 500;
  * @property {'town'|'terminal'|'timeout'} [decidedBy]
  * @property {Proof} [proof]          set when resolved: what showed the terminal answered
  * @property {string} [message]
- * @property {{ rules: PermissionRule[], destination: string, at: number }} [always]  what an "Allow always" saved, and when
+ * @property {{ rules: PermissionRule[], destination: string, at: number }} [always]  the rule an "Allow always" asked Claude Code to save, and when
  */
 
 /**
@@ -117,7 +117,7 @@ function copyRules(rules) {
 
 /**
  * What a town decision changes on its approval: the answer, the note typed with it, and the rule
- * an "Allow always" saves, with when.
+ * an "Allow always" asked Claude Code to save, with when.
  * @param {'allow'|'deny'} decision
  * @param {string} note
  * @param {Offer|undefined} offer  the suggestion an "Allow always" chose

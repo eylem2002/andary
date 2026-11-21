@@ -293,7 +293,7 @@ describe('forwarder trust (another program on the recorded port)', () => {
 });
 
 describe('forwarder capabilities', () => {
-  it('declares on every body that it marks one it shortened, so the town may trust one unmarked', async () => {
+  it('declares on every body what it does: it marks one it shortened, and it can pass a rule on', async () => {
     const fake = await impostor(() => ({}), 'caps-key');
     try {
       const env = isolatedEnv({ ANDARY_HOME: homeWith('caps', { pid: process.pid, port: fake.port, responseKey: 'caps-key' }) });
@@ -307,9 +307,9 @@ describe('forwarder capabilities', () => {
       assert.deepEqual(
         bodies.map((body) => [body.caps, body.event.truncated]),
         [
-          [['truncated'], undefined],
-          [['truncated'], true],
-          [['truncated'], true],
+          [['truncated', 'updatedPermissions'], undefined],
+          [['truncated', 'updatedPermissions'], true],
+          [['truncated', 'updatedPermissions'], true],
         ],
       );
     } finally {
@@ -370,6 +370,17 @@ describe('forwarder: an allow that saves a rule (Allow always)', () => {
     assert.equal(stdout, allowWith(SUGGESTION));
   });
 
+  it('passes on a rule kept for the session, and a prefix written either way', async () => {
+    for (const suggestion of [
+      { ...SUGGESTION, destination: 'session' },
+      { ...SUGGESTION, rules: [{ toolName: 'Bash', ruleContent: 'npm test *' }] },
+      { ...SUGGESTION, rules: [{ toolName: 'Bash', ruleContent: 'npm test' }] },
+      { ...SUGGESTION, rules: [{ toolName: 'mcp__github__get_issue' }] },
+    ]) {
+      assert.equal(await printed([suggestion], (event) => allowSaving([event.permission_suggestions[0]])), allowWith(suggestion), JSON.stringify(suggestion.rules));
+    }
+  });
+
   it('compares without regard to key order, and prints the suggestion as its own input has it', async () => {
     const reordered = { destination: 'localSettings', behavior: 'allow', rules: [{ ruleContent: 'npm test:*', toolName: 'Bash' }], type: 'addRules' };
     const stdout = await printed([SUGGESTION], () => allowSaving([reordered]));
@@ -408,6 +419,25 @@ describe('forwarder: an allow that saves a rule (Allow always)', () => {
       ['replaced rules', { ...SUGGESTION, type: 'replaceRules' }],
       ['a mode', { type: 'setMode', mode: 'bypassPermissions', destination: 'session' }],
       ['folders', { type: 'addDirectories', directories: ['/'], destination: 'session' }],
+    ];
+    for (const [what, suggestion] of cases) {
+      assert.equal(await printed([suggestion], (event) => allowSaving([event.permission_suggestions[0]])), PLAIN_ALLOW, what);
+    }
+  });
+
+  it('never saves a rule that allows more than it reads, even when Claude Code suggested it', async () => {
+    /** @param {Record<string, unknown>} rule */
+    const only = (rule) => ({ ...SUGGESTION, rules: [rule] });
+    /** @type {[string, object][]} */
+    const cases = [
+      ['an empty content, which Claude Code saves as the whole tool', only({ toolName: 'Bash', ruleContent: '' })],
+      ['a star: the whole tool', only({ toolName: 'Bash', ruleContent: '*' })],
+      ['no content: the whole tool', only({ toolName: 'Bash' })],
+      ['a wildcard in the middle', only({ toolName: 'Bash', ruleContent: 'rm -f *.log' })],
+      ['a path pattern', only({ toolName: 'Read', ruleContent: '/home/me/project/**' })],
+      ['every tool of an MCP server', only({ toolName: 'mcp__github__*' })],
+      ['a narrow rule beside a broad one', { ...SUGGESTION, rules: [{ toolName: 'Bash', ruleContent: 'npm test' }, { toolName: 'Bash', ruleContent: '*' }] }],
+      ['no rules at all', { ...SUGGESTION, rules: [] }],
     ];
     for (const [what, suggestion] of cases) {
       assert.equal(await printed([suggestion], (event) => allowSaving([event.permission_suggestions[0]])), PLAIN_ALLOW, what);

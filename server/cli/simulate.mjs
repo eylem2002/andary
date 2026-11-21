@@ -80,14 +80,14 @@ async function loadSimulation(modulePath, io) {
 /**
  * Posts one payload; for PermissionRequest, waits for the town's answer and passes it back to
  * the simulation ({ decision }, with the rule an "Allow always" saved), or nothing when the town
- * did not decide.
+ * did not decide. The story keeps a saved rule, so it says it can (`caps`).
  * @param {import('../state-file.mjs').ServerState} state
  * @param {Record<string, any>} payload
  * @returns {Promise<{ decision: 'allow'|'deny', updatedPermissions?: unknown[] } | undefined>}
  */
 async function emitToServer(state, payload) {
   const permission = payload?.hook_event_name === 'PermissionRequest';
-  const { output } = await postHook(state, payload, { timeoutMs: permission ? state.approvalTimeoutMs + 5000 : 5000 });
+  const { output } = await postHook(state, payload, { timeoutMs: permission ? state.approvalTimeoutMs + 5000 : 5000, caps: ['updatedPermissions'] });
   if (!permission) return undefined;
   const { behavior, updatedPermissions } = output?.hookSpecificOutput?.decision ?? {};
   if (behavior !== 'allow' && behavior !== 'deny') return undefined;

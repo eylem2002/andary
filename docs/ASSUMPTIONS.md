@@ -461,24 +461,45 @@ section.
 101. **"Allow always" saves only rules that stay with you.** The town offers an allow rule for this
     project and only you (`.claude/settings.local.json`) or until the session ends; never one for
     the committed project settings (it would change your teammates' prompts) or for every project,
-    and never a mode or folders. The forwarder enforces the same list on its own.
+    never a mode or folders, and never a rule that allows more than it reads (108). The forwarder
+    enforces the same rules on its own.
 102. **A suggestion the town cannot show exactly is not offered.** One with a field the town does not
     know, on the suggestion or on a rule, or one that sanitising changed (a secret masked, a long
     value cut) gets no "Allow always": the card must show the very rule it saves.
 103. **One rule per card, and no key for it.** The card offers the first suggestion kept for this
     project, else the first kept for the session. `A` stays a plain allow, so saving a rule always
     takes its own button, with the same one-second click delay as Allow and Deny.
-104. **"You allowed this N times today" counts what this town saw.** Earlier requests for the same
-    rule, allowed in the town or answered in the terminal on the viewer's calendar day, among the
-    requests the page knows (the last 100; a new tab gets the server's last 50 settled ones). One
-    answered in the terminal counts as allowed: the town only sees the agent carry on, so a denial
-    there may be counted now and then.
-105. **"Claude Code asked again" is judged within one session.** Claude Code applies a saved rule to
-    the session that saved it at once, so a request for that rule there, made after the choice,
-    means the rule did not take. Another session may have started before the rule was saved, so it
-    is not judged.
+104. **"You allowed this N times today" counts what this town saw, in one project.** Earlier
+    requests for the same rule from the same folder, on the viewer's calendar day, among the requests
+    the page knows (the last 100; a new tab gets the server's last 50 settled ones): those allowed in
+    the town, and those answered in the terminal whose tool then ran. One the terminal settled
+    because the agent or session stopped is not counted: it may have been a denial.
+105. **The town says what it asked for, not what was saved.** Claude Code does not report whether
+    it saved a rule, so a card answered with "Allow always" reads "Allowed; asked Claude Code to
+    save …". A rule asked to be saved for this project that comes back in the same session, after
+    the choice, gets a neutral hint: it may not have been saved (a managed setting can forbid saved
+    rules). Rules kept for the session are not judged, since `claude --continue` keeps the session
+    id but not its session rules, and other sessions may have started before the rule was saved.
 106. **The forwarder compares suggestions as JSON with sorted keys.** Key order means nothing in
     JSON. A value it cannot compare (nested too deeply) saves nothing: the answer is a plain allow.
 107. **The demo keeps a rule allowed always for its project.** Its suggestions are for this project
     (`localSettings`), so later demo sessions of the same project do not ask for it either, as
     Claude Code would not.
+108. **A rule is offered only when the card can say what it allows.** One exact command or value;
+    commands starting with a prefix, written `npm test:*` or `npm test *` (Claude Code reads the two
+    alike, and its permission dialog now writes the second), for Bash and PowerShell only, and said
+    in words ("commands starting with “npm test”"); or one MCP tool, the narrowest rule there is for
+    it ("every use of this tool"). Never a whole built-in tool (no content, an empty content, which
+    Claude Code saves as the bare tool, or `*`), a wildcard anywhere else (`rm -f *.log` also
+    allows `rm -f -r ~ x.log`; `?` and `[` are wildcards in path rules), or an MCP rule with
+    content (Claude Code skips those). A folder rule such as `Read(/project/**)` is not offered
+    either; the terminal still offers it.
+109. **"Allow always" needs a forwarder that can pass the rule on.** The plugin runs its own copy of
+    the forwarder, and `andary start` refreshes only `<home>/hook.mjs`, so an older copy may answer
+    for the town; it would print a plain allow. Each body says what its forwarder does (`caps`),
+    and a request whose body does not declare `updatedPermissions` offers no rule (one that does
+    not declare `truncated` is not held at all).
+110. **Rules are written the way Claude Code writes them.** A backslash and each parenthesis in a
+    rule's content get a backslash (Claude Code's own settings writer does this), so
+    `Bash(echo \), Bash\(ls)` cannot read as two rules. Hidden characters are revealed on the card
+    and in the log, as for commands.

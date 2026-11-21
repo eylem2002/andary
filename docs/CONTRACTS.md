@@ -200,12 +200,16 @@ shows up as a crew of its own.
    port someone else now holds learns neither the event nor the secret.
 4. `POST http://127.0.0.1:<port>/api/hook` with headers `x-andary-secret: <secret>` and
    `x-andary-nonce: <16 random bytes, base64url>` and body
-   `{"v":1,"ts":<ts>,"caps":["truncated"],"event":<payload>}`; run with the argument `codex`, the
-   body also has `"source":"codex"` (§4.12). `caps` says what this forwarder does (strings; the
-   server ignores any it does not know): `truncated`, it marks a body it had to shorten (§4.6). The
-   server holds a request for the town only from a forwarder that declares it (§4.5); `andary
-   replay` and `andary simulate` post the same body, `caps` included, as they never shorten one.
-   Codex reads the same PermissionRequest decision format, so step 5 is the same for both.
+   `{"v":1,"ts":<ts>,"caps":["truncated","updatedPermissions"],"event":<payload>}`; run with the
+   argument `codex`, the body also has `"source":"codex"` (§4.12). `caps` says what this forwarder
+   does (strings; the server ignores any it does not know): `truncated`, it marks a body it had to
+   shorten (§4.6), and `updatedPermissions`, it can pass a saved rule on (step 5). The server
+   holds a request for the town only from a forwarder that declares `truncated`, and offers "Allow
+   always" only for a request whose body declares `updatedPermissions` (§4.5): an older copy, such
+   as a plugin's own, prints a plain allow. `andary replay` and `andary simulate` post the same
+   body, `truncated` included, as they never shorten one; only `andary simulate`, whose story
+   keeps a saved rule, declares `updatedPermissions`. Codex reads the same PermissionRequest
+   decision format, so step 5 is the same for both.
    Timeout 1.5 s, or `approvalTimeoutMs + 5000` for `PermissionRequest`.
 5. Only for `PermissionRequest`: if the reply carries a valid `x-andary-signature`
    (`base64url(HMAC-SHA256(responseKey, nonce + "\n" + body))`) and its `output` is an allow or
@@ -213,10 +217,12 @@ shows up as a crew of its own.
    `{behavior:'deny', message}`, or an allow that saves one rule ("Allow always", §4.5):
    `{behavior:'allow', updatedPermissions:[s]}`. That last one only when the reply's
    `updatedPermissions` is an array of exactly one element that equals, whatever the order of
-   keys, an element `s` of the hook's own stdin `permission_suggestions`, and `s` is `addRules`
-   with `behavior: 'allow'` and `destination` `localSettings` or `session`; `s` is printed from the
-   hook's own input, never from the reply. Any other `updatedPermissions` gives a plain allow; any
-   other field is dropped. Nothing else is ever printed.
+   keys, an element `s` of the hook's own stdin `permission_suggestions`, `s` is `addRules` with
+   `behavior: 'allow'` and `destination` `localSettings` or `session`, and each of its rules allows
+   no more than it reads (§4.5: never an empty content, `*`, a whole built-in tool or another
+   wildcard). `s` is printed from the hook's own input, never from the reply. Any other
+   `updatedPermissions` gives a plain allow; any other field is dropped. Nothing else is ever
+   printed.
 6. **Always exits 0** and never prints anything else. Any error → exit 0 silently.
 
 ### 4.4 Server (`server/`)
@@ -283,7 +289,7 @@ Server → browser:
 //              toolName, toolInput, callKey: string|null /* the request's andary_key, §4.6 */, source: 'claude'|'codex',
 //              cwd, createdAt, expiresAt: number|null, decidedBy?: 'town'|'terminal'|'timeout', proof?: 'ran'|'denied'|'stopped', message?,
 //              suggestions: { index, rules: { toolName, ruleContent? }[], destination: 'localSettings'|'session' }[],
-//              always?: { rules, destination, at } /* what an "Allow always" saved, and when (server time) */ }
+//              always?: { rules, destination, at } /* the rule an "Allow always" asked Claude Code to save, and when (server time) */ }
 ```
 
 Browser → server:
@@ -351,25 +357,36 @@ character of its line (a line break in JavaScript, in Python source and in most 
 `// note\rconsole.log("RAN")` runs its second line). In a diff only a newline ends a row, so a
 carriage return in file content is shown as `⟨U+000D⟩`, and a run of blank-looking rows is
 collapsed whatever its rows' kinds; a run of more than one kind counts each
-(`⟨120 blank lines: 80 added, 40 removed⟩`). In the browser, Allow/Deny ignore pointer clicks for
-1 s after a card appears or changes place.
+(`⟨120 blank lines: 80 added, 40 removed⟩`). In the browser, Allow, Allow always and Deny ignore
+pointer clicks for 1 s after a card appears or changes place.
 
 **Allow always.** `Approval.suggestions` lists the request's `permission_suggestions` the town
 offers to save, each with its `index` in that list: `addRules` with `behavior: 'allow'`,
 `destination` `localSettings` (this project, only you) or `session` (until the session ends), and
 a non-empty `rules` of `{toolName, ruleContent?}` objects, with no field the town does not know on
-the suggestion or its rules; only those sanitising left unchanged, and none for Codex,
+the suggestion or its rules, each allowing no more than it reads: one exact command or value,
+commands starting with a prefix (Bash and PowerShell: `npm test:*` or `npm test *`), or one MCP
+tool (`mcp__<server>__<tool>`, no content). Never an empty content (Claude Code saves it as the
+bare tool), `*`, a whole built-in tool, any other wildcard (`*`, and `?` or `[` outside command
+rules), or an MCP rule with content. Only suggestions sanitising left unchanged are offered, only
+when the hook's body declares `updatedPermissions` in `caps` (§4.3), and none for Codex,
 `ExitPlanMode` or `AskUserQuestion` (`public/js/core/permission-rules.js`, `offeredSuggestions` in
 `server/approvals.mjs`). The suggestions themselves stay on the server. `decide` with `always` is
 accepted only for a held, pending approval, with `decision: 'allow'` and the `index` of one of its
 suggestions; anything else answers `{t:'error'}` and changes nothing. The hook then gets
 `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[<that suggestion, exactly as it arrived>]}}}`,
 which the forwarder checks again against its own input (§4.3), and the approval records
-`always: { rules, destination, at }`. The card offers one suggestion (the first `localSettings`
-one, else the first `session` one) with an **Allow always** button under Allow and Deny, the rule
-written out (`Bash(npm test:*)`) and where it is kept; it has no key of its own. A short hint says
-how often the same rule was allowed today, or that it came back after an "Allow always"
-(`public/js/ui/approval-rules.js`). The demo does the same (`sources/demo.js`).
+`always: { rules, destination, at }`. Whether Claude Code saved the rule is not known, so the card
+says what happened: "Allowed; asked Claude Code to save Bash(npm test) for this project, only
+you". The card offers one suggestion (the first `localSettings` one, else the first `session`
+one): under Allow and Deny, a line names the rule as Claude Code writes it (a backslash and
+parentheses escaped with a backslash, hidden characters revealed), what it allows ("commands
+starting with “npm test”") and where it is kept, and then, set apart, the **Allow always**
+button, which has no key of its own. A short hint says how often the same rule was allowed today
+in the same project (allowed in the town, or resolved with `proof: 'ran'`), or that a rule asked to
+be saved for this project came back in the same session (it may not have been saved: a managed
+setting can forbid saved rules) (`public/js/ui/approval-rules.js`). The demo does the same
+(`sources/demo.js`).
 
 ### 4.6 Implementation notes (server)
 
@@ -379,7 +396,8 @@ Settled during implementation; they refine §4.3–§4.5.
   server in the background). `--approval-timeout` is capped at 140 s because Claude Code kills the
   hook at 150 s. An explicit `--host` address is added to the Host allowlist. A sign-in link
   opened on another `/<page>.html` (the lab pages, which do not read the fragment) only loses its
-  token: the redirect has no `#signin=`.
+  token: the redirect has no `#signin=`. `andary simulate` also declares `updatedPermissions` in
+  `caps` (its story keeps a rule allowed always, §7); `andary replay` declares only `truncated`.
 - HTTPS (ADR 0016, `server/listener.mjs`): with `--tls-cert`/`--tls-key` one port takes both;
   a connection whose first byte is `0x16` (a TLS handshake) gets HTTPS (TLS 1.2 or newer,
   10 s handshake limit), any other gets plain HTTP only from this computer (a loopback peer, or a

@@ -110,10 +110,11 @@ export { ACHIEVEMENTS };
  * @property {number} createdAt
  * @property {number|null} expiresAt
  * @property {'town'|'terminal'|'timeout'} [decidedBy]
+ * @property {'ran'|'denied'|'stopped'} [proof]  resolved: what showed the terminal answered (the tool ran, was denied, or the agent stopped)
  * @property {string} [message]
  * @property {string|null} [callKey]  the server's key for the call's input (§4.5), to find its dialog
  * @property {import('./permission-rules.js').OfferedSuggestion[]} [suggestions]  rules an allow may save ("Allow always")
- * @property {{ rules: import('./permission-rules.js').PermissionRule[], destination: string, at: number }} [always]  what an "Allow always" saved, and when
+ * @property {{ rules: import('./permission-rules.js').PermissionRule[], destination: string, at: number }} [always]  the rule an "Allow always" asked Claude Code to save, and when
  */
 
 /**
@@ -638,8 +639,8 @@ const APPROVAL_LOG = Object.freeze({
 });
 
 /**
- * The rules an "Allow always" saved, on one line ('' for any other answer). The approval crosses
- * the network, so it is read defensively.
+ * The rules an "Allow always" asked Claude Code to save, on one line with hidden characters
+ * revealed ('' for any other answer). The approval crosses the network, so it is read defensively.
  * @param {Approval} approval
  */
 function savedRules(approval) {
@@ -684,7 +685,7 @@ function approvalChanged(m, approval, ts) {
   if (log) {
     const saved = savedRules(approval);
     const at = { ts, sessionId: approval.sessionId, agentKey: key, kind: 'approval' };
-    pushLog(m, at, s, a, { icon: log.icon, text: saved ? `Allowed always: ${saved}` : `${log.prefix}: ${summary}`, level: /** @type {LogDraft['level']} */ (log.level) });
+    pushLog(m, at, s, a, { icon: log.icon, text: saved ? `Allowed; asked to save ${saved}` : `${log.prefix}: ${summary}`, level: /** @type {LogDraft['level']} */ (log.level) });
   }
   if (approval.status === 'denied') m.awaiting.delete(key);
   return approval.status === 'allowed' ? countApproval(m, key, tool) : [];

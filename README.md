@@ -160,11 +160,11 @@ file's content, or an edit as a diff. Anything that draws nothing (an unusual sp
 zero-width or direction mark, a run of blank lines) shows as a marker such as `⟨U+00A0⟩`, so
 nothing can hide in what you approve. To tell the agent why you said no, type a reason before
 **Deny** (or press Enter in the reason field). When Claude Code suggests a rule for the request,
-**Allow always** saves it for this project (only you) or for the session, and the card shows the
-exact rule first, such as `Bash(npm test:*)`. A request the town cannot show in full (a secret
-was masked, a long value was cut, or it has an option the card does not show, such as running a
-command outside the sandbox) is never held there and goes straight to your terminal; so does one
-from an older copy of Andary's hook (the card says how to update it). Codex does not say whether
+**Allow always** also asks it to save that rule for this project (only you) or for the session,
+and the card shows the exact rule first, such as `Bash(npm run build)`. A request the town cannot
+show in full (a secret was masked, a long value was cut, or it has an option the card does not
+show, such as running a command outside the sandbox) is never held there and goes straight to
+your terminal; so does one from an older copy of Andary's hook (the card says how to update it). Codex does not say whether
 a command asks to leave its sandbox, so a Codex command's card says that allowing it may.
 
 ### See what needs you

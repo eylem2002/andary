@@ -272,6 +272,22 @@ describe('allow always', () => {
     await closeBrowser(browser);
   });
 
+  it('offers no rule through a forwarder that does not say it can pass one on (an older copy)', async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    const payload = permissionRequest({ permission_suggestions: [SAVE] });
+    // What a forwarder from before "Allow always" declares: it marks a body it shortened, so the
+    // request is held, but it would print a plain allow.
+    const answer = postHook(town, payload, { caps: ['truncated'] });
+    const pending = await approvalFor(browser, payload.session_id);
+    assert.deepEqual([pending.a.held, pending.a.suggestions], [true, []]);
+    browser.send(JSON.stringify({ t: 'decide', id: pending.a.id, decision: 'allow', always: 0 }));
+    assert.match((await nthError(browser, 1)).message, /Allow always/);
+    browser.send(JSON.stringify({ t: 'decide', id: pending.a.id, decision: 'allow' }));
+    assert.deepEqual(JSON.parse((await answer).text).output, decisionOutput('allow'));
+    await closeBrowser(browser);
+  });
+
   it('offers no rule for a plan, a question or Codex', async () => {
     const browser = await connectBrowser(town);
     await waitForMessage(browser, (m) => m?.t === 'hello');

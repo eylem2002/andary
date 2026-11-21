@@ -13,8 +13,10 @@
 //
 // The decision is rebuilt, never copied: an allow, or a deny with a message. An allow may also
 // save one permission rule ("Allow always"), but only a rule Claude Code itself suggested in this
-// very hook's input, only an allow rule for this project (only you) or this session, and it is
-// printed from that input, never from the server's reply.
+// very hook's input, only an allow rule for this project (only you) or this session that allows
+// no more than it reads, and it is printed from that input, never from the server's reply. Every
+// body says this forwarder can do that (`caps`): the server offers "Allow always" only then, so an
+// older copy, which prints a plain allow, never leaves the town claiming a rule was saved.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { request } from 'node:http';
@@ -38,12 +40,16 @@ const RAW_PREVIEW_CHARS = 4000;
 /** A deny reason is at most 500 characters plus our prefix; anything longer did not come from us. */
 const MAX_DENY_MESSAGE_CHARS = 1000;
 /**
- * What this forwarder does, so the server knows what to trust: `truncated`, it marks a body it
- * shortened (a server holds a request for the town only from a forwarder that does).
+ * What this forwarder does, so the server knows what to trust (CONTRACTS §4.3): `truncated`, it
+ * marks a body it shortened (a server holds a request for the town only from a forwarder that
+ * does); `updatedPermissions`, it can pass a saved rule on (the server offers "Allow always" only
+ * then).
  */
-const CAPS = Object.freeze(['truncated']);
+const CAPS = Object.freeze(['truncated', 'updatedPermissions']);
 /** Where an allow may save a rule: `.claude/settings.local.json` (this project, only you) or the session. */
 const LOCAL_DESTINATIONS = new Set(['localSettings', 'session']);
+/** Tools whose rules match a command line, where a trailing `:*` or ` *` means "starting with". */
+const COMMAND_TOOLS = new Set(['Bash', 'PowerShell']);
 
 /**
  * Exits 0, after flushing `text` to stdout if there is any.
@@ -291,13 +297,36 @@ function canonicalJson(value) {
 }
 
 /**
- * Whether a permission update adds allow rules for this project (only you) or this session.
- * Rules for the shared project settings or every project, modes and folders are never saved.
+ * Whether a rule allows no more than it reads: one exact command or value, commands starting with
+ * a prefix (`npm test:*` or `npm test *`, Bash and PowerShell only), or one MCP tool. Never a whole
+ * built-in tool (no content, an empty content, which Claude Code saves as the bare tool, or `*`),
+ * any other wildcard, or an MCP rule with content. The same test as ruleReach in
+ * public/js/core/permission-rules.js, which decides what the town offers.
+ * @param {any} rule
+ * @returns {boolean}
+ */
+function isNarrowRule(rule) {
+  const tool = rule?.toolName;
+  const content = rule?.ruleContent;
+  if (typeof tool !== 'string' || !/^[A-Za-z][\w-]*$/.test(tool)) return false;
+  if (content === undefined) return /^mcp__[\w-]+__[\w-]+$/.test(tool);
+  if (typeof content !== 'string' || content.trim() === '' || tool.startsWith('mcp__')) return false;
+  if (!COMMAND_TOOLS.has(tool)) return !/[*?[]/.test(content);
+  if (!content.includes('*')) return true;
+  const prefix = /^([^*]+?)(?::\*| \*)$/.exec(content);
+  return prefix !== null && prefix[1].trim() !== '';
+}
+
+/**
+ * Whether a permission update adds allow rules for this project (only you) or this session, each
+ * allowing no more than it reads. Rules for the shared project settings or every project, modes
+ * and folders are never saved.
  * @param {any} update
  * @returns {boolean}
  */
 function isLocalAllowRule(update) {
-  return update?.type === 'addRules' && update.behavior === 'allow' && LOCAL_DESTINATIONS.has(update.destination);
+  if (update?.type !== 'addRules' || update.behavior !== 'allow' || !LOCAL_DESTINATIONS.has(update.destination)) return false;
+  return Array.isArray(update.rules) && update.rules.length > 0 && update.rules.every(isNarrowRule);
 }
 
 /**

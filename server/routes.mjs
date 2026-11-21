@@ -318,6 +318,8 @@ function sendHookReply(ctx, req, res, output) {
 
 /**
  * Validates the forwarder's body: {"v":1,"ts":<ms>,"source"?:"codex","caps"?:[…],"event":{…}}.
+ * `caps` says what the forwarder does (CONTRACTS §4.3): it marks a body it shortened, it can pass
+ * a saved rule on; an older forwarder sends fewer, or none.
  * @param {Buffer} raw
  * @returns {{ ts: number, source: import('./adapters/index.mjs').Source, event: Record<string, any>, caps: string[] }}
  */
@@ -380,6 +382,9 @@ function whyNotHeld(current, exact) {
   return exact ? undefined : NOT_SHOWN_IN_FULL;
 }
 
+/** The capability a forwarder declares when it can pass a saved rule on (CONTRACTS §4.3). */
+const SAVES_RULES = 'updatedPermissions';
+
 /**
  * Holds the response for the town to decide when remote approvals are on and someone is
  * watching; otherwise answers null at once and the terminal prompt appears as usual.
@@ -401,8 +406,9 @@ async function answerPermissionRequest(ctx, req, res, event, body) {
   const current = body.caps.includes('truncated');
   const hold = wanted && exact && current && !terminalOnly;
   const why = terminalOnly ?? (wanted ? whyNotHeld(current, exact) : undefined);
-  // A plan or a question is answered in the terminal, so no allow from the town can save a rule.
-  const offers = terminalOnly ? [] : offeredSuggestions(raw, event);
+  // No rule is offered for a plan or a question (answered in the terminal), nor through a
+  // forwarder that would drop it: the card would claim a rule was saved when it was not.
+  const offers = terminalOnly || !body.caps.includes(SAVES_RULES) ? [] : offeredSuggestions(raw, event);
   const { approval, response } = ctx.broker.create(event, { hold, message: why, at: body.at, offers });
   if (hold) {
     // The forwarder went away (Claude Code cancelled the hook): Claude asks in the terminal now.

@@ -515,6 +515,20 @@ describe('allow always: what a request offers', () => {
     assert.ok(offers.every((offer) => offer.index < 50));
   });
 
+  it('offers no rule that allows more than it reads', () => {
+    /** @param {Record<string, unknown>} one */
+    const only = (one) => rule({ rules: [one] });
+    const { offers } = suggesting([
+      only({ toolName: 'Bash', ruleContent: '' }),
+      only({ toolName: 'Bash', ruleContent: '*' }),
+      only({ toolName: 'Bash' }),
+      only({ toolName: 'Bash', ruleContent: 'rm -f *.log' }),
+      only({ toolName: 'Read', ruleContent: '/home/me/project/**' }),
+      only({ toolName: 'Bash', ruleContent: 'npm test' }),
+    ]);
+    assert.deepEqual(offers.map((offer) => offer.index), [5], 'empty, star, whole-tool and glob rules are never offered');
+  });
+
   it('offers nothing for Codex, which sends no suggestions of its own', () => {
     const raw = request({ permission_suggestions: [rule()] });
     assert.deepEqual(offeredSuggestions(raw, sanitize({ ...raw, andary_source: 'codex' })), []);
