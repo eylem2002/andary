@@ -19,7 +19,7 @@ An independent architecture review (2026-11-20) found the design sound but the s
 - `server/ingest.mjs` is the only way an event enters the town, with a per-origin `POLICIES`
   table. Source adapters (ADR 0013) run before it.
 - Rules both sides must agree on live once, in pure core modules the server may import
-  (`ids`, `dates`, `text`, `prices`, `growth`).
+  (`ids`, `dates`, `text`, `prices`, `growth`, `dialogs`).
 - The browser's sources sit in `public/js/sources/` behind one `TownSource` shape (named `EventSource` until part 27).
 - `core/events.js`, `store.js` and `director.js` are split by job (`text`, `summaries`; `crews`,
   `changes`, `store-model`; `director-queue`), and the store's types are defined once.
