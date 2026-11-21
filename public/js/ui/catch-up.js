@@ -438,6 +438,9 @@ export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } =
   const body = /** @type {HTMLElement|null} */ (dialog.el.querySelector('.hud-dialog__body'));
   dialog.el.setAttribute('data-testid', 'catch-up');
   dialog.el.addEventListener('close', () => {
+    // The close event comes a task later: opened again by then (Esc, then W at once), this look
+    // is the new one's.
+    if (dialog.isOpen) return;
     clearTimeout(answerTimer);
     asked = null;
     // Focus is back on the offer by now: the masthead hides it next, and moves focus on.

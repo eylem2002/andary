@@ -35,6 +35,8 @@ export function createDialog({ id, title, body, wide = false, scrollable = false
   /** @type {HTMLElement|null} */
   let opener = null;
   dialog.addEventListener('close', () => {
+    // The close event comes a task later: opened again by then, focus stays in the dialog.
+    if (dialog.open) return;
     if (opener?.isConnected) opener.focus();
     // What opened it has gone (hidden meanwhile): focus goes somewhere that is still there.
     if (opener && document.activeElement !== opener) fallback?.()?.focus();

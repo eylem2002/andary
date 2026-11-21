@@ -401,8 +401,12 @@ test('two crews in one folder: an edit of the same file is a note on both rows, 
   await expect(inspector.getByTestId('inspector-dismiss')).toBeVisible();
   await expect(page.getByTestId('log-entry').filter({ hasText: words })).toHaveCount(1);
 
-  // Set aside from either row, it is gone from both.
-  await page.locator('.hud-stations__item:has([data-agent-key="e2e-first:main"]) [data-testid="dismiss-need"]').click();
+  // Set aside once, it is gone from both rows. On a phone the agent's details sheet covers the
+  // crew rows, so the set-aside there is the one at hand.
+  const setAside = test.info().project.name === 'mobile'
+    ? inspector.getByTestId('inspector-dismiss')
+    : page.locator('.hud-stations__item:has([data-agent-key="e2e-first:main"]) [data-testid="dismiss-need"]');
+  await setAside.click();
   await expect(button).toBeHidden();
   await expect(row('e2e-second')).not.toContainText(words);
 });
@@ -452,6 +456,17 @@ test('catch me up: W shows what each crew did, crews that need you first, and re
   await lines.nth(0).getByTestId('catch-up-need').click();
   await expect(dialog).toBeHidden();
   await expect(page.locator('[data-testid="agent-row"][data-agent-key="e2e-other:main"]')).toHaveAttribute('aria-current', 'true');
+
+  // Closed and opened again at once (Esc, then W, faster than the page's next task): the old
+  // close must not cancel the new look.
+  await page.keyboard.press('W');
+  await expect(dialog.getByTestId('catch-up-period')).toHaveText('Nothing new since you last looked, a moment ago.');
+  await page.evaluate(() => {
+    const open = /** @type {HTMLDialogElement} */ (document.querySelector('[data-testid="catch-up"]'));
+    open.close();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'W', shiftKey: true, bubbles: true }));
+  });
+  await expect(dialog.getByTestId('catch-up-period')).toHaveText('Nothing new since you last looked, a moment ago.');
 });
 
 /**
