@@ -509,24 +509,43 @@ section.
     rule's content get a backslash (Claude Code's own settings writer does this), so
     `Bash(echo \), Bash\(ls)` cannot read as two rules. Hidden characters are revealed on the card
     and in the log, as for commands.
-111. **"The same step" is judged from the call alone.** A shell command with its whitespace
-    collapsed, a leading `cd <dir> &&` and a trailing `2>&1`, `| tail …`, `| head …` or `| grep …`
-    dropped (only a single pipe: `|| true` stays), so `cd app && npm test 2>&1 | tail -40` is
-    `npm test`; `cd a && npm test` and `cd b && npm test` are therefore the same step. File tools go
+111. **"The same step" is judged from the call alone.** A shell command is read as the command
+    inside a shell it was handed to (one level of `bash`/`sh`/`zsh -c` or `-lc '…'`: Codex sends
+    every command so), its whitespace collapsed, without a leading `sleep N &&` (or `;`) and
+    without a trailing `2>&1`, `| tail …` or `| head …` (only a single pipe: `|| true` stays). A
+    trailing `| grep …` is dropped only after a test or build run (`npm test`, `npm run build`,
+    `pytest`, `cargo test`, `go test`, `make`, `tsc` and the like), so `npm test 2>&1 | grep FAIL`
+    is `npm test` while `git log | grep fix` and `git log | grep feat` are two steps. Leading
+    `cd <dir> &&` (or `;`) are followed to the folder they lead to, from the hook's cwd, and that
+    folder is part of the step: `cd packages/a && npm test` and `cd packages/b && npm test` are two
+    steps, `cd . && npm test` or a `cd` into the cwd itself is `npm test`, and `npm test` run from
+    `packages/a` is `cd packages/a && npm test` run from the project. A `cd ~/x` or `cd $DIR` is
+    kept as written. The alert shows such a step with its `cd`, relative to the cwd. File tools go
     by tool and path (Read with its offset and limit), so three failed Edits of one file with
     different text are the same step; Grep and Glob by pattern and path; anything else by its input
     as JSON with sorted keys. Keys are cut at 300 characters.
-112. **A change is judged by what the call says it did.** Andary cannot see the disk, so besides a
-    successful Edit, MultiEdit, Write, NotebookEdit or Codex patch, a successful shell command is a
-    change when it reads like one: `sed -i`, `perl -i`, a `--write` or `--fix` flag, `ruff format`,
-    `black`, `cargo fmt`, `go fmt`/`gofmt -w`, `patch`, `rm`, `mv`, `cp`, `mkdir`, `touch`, a
-    package install or removal, and the git commands that rewrite the work tree or the index:
-    `checkout`, `switch`, `restore`, `reset`, `stash` (not `list` or `show`), `apply`, `am`,
-    `merge`, `rebase`, `pull`, `cherry-pick`, `revert` and `commit` (after a commit, `git status`
-    has something new to say). Output written to a file (`npm test > test.log`) is not a change:
-    test runs are often kept that way, and counting it would hide the very loops rule 2 is for.
-    The list goes further than the design's examples, on the quiet side: a command wrongly taken
-    for a change can hide a loop, never invent one.
+112. **A change is judged by what the call says it did, and can be wrong both ways.** Andary cannot
+    see the disk, so besides a successful Edit, MultiEdit, Write, NotebookEdit or Codex patch, a
+    successful shell command (read inside one level of `bash -lc '…'`, as in 111) is a change when
+    it reads like one: `sed -i`, `perl -i`, a `--write`, `--fix` or `-w` flag (not grep's, curl's,
+    wc's, diff's or git's `-w`), `ruff format`, `black`, `cargo fmt`, `go fmt`, an npm, pnpm, yarn
+    or bun script whose name has `format`, `fix`, `codegen` or `generate` in it (`lint:fix`, not
+    `test:fixtures`) or is `build:types`, `node scripts/…` or `python scripts/…`, `patch`, `rm`,
+    `mv`, `cp`, `mkdir`, `touch` (also after a `(` or a quote opening a `-c` script), a package
+    install or removal, the git commands that rewrite the work tree or the index (`checkout`,
+    `switch`, `restore`, `reset`, `stash` but not `list` or `show`, `apply`, `am`, `merge`,
+    `rebase`, `pull`, `cherry-pick`, `revert` and `commit`: after a commit, `git status` has
+    something new to say), output or a here-document written with `>`, `>>`, `tee` or `tee -a` to
+    a path that is not a log or temporary file (`*.log`, `*.out`, `/tmp/…`, `/dev/…` do not count),
+    and a script given to python, node, ruby, perl or a shell inline (a here-document, `-c`, `-e`)
+    that opens a file for writing (`open(…, 'w')` or `'a'`) or calls `writeFile`, `appendFile`,
+    `write_text` or `write_bytes`. Wrongly taken for a change: a `>` that is no redirect
+    (`awk '$3 > 100'`, `python -c "print(a > b)"`), test output kept in a file that is not a log
+    (`npm test | tee results.txt`), a script that only reads, a `-w` that means something else, a
+    word in a grep pattern (`grep "git commit"`). Each can hide a loop, never invent one. Missed: a
+    change made in a way not listed (a script under another folder, a code generator by another
+    name, a tool the agent calls through MCP), which can invent a loop that is not one; the list
+    goes far enough that this needs an unusual command.
 113. **Whose change counts.** A change counts for the agent that made it, for every agent of any
     crew working in the same folder (compared as given, with forward slashes and no trailing
     slash), and for every agent whose folder holds the changed file (a helper that went into a
@@ -540,11 +559,16 @@ section.
     `ScheduleWakeup`, `WaitForMcpServers`, `TaskList` and `TaskGet`; a Read of a background task's
     output file (Claude Code writes it to
     `<temp>/claude-<uid>/<project>/<session>/tasks/<id>.output` and has Claude read it with Read
-    since TaskOutput went), or a shell command that reads one; and
-    shell commands that start with `sleep` (`Start-Sleep` in PowerShell), loop with `sleep`, run
-    `watch`, or check CI and deployments: `gh run watch|view|list`, `gh pr checks|status`,
-    `gh workflow view`, `gh api` on runs, check runs, check suites or statuses, `glab ci|pipeline
-    status|view|list|trace`, `kubectl rollout status` and `kubectl wait`. A wait that changes files
+    since TaskOutput went), or a shell command that reads one; a shell command that loops with
+    `sleep`; and a shell command (read inside `bash -lc '…'`, as in 111) whose every part, between
+    `&&`, `||` and `;`, waits, besides any `cd`, `echo`, `printf`, `true` or `date`: `sleep`
+    (`Start-Sleep`, `Get-Job`, `Wait-Job`, `Receive-Job` in PowerShell), `watch`, CI and deployment
+    checks (`gh run watch|view|list`, `gh pr checks|status`, `gh pr view --json
+    statusCheckRollup`, `gh workflow view`, `gh api` on runs, check runs, check suites or statuses,
+    `glab ci|pipeline status|view|list|trace`, `kubectl rollout status`, `kubectl wait`, `kubectl
+    get pods`), health checks (`curl` of a `/health` path, `curl -f` or `wget` of localhost),
+    looking at logs and processes (`tail … *.log`, `ps`, `pgrep`, `docker ps`, `docker compose
+    ps`, `lsof -i`). So `sleep 5 && npm test` is the test run, not a wait. A wait that changes files
     (`sleep 5 && git pull`) is still a change. Codex polls a running command through `write_stdin`,
     which fires no hooks, so it needs no entry.
 115. **An interrupt is no failure.** A tool call you stopped with Esc arrives as
@@ -552,10 +576,11 @@ section.
     after a prompt.
 116. **Starting afresh forgets everything about the agent.** A prompt, the turn ending (Stop,
     StopFailure, a Codex interrupt), the agent finishing (SubagentStop, a teammate's TeammateIdle),
-    its session starting again (startup, resume, clear) or ending all clear the counts too, not
-    just the alert: a loop is judged within a stretch of work. A compaction carries on with the
-    same work, so it keeps them. A TeammateIdle the store could not match to a teammate lands on
-    the lead and is not its turn ending; on the server, one without an `agent_id` resets nobody.
+    its session starting again (startup, resume, clear) or ending (every agent of the session, in
+    the town and on the server) all clear the counts too, not just the alert: a loop is judged
+    within a stretch of work. A compaction carries on with the same work, so it keeps them. A
+    TeammateIdle the store could not match to a teammate lands on the lead and is not its turn
+    ending; on the server, one without an `agent_id` resets nobody.
 117. **One alert per agent, one episode while it lasts.** While any of its steps meets a rule the
     episode goes on, keeping the time it started (its id, so a dismissal holds) and showing the
     step run most recently, its count updated. When several rules hold, the words follow rule 1,
@@ -565,17 +590,47 @@ section.
 118. **A stuck alert stands beside a wait.** An agent that asks you something while it is stuck has
     both items, the question first: the loop is still there once you answer.
 119. **The stuck rules remember a bounded amount.** 200 agents (the one quiet the longest is
-    forgotten first, and its alert ends), 20 steps each (the one run the longest ago goes first),
-    12 failures per step. The server keeps its own copy, for this computer's events only, and only
-    while phone notes are on.
+    forgotten first, and its alert ends), 64 steps each (past that, the step run the longest ago
+    with no failure counting towards rule 1 or 3 goes first, so reads between attempts never push
+    out a failing step; with every step failing, the one run the longest ago goes, and its alert
+    ends), 12 failures per step. The server keeps its own copy, for this computer's events only,
+    and only while phone notes are on.
 120. **One phone note per episode, through the usual limits.** The note goes out when an episode
     starts, at default priority (the agent is not blocked). One held back by the 30 s limit (two
     crews stuck within half a minute) is dropped, not sent later: the town shows both.
-121. **The desktop and phone words say "the same step keeps failing" for every rule.** A step run
-    five times with nothing changed is not getting anywhere, whatever its exit code says; the
-    town's own words name the rule. Screen readers hear of a new alert in the town's words, as of a
-    new question, plan or stop: a stuck agent's storm is in the town only.
+121. **The desktop and phone words follow the rule that started the episode, and name no step.**
+    Rules 1 and 3: "A crew seems stuck: the same step keeps failing"; rule 2, whose step may
+    succeed every time: "A crew seems stuck: it keeps repeating the same step" (desktop: "<crew>
+    seems stuck: …"). A note goes out once, so if the episode moves on to another rule its words
+    stay; the town's own words always name the rule. Screen readers hear of a new alert in the
+    town's words without the backticks that mark the command on screen, as of a new question, plan
+    or stop: a stuck agent's storm is in the town only.
 122. **In the town, the storm lasts as long as the alert.** Another step succeeding meanwhile does
     not clear it (it used to clear an agent's rain), and a failed turn's storm, which comes with
     the turn ending the alert, stays until the next prompt as before. The activity log gets one
     line, level warn, when an episode starts.
+123. **Rule 3's "same error" is the first line that says something about the failure.** The whole
+    error text is read (as far as the server passes strings on, 2,000 characters), skipping blank
+    lines, lines that only say a command failed (`Exit code 1`, `Error`, `command failed`, `exit
+    status 1`), the command echoed back (`> pkg@1.0.0 test`, `> node --test`, `$ jest`, `+ npm
+    test`, or the command itself), npm's, pnpm's, yarn's and make's lines about a script failing
+    (`npm ERR! code ELIFECYCLE`, `npm error Lifecycle script … failed`, its code, path, workspace,
+    command and log lines, `ELIFECYCLE`, `ERR_PNPM_…`, `error Command failed with exit code 1`,
+    `make: *** …`), CI's `Process completed with exit code 1`, rules and banners (`=====`, `===
+    test session starts ===`), passing tests (`✔`, `✓`, `ok 1`, `PASS`), node's `▶` suite lines and
+    test runners' headers (vitest's `RUN v…`, pytest's platform, rootdir, configfile, plugins and
+    collected lines). Times in the line (`(1.2ms)`, `12ms`) are left out, as they differ from run to
+    run. A failure with no such line (Claude Code's bare `Exit code 1`, Codex's npm stderr) is left
+    out of rule 3; rules 1 and 2 still count it. Six red runs while writing tests rarely share
+    their first such line, since a different test fails; a TypeError that keeps coming back does.
+    The list goes past the design's "first error line" on the quiet side: a skipped line can hide a
+    loop from rule 3, never invent one.
+124. **The rules go by when each call happened.** Hooks reach Andary out of order, so each call
+    carries its hook's own time (the town's `e.ts`, the server's `hookTime`). Each agent keeps the
+    time of the latest change that counted for it; a call made before that and arriving after it
+    is not counted by rules 1 and 2 (and a late success does not restart a count), though rule 3,
+    which holds whatever changed, still takes its failure. Rule 3's failures are kept in time
+    order and its 20 minutes run back from the latest. A change arriving after failures made later
+    than it still clears them, which can hide a loop. An agent first seen after a change in its
+    folder knows nothing of it, so its calls made before that change count: that could invent a
+    loop, but only if its very first hooks arrive after another agent's later edit.

@@ -89,6 +89,8 @@ const KIND_BY_HOOK = Object.freeze({
 export const HOOK_BY_KIND = Object.freeze(Object.fromEntries(Object.entries(KIND_BY_HOOK).map(([hook, kind]) => [kind, hook])));
 
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
+/** A failure's text is kept this far (the server cuts every string there too). */
+const MAX_ERROR_TEXT = 2000;
 
 // ---------------------------------------------------------------------------------------------
 // Per-kind data.
@@ -132,6 +134,8 @@ function failData(p, cwd) {
   return {
     ...data,
     error,
+    // Every line, for the stuck rules (loops.js): the first line is often only `Exit code 1`.
+    errorText: clip(textOf(p.error), MAX_ERROR_TEXT),
     isInterrupt,
     errorKind: classifyError(error, isInterrupt, data.commandKind),
     durationMs: finite(p.duration_ms),

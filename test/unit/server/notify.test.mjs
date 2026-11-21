@@ -730,7 +730,7 @@ test('an agent that seems stuck gets one note per episode, naming nothing', asyn
   await at(2_000);
   assert.deepEqual(posts.map((post) => [post.body, post.headers]), [['A crew seems stuck: the same step keeps failing.', { Title: 'Andary', Priority: 'default', Tags: 'repeat' }]]);
   await at(40_000);
-  for (let i = 0; i < 5; i += 1) notifier.observe(red());
+  for (let i = 0; i < 5; i += 1) notifier.observe(red({ error: 'Exit code 1' }));
   await at(60_000);
   assert.equal(posts.length, 1, 'still the same episode, though the 30 s limit would let one through');
   // An edit is progress: the episode ends, and failing on afterwards is a new one.
@@ -739,6 +739,27 @@ test('an agent that seems stuck gets one note per episode, naming nothing', asyn
   await at(61_000);
   assert.equal(stuckNotes(posts).length, 2);
   for (const word of ['npm', 'secret', 'Bash', 'Exit']) assert.ok(!JSON.stringify(posts).includes(word), word);
+});
+
+test('the words follow the rule: a step run over and over need not fail', async () => {
+  const { notifier, posts, at } = testNotifier();
+  const piped = hook('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test 2>&1 | tail -40' }, tool_use_id: 'toolu_p', tool_response: { stdout: 'ok' } });
+  for (let i = 0; i < 5; i += 1) notifier.observe(piped);
+  await at(1_000);
+  assert.deepEqual(stuckNotes(posts).map((post) => post.body), ['A crew seems stuck: it keeps repeating the same step.']);
+});
+
+test('goes by when each hook was sent: a failure arriving after a later edit does not count', async () => {
+  const { notifier, posts, at } = testNotifier();
+  await at(10_000);
+  const edit = hook('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: '/work/secret-project/src/a.ts', old_string: 'a', new_string: 'b' }, tool_use_id: 'toolu_e', tool_response: {} });
+  notifier.observe(edit, 2_000);
+  for (const ts of [1_000, 3_000, 4_000]) notifier.observe(red(), ts);
+  await at(11_000);
+  assert.equal(stuckNotes(posts).length, 0, 'two failures since the edit');
+  notifier.observe(red(), 5_000);
+  await at(12_000);
+  assert.equal(stuckNotes(posts).length, 1);
 });
 
 test('a stuck note held back by the 30 s limit is dropped, not sent later', async () => {

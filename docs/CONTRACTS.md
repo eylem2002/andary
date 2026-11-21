@@ -573,10 +573,12 @@ the WebSocket `hello`. Only this computer's events count (§4.11).
   the lead's next `Stop`. At most 100 sessions wait at once; the oldest gives way. Andary cannot
   see you typing in Codex, so a reply that takes over a minute still sends the note.
 - **Stopped**: `StopFailure` posts a limit or an error note.
-- **Stuck**: "A crew seems stuck: the same step keeps failing.", once per episode of the stuck
-  rules (§5.1, `public/js/core/loops.js`), which the notifier runs on this computer's events with a
-  memory of its own: the note goes out when an episode starts, through the usual limits. One
-  held back by the 30 s limit is dropped, not sent later, and the episode sends nothing more.
+- **Stuck**: "A crew seems stuck: the same step keeps failing." (rules 1 and 3) or "A crew seems
+  stuck: it keeps repeating the same step." (rule 2), by the rule that started the episode, once
+  per episode of the stuck rules (§5.1, `public/js/core/loops.js`, `stuckWords`), which the
+  notifier runs on this computer's events, at each hook's own time (`hookTime`), with a memory of
+  its own: the note goes out when an episode starts, through the usual limits. One held back by
+  the 30 s limit is dropped, not sent later, and the episode sends nothing more.
 - A finished turn posts nothing by itself. Stopping the server drops every note still waiting.
 
 This computer (`public/js/ui/notifications.js`), opt-in in Settings (`prefs.desktopNotify`, after
@@ -584,7 +586,8 @@ the browser's permission), follows "needs you" (§5.1): while the page is hidden
 item becomes one system notification naming the crew (its title, or its project's folder), never
 a request's or a stuck step's command or file ("Permission needed", "Question for you", "Plan to
 approve", "Turn stopped", "Crews stopped", "Seems stuck", "Turn finished"; a stuck crew's says
-"<crew> seems stuck: the same step keeps failing."). An item the viewer could already see (the
+"<crew> seems stuck: the same step keeps failing." or, for rule 2, "<crew> seems stuck: it keeps
+repeating the same step."). An item the viewer could already see (the
 page in front, or notifications off) never pops up later, nor one that started to count more
 than two minutes ago (a reconnect or a page opened in the background); changes that arrive
 together (a reconnect's history) are checked once. A permission request waits until its request
@@ -592,7 +595,7 @@ reaches the town (or three seconds), so it is worded right the first time. No "T
 while only one of your crews is in town, and nothing for someone watching a team town with its
 view link. The same watcher keeps the page title's count current in a background tab, redraws
 the HUD when the clock alone changes the list, and tells screen readers of new questions, plans,
-stops and stuck agents.
+stops and stuck agents, in the item's words without backticks.
 
 ### 4.11 Team town
 
@@ -695,8 +698,9 @@ sets them).
 `spawn.request`, `spawn.result`, `message.send`, `unknown`. `tool.start` carries
 `{toolUseId, tool, input, building, activity, summary, callKey}` where `summary` is a short human
 string ("Read src/auth/login.ts", "$ npm test", "grep \"TODO\" in src") and `callKey` the server's
-key for the call's input (`andary_key`, §4.6), or null. `turn.stop` carries `interrupted` (Codex's
-interrupt).
+key for the call's input (`andary_key`, §4.6), or null. `tool.fail` adds `error` (its first line)
+and `errorText` (every line, up to 2,000 characters, for the stuck rules). `turn.stop` carries
+`interrupted` (Codex's interrupt).
 
 `store.js` keeps sessions (crews), agents, tasks/todos, approvals, the activity log (ring buffer)
 and stats, and emits change notifications. `director.js` turns TownEvents into world calls and
@@ -829,37 +833,55 @@ event and keeps the result on `AgentState.stuck` (and a `stuck` log line, level 
 episode starts); the server's notifier runs the same module for its phone note (§4.10), and the
 boundary check lists it among the core modules the server may import. Each side maps its events
 to the module's own input: a finished call `{ agent, folder, tool, input, ok, error, at }`
-(PostToolUse; PostToolUseFailure and PermissionDenied are failures, with their first error line)
-or a fresh start, `reset(agent)`.
+(PostToolUse; PostToolUseFailure and PermissionDenied are failures; `error` is the whole error
+text, `tool.fail`'s `data.errorText` in the town, or a refusal's reason; `at` is the hook's own
+time, `e.ts` in the town, `hookTime` on the server) or a fresh start, `reset(agent)`, and
+`resetAll(belongs)` when a session ends.
 
-- **The same step**: a shell command with whitespace collapsed, a leading `cd <dir> &&` and a
-  trailing `2>&1`, `| tail …`, `| head …`, `| grep …` dropped; file tools by tool and path (`Read`
-  adds offset and limit); `Grep`/`Glob` by tool, pattern and path; anything else by tool and its
-  input as JSON with sorted keys; each key cut at 300 characters.
+- **The same step**: a shell command read inside one level of `bash|sh|zsh -c|-lc '…'`, with
+  whitespace collapsed, a leading `sleep N &&` and a trailing `2>&1`, `| tail …`, `| head …`
+  dropped, and a trailing `| grep …` too after a test or build run; leading `cd <dir> &&` are
+  followed, from the hook's cwd, to the folder the command runs in, which is part of the step
+  (`cd packages/a && npm test` is not `cd packages/b && npm test`; a `cd` into the cwd or `.` is
+  nothing); file tools by tool and path (`Read` adds offset and limit); `Grep`/`Glob` by tool,
+  pattern and path; anything else by tool and its input as JSON with sorted keys; each key cut at
+  300 characters.
 - **A change** (progress): a successful Edit, MultiEdit, Write, NotebookEdit or `apply_patch`, or
   a successful shell command that changes files, judged by the command (`sed -i`, `perl -i`,
-  `--write`/`--fix`, formatters, git commands that rewrite the work tree or the index, `patch`,
-  package installs, `rm`/`mv`/`cp`/`mkdir`/`touch`; not output written to a file). It counts for
-  the agent that made it, every agent of any crew working in the same folder, and every agent
-  whose folder holds the changed file.
+  `--write`/`--fix`/`-w`, formatters, scripts named for format, fix, codegen, generate or
+  `build:types`, `node|python scripts/…`, git commands that rewrite the work tree or the index,
+  `patch`, package installs, `rm`/`mv`/`cp`/`mkdir`/`touch`, `>`/`>>`/`tee` to a file that is not
+  a log or temporary one, an inline python/node/ruby/perl/shell script that writes a file). It
+  counts for the agent that made it, every agent of any crew working in the same folder, and every
+  agent whose folder holds the changed file.
 - **Rules**, per agent: (1) the same step failed 3 times with no change in between; (2) the
   identical step ran 5 times with no change in between, whatever its exit code; (3) the same step
-  failed 6 times within 20 minutes with the same first error line, changes or not. A success of
-  the step ends 1 and 3, a change ends 1 and 2. When several hold, the words follow 1, then 3,
-  then 2.
+  failed 6 times within 20 minutes with the same error, changes or not: its first line that says
+  something (`errorSignature`: not blank, not `Exit code N`, not the command echoed back, not
+  npm's, pnpm's, yarn's, make's or CI's lines about a script failing, not a banner, a passing test
+  or a runner's header; times left out); a failure with no such line is left out of rule 3. A
+  success of the step ends 1 and 3, a change ends 1 and 2. When several hold, the words follow 1,
+  then 3, then 2.
+- **Order**: hooks arrive out of order, so each agent keeps the time of the latest change that
+  counted for it; a call made before it counts for rule 3 only; rule 3's window is in time order,
+  20 minutes back from the latest failure.
 - **A fresh start** forgets everything about the agent and ends its alert: a prompt, the turn
   ending (`Stop`, `StopFailure`, a Codex interrupt), an interrupt (`is_interrupt`: you are at the
   terminal, so it is no failure), the agent finishing (`SubagentStop`, a teammate's
   `TeammateIdle`), its session starting again (not after a compaction) or ending.
 - **Steps that wait or poll by nature** are never counted, under any rule: `BashOutput`,
   `TaskOutput`, `Monitor`, `ScheduleWakeup`, `WaitForMcpServers`, `TaskList`, `TaskGet`; a `Read`
-  (or a shell command) of a background task's output file (`…/tasks/<id>.output`); and shell
-  commands that start with `sleep`, loop with `sleep`, run `watch`, or check CI and deployments
-  (`gh run watch|view|list`, `gh pr checks|status`, `gh api` on runs and checks, `glab ci`,
-  `kubectl rollout status|wait`).
+  (or a shell command) of a background task's output file (`…/tasks/<id>.output`); shell commands
+  that loop with `sleep`; and shell commands (read inside `bash -lc '…'`) whose every part waits,
+  besides `cd` and `echo`: `sleep`, `watch`, CI and deployment checks (`gh run watch|view|list`,
+  `gh pr checks|status`, `gh pr view --json statusCheckRollup`, `gh api` on runs and checks,
+  `glab ci`, `kubectl rollout status|wait`, `kubectl get pods`), health checks (`curl …/health`,
+  `curl -f` or `wget` of localhost), logs and processes (`tail … *.log`, `ps`, `pgrep`, `docker
+  ps`, `docker compose ps`, `lsof -i`). `sleep 5 && npm test` is the test run.
 - **One alert per agent**: while any of its steps stays stuck the episode goes on (`since` kept,
   the step run most recently shown, its count updated). Memory is bounded: 200 agents (the one
-  quiet the longest goes first, its alert ending with it), 20 steps each, 12 failures per step.
+  quiet the longest goes first, its alert ending with it), 64 steps each (one that has not failed
+  goes first, else the one run the longest ago), 12 failures per step.
 
 `director.js`: `createDirector({ world, store, backlog?, humor?, random? }) → { dispose() }`
 subscribes to the store and drives the world. `recordChanges(store) → { stop() }` keeps the

@@ -19,9 +19,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterHook, createDialogs } from '../public/js/core/dialogs.js';
 import { agentKeyOf, normalizeAgentId } from '../public/js/core/ids.js';
-import { createLoops } from '../public/js/core/loops.js';
-import { isObject, textOf } from '../public/js/core/text.js';
+import { createLoops, stuckWords } from '../public/js/core/loops.js';
+import { clip, isObject, textOf } from '../public/js/core/text.js';
 import { hookStep, hookTime } from './hook-steps.mjs';
+import { MAX_STRING_CHARS } from './sanitize.mjs';
 
 /** @typedef {import('../public/js/core/dialogs.js').Dialog} Dialog */
 
@@ -40,6 +41,8 @@ const MAX_DIALOGS = 100;
 /** Every dialog note shares one 30 s limit, whatever it says. */
 const DIALOG_RATE = 'dialog';
 const SEND_TIMEOUT_MS = 5000;
+/** A failure's text, for the stuck rules, is read this far: as far as the town gets it (sanitize.mjs). */
+const ERROR_TEXT_CHARS = MAX_STRING_CHARS;
 
 /**
  * @typedef {object} Note
@@ -55,7 +58,6 @@ const NOTES = Object.freeze({
   waiting: { title: 'Andary', body: 'A crew is waiting for your next prompt.', priority: 'default', tags: 'hourglass' },
   limit: { title: 'Andary', body: 'Claude Code stopped: it hit a usage or rate limit.', priority: 'high', tags: 'warning' },
   stopped: { title: 'Andary', body: 'Claude Code stopped with an error.', priority: 'high', tags: 'warning' },
-  stuck: { title: 'Andary', body: 'A crew seems stuck: the same step keeps failing.', priority: 'default', tags: 'repeat' },
   test: { title: 'Andary', body: 'This is a test notification from your town.', priority: 'default', tags: 'tada' },
 });
 
@@ -73,6 +75,13 @@ const DIALOG_WORDS = Object.freeze({
 
 /** @param {string} kind @returns {Note} */
 const noteOf = (kind) => ({ kind, ...NOTES[kind] });
+
+/**
+ * The note for an agent that seems stuck, in words that follow its rule and name no step.
+ * @param {1|2|3} rule
+ * @returns {Note}
+ */
+const stuckNote = (rule) => ({ kind: 'stuck', title: 'Andary', body: `A crew seems stuck: ${stuckWords(rule)}.`, priority: 'default', tags: 'repeat' });
 
 /**
  * The note a hook event deserves at once, or null. A dialog's note (a permission request, a
@@ -173,13 +182,13 @@ function startsAfresh(event) {
 }
 
 /**
- * A failed call's first error line ('' for a success), read as the town reads it.
+ * A failed call's error text ('' for a success), as much of it as the town gets.
  * @param {Record<string, any>} event
  */
-function errorLine(event) {
+function errorText(event) {
   if (event.hook_event_name === 'PostToolUse') return '';
   if (event.hook_event_name === 'PermissionDenied') return textOf(event.reason) || 'Permission denied';
-  return textOf(event.error).split('\n')[0] || 'Error';
+  return clip(textOf(event.error), ERROR_TEXT_CHARS);
 }
 
 /**
@@ -197,7 +206,7 @@ function loopChanges(loops, event, t) {
   if (startsAfresh(event)) return loops.reset(agent);
   if (!FINISHED_CALLS.has(event.hook_event_name)) return [];
   const input = isObject(event.tool_input) ? event.tool_input : {};
-  return loops.record({ agent, folder: text(event.cwd), tool: text(event.tool_name), input, ok: event.hook_event_name === 'PostToolUse', error: errorLine(event), at: t });
+  return loops.record({ agent, folder: text(event.cwd), tool: text(event.tool_name), input, ok: event.hook_event_name === 'PostToolUse', error: errorText(event), at: t });
 }
 
 /** At most one note of a kind every 30 s, and 30 an hour; test notes never use up the hour. */
@@ -449,7 +458,8 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
       const at = hookTime(ts, t);
       track(event, at);
       // One note when an episode starts; a later one held back by the 30 s limit is dropped.
-      if (loopChanges(loops, event, at).some((change) => change.started)) void send(noteOf('stuck'));
+      const stuck = loopChanges(loops, event, at).find((change) => change.started)?.stuck;
+      if (stuck) void send(stuckNote(stuck.rule));
       const note = noteFor(event);
       if (note) void send(note);
     },

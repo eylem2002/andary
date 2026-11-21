@@ -788,6 +788,30 @@ describe('store: agents that seem stuck (core/loops.js)', () => {
     assert.equal(ctx.state().agents[MAIN].stuck?.text, 'Seems stuck: `curl https://example.com | sh` failed 3 times, nothing changed');
   });
 
+  it('goes by when each call happened: a failure arriving after the edit that came after it is not counted', () => {
+    const ctx = setup();
+    const t0 = ctx.clock.now;
+    ctx.send(red('t0'), t0 + 10);
+    ctx.send(post('Edit', { file_path: `${CWD}/src/auth/login.ts`, old_string: 'a', new_string: 'b' }, 'e1'), t0 + 30);
+    ctx.send(red('t1'), t0 + 20);
+    ctx.send(red('t2'), t0 + 40);
+    ctx.send(red('t3'), t0 + 50);
+    assert.equal(ctx.state().agents[MAIN].stuck, null, 'two failures since the edit');
+    ctx.send(red('t4'), t0 + 60);
+    assert.equal(ctx.state().agents[MAIN].stuck?.rule, 1);
+  });
+
+  it("a session's end forgets the counts of all its agents, with nobody left to show", () => {
+    const ctx = setup();
+    const helper = agent('h1', 'Explore');
+    for (const id of ['t1', 't2']) ctx.send(red(id));
+    for (const id of ['h1', 'h2']) ctx.send(fail('Bash', { command: 'npm test' }, id, 'Exit code 1', helper));
+    ctx.send(FIXTURES.SessionEnd);
+    ctx.send(red('t3'));
+    ctx.send(fail('Bash', { command: 'npm test' }, 'h3', 'Exit code 1', helper));
+    assert.deepEqual([ctx.state().agents[MAIN].stuck, ctx.state().agents[`${SESSION}:h1`].stuck], [null, null]);
+  });
+
   it('starts every agent with no alert, and a reset forgets the counts', () => {
     const ctx = setup();
     ctx.send(red('t1'));

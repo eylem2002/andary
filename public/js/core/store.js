@@ -585,7 +585,7 @@ function apply(m, input) {
   if (a) setWait(a, e);
   // A teammate's crew (a team town) is theirs to answer: its dialogs are not kept.
   if (!s.member && dialogsAfterEvent(m.dialogs, e, a ? a.agentId : e.agentId)) m.state.dialogs = m.dialogs.list();
-  const newlyStuck = a ? followLoops(m, e, s, a) : [];
+  const newlyStuck = followLoops(m, e, s, a);
   if (relabels.length) e.data.relabels = relabels;
   s.lastActivity = Math.max(s.lastActivity, e.ts);
   if (a) a.lastActivity = Math.max(a.lastActivity, e.ts);
@@ -618,13 +618,16 @@ const FINISHED_CALLS = new Set(['tool.end', 'tool.fail', 'permission.denied']);
  * @param {Model} m
  * @param {TownEvent} e
  * @param {Session} s
- * @param {AgentState} a
+ * @param {AgentState|undefined} a
  * @returns {import('./loops.js').LoopChange[]}
  */
 function followLoops(m, e, s, a) {
   /** @type {import('./loops.js').LoopChange[]} */
   let changes = [];
-  if (startsAfresh(e, a)) changes = m.loops.reset(a.key);
+  // A session's end forgets all its agents, those it no longer lists too.
+  if (e.kind === 'session.end') changes = m.loops.resetAll((key) => key.startsWith(`${s.id}:`));
+  else if (!a) return [];
+  else if (startsAfresh(e, a)) changes = m.loops.reset(a.key);
   else if (FINISHED_CALLS.has(e.kind)) changes = m.loops.record(loopCall(e, s, a));
   for (const change of changes) {
     const agent = m.state.agents[change.agent];
@@ -657,7 +660,7 @@ function startsAfresh(e, a) {
  */
 function loopCall(e, s, a) {
   const ok = e.kind === 'tool.end';
-  const error = e.kind === 'permission.denied' ? str(e.data.reason) || 'Permission denied' : str(e.data.error);
+  const error = e.kind === 'permission.denied' ? str(e.data.reason) || 'Permission denied' : str(e.data.errorText);
   return { agent: a.key, folder: e.cwd || s.cwd, tool: e.data.tool, input: e.data.input, ok, error: ok ? '' : error, at: e.ts };
 }
 

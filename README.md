@@ -183,12 +183,16 @@ notifications on (Settings), each new one also pops up while the tab is in the b
 
 An agent that **seems stuck** counts too: one whose step failed three times with nothing changed
 in between, ran five times with nothing changed whatever its exit code (`npm test 2>&1 | tail`
-reports tail's exit code, not the tests'), or failed six times in 20 minutes with the same error.
+reports tail's exit code, not the tests'), or failed six times in 20 minutes with the same error
+(the first line that says something, not `Exit code 1` or npm's own lines). A step is the command
+and the folder it runs in, so `cd packages/a && npm test` and `cd packages/b && npm test` are two.
 Its row says so ("Seems stuck: `npm test` failed 3 times, nothing changed"), a storm gathers over
 it in the town, and the activity log notes when it started. An edit by any agent in the same
-folder is progress and ends the alert; so do your next prompt, the turn ending, and, for a step
-that kept failing, the step working at last. Steps that wait by nature (reading a background
-task's output, `sleep` loops, `gh run watch` and other CI checks) never count.
+folder is progress and ends the alert, and so is a command that writes files (`sed -i`, a
+formatter, `cat > file`, a script that writes); so do your next prompt, the turn ending, and, for a
+step that kept failing, the step working at last. Steps that wait by nature (reading a background
+task's output, `sleep` loops, `gh run watch` and other CI checks, health checks, `ps` or `docker
+ps`) never count.
 
 ### Everything else
 
@@ -211,7 +215,8 @@ task's output, `sleep` loops, `gh run watch` and other CI checks) never count.
   tool finishing after your answer in the terminal, or your next prompt. Andary sees a yes for a
   longer command only when it finishes, and a "No" only at your next prompt, so those can still
   send one. An agent that seems stuck sends one note each time it gets stuck ("A crew seems
-  stuck: the same step keeps failing").
+  stuck: the same step keeps failing", or "…: it keeps repeating the same step" for a step run
+  over and over that need not fail).
 
 ![The town's five looks](docs/media/andary-looks.webp)
 

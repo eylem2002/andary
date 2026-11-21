@@ -287,7 +287,7 @@ describe('attentionItems', () => {
   test('an agent that seems stuck is an alert: counted, and set aside until its next episode', () => {
     const t = town();
     /** @param {number} ts */
-    const red = (ts) => t.send('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_use_id: `t${ts}`, error: 'Exit code 1', is_interrupt: false }, ts);
+    const red = (ts) => t.send('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_use_id: `t${ts}`, error: 'Exit code 1\nTypeError: token is undefined', is_interrupt: false }, ts);
     red(T0);
     red(T0 + 1);
     assert.deepEqual(t.items(T0 + 10), []);

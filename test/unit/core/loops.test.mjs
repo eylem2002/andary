@@ -3,7 +3,7 @@
 // remembered.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { MAX_AGENTS, MAX_KEY_CHARS, MAX_STEPS, changesFiles, coreCommand, createLoops, isPolling, stepKey } from '../../../public/js/core/loops.js';
+import { MAX_AGENTS, MAX_KEY_CHARS, MAX_STEPS, changesFiles, coreCommand, createLoops, errorSignature, isPolling, stepKey, stuckWords } from '../../../public/js/core/loops.js';
 
 /** @typedef {import('../../../public/js/core/loops.js').LoopCall} LoopCall */
 /** @typedef {import('../../../public/js/core/loops.js').LoopChange} LoopChange */
@@ -52,19 +52,48 @@ function rules() {
 const times = (n, make) => Array.from({ length: n }, (_, i) => make(i));
 
 describe('the same step', () => {
-  test('a shell command, without a leading cd and without the output plumbing at its end', () => {
-    assert.equal(coreCommand('cd /work/app &&  npm   test 2>&1 | tail -40'), 'npm test');
+  test('a shell command, without a cd into its own folder and without the output plumbing at its end', () => {
+    assert.equal(coreCommand('cd /work/app &&  npm   test 2>&1 | tail -40', APP), 'npm test');
     assert.equal(coreCommand('npm test 2>&1 | grep -v warn | head -50'), 'npm test');
-    assert.equal(coreCommand('cd "/my app" && npm test\n'), 'npm test');
-    const npmTest = stepKey('Bash', { command: 'npm test' });
-    for (const same of ['npm test 2>&1', 'npm test | tail -20', 'cd app && npm test | grep FAIL', ' npm  test ']) {
-      assert.equal(stepKey('Bash', { command: same, description: 'Run the tests' }), npmTest, same);
+    assert.equal(coreCommand('cd "/my app" && npm test\n', '/my app'), 'npm test');
+    assert.equal(coreCommand('cd . && sleep 2 && npm test'), 'npm test', 'a pause before it is no part of it');
+    const npmTest = stepKey('Bash', { command: 'npm test' }, APP);
+    for (const same of ['npm test 2>&1', 'npm test | tail -20', `cd ${APP} && npm test | grep FAIL`, 'cd . && npm test', 'cd ../app && npm test', ' npm  test ', 'sleep 5 && npm test']) {
+      assert.equal(stepKey('Bash', { command: same, description: 'Run the tests' }, APP), npmTest, same);
     }
-    for (const other of ['npm test || true', 'npm run test', 'npm test -- login', 'cd app; npm test']) {
-      assert.notEqual(stepKey('Bash', { command: other }), npmTest, other);
+    for (const other of ['npm test || true', 'npm run test', 'npm test -- login', 'cd app && npm test', 'cd packages/a && npm test']) {
+      assert.notEqual(stepKey('Bash', { command: other }, APP), npmTest, other);
     }
-    assert.equal(stepKey('Bash', { command: ['npm', 'test'] }), npmTest, 'a Codex argument list');
-    assert.notEqual(stepKey('PowerShell', { command: 'npm test' }), npmTest);
+    assert.equal(stepKey('Bash', { command: ['npm', 'test'] }, APP), npmTest, 'a Codex argument list');
+    assert.notEqual(stepKey('PowerShell', { command: 'npm test' }, APP), npmTest);
+  });
+
+  test('a command handed to a shell is the command inside it (Codex runs every command so)', () => {
+    const npmTest = stepKey('Bash', { command: 'npm test' }, APP);
+    for (const wrapped of [['bash', '-lc', 'npm test'], "bash -lc 'npm test 2>&1 | tail -30'", '/bin/zsh -lc "npm test"', "sh -c 'cd /work/app && npm test'"]) {
+      assert.equal(stepKey('Bash', { command: wrapped }, APP), npmTest, JSON.stringify(wrapped));
+    }
+    assert.equal(coreCommand(['bash', '-lc', "echo 'it''s' && cd packages/a && npm test"], APP), "echo 'it''s' && cd packages/a && npm test");
+    const inner = String.raw`cd packages/a && echo 'it'\''s'`;
+    assert.equal(coreCommand(['bash', '-lc', inner], APP), inner, 'quotes inside read back as typed');
+  });
+
+  test('a cd elsewhere is part of the step, by the folder it leads to', () => {
+    const a = stepKey('Bash', { command: 'cd packages/a && npm test' }, APP);
+    assert.equal(stepKey('Bash', { command: `cd ${APP}/packages/a && npm test` }, APP), a);
+    assert.equal(stepKey('Bash', { command: 'cd packages && cd ./a/ && npm test' }, APP), a);
+    assert.equal(stepKey('Bash', { command: 'cd ../app/packages/a; npm test' }, APP), a);
+    assert.equal(stepKey('Bash', { command: 'npm test' }, `${APP}/packages/a`), a, 'or run from there');
+    assert.notEqual(stepKey('Bash', { command: 'cd packages/b && npm test' }, APP), a);
+    assert.equal(coreCommand(`cd ${APP}/packages/a && npm test 2>&1 | tail -5`, APP), 'cd packages/a && npm test', 'shown as from the folder it runs in');
+  });
+
+  test('a trailing grep is part of the step, unless it filters a test or build run', () => {
+    assert.notEqual(stepKey('Bash', { command: 'git log --oneline | grep fix' }), stepKey('Bash', { command: 'git log --oneline | grep feat' }));
+    assert.equal(coreCommand('git log --oneline | grep fix | head -5'), 'git log --oneline | grep fix');
+    for (const run of ['npm test', 'npm run build', 'pnpm typecheck', 'npx vitest run', 'pytest -x', 'cargo test', 'go test ./...', 'make check', 'node --test test/']) {
+      assert.equal(coreCommand(`${run} 2>&1 | grep -E "FAIL|Error" | head -20`), run, run);
+    }
   });
 
   test('file tools by tool and path; Read adds offset and limit', () => {
@@ -121,6 +150,27 @@ describe('what counts as a change', () => {
       'rm -rf node_modules/.cache',
       'mkdir -p src/lib && mv a.ts src/lib/',
       'cp .env.example .env',
+      "bash -lc 'npm install'",
+      "(cd src && rm old.ts)",
+      "find . -name '*.orig' -exec sh -c 'rm \"$1\"' _ {} \\;",
+      "cat > src/a.ts <<'EOF'\nexport const a = 1;\nEOF",
+      'cat <<EOF >> notes.md\n- done\nEOF',
+      'echo "export {}" > src/index.ts',
+      'npm test 2>&1 | tee test-output.txt',
+      'jq . package.json | tee -a package.tmp.json',
+      "python3 - <<'EOF'\nfrom pathlib import Path\nPath('src/a.py').write_text('x = 1')\nEOF",
+      "python - <<'PY'\nwith open('config.json', 'w') as f:\n    f.write('{}')\nPY",
+      'node <<EOF\nrequire("fs").writeFileSync("a.json", "{}")\nEOF',
+      "ruby -e 'File.open(\"a.rb\", \"a\") { |f| f.puts 1 }'",
+      'gofmt -w main.go',
+      'npx prettier -w src',
+      'npm run format',
+      'pnpm lint:fix',
+      'yarn codegen',
+      'npm run generate -- --force',
+      'npm run build:types',
+      'node scripts/build-icons.mjs',
+      'python scripts/gen_schema.py',
     ];
     for (const command of changes) assert.equal(changesFiles(command), true, command);
     const nothing = [
@@ -134,11 +184,31 @@ describe('what counts as a change', () => {
       'git stash list',
       'git add -A',
       'npm test > test.log 2>&1',
+      'npm test >> /tmp/run.txt',
+      'npm test 2>/dev/null',
+      'npm test | tee test.log',
+      'pytest > results.out',
+      'node -e "console.log([1, 2].map((x) => x * 2))"',
+      "python3 - <<'EOF'\nprint(open('a.py').read())\nEOF",
       'docker run --rm node:22 npm test',
       'grep -rn "rm -rf" src',
+      'grep -w token src/auth.ts',
+      "curl -s -w '%{http_code}' localhost:3000",
+      'npm run test:fixtures',
+      'echo "=> done" >&2',
     ];
     for (const command of nothing) assert.equal(changesFiles(command), false, command);
     assert.equal(changesFiles(['git', 'checkout', 'main']), true, 'a Codex argument list');
+    assert.equal(changesFiles(['bash', '-lc', "cat > src/a.ts <<'EOF'\nx\nEOF"]), true, 'and one handed to a shell');
+  });
+
+  test('a script that writes the file the tests then fail on is progress, three times over', () => {
+    const t = rules();
+    for (let i = 0; i < 3; i += 1) {
+      t.run(ran({ input: { command: `python3 - <<'EOF'\nopen('src/calc.py', 'w').write('def add(a, b): return a + ${i}')\nEOF` }, at: T0 + i * 10 }));
+      t.run(failed({ input: { command: 'pytest -q' }, at: T0 + i * 10 + 1 }));
+    }
+    assert.equal(t.stuck(), null);
   });
 
   test('a failed edit is no change: its own failures count instead', () => {
@@ -236,7 +306,7 @@ describe('rule 2: the identical step ran 5 times with nothing changed', () => {
   });
 });
 
-describe('rule 3: the same step failed 6 times within 20 minutes with the same first error line', () => {
+describe('rule 3: the same step failed 6 times within 20 minutes with the same error', () => {
   /** @param {number} i */
   const sameError = (i) => failed({ at: T0 + i * MINUTE, error: 'TypeError: token is undefined' });
 
@@ -268,6 +338,95 @@ describe('rule 3: the same step failed 6 times within 20 minutes with the same f
     t.run(edited({ at: T0 + 6 * MINUTE }));
     assert.deepEqual([t.stuck()?.rule, t.stuck()?.text, t.started()], [3, 'Seems stuck: `npm test` failed 6 times with the same error', 1], 'the same episode, in other words');
   });
+
+  test('the error is the first line that says something: not `Exit code 1`, a banner or npm about the script', () => {
+    /** @type {[string, string, string][]} what failed, its text, the line compared ('' none) */
+    const failures = [
+      ['Claude Code, node --test', 'Exit code 1\n\n> andary@0.1.0 test\n> node --test test/\n\n▶ login\n  ✔ accepts a fresh token (0.8ms)\n  ✖ rejects an expired token (1.2ms)\n    AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:', '✖ rejects an expired token'],
+      ['Claude Code, vitest', 'Exit code 1\n\n> app@1.0.0 test\n> vitest run\n\n RUN  v2.1.8 /work/app\n\n ❯ test/auth.test.ts (3 tests | 1 failed) 12ms\n   × login > rejects expired tokens 5ms', '❯ test/auth.test.ts (3 tests | 1 failed)'],
+      ['Claude Code, pytest', 'Exit code 1\n============================= test session starts ==============================\nplatform linux -- Python 3.12.3, pytest-8.3.3, pluggy-1.5.0\nrootdir: /work/app\nconfigfile: pyproject.toml\ncollected 12 items\n\ntests/test_cart.py ..F.........                                         [100%]', 'tests/test_cart.py ..F......... [100%]'],
+      ['Claude Code, a crash', "Exit code 1\nnode:internal/modules/run_main:123\n    triggerUncaughtException(\n\nTypeError: Cannot read properties of undefined (reading 'split')", 'node:internal/modules/run_main:123'],
+      ['Claude Code, the command echoed', 'Exit code 2\n+ npm test\n$ npm test\nnpm test\nmake: *** [Makefile:12: test] Error 2', ''],
+      ['Claude Code, nothing but the exit code', 'Exit code 1', ''],
+      ['Codex, npm 10 on stderr', 'npm error Lifecycle script `test` failed with error:\nnpm error code 1\nnpm error path /work/app\nnpm error workspace app@1.0.0\nnpm error location /work/app\nnpm error command failed\nnpm error command sh -c node --test', ''],
+      ['Codex, npm 6 on stderr', 'npm ERR! code ELIFECYCLE\nnpm ERR! errno 1\nnpm ERR! app@1.0.0 test: `node --test`\nnpm ERR! Exit status 1\nnpm ERR!\nnpm ERR! Failed at the app@1.0.0 test script.\nnpm ERR! This is probably not a problem with npm. There is likely additional logging output above.\n\nnpm ERR! A complete log of this run can be found in:\nnpm ERR!     /root/.npm/_logs/2026-11-21T00_00_00_000Z-debug.log', ''],
+      ['Codex, pnpm and yarn', ' ELIFECYCLE  Test failed. See above for more details.\nERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  app@1.0.0 test: `vitest run`\nerror Command failed with exit code 1.\ninfo Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.', ''],
+      ['Codex, no output', 'Exit code 1', ''],
+      ['Codex, a plain word', 'Error', ''],
+      ['CI', 'Error: Process completed with exit code 1.\ncommand failed', ''],
+      ['Codex, a real error on stderr', 'npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/left-padd', 'npm error code E404'],
+    ];
+    for (const [what, text, line] of failures) assert.equal(errorSignature(text, 'npm test'), line, what);
+  });
+
+  test('red, edit, red again: six runs of TDD are not stuck, with Claude Code or Codex', () => {
+    const claude = rules();
+    for (let i = 0; i < 6; i += 1) {
+      claude.run(failed({ at: T0 + i * MINUTE, error: `Exit code 1\n\n> app@1.0.0 test\n> node --test\n\n✖ case ${i} works (0.${i}ms)` }), edited({ at: T0 + i * MINUTE + 1 }));
+    }
+    assert.equal(claude.stuck(), null);
+    const codex = rules();
+    const stderr = 'npm error Lifecycle script `test` failed with error:\nnpm error code 1\nnpm error path /work/app\nnpm error command failed\nnpm error command sh -c node --test';
+    for (let i = 0; i < 6; i += 1) codex.run(failed({ input: { command: ['bash', '-lc', 'npm test'] }, at: T0 + i * MINUTE, error: stderr }), edited({ at: T0 + i * MINUTE + 1 }));
+    assert.equal(codex.stuck(), null, 'npm saying the script failed says nothing about how');
+  });
+
+  test('the same TypeError six times, edits or not, is stuck; a failure saying nothing leaves the count alone', () => {
+    const t = rules();
+    for (let i = 0; i < 6; i += 1) {
+      t.run(failed({ at: T0 + i * MINUTE, error: `Exit code 1\n\n> app@1.0.0 test\n> node --test\n\n✖ login (${i + 1}.2ms)\n  TypeError: token is undefined` }), edited({ at: T0 + i * MINUTE + 1 }));
+      if (i === 2) t.run(failed({ at: T0 + i * MINUTE + 2, error: 'Exit code 1' }), edited({ at: T0 + i * MINUTE + 3 }));
+    }
+    assert.deepEqual([t.stuck()?.rule, t.stuck()?.count], [3, 6]);
+  });
+
+  test('its window goes by when the failures happened, not when they arrived', () => {
+    const t = rules();
+    const late = (/** @type {number} */ minute) => failed({ at: T0 + minute * MINUTE, error: 'TypeError: token is undefined' });
+    for (const minute of [30, 31, 32, 33, 34]) t.run(late(minute), edited({ at: T0 + minute * MINUTE + 1 }));
+    t.run(late(0));
+    assert.equal(t.stuck(), null, 'the sixth happened half an hour before the others');
+    t.run(late(29));
+    assert.deepEqual([t.stuck()?.rule, t.stuck()?.count], [3, 6], 'this one, though late, happened within the 20 minutes');
+  });
+});
+
+describe('hooks that arrive out of order', () => {
+  test('a failure made before an edit but arriving after it does not count towards rule 1', () => {
+    const t = rules();
+    t.run(edited({ at: T0 + 2 }), failed({ at: T0 + 1 }), failed({ at: T0 + 3 }), failed({ at: T0 + 4 }));
+    assert.equal(t.stuck(), null, 'two failures since the edit');
+    t.run(failed({ at: T0 + 5 }));
+    assert.equal(t.stuck()?.rule, 1);
+  });
+
+  test("another agent's edit in the folder moves the line too, and a late success changes nothing", () => {
+    const t = rules();
+    t.run(ran({ input: { command: 'ls' }, at: T0 }), edited({ agent: HELPER, at: T0 + 10 }), ran({ at: T0 + 5 }), ran({ at: T0 + 6 }));
+    t.run(...times(4, (i) => ran({ at: T0 + 11 + i })));
+    assert.equal(t.stuck(), null, 'four runs since the edit');
+    t.run(...times(3, (i) => failed({ input: { command: 'npm run lint' }, at: T0 + 20 + i })));
+    t.run(ran({ input: { command: 'npm run lint' }, at: T0 + 9 }));
+    assert.equal(t.stuck()?.step, 'npm run lint', 'it worked before the edit, not since');
+  });
+});
+
+describe('a monorepo: a cd into a package is a step of its own', () => {
+  test("each package's checks, one after another, never seem stuck", () => {
+    const t = rules();
+    for (const name of ['a', 'b', 'c', 'd', 'e', 'f', 'g']) t.run(failed({ input: { command: `cd packages/${name} && npm test 2>&1 | tail -20` } }));
+    assert.equal(t.stuck(), null);
+    const codex = rules();
+    for (const name of ['a', 'b', 'c', 'd', 'e', 'f']) codex.run(failed({ input: { command: ['bash', '-lc', `cd packages/${name} && npm test`] }, error: 'npm error code 1' }));
+    assert.equal(codex.stuck(), null);
+  });
+
+  test('the same package red three times with nothing changed is', () => {
+    const t = rules();
+    t.run(failed({ input: { command: 'cd packages/a && npm test' } }), failed({ input: { command: 'cd packages/b && npm test' } }));
+    t.run(failed({ input: { command: `cd ${APP}/packages/a && npm test | tail -5` } }), failed({ folder: `${APP}/packages/a`, input: { command: 'npm test' } }));
+    assert.equal(t.stuck()?.text, 'Seems stuck: `cd packages/a && npm test` failed 3 times, nothing changed');
+  });
 });
 
 describe('steps that wait by nature are never counted', () => {
@@ -294,6 +453,19 @@ describe('steps that wait by nature are never counted', () => {
       ['Bash', { command: 'watch -n 5 kubectl get pods' }],
       ['Bash', { command: 'kubectl rollout status deploy/api' }],
       ['PowerShell', { command: 'Start-Sleep -Seconds 30; Get-Job' }],
+      ['Bash', { command: 'curl -s http://localhost:3000/health' }],
+      ['Bash', { command: 'curl -fsS http://127.0.0.1:8080/ > /dev/null && echo up' }],
+      ['Bash', { command: 'wget -qO- localhost:5173' }],
+      ['Bash', { command: 'tail -n 100 logs/server.log' }],
+      ['Bash', { command: 'ps aux | grep -v grep | grep vite' }],
+      ['Bash', { command: 'pgrep -f "node server.js"' }],
+      ['Bash', { command: 'docker ps --format "{{.Names}}"' }],
+      ['Bash', { command: 'docker compose ps' }],
+      ['Bash', { command: 'kubectl get pods -n staging' }],
+      ['Bash', { command: 'gh pr view 42 --json statusCheckRollup' }],
+      ['Bash', { command: 'lsof -i :3000' }],
+      ['Bash', { command: "bash -lc 'sleep 30'" }],
+      ['Bash', { command: ['bash', '-lc', 'sleep 30 && gh run list --limit 1'] }],
     ];
     for (const [tool, input] of waits) {
       assert.equal(isPolling(tool, input), true, `${tool} ${JSON.stringify(input)}`);
@@ -304,12 +476,22 @@ describe('steps that wait by nature are never counted', () => {
   });
 
   test('ordinary steps are not waits, and a wait that changes files is still a change', () => {
-    for (const command of ['npm test', 'npm run watch', 'npx tsc --watch', 'cat src/a.ts', 'gh pr create --fill']) assert.equal(isPolling('Bash', { command }), false, command);
+    for (const command of ['npm test', 'npm run watch', 'npx tsc --watch', 'cat src/a.ts', 'gh pr create --fill', 'curl -X POST localhost:3000/api/login', 'echo done']) {
+      assert.equal(isPolling('Bash', { command }), false, command);
+    }
     assert.equal(isPolling('Read', { file_path: `${APP}/src/tasks/list.output.ts` }), false);
     const t = rules();
     t.run(...times(3, () => failed()));
     t.run(ran({ input: { command: 'sleep 10 && git pull' } }));
     assert.equal(t.stuck(), null);
+  });
+
+  test('only a command that is nothing but waiting is a wait: `sleep 5 && npm test` is the test run', () => {
+    assert.equal(isPolling('Bash', { command: 'sleep 5 && npm test' }), false);
+    assert.equal(isPolling('Bash', { command: ['bash', '-lc', 'sleep 2; npm test'] }), false);
+    const t = rules();
+    t.run(failed({ input: { command: 'sleep 5 && npm test' } }), failed(), failed({ input: { command: 'sleep 2; npm test 2>&1 | tail' } }));
+    assert.equal(t.stuck()?.text, 'Seems stuck: `npm test` failed 3 times, nothing changed');
   });
 });
 
@@ -350,6 +532,11 @@ describe('a change by any agent in the same folder', () => {
 });
 
 describe('one alert per agent', () => {
+  test('words that name no step, for notes that may show on a locked screen, follow the rule', () => {
+    assert.deepEqual([1, 2, 3].map((rule) => stuckWords(/** @type {1|2|3} */ (rule))), ['the same step keeps failing', 'it keeps repeating the same step', 'the same step keeps failing']);
+  });
+
+
   test('while any step stays stuck the episode goes on, showing the step run most recently', () => {
     const t = rules();
     t.run(...times(3, () => failed()));
@@ -373,13 +560,24 @@ describe('one alert per agent', () => {
 });
 
 describe('memory', () => {
-  test(`at most ${MAX_STEPS} steps an agent: the one run the longest ago is forgotten, and its alert ends`, () => {
+  test('a step failing between many others is remembered: twenty reads between attempts', () => {
+    const t = rules();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      t.run(failed());
+      t.run(...times(20, (i) => ran({ tool: 'Read', input: { file_path: `${APP}/src/${attempt}-${i}.ts` } })));
+    }
+    assert.equal(t.stuck()?.rule, 1);
+  });
+
+  test(`at most ${MAX_STEPS} steps an agent: one that never failed goes first, else the one run the longest ago`, () => {
     const t = rules();
     t.run(...times(3, () => failed()));
-    t.run(...times(MAX_STEPS - 1, (i) => ran({ tool: 'Read', input: { file_path: `${APP}/src/${i}.ts` } })));
+    t.run(...times(MAX_STEPS * 2, (i) => ran({ tool: 'Read', input: { file_path: `${APP}/src/${i}.ts` } })));
+    assert.equal(t.stuck()?.rule, 1, 'reads never push out a failing step');
+    t.run(...times(MAX_STEPS - 1, (i) => failed({ input: { command: `npm test -- case-${i}` } })));
     assert.equal(t.stuck()?.rule, 1);
-    t.run(ran({ tool: 'Read', input: { file_path: `${APP}/src/last.ts` } }));
-    assert.equal(t.stuck(), null);
+    t.run(failed({ input: { command: 'npm test -- last' } }));
+    assert.equal(t.stuck(), null, 'with every step failing, the one run the longest ago goes, and its alert ends');
   });
 
   test(`at most ${MAX_AGENTS} agents: the one quiet the longest is forgotten, and its alert ends`, () => {

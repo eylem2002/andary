@@ -83,6 +83,11 @@ describe('what deserves a notification', () => {
     assert.match(t.items()[0].text, /deploy:secret/, 'the HUD may show the command');
     assert.deepEqual(t.notes()[0], { title: 'Seems stuck', body: 'api-server seems stuck: the same step keeps failing.', tag: t.items()[0].id });
     assert.doesNotMatch(JSON.stringify(t.notes()), /deploy|secret|npm/);
+    const repeating = town();
+    for (const id of ['t1', 't2', 't3', 't4', 't5']) {
+      repeating.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test 2>&1 | tail -40' }, tool_use_id: id, tool_response: { stdout: 'ok' } });
+    }
+    assert.equal(repeating.notes()[0]?.body, 'api-server seems stuck: it keeps repeating the same step.', 'a step run over and over need not fail');
   });
 
   test('a finished turn only once nobody answered, and only with more than one crew at work', () => {
@@ -213,7 +218,7 @@ describe('installNotifications', () => {
       t.send('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_use_id: id, error: 'Exit code 1', is_interrupt: false });
     }
     await settle();
-    assert.deepEqual(heard, ['api-server: Seems stuck: `npm test` failed 3 times, nothing changed']);
+    assert.deepEqual(heard, ['api-server: Seems stuck: npm test failed 3 times, nothing changed'], 'without the backticks that mark the command on screen');
     t.send('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_use_id: 't4', error: 'Exit code 1', is_interrupt: false });
     await settle();
     assert.equal(heard.length, 1, 'once per episode, though its words count on');

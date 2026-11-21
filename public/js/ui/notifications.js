@@ -9,6 +9,7 @@
 // The same watcher keeps the page title's count current: the HUD renders on animation frames,
 // which a background tab does not get, yet a background tab's title is the one you look at.
 import { countedItems } from '../core/attention.js';
+import { stuckWords } from '../core/loops.js';
 import { updateTitle } from './masthead.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
@@ -50,7 +51,7 @@ export function notificationFor(item, state, now) {
       return item.crews > 1 ? note('Crews stopped', `${item.text}.`) : note('Turn stopped', `${crew}: ${item.text}.`);
     case 'stuck':
       // The item's own words name the command: these may show on a locked screen.
-      return note('Seems stuck', `${crew} seems stuck: the same step keeps failing.`);
+      return note('Seems stuck', `${crew} seems stuck: ${stuckWords(state.agents[item.agentKey]?.stuck?.rule ?? 1)}.`);
     case 'finished':
       // With one crew at work you are probably at its terminal already.
       return activeCrews(state) > 1 ? note('Turn finished', `${crew} is waiting for your next prompt.`) : null;
@@ -126,7 +127,8 @@ export function installNotifications(ctx, { now: clock = Date.now, every = CHECK
       seen.add(item.id);
       if (seen.size > MAX_SEEN) seen.delete(seen.values().next().value ?? '');
       if (now - item.countedSince > NEWS_MS) continue;
-      if (ANNOUNCED.has(item.kind)) ctx.announcer.polite(`${crewName(state, item)}: ${item.text}`);
+      // Backticks mark a command on screen; read aloud they are noise.
+      if (ANNOUNCED.has(item.kind)) ctx.announcer.polite(`${crewName(state, item)}: ${item.text.replaceAll('`', '')}`);
       const note = notify ? notificationFor(item, state, now) : null;
       if (note) show(note);
     }
