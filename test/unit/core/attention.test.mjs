@@ -100,6 +100,64 @@ describe('open dialogs, in the order the hooks really come', () => {
   });
 });
 
+describe('hooks that arrive out of order go by their own time', () => {
+  // A permission request is sent at once; every other hook in the background, each on its own.
+  // "After" means more than ORDER_SLACK_MS (250 ms) later: two forwarders' stamps may swap.
+  test("a plan's request that overtook its PreToolUse stays one item: the PreToolUse joins it", () => {
+    const t = town();
+    const plan = { tool_name: 'ExitPlanMode', tool_input: { plan: 'Ship it' } };
+    t.send('PermissionRequest', plan, T0 + 20);
+    t.store.setApproval(approvalOf({ toolName: 'ExitPlanMode', toolInput: plan.tool_input, held: false, createdAt: T0 + 25 }));
+    const [before] = t.items();
+    t.send('PreToolUse', { ...plan, tool_use_id: 'p1' }, T0 + 10);
+    assert.deepEqual(t.items().map((i) => [i.kind, i.id]), [['plan', before.id]], 'one dialog: one notification');
+    assert.equal(t.store.getState().dialogs.length, 1);
+    t.send('PostToolUse', { ...plan, tool_use_id: 'p1', tool_response: {} }, T0 + 30);
+    assert.deepEqual(t.items(), []);
+  });
+
+  test("a question's request that overtook its PreToolUse keeps its words; asking again replaces it", () => {
+    const t = town();
+    const asked = (question) => ({ tool_name: 'AskUserQuestion', tool_input: { questions: [{ question }] } });
+    t.send('PermissionRequest', asked('Which database?'), T0 + 20);
+    const [before] = t.items();
+    t.send('PreToolUse', { ...asked('Which database?'), tool_use_id: 'q1' }, T0 + 10);
+    assert.deepEqual(t.items().map((i) => [i.kind, i.text, i.id]), [['question', 'Asks: Which database?', before.id]]);
+    t.send('PreToolUse', { ...asked('Which port?'), tool_use_id: 'q2' }, T0 + 5_000);
+    assert.deepEqual(t.items().map((i) => i.text), ['Asks: Which port?'], 'it cannot ask again while one waits');
+  });
+
+  test("a session's notice stays when the call started before it arrives late; a call started after it ends it", () => {
+    const t = town();
+    t.send('Notification', { notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' }, T0 + 20);
+    t.send('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'curl https://example.com' }, tool_use_id: 'b1' }, T0 + 10);
+    assert.deepEqual(t.items().map((i) => i.kind), ['terminal'], 'the call it asks about started before it');
+    t.send('PreToolUse', { tool_name: 'Read', tool_input: { file_path: 'x' }, tool_use_id: 'r1' }, T0 + 5_000);
+    assert.deepEqual(t.items(), []);
+  });
+
+  test('a late PreToolUse of the turn does not end its finished wait', () => {
+    const t = town();
+    t.send('Stop', { last_assistant_message: 'Done.' }, T0 + 20);
+    t.send('PreToolUse', { tool_name: 'Read', tool_input: { file_path: 'x' }, tool_use_id: 'r1' }, T0 + 10);
+    assert.equal(t.lead().wait?.kind, 'finished');
+    t.send('PreToolUse', { tool_name: 'Read', tool_input: { file_path: 'y' }, tool_use_id: 'r2' }, T0 + 30);
+    assert.equal(t.lead().wait, null, 'a call started after it: the agent moved on');
+  });
+
+  test('a Stop that arrives after the prompt you queued behind it starts no wait', () => {
+    const t = town();
+    t.send('PreToolUse', { tool_name: 'Read', tool_input: { file_path: 'x' }, tool_use_id: 'r1' }, T0);
+    t.send('UserPromptSubmit', { prompt: 'and the docs too' }, T0 + 21);
+    t.send('Stop', { last_assistant_message: 'Done.' }, T0 + 20);
+    assert.equal(t.lead().wait, null, 'it ended the turn before your prompt');
+    t.send('StopFailure', { error: 'server_error' }, T0 + 15);
+    assert.equal(t.lead().wait, null, 'nor does an older failure');
+    t.send('Stop', { last_assistant_message: 'Docs too.' }, T0 + 50);
+    assert.equal(t.lead().wait?.text, 'Finished: Docs too.');
+  });
+});
+
 describe('what each agent waits for (AgentState.wait)', () => {
   test('a finished turn waits; idle_prompt marks when nobody answered', () => {
     const t = town();
@@ -152,7 +210,7 @@ describe('what each agent waits for (AgentState.wait)', () => {
     assert.deepEqual(t.items().map((i) => [i.kind, i.text]), [['question', 'The GitHub server needs input']]);
     t.send('PostToolUse', { tool_name: 'Read', tool_input: { file_path: 'x' }, tool_response: {} }, T0 + 1);
     assert.equal(t.items().length, 1, 'a parallel call finishing proves nothing');
-    t.send('PreToolUse', { tool_name: 'Read', tool_input: { file_path: 'y' }, tool_use_id: 'r2' }, T0 + 2);
+    t.send('PreToolUse', { tool_name: 'Read', tool_input: { file_path: 'y' }, tool_use_id: 'r2' }, T0 + 2_000);
     assert.deepEqual(t.items(), []);
   });
 });

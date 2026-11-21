@@ -453,3 +453,8 @@ section.
 99. **`I` goes to what needs you.** It is free in the page (no browser uses a bare `I`), and reads
     as "inbox". A request the town can answer opens its card in Approvals; anything else is
     answered in the terminal, so the agent is selected and the camera points at it.
+100. **A hook sent before an agent's wait began, or before it last moved on, is stale.** Every hook
+    but a permission request reaches the town on its own, in the background, so a late
+    `PreToolUse` of a finished turn does not end its wait, and a `Stop` that arrives after the
+    prompt you queued behind it starts none. The town goes by each hook's own time, as the phone
+    notes and the broker do; the clock is the agent's machine, the same one for all its hooks.

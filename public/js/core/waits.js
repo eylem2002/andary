@@ -4,7 +4,9 @@
 // core/attention.js turns waits and dialogs into the "needs you" list. Pure.
 //
 // A wait starts when the agent stops for you and ends when it moves again (a prompt, a tool call,
-// a new session, a helper finishing).
+// a new session, a helper finishing). Hooks may arrive out of order (every hook but a permission
+// request is sent in the background, each on its own), so a hook sent before the wait began, or
+// before the agent last moved on, changes nothing: it was about a turn already over.
 import { clip, oneLine, own, str } from './text.js';
 
 /** @typedef {'finished'|'stopped'} WaitKind */
@@ -69,14 +71,21 @@ const RULES = Object.freeze({
 
 /**
  * The agent's wait after an event: a new Wait, null (no longer waiting), or undefined (unchanged).
- * @param {{ role: string, wait?: Wait|null }} agent
+ * @param {{ role: string, wait?: Wait|null, movedAt?: number }} agent  movedAt: when it last
+ *   moved on (the newest hook movesOn() was true for)
  * @param {WaitEvent} event
  * @returns {Wait|null|undefined}
  */
 export function waitAfter(agent, event) {
   const current = agent.wait ?? null;
-  if (MOVES_ON.has(event.kind)) return null;
+  if (event.ts < Math.max(current?.since ?? -Infinity, agent.movedAt ?? -Infinity)) return undefined;
+  if (movesOn(event)) return null;
   return own(RULES, event.kind)?.(agent, current, event.ts, event.data);
+}
+
+/** Whether an event shows the agent moving on: it ends any wait. @param {WaitEvent} event */
+export function movesOn(event) {
+  return MOVES_ON.has(event.kind);
 }
 
 /**

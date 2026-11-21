@@ -69,10 +69,11 @@ world is still being built; the director then plays the changes it missed (CONTR
 
 **Pure core.** `public/js/core/` has no DOM and no I/O, so it runs anywhere and is unit-tested in
 Node. What the page was opened with (the town look, from the address or saved preferences) is read
-once, in `page.js`, and the HUD and the town's environment take it from there. The server reuses the few core modules both sides must read the same way: identifiers,
-dates, text helpers, prices, the growth rules, and what an approval card shows of a request (card
-fields). When an agent is waiting for you (open dialogs) is a pure core model too, which the phone
-notes and the approval broker both follow.
+once, in `page.js`, and the HUD and the town's environment take it from there. The server reuses
+the few core modules both sides must read the same way: identifiers, dates, text helpers, prices,
+the growth rules, when an agent is waiting for you (open dialogs: the phone notes, the approval
+broker and the town's "needs you" follow one model), and what an approval card shows of a request
+(card fields).
 
 **The world behind a facade.** The app talks to the 3D world only through `world/world.js`
 (CONTRACTS §6). Inside it, the town (`env/`) and the people (`agents/`) never import each other;

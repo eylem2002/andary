@@ -26,7 +26,7 @@ function callOf(e, agentId) {
   const sourceTool = str(e.data.sourceTool);
   const tools = CALL_KINDS.has(e.kind) ? [str(e.data.tool), sourceTool].filter(Boolean) : [];
   // A call an adapter renamed (Codex's apply_patch as an Edit) had its input rewritten too.
-  const input = !tools.length || sourceTool ? null : str(e.data.callKey) || inputKey(isObject(e.data.input) ? e.data.input : {});
+  const input = !tools.length || sourceTool ? null : str(e.data.callKey) || inputKey(isObject(e.data.input) ? e.data.input : {}, { tool: tools[0], source: e.source });
   return { sessionId: e.sessionId, agentId, tools, input };
 }
 
@@ -85,7 +85,7 @@ export function dialogsAfterApproval(dialogs, approval, about) {
     sessionId: str(approval.sessionId),
     agentId: normalizeAgentId(approval.agentId),
     tools,
-    input: str(approval.callKey) || inputKey(isObject(approval.toolInput) ? approval.toolInput : {}),
+    input: str(approval.callKey) || inputKey(isObject(approval.toolInput) ? approval.toolInput : {}, { tool: tools[0], source: approval.source }),
   };
   const held = approval.status === 'pending' && approval.held === true;
   const linked = dialogs.link(call, approval.id, held);

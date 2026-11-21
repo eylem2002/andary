@@ -114,6 +114,7 @@ export function baseAgent(s, key, agentId, ts) {
     lastMessage: undefined,
     model: undefined,
     wait: null,
+    movedAt: 0,
   };
 }
 

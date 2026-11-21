@@ -8,10 +8,10 @@
 //
 // Which observers see an event depends on where it came from, and that is written down once, in
 // POLICIES, instead of in each route. Before any of them, a tool hook gets its call key
-// (`andary_key`, hook-steps.mjs), from its input as it arrived. The phone notes and the approval
-// broker get the hook's own time (`ts`) with it: hooks may arrive out of order.
+// (`andary_key`, hook-steps.mjs), from its input as it arrived. The town, the phone notes and the
+// approval broker get the hook's own time (`ts`, hookTime) with it: hooks may arrive out of order.
 import { toTownPayloads } from './adapters/index.mjs';
-import { withCallKey } from './hook-steps.mjs';
+import { hookTime, withCallKey } from './hook-steps.mjs';
 import { sanitize } from './sanitize.mjs';
 
 /** @typedef {import('./app.mjs').TownContext} TownContext */
@@ -40,11 +40,14 @@ const TEAM_MAX_AGE_MS = 60 * 60 * 1000;
  * PermissionRequest, which the caller answers (adapters never split or rewrite one).
  * @param {TownContext} ctx
  * @param {{ ts: number, source: import('./adapters/index.mjs').Source, event: Record<string, any> }} body
+ * @param {number} [now]
  * @returns {TownEnvelope[]}
  */
-export function ingestHook(ctx, body) {
+export function ingestHook(ctx, body, now = Date.now()) {
   if (body.source === 'claude') ctx.usage.observe(body.event);
-  return toTownPayloads(body.source, body.event).map((event) => admit(ctx, 'local', { ts: body.ts, event }));
+  // Its own time, kept within the last hour (hookTime): the town, the notes and the broker go by it.
+  const ts = hookTime(body.ts, now);
+  return toTownPayloads(body.source, body.event).map((event) => admit(ctx, 'local', { ts, event }));
 }
 
 /**

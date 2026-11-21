@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { POLICIES, ingestHook, ingestTeam } from '../../../server/ingest.mjs';
 import { inputKey } from '../../../public/js/core/dialogs.js';
 
+/** A local hook at the clock's 10 s mark, so the small times below are kept as they are (hookTime). */
+const HOUR = 60 * 60_000;
+const ingestAt = (/** @type {any} */ ctx, /** @type {any} */ body) => ingestHook(ctx, body, 10_000);
+
 /** A town context that records which observers saw what. */
 function fakeContext() {
   /** @type {Record<string, any[]>} */
@@ -33,7 +37,7 @@ describe('ingest', () => {
 
   it('a local Claude Code hook: usage, growth, notifications, relay and approvals, then the browsers', () => {
     const { ctx, seen } = fakeContext();
-    const [envelope] = ingestHook(ctx, { ts: 5, source: 'claude', event: { hook_event_name: 'Stop', session_id: 's', andary_member: 'Mallory' } });
+    const [envelope] = ingestAt(ctx, { ts: 5, source: 'claude', event: { hook_event_name: 'Stop', session_id: 's', andary_member: 'Mallory' } });
     assert.deepEqual([envelope.id, envelope.ts, envelope.event.andary_member], [1, 5, undefined]);
     for (const key of ['usage', 'growth', 'notify', 'broker', 'relay', 'history', 'broadcast']) assert.equal(seen[key].length, 1, key);
     assert.equal(seen.broadcast[0].e.id, 1);
@@ -41,13 +45,25 @@ describe('ingest', () => {
 
   it("the phone notes and the approval broker get each hook's own time: hooks may arrive out of order", () => {
     const { ctx, seen } = fakeContext();
-    ingestHook(ctx, { ts: 1_234, source: 'claude', event: { hook_event_name: 'PreToolUse', session_id: 's', tool_name: 'ExitPlanMode', tool_input: { plan: 'x' } } });
-    assert.deepEqual([seen.notify[0].ts, seen.broker[0].ts], [1_234, 1_234]);
+    ingestAt(ctx, { ts: 1_234, source: 'claude', event: { hook_event_name: 'PreToolUse', session_id: 's', tool_name: 'ExitPlanMode', tool_input: { plan: 'x' } } });
+    assert.deepEqual([seen.notify[0].ts, seen.broker[0].ts, seen.broadcast[0].e.ts], [1_234, 1_234, 1_234]);
+  });
+
+  it('every reader gets the same kept time: never later than its arrival, nor more than an hour before it', () => {
+    const { ctx, seen } = fakeContext();
+    const stop = { hook_event_name: 'Stop', session_id: 's' };
+    const now = 10 * HOUR;
+    ingestHook(ctx, { ts: now + 400_000, source: 'claude', event: stop }, now);
+    ingestHook(ctx, { ts: 1, source: 'claude', event: stop }, now);
+    const times = (/** @type {any[]} */ list) => list.map((x) => x.ts ?? x.e.ts);
+    assert.deepEqual(times(seen.notify), [now, now - HOUR]);
+    assert.deepEqual(times(seen.broker), [now, now - HOUR]);
+    assert.deepEqual(times(seen.broadcast), [now, now - HOUR], 'the town reads the time the notes and the broker go by');
   });
 
   it('a permission request is left to the route: approvals do not observe it', () => {
     const { ctx, seen } = fakeContext();
-    ingestHook(ctx, { ts: 1, source: 'claude', event: { hook_event_name: 'PermissionRequest', session_id: 's', tool_name: 'Bash' } });
+    ingestAt(ctx, { ts: 1, source: 'claude', event: { hook_event_name: 'PermissionRequest', session_id: 's', tool_name: 'Bash' } });
     assert.equal(seen.broker.length, 0);
     assert.equal(seen.relay.length, 1);
   });
@@ -55,7 +71,7 @@ describe('ingest', () => {
   it('a Codex hook goes through its adapter and never reaches the usage reader', () => {
     const { ctx, seen } = fakeContext();
     const patch = '*** Begin Patch\n*** Add File: a.ts\n+a\n*** Add File: b.ts\n+b\n*** End Patch';
-    const envelopes = ingestHook(ctx, { ts: 1, source: 'codex', event: { hook_event_name: 'PostToolUse', session_id: 't', cwd: '/w', tool_name: 'apply_patch', tool_use_id: 'c', tool_input: { command: patch } } });
+    const envelopes = ingestAt(ctx, { ts: 1, source: 'codex', event: { hook_event_name: 'PostToolUse', session_id: 't', cwd: '/w', tool_name: 'apply_patch', tool_use_id: 'c', tool_input: { command: patch } } });
     assert.deepEqual(envelopes.map((e) => [e.id, e.event.tool_name, e.event.andary_source]), [[1, 'Write', 'codex'], [2, 'Write', 'codex']]);
     assert.equal(seen.usage.length, 0);
     assert.equal(seen.broker.length, 2);
@@ -64,33 +80,33 @@ describe('ingest', () => {
   it('stamps every tool hook with its call key, from the input as it arrived; one that came along is replaced', () => {
     const { ctx, seen } = fakeContext();
     const input = { command: `echo ${'x'.repeat(3000)}` };
-    const [envelope] = ingestHook(ctx, { ts: 1, source: 'claude', event: { hook_event_name: 'PostToolUse', session_id: 's', tool_name: 'Bash', tool_input: input, andary_key: 'forged' } });
+    const [envelope] = ingestAt(ctx, { ts: 1, source: 'claude', event: { hook_event_name: 'PostToolUse', session_id: 's', tool_name: 'Bash', tool_input: input, andary_key: 'forged' } });
     const key = inputKey(input);
     assert.equal(seen.notify[0].andary_key, key, 'the notifier reads it');
     assert.equal(seen.broker[0].andary_key, key, 'the broker reads it');
     assert.equal(envelope.event.andary_key, key, 'the sanitizer keeps it for the browsers');
     assert.notEqual(inputKey(envelope.event.tool_input), key, 'the cut input would not give it back');
     for (const hook of ['PermissionRequest', 'PreToolUse', 'PostToolUseFailure', 'PermissionDenied']) {
-      const [stamped] = ingestHook(ctx, { ts: 2, source: 'claude', event: { hook_event_name: hook, session_id: 's', tool_name: 'Bash', tool_input: input } });
+      const [stamped] = ingestAt(ctx, { ts: 2, source: 'claude', event: { hook_event_name: hook, session_id: 's', tool_name: 'Bash', tool_input: input } });
       assert.equal(stamped.event.andary_key, key, hook);
     }
-    const [stop] = ingestHook(ctx, { ts: 3, source: 'claude', event: { hook_event_name: 'Stop', session_id: 's', andary_key: 'forged' } });
+    const [stop] = ingestAt(ctx, { ts: 3, source: 'claude', event: { hook_event_name: 'Stop', session_id: 's', andary_key: 'forged' } });
     assert.equal('andary_key' in stop.event, false, 'only a tool hook has one');
   });
 
   it("Codex: a renamed call keeps its own call's key, and a long list command's request and result share one", () => {
     const { ctx } = fakeContext();
     const command = ['bash', '-lc', `echo ${'y'.repeat(2500)}`];
-    const [asked] = ingestHook(ctx, { ts: 1, source: 'codex', event: { hook_event_name: 'PermissionRequest', session_id: 't', tool_name: 'Bash', tool_input: { command } } });
-    const [ran] = ingestHook(ctx, { ts: 2, source: 'codex', event: { hook_event_name: 'PostToolUse', session_id: 't', tool_name: 'Bash', tool_use_id: 'c', tool_input: { command }, tool_response: { exit_code: 0 } } });
+    const [asked] = ingestAt(ctx, { ts: 1, source: 'codex', event: { hook_event_name: 'PermissionRequest', session_id: 't', tool_name: 'Bash', tool_input: { command } } });
+    const [ran] = ingestAt(ctx, { ts: 2, source: 'codex', event: { hook_event_name: 'PostToolUse', session_id: 't', tool_name: 'Bash', tool_use_id: 'c', tool_input: { command }, tool_response: { exit_code: 0 } } });
     assert.equal(ran.event.andary_key, asked.event.andary_key);
     assert.notEqual(inputKey(ran.event.tool_input), inputKey(asked.event.tool_input), 'sanitized, a list and the line the adapter joined are cut differently');
     // A two-file patch: both edits it becomes carry the key the request was asked with.
     const patch = '*** Begin Patch\n*** Add File: a.ts\n+a\n*** Add File: b.ts\n+b\n*** End Patch';
-    const [request] = ingestHook(ctx, { ts: 3, source: 'codex', event: { hook_event_name: 'PermissionRequest', session_id: 't', tool_name: 'apply_patch', tool_input: { command: patch } } });
-    const writes = ingestHook(ctx, { ts: 4, source: 'codex', event: { hook_event_name: 'PostToolUse', session_id: 't', cwd: '/w', tool_name: 'apply_patch', tool_use_id: 'p', tool_input: { command: patch }, andary_key: 'forged' } });
+    const [request] = ingestAt(ctx, { ts: 3, source: 'codex', event: { hook_event_name: 'PermissionRequest', session_id: 't', tool_name: 'apply_patch', tool_input: { command: patch } } });
+    const writes = ingestAt(ctx, { ts: 4, source: 'codex', event: { hook_event_name: 'PostToolUse', session_id: 't', cwd: '/w', tool_name: 'apply_patch', tool_use_id: 'p', tool_input: { command: patch }, andary_key: 'forged' } });
     assert.deepEqual(writes.map((e) => [e.event.tool_name, e.event.andary_key]), [['Write', request.event.andary_key], ['Write', request.event.andary_key]]);
-    const [helper] = ingestHook(ctx, { ts: 5, source: 'codex', event: { hook_event_name: 'PreToolUse', session_id: 't', tool_name: 'spawn_agent', tool_input: { message: 'look around' } } });
+    const [helper] = ingestAt(ctx, { ts: 5, source: 'codex', event: { hook_event_name: 'PreToolUse', session_id: 't', tool_name: 'spawn_agent', tool_input: { message: 'look around' } } });
     assert.deepEqual([helper.event.tool_name, helper.event.andary_key], ['Agent', inputKey({ message: 'look around' })]);
   });
 

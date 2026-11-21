@@ -14,7 +14,7 @@ import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
 import { dialogsAfterApproval, dialogsAfterEvent } from './store-dialogs.js';
-import { stopLabel, waitAfter } from './waits.js';
+import { movesOn, stopLabel, waitAfter } from './waits.js';
 
 export { ACHIEVEMENTS };
 
@@ -92,6 +92,7 @@ export { ACHIEVEMENTS };
  * @property {string} [lastMessage]
  * @property {string} [model]
  * @property {import('./waits.js').Wait|null} wait  what it waits for you on, if anything (waits.js)
+ * @property {number} movedAt  when it last moved on (a prompt, a tool call…): a stop sent earlier is stale
  */
 
 /**
@@ -575,7 +576,7 @@ function apply(m, input) {
   m.state.stats.events += 1;
   const handler = own(APPLY, e.kind);
   const draft = handler && a ? handler(m, e, s, a, relabels) : null;
-  if (a) setWait(a, waitAfter(a, e));
+  if (a) setWait(a, e);
   // A teammate's crew (a team town) is theirs to answer: its dialogs are not kept.
   if (!s.member && dialogsAfterEvent(m.dialogs, e, a ? a.agentId : e.agentId)) m.state.dialogs = m.dialogs.list();
   if (relabels.length) e.data.relabels = relabels;
@@ -587,12 +588,14 @@ function apply(m, input) {
 }
 
 /**
- * Applies a wait change from waits.js: undefined leaves the wait as it is.
+ * The agent's wait after an event (waits.js), and when it last moved on.
  * @param {AgentState} a
- * @param {import('./waits.js').Wait|null|undefined} next
+ * @param {TownEvent} e
  */
-function setWait(a, next) {
+function setWait(a, e) {
+  const next = waitAfter(a, e);
   if (next !== undefined) a.wait = next;
+  if (movesOn(e)) a.movedAt = Math.max(a.movedAt, e.ts);
 }
 
 // ---------------------------------------------------------------------------------------------
