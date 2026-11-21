@@ -47,6 +47,7 @@
  * @property {(paused: boolean) => void} setPaused
  * @property {(speed: 1|2|4) => void} setSpeed
  * @property {() => boolean} notifyTest   asks the server for a test phone notification
+ * @property {(since: number) => boolean} requestDigest  asks what each crew did since a time (Catch me up); false when it cannot be asked
  */
 
 /**
@@ -84,7 +85,7 @@
  * @property {(sel: Selection|null, opts?: { camera?: boolean, from?: 'hud'|'world', focus?: boolean }) => void} select
  * @property {(on?: boolean) => void} setFollow
  * @property {(tab: string, opts?: { focus?: boolean }) => void} showTab
- * @property {(name: 'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard') => void} openDialog
+ * @property {(name: import('./hud-actions.js').DialogName) => void} openDialog
  * @property {(agentKey: string, changeId: string) => void} showDiff  opens a change's diff
  * @property {(action: string) => void} run   runs a toolbar/shortcut action by name
  * @property {ReturnType<typeof import('./sound.js').createSound>} sound
@@ -93,6 +94,8 @@
  * @property {() => void} refresh   re-renders view-dependent parts (toolbar, masthead, panels)
  * @property {ReturnType<typeof import('./cinema.js').createCinema>} cinema   the director camera
  * @property {ReturnType<typeof import('./needs-you.js').createNeedsYou>} needsYou  what needs the viewer (core/attention.js)
+ * @property {(item: import('../core/attention.js').AttentionItem) => void} goToNeed  goes to one thing that needs the viewer
+ * @property {ReturnType<typeof import('./catch-up.js').createCatchUp>} catchUp  Catch me up: the dialog and the masthead's offer
  */
 
 export {};

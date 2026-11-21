@@ -1,7 +1,8 @@
 // The top of the screen: the town's street sign (brand + live counts) on the left; on the right,
 // "3 need you" while agents wait for you (like a wanted level: it stays until you act, and a click
-// goes to the most urgent, the next click to the next one), the connection status and settings.
-// The page title carries the same count for a background tab.
+// goes to the most urgent, the next click to the next one), "Catch me up" beside it when you come
+// back from time away (ui/catch-up.js), the connection status and settings. The page title
+// carries the same count for a background tab.
 import { h, setAttr, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { listJoin, plural } from './format.js';
@@ -38,8 +39,11 @@ export function createMasthead(ctx) {
   const waitingWords = h('span', { class: 'hud-waiting__words' });
   const waiting = h('button', { type: 'button', class: 'hud-btn hud-btn--board hud-waiting', hidden: true, 'data-testid': 'waiting-for-you', 'aria-keyshortcuts': 'I', on: { click: () => ctx.run('needs-you') } },
     icon('hourglass', { size: 18 }), waitingCount, waitingWords);
+  // Its name starts with its visible words, which phones leave out (the icon stays).
+  const catchUp = h('button', { type: 'button', class: 'hud-btn hud-btn--board hud-catchup-offer', hidden: true, 'data-testid': 'catch-up-button', 'aria-keyshortcuts': 'W', 'aria-label': 'Catch me up on what your crews did while you were away', on: { click: () => ctx.run('catch-up') } },
+    icon('clock', { size: 18 }), h('span', { class: 'hud-catchup-offer__words', text: 'Catch me up' }));
 
-  const el = h('header', { class: 'hud hud-masthead' }, sign, h('div', { class: 'hud-topright' }, waiting, setupButton, status, settingsButton));
+  const el = h('header', { class: 'hud hud-masthead' }, sign, h('div', { class: 'hud-topright' }, waiting, catchUp, setupButton, status, settingsButton));
 
   /** @param {StoreState} state */
   function render(state) {
@@ -56,6 +60,9 @@ export function createMasthead(ctx) {
     // Yellow while an agent is blocked or stopped; quieter when crews only finished their turns.
     setAttr(waiting, 'data-level', counted[0]?.level ?? null);
     updateTitle(n);
+    const offered = ctx.catchUp.offered();
+    if (!offered && document.activeElement === catchUp) settingsButton.focus();
+    setHidden(catchUp, !offered);
     const key = ctx.view.connection;
     const info = STATUS[key] ?? STATUS.connecting;
     const text = key === 'demo' && ctx.view.paused ? 'Demo, paused' : info.text;

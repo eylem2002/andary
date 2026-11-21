@@ -230,11 +230,13 @@ while crews kept working.
 (turns finished with the last message, failures and stops, approvals asked and answered, files
 changed, the last test result, commits and pushes, helpers started and finished), so a summary for
 any period survives a page reload and does not depend on the history the server keeps for late
-tabs. The browser asks `{ t: 'digest', since }` and shows it.
+tabs. The browser asks `{ t: 'digest', since }` and shows it. The counting is a pure core module
+(`core/digest.js`), so the demo can play the server's part.
 
 **Where**: when you come back (your first prompt or decision after an absence, or opening the town
-after one), the inbox button offers "Catch me up"; `W` opens it any time, for the period since you
-last looked. One line per quiet crew; crews that need you first.
+after one), the masthead's "need you" area offers "Catch me up"; `W` opens it any time, for the
+period since you last looked. One line per crew that did something, crews that need you first;
+quiet crews in one line at the end.
 
 **Decision:** do, after the others that feed it. Size: medium.
 

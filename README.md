@@ -147,6 +147,7 @@ building to see who is inside.
 | `M` | Sound on or off |
 | `U` · `L` | Usage (tokens and estimated cost) · Leaderboard |
 | `I` | Go to what needs you, most urgent first (again for the next) |
+| `W` | Catch me up: what your crews did since you last looked |
 | `A` | Go to approvals |
 | `1`–`9` | Jump to crew 1 to 9 |
 | `?` | All shortcuts |
@@ -212,6 +213,17 @@ deny in the town ends its alert. An edit of such a
 file is only a note under both rows, as an edit must match what is in the file. It lasts half an
 hour, or until the agents finish. Andary compares paths as written: a symbolic link, or a disk that
 ignores case, can hide one.
+
+### Catch up
+
+Away for a while? If 20 minutes pass with no prompt from you in any session and no request
+answered in the town while your crews keep working, the town counts you as away. When you come
+back (your next prompt or answer there, or opening the town), a **Catch me up** button sits
+beside the "need you" one. It shows one line per crew, such as "api-server: 3 turns, tests
+passing, 1 commit pushed, 2 files changed", with the last thing each one said: crews that need
+you first (a click goes to what they need), quiet ones in a line at the end. Press `W` any time
+for what happened since you last looked. The server keeps the counts for the last day, in memory
+only, so a page reload loses nothing; a teammate's crews in a team town are theirs and left out.
 
 ### Everything else
 

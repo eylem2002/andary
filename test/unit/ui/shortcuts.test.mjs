@@ -23,6 +23,9 @@ describe('shortcutFor', () => {
       H: 'toggle-panels',
       p: 'place-names',
       P: 'place-names',
+      i: 'needs-you',
+      w: 'catch-up',
+      W: 'catch-up',
       '?': 'help',
     };
     for (const [key, action] of Object.entries(cases)) assert.equal(shortcutFor({ key }), action, key);
@@ -73,4 +76,5 @@ test('the help dialog lists every shortcut once', () => {
   const labels = SHORTCUT_HELP.map((item) => item.label);
   assert.equal(new Set(labels).size, labels.length);
   assert.ok(SHORTCUT_HELP.find((item) => item.keys.includes('Space'))?.demoOnly);
+  assert.match(SHORTCUT_HELP.find((item) => item.keys.includes('W'))?.label ?? '', /^Catch me up/);
 });

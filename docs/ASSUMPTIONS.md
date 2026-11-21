@@ -845,3 +845,74 @@ section.
     last 50 commands are kept for half an hour (a refused one is dropped). Two changes at the same
     time are judged once, in the order they arrive. An agent's older change arriving late leaves
     its newer one standing.
+148. **Away counts only what is surely you: a prompt, or a request answered in the town.** A
+     `/compact` you ran is a prompt too, as "needs you" already reads one (89). A yes in the
+     terminal shows only when the tool finishes (and another hook could have answered it), an
+     interrupt arrives as a failed tool or a Codex Stop, and an expiry or a release is nobody's
+     answer, so none of them counts. "Crews kept working" means any local hook other than a prompt
+     arrived after you were last seen (the doctor's probe aside): one turn that finished just
+     after you left is enough, so coming back to it offers a catch-up too. Until your first
+     prompt, when the town started counts as when you were last seen.
+149. **An absence begins at the 20-minute mark, on a timer.** Not only at your return, so a town
+     left open on a second screen offers "Catch me up" before you type anything. Reading a long
+     answer for 20 minutes without typing counts as away too: the offer is a quiet button, not a
+     pop-up, and costs nothing to ignore.
+150. **The offer stays 30 minutes after you come back, or until you look.** Like a finished turn
+     (93), it would only be noise after that; `W` still works. It is not offered when you have
+     opened Catch me up since you left (from your phone during the meeting, say). Screen readers
+     hear "Welcome back…" once per return.
+151. **"Since you last looked" is the end of the last summary you saw, on the server's clock.** It
+     is kept in this browser per town (`andary:caught-up`) and shared by its tabs, and the page
+     never compares its own clock with the server's. You saw what happened before you left, so a
+     period starts when you last looked or when you left, whichever is later. The first look
+     ever starts when you left if the server knows of an absence, and otherwise covers everything
+     it keeps: since it started, a day at most.
+152. **A period starts at its five-minute bucket.** The counts are kept in buckets, so a summary
+     counts every bucket that ends after the time asked for: it can repeat up to five minutes
+     you already saw, but never miss any. Hooks are timed by when they reached the server, so one
+     that arrives late is never lost between two looks.
+153. **Files changed are distinct files, kept per crew rather than per bucket.** A count per
+     bucket would make a file edited ten times ten files, and a set of paths per bucket would cost
+     far more memory. Each crew keeps up to 200 files (a short key of the path) with the time of
+     their latest change, which is exact for any period that ends now, as every summary does.
+     Files a shell command changes (`sed -i`, a formatter) cannot be known and are not counted.
+154. **The test result is the latest test command's, read as the town reads a test run.** A
+     `Bash` or `PowerShell` command whose strongest kind is a test (core/summaries.js, which the
+     server now shares) passed with its `PostToolUse` and failed with its `PostToolUseFailure`
+     (unless interrupted). `npm test && git push` is a push, as in the weather and the records,
+     and `npm test | tail` reports tail's exit, as everywhere in the town. A command sent to the
+     background has only started when its hook comes (its output is read later, by tools that do
+     not name it), so it brings no test result, commit or push: "tests passing" is never a guess.
+155. **A commit or a push is any successful command with `git commit` or `git push` in it.** One
+     command can be both. Commits read as pushed ("1 commit pushed") only when a push came after
+     the latest one; otherwise both are counted ("2 commits, 1 push").
+156. **Failed tool calls are counted; stopped turns keep their kind.** Agents fail and retry all
+     the time, red tests have words of their own (the test result) and an interrupt is you, so a
+     failed call only adds to a number. A stopped turn's kind (rate limit, overload, billing) says
+     what to do, so it is named: "stopped (rate limited)". Auto mode's `PermissionDenied` is not a
+     failure here.
+157. **"Permissions asked" leaves out questions and plans.** `AskUserQuestion` and `ExitPlanMode`
+     raise a PermissionRequest too, but they want an answer, not a permission, and "needs you"
+     already shows any that wait. A request counts as answered when it is allowed or denied in the
+     town or answered in the terminal; an expired one is not, and a later answer to it in the
+     terminal cannot be seen.
+158. **A crew that only used tools still did something.** Its line says how many tool calls
+     ("14 tool calls") when nothing else counted. A crew with nothing counted in the period is
+     quiet; one that left town after doing something is still listed, by its folder.
+159. **Bounded, and in memory only.** 100 crews (the one quiet for longest is forgotten), a day of
+     buckets and 200 files per crew, a turn's last message cut to 200 characters on one line: a
+     few megabytes at the very worst. It holds your agents' last messages, which ADR 0006 keeps
+     off the disk, so a restart forgets it, as it forgets the history.
+160. **Catch me up works in the demo.** The counting is a pure core module the demo shares, so `W`
+     tells the story's crews; nobody is ever away in a demo, so it is never offered there, and
+     what you looked at there is not kept.
+161. **In a team town, Catch me up is the host's.** A viewer is told nothing of the host's absences
+     and is told that only the host can catch up; teammates' crews are left out of the host's
+     counts, and their prompts never count as the host being here.
+162. **The open dialog follows "needs you", not the counts.** The crews that need you follow the
+     town as it changes (answered elsewhere, the button goes, and focus stays on the same crew's
+     line); the counts stay those the server gave when the dialog opened.
+163. **`W` opens Catch me up, any time.** It is free in the page: no browser uses a bare `W`, and
+     the 3D view's own keys are arrows, `+`/`-`, `Q`/`E`. Screen readers in browse mode keep
+     letters for themselves, as they do for the town's other shortcuts; the masthead's button
+     (while it is offered) and the help dialog's list of shortcuts lead there too.

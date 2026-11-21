@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalize } from '../../../public/js/core/events.js';
 import { agentKeyOf, normalizeAgentId } from '../../../public/js/core/ids.js';
-import { classifyCommand, classifyError, summarizeTool } from '../../../public/js/core/summaries.js';
+import { classifyCommand, classifyError, commandKinds, summarizeTool } from '../../../public/js/core/summaries.js';
 import { hostPath, shortCommand, shortPath } from '../../../public/js/core/text.js';
 import { CWD, FIXTURES, SESSION, envelope, hook } from './helpers.mjs';
 
@@ -389,6 +389,15 @@ describe('classifyCommand and classifyError', () => {
       ['', null],
     ];
     for (const [command, kind] of table) assert.equal(classifyCommand(command), kind, command);
+  });
+
+  it('lists every kind a command matches, strongest first (the catch-up counts a commit and a push apart)', () => {
+    assert.deepEqual(commandKinds('git add -A && git commit -m x && git push'), ['git-push', 'git-commit']);
+    assert.deepEqual(commandKinds('npm test && git push'), ['git-push', 'test']);
+    assert.deepEqual(commandKinds('npm test'), ['test']);
+    assert.deepEqual(commandKinds('ls -la'), []);
+    assert.deepEqual(commandKinds(''), []);
+    assert.deepEqual(commandKinds(undefined), []);
   });
 
   it('says why a tool failed', () => {

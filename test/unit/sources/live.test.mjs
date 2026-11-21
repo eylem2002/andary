@@ -110,6 +110,28 @@ describe('connectLive', () => {
     assert.deepEqual(socket.sent[3], { t: 'decide', id: 'a3', decision: 'allow', always: 0 }, '"Allow always" names the suggestion by its index');
   });
 
+  test('catch me up: the request goes out on an open socket; the answer and your absences come back', () => {
+    const digests = [];
+    const aways = [];
+    const link = connectLive({ store: fakeStore(), WebSocketImpl: /** @type {any} */ (FakeSocket), url: 'ws://x/ws', onDigest: (d) => digests.push(d), onAway: (a) => aways.push(a) });
+    const socket = FakeSocket.all[0];
+    assert.equal(link.requestDigest(1000), false, 'not yet open');
+    socket.open();
+    assert.equal(link.requestDigest(1000), true);
+    assert.deepEqual(socket.sent, [{ t: 'digest', since: 1000 }]);
+    // Every hello says, so an absence from before a restart is not offered again.
+    socket.receive({ t: 'hello', history: [], approvals: [], away: { since: 5, until: 9 } });
+    socket.receive({ t: 'hello', history: [], approvals: [] });
+    socket.receive({ t: 'away', away: { since: 20, until: null } });
+    socket.receive({ t: 'digest', d: { since: 0, until: 30, crews: [] } });
+    assert.deepEqual(aways, [{ since: 5, until: 9 }, null, { since: 20, until: null }]);
+    assert.deepEqual(digests, [{ since: 0, until: 30, crews: [] }]);
+    // A message type the page does not know, or one named like a property of every object, is ignored.
+    socket.receive({ t: 'constructor' });
+    socket.receive({ t: 'launch' });
+    assert.equal(digests.length, 1);
+  });
+
   test('pings while live', () => {
     connectLive({ store: fakeStore(), WebSocketImpl: /** @type {any} */ (FakeSocket), url: 'ws://x/ws' });
     const socket = FakeSocket.all[0];

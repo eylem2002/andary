@@ -10,13 +10,14 @@ const ingestAt = (/** @type {any} */ ctx, /** @type {any} */ body) => ingestHook
 /** A town context that records which observers saw what. */
 function fakeContext() {
   /** @type {Record<string, any[]>} */
-  const seen = { usage: [], growth: [], notify: [], broker: [], relay: [], broadcast: [], history: [] };
+  const seen = { usage: [], growth: [], notify: [], broker: [], digest: [], relay: [], broadcast: [], history: [] };
   const ctx = {
     counts: { events: 0 },
     usage: { observe: (/** @type {any} */ e, /** @type {number} */ ts) => seen.usage.push({ ...e, observedTs: ts }) },
     progress: { observe: (/** @type {any} */ e) => seen.growth.push(e) },
     notifier: { observe: (/** @type {any} */ e, /** @type {number} */ ts) => seen.notify.push({ ...e, ts }) },
     broker: { observe: (/** @type {any} */ e, /** @type {number} */ ts) => seen.broker.push({ ...e, ts }) },
+    digest: { observe: (/** @type {any} */ e, /** @type {number} */ at) => seen.digest.push({ event: e, at }) },
     relay: { send: (/** @type {any} */ envelope) => seen.relay.push(envelope) },
     history: { push: (/** @type {any} */ envelope) => seen.history.push(envelope) },
     recorder: null,
@@ -30,16 +31,16 @@ const names = (/** @type {any[]} */ events) => events.map((e) => e.hook_event_na
 
 describe('ingest', () => {
   it('policies: local events reach every observer, a teammate\'s only grow the town', () => {
-    assert.deepEqual(POLICIES.local, { growth: true, notify: true, approvals: true, relay: true });
-    assert.deepEqual(POLICIES.team, { growth: true, notify: false, approvals: false, relay: false });
+    assert.deepEqual(POLICIES.local, { growth: true, notify: true, approvals: true, digest: true, relay: true });
+    assert.deepEqual(POLICIES.team, { growth: true, notify: false, approvals: false, digest: false, relay: false });
     assert.ok(Object.isFrozen(POLICIES) && Object.isFrozen(POLICIES.local));
   });
 
-  it('a local Claude Code hook: usage, growth, notifications, relay and approvals, then the browsers', () => {
+  it('a local Claude Code hook: usage, growth, notifications, relay, approvals and the digest, then the browsers', () => {
     const { ctx, seen } = fakeContext();
     const [envelope] = ingestAt(ctx, { ts: 5, source: 'claude', event: { hook_event_name: 'Stop', session_id: 's', andary_member: 'Mallory' } });
     assert.deepEqual([envelope.id, envelope.ts, envelope.event.andary_member], [1, 5, undefined]);
-    for (const key of ['usage', 'growth', 'notify', 'broker', 'relay', 'history', 'broadcast']) assert.equal(seen[key].length, 1, key);
+    for (const key of ['usage', 'growth', 'notify', 'broker', 'digest', 'relay', 'history', 'broadcast']) assert.equal(seen[key].length, 1, key);
     assert.equal(seen.broadcast[0].e.id, 1);
     // The usage reader gets the hook's start time: a compaction then drops older context readings.
     assert.equal(seen.usage[0].observedTs, 5);
@@ -61,6 +62,15 @@ describe('ingest', () => {
     assert.deepEqual(times(seen.notify), [now, now - HOUR]);
     assert.deepEqual(times(seen.broker), [now, now - HOUR]);
     assert.deepEqual(times(seen.broadcast), [now, now - HOUR], 'the town reads the time the notes and the broker go by');
+  });
+
+  it('the digest counts what browsers see: the sanitized event, timed by its arrival', () => {
+    const { ctx, seen } = fakeContext();
+    const secret = `sk-ant-${'Q'.repeat(30)}`;
+    const [envelope] = ingestHook(ctx, { ts: 5, source: 'claude', event: { hook_event_name: 'Stop', session_id: 's', last_assistant_message: `Set the key to ${secret}` } });
+    assert.equal(seen.digest[0].event, envelope.event);
+    assert.equal(seen.digest[0].at, envelope.rx, 'when it arrived, not when the hook started');
+    assert.ok(!seen.digest[0].event.last_assistant_message.includes(secret));
   });
 
   it('a permission request is left to the route: approvals do not observe it', () => {
@@ -151,7 +161,8 @@ describe('ingest', () => {
     assert.deepEqual(envelopes.map((e) => [e.event.andary_member, e.event.session_id]), [['Sam', 'Sam~x'], ['Sam', 'Sam~y'], ['Sam', 'Sam~unknown']]);
     assert.deepEqual(envelopes.map((e) => e.ts), [now - 1000, now - 60 * 60 * 1000, now]);
     assert.deepEqual(names(seen.growth), ['Stop', 'PreToolUse', 'PermissionRequest']);
-    for (const key of ['usage', 'notify', 'broker', 'relay']) assert.equal(seen[key].length, 0, key);
+    // Their crews' catch-up is theirs, and their prompts are not yours: no digest, no presence.
+    for (const key of ['usage', 'notify', 'broker', 'digest', 'relay']) assert.equal(seen[key].length, 0, key);
     assert.equal(seen.broadcast.length, 3);
   });
 });

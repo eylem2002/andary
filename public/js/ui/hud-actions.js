@@ -15,8 +15,10 @@ import { nextPlaceNames } from '../core/place-names.js';
  * @property {ReturnType<typeof import('./inspector.js').createInspector>} inspector
  * @property {ReturnType<typeof import('./building-card.js').createBuildingCard>} place
  * @property {ReturnType<typeof import('./approvals.js').createApprovalsPanel>} approvals
- * @property {Record<'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard', { open(): void, close(): void, isOpen: boolean }>} dialogs
+ * @property {Record<DialogName, { open(): void, close(): void, isOpen: boolean }>} dialogs
  */
+
+/** @typedef {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'catchUp'} DialogName */
 
 /** @typedef {{ ctx: HudContext, ui: HudParts }} Hud */
 
@@ -101,7 +103,7 @@ export function setFollow(hud, on = !hud.ctx.view.follow) {
 
 /**
  * @param {Hud} hud
- * @param {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'} name
+ * @param {DialogName} name
  */
 export function openDialog({ ui }, name) {
   for (const [key, dialog] of Object.entries(ui.dialogs)) if (key !== name && dialog.isOpen) dialog.close();
@@ -151,6 +153,7 @@ export function runAction(hud, action) {
     pause: () => togglePause(ctx),
     'cycle-speed': () => cycleSpeed(ctx),
     'needs-you': () => goToNextNeed(hud),
+    'catch-up': () => openDialog(hud, 'catchUp'),
     help: () => openDialog(hud, 'help'),
     usage: () => openDialog(hud, 'usage'),
     leaderboard: () => openDialog(hud, 'leaderboard'),
@@ -159,18 +162,29 @@ export function runAction(hud, action) {
 }
 
 /**
- * Goes to what needs the viewer, most urgent first; again goes on to the next one. A request the
- * town can answer opens its card in Approvals (the full change is shown there); anything else is
- * answered in the terminal, so the agent is selected and the camera points at it.
+ * Goes to what needs the viewer, most urgent first; again goes on to the next one.
  * @param {Hud} hud
  */
 function goToNextNeed(hud) {
-  const { ctx, ui } = hud;
+  const { ctx } = hud;
   const item = ctx.needsYou.next(ctx.needsYou.items(ctx.store.getState()));
   if (!item) {
     ctx.announcer.polite('Nothing needs you right now.');
     return;
   }
+  goToNeed(hud, item);
+}
+
+/**
+ * Goes to one thing that needs the viewer (from the "need you" button, or a crew's line in Catch
+ * me up). A request the town can answer opens its card in Approvals (the full change is shown
+ * there); anything else is answered in the terminal, so the agent is selected and the camera
+ * points at it.
+ * @param {Hud} hud
+ * @param {import('../core/attention.js').AttentionItem} item
+ */
+export function goToNeed(hud, item) {
+  const { ctx, ui } = hud;
   if (item.approvalId) {
     ctx.showTab('approvals');
     ui.approvals.focusApproval(item.approvalId);

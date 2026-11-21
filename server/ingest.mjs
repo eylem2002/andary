@@ -4,7 +4,8 @@
 //   source payload ──adapter──▶ town payloads ──policy──▶ observers ──record──▶ envelope ──▶ browsers
 //                   (adapters/)                 (usage, growth,       (sanitize, history,
 //                                                notifications,        recording, broadcast)
-//                                                approvals, relay)
+//                                                approvals, digest,
+//                                                relay)
 //
 // Which observers see an event depends on where it came from, and that is written down once, in
 // POLICIES, instead of in each route. Before any of them, a tool hook gets its call key
@@ -24,13 +25,13 @@ import { withWorkTree } from './work-trees.mjs';
  * What each origin's events do besides appearing in the town.
  * - local: this computer's agents, through the forwarder.
  * - team: a teammate's agents, relayed by their Andary (CONTRACTS §4.11). They grow the town, but
- *   their prompts are theirs to answer and their notifications theirs to get, and they are never
- *   relayed again.
- * @type {Readonly<Record<Origin, Readonly<{ growth: boolean, notify: boolean, approvals: boolean, relay: boolean }>>>}
+ *   their prompts are theirs to answer, their notifications and their catch-up (digest: what their
+ *   crews did while they were away) theirs to get, and they are never relayed again.
+ * @type {Readonly<Record<Origin, Readonly<{ growth: boolean, notify: boolean, approvals: boolean, digest: boolean, relay: boolean }>>>}
  */
 export const POLICIES = Object.freeze({
-  local: Object.freeze({ growth: true, notify: true, approvals: true, relay: true }),
-  team: Object.freeze({ growth: true, notify: false, approvals: false, relay: false }),
+  local: Object.freeze({ growth: true, notify: true, approvals: true, digest: true, relay: true }),
+  team: Object.freeze({ growth: true, notify: false, approvals: false, digest: false, relay: false }),
 });
 
 /** A teammate's queued events older than this arrive dated an hour ago. */
@@ -86,6 +87,9 @@ function admit(ctx, origin, item) {
   if (policy.growth) ctx.progress.observe(event);
   if (policy.notify) ctx.notifier.observe(event, item.ts);
   const envelope = record(ctx, { ts: item.ts, event });
+  // Sanitized, as what it counts (a turn's last message) goes to browsers; timed by arrival, so a
+  // late hook still counts in the period a browser asks about.
+  if (policy.digest) ctx.digest.observe(envelope.event, envelope.rx);
   if (policy.relay) ctx.relay?.send(envelope);
   // A permission request is answered by the route (it may be held); everything else settles or
   // updates waiting approvals.

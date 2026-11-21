@@ -113,11 +113,38 @@ export function socketUrl(pageUrl) {
  * @property {(message: string) => void} [onError]
  * @property {(progress: unknown) => void} [onProgress]  the town's growth and busy days (§4.9)
  * @property {(ok: boolean) => void} [onNotifyTest]  the answer to notifyTest()
+ * @property {(digest: unknown) => void} [onDigest]   the answer to requestDigest(): what each crew did
+ * @property {(away: unknown) => void} [onAway]       the latest time you were away, from hello and as it changes
  * @property {new (url: string, protocols?: string[]) => WebSocket} [WebSocketImpl]
  * @property {() => import('./credentials.js').Credentials} [credentials]
  * @property {() => Promise<Hello|null>} [hello]
  * @property {string} [url]
  */
+
+/**
+ * @typedef {Required<Pick<LiveOptions, 'onSettings'|'onError'|'onProgress'|'onNotifyTest'|'onDigest'|'onAway'>> & { store: LiveOptions['store'], ingest: (envelope: unknown) => void }} Sinks
+ */
+
+/**
+ * What each server message does after hello (CONTRACTS §4.5), given where things go; any other
+ * message is ignored.
+ * @type {Readonly<Record<string, (message: Record<string, any>, to: Sinks) => void>>}
+ */
+const MESSAGES = Object.freeze({
+  hook: (m, to) => {
+    if (m.e) to.ingest(m.e);
+  },
+  approval: (m, to) => {
+    if (m.a) to.store.setApproval(m.a);
+  },
+  settings: (m, to) => to.onSettings(m.settings ?? {}),
+  usage: (m, to) => to.store.setUsage?.(m.u, m.days),
+  progress: (m, to) => to.onProgress(m.p),
+  'notify-test': (m, to) => to.onNotifyTest(m.ok === true),
+  digest: (m, to) => to.onDigest(m.d),
+  away: (m, to) => to.onAway(m.away ?? null),
+  error: (m, to) => to.onError(String(m.message ?? 'The server reported an error.')),
+});
 
 /**
  * Opens and keeps open the live connection.
@@ -131,6 +158,8 @@ export function connectLive({
   onError = () => {},
   onProgress = () => {},
   onNotifyTest = () => {},
+  onDigest = () => {},
+  onAway = () => {},
   WebSocketImpl = globalThis.WebSocket,
   credentials = () => readCredentials(),
   hello = () => fetchHello({ credentials }),
@@ -146,6 +175,8 @@ export function connectLive({
   let retryTimer = null;
   /** @type {ReturnType<typeof setInterval>|null} */
   let pingTimer = null;
+  /** Where the server's messages go (MESSAGES). @type {Sinks} */
+  const sinks = { store, ingest, onSettings, onError, onProgress, onNotifyTest, onDigest, onAway };
 
   /** @param {LinkStatus} next */
   function setStatus(next) {
@@ -194,15 +225,8 @@ export function connectLive({
   /** @param {unknown} raw */
   function handle(raw) {
     const message = parseMessage(raw);
-    if (!message) return;
-    if (message.t === 'hello') applyHello(message);
-    else if (message.t === 'hook' && message.e) ingest(message.e);
-    else if (message.t === 'approval' && message.a) store.setApproval(message.a);
-    else if (message.t === 'settings') onSettings(message.settings ?? {});
-    else if (message.t === 'usage') store.setUsage?.(message.u, message.days);
-    else if (message.t === 'progress') onProgress(message.p);
-    else if (message.t === 'notify-test') onNotifyTest(message.ok === true);
-    else if (message.t === 'error') onError(String(message.message ?? 'The server reported an error.'));
+    if (message?.t === 'hello') applyHello(message);
+    else if (message && Object.hasOwn(MESSAGES, message.t)) MESSAGES[message.t](message, sinks);
   }
 
   /** `hello` carries the server's whole state, so the store is rebuilt from it. @param {Record<string, any>} message */
@@ -217,6 +241,8 @@ export function connectLive({
     // Whole values, so nothing is left over from before a restart (a town that no longer hosts a team).
     onSettings({ ...(message.settings ?? {}), team: message.settings?.team ?? null, notifyUrl: typeof message.notifyUrl === 'string' ? message.notifyUrl : null });
     if (message.progress) onProgress(message.progress);
+    // Always, so an absence from before a restart is not offered again.
+    onAway(message.away ?? null);
     setStatus('live');
     startPing();
   }
@@ -286,6 +312,13 @@ function requests(send) {
     /** Asks the server to send a test phone notification. */
     notifyTest() {
       return send({ t: 'notify-test' });
+    },
+    /**
+     * Asks what each crew did since a time (the server's clock, ms); the answer comes to onDigest.
+     * @param {number} since
+     */
+    requestDigest(since) {
+      return send({ t: 'digest', since });
     },
     /** @param {boolean} on */
     setRemoteApprovals(on) {

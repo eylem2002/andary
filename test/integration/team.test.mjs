@@ -93,10 +93,32 @@ describe('Team town', () => {
     viewer.send(JSON.stringify({ t: 'settings', settings: { remoteApprovals: true } }));
     const refusal = await waitForMessage(viewer, (m) => m?.t === 'error');
     assert.match(refusal.message, /Viewers can only watch/);
+    // Catch me up is the owner's: a viewer hears nothing of the owner's absences and cannot ask.
+    assert.equal(greeting.away, null);
+    viewer.send(JSON.stringify({ t: 'digest', since: 0 }));
+    const errors = () => viewer.messages.filter((m) => m?.t === 'error');
+    await waitForMessage(viewer, () => errors().length === 2);
+    assert.match(errors()[1].message, /Viewers can only watch/);
+    assert.ok(!viewer.messages.some((m) => m?.t === 'digest'));
     await closeBrowser(viewer);
 
     // The view link does nothing on a town that does not host a team.
     assert.equal((await rawRequest(member.port, { path: `/?view=${view}` })).status, 403);
+  });
+
+  it("leaves a teammate's crews out of the host's catch-up: they are theirs", async () => {
+    const owner = await connectBrowser(host);
+    await waitForMessage(owner, (m) => m?.t === 'hello');
+    const relayed = waitForMessage(owner, (m) => m?.t === 'hook' && m.e.event.session_id === 'Lina~catch-up', 10_000);
+    await postHook(member, { ...hookPayload('Stop', { last_assistant_message: 'Done on Lina\'s side' }), session_id: 'catch-up' });
+    await relayed;
+    await postHook(host, { ...hookPayload('Stop', { last_assistant_message: 'Done here' }), session_id: 'host-crew' });
+    owner.send(JSON.stringify({ t: 'digest', since: 0 }));
+    const { d: digest } = await waitForMessage(owner, (m) => m?.t === 'digest');
+    const ids = digest.crews.map((/** @type {any} */ crew) => crew.sessionId);
+    assert.ok(ids.includes('host-crew'), ids.join(', '));
+    assert.ok(!ids.some((/** @type {string} */ id) => id.startsWith('Lina~')), ids.join(', '));
+    await closeBrowser(owner);
   });
 
   it('invites print the key for the environment, the view link, and what the link shows', () => {

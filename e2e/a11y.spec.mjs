@@ -94,6 +94,21 @@ test('settings and setup dialogs have no violations', async ({ page }) => {
   expect(await violations(page)).toEqual([]);
 });
 
+test('catch-up dialog has no violations, and Escape gives focus back', async ({ page }) => {
+  await openDemo(page, { theme: 'dark', world: 'fake' });
+  // A few seconds of the story (at 4×), so the crews have done something to tell.
+  await page.waitForTimeout(3000);
+  const settings = page.getByTestId('settings-button');
+  await settings.focus();
+  await page.keyboard.press('w');
+  const dialog = page.getByRole('dialog', { name: 'Catch me up' });
+  await expect(dialog.getByTestId('catch-up-crew').first()).toBeVisible();
+  expect(await violations(page)).toEqual([]);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(settings).toBeFocused();
+});
+
 test('every visible control is at least 24 × 24 CSS pixels (WCAG 2.5.8)', async ({ page }) => {
   await openDemo(page, { world: 'fake' });
   const small = await page.evaluate(() =>
