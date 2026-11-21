@@ -21,9 +21,11 @@ describe('work trees on disk', () => {
     writeFileSync(join(linked, '.git'), `gitdir: ${join(repo, '.git', 'worktrees', 'feature')}\n`);
     mkdirSync(join(home, 'plain'), { recursive: true });
     const trees = createWorkTrees();
-    assert.equal(trees.rootOf(join(repo, 'packages', 'web', 'src')), repo);
-    assert.equal(trees.rootOf(repo), repo);
-    assert.equal(trees.rootOf(join(linked, 'src')), linked);
+    // Read back with forward slashes, as the town compares folders (Windows gives backslashes).
+    const slashed = (/** @type {string} */ path) => path.replace(/\\/g, '/');
+    assert.equal(trees.rootOf(join(repo, 'packages', 'web', 'src')), slashed(repo));
+    assert.equal(trees.rootOf(repo), slashed(repo));
+    assert.equal(trees.rootOf(join(linked, 'src')), slashed(linked));
     assert.equal(trees.rootOf(join(home, 'plain')), null);
   });
 
