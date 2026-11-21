@@ -107,6 +107,22 @@ describe('what deserves a notification', () => {
     assert.ok(t.notes(NEWS_MS)[0]);
     assert.equal(t.notes(NEWS_MS + 1)[0], null);
   });
+
+  test('two agents in one folder: the crew by name and number, never the file, the command or the other agent', () => {
+    const t = town();
+    const file = '/home/dev/code/api-server/src/secret-plan.ts';
+    t.send('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: file, old_string: 'a', new_string: 'b' }, tool_response: {}, tool_use_id: 'e1' });
+    t.send('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: file, old_string: 'b', new_string: 'c' }, tool_response: {}, tool_use_id: 'e2' }, other);
+    assert.deepEqual(t.notes(), [null], 'an edit is a note: nothing pops up');
+    t.send('PostToolUse', { tool_name: 'Write', tool_input: { file_path: file, content: 'x' }, tool_response: {}, tool_use_id: 'w1' }, other);
+    t.send('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'git stash' }, tool_use_id: 'b1' });
+    const notes = t.notes().filter(Boolean);
+    assert.deepEqual(notes.map((n) => [n?.title, n?.body]), [
+      ['Two agents in one folder', "api-server (crew 2) may be undoing another agent's work."],
+      ['Two agents in one folder', "api-server (crew 1) may be undoing another agent's work."],
+    ], 'crews in one folder share a project name: the number tells which');
+    assert.doesNotMatch(JSON.stringify(notes), /secret-plan|git stash|Foreman/);
+  });
 });
 
 describe('installNotifications', () => {
@@ -236,5 +252,22 @@ describe('installNotifications', () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.ok(refreshes > before, 'the Codex turn started to count with no event');
     assert.equal(page.title, '(2) Andary');
+  });
+
+  test("screen readers hear of a write over another agent's change; a note's words redraw the HUD as time goes", async () => {
+    const t = town();
+    watch(t, { desktopNotify: false }, 5);
+    const file = '/home/dev/code/api-server/src/auth.ts';
+    t.send('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: file, old_string: 'a', new_string: 'b' }, tool_response: {}, tool_use_id: 'e1' });
+    t.send('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: file, old_string: 'b', new_string: 'c' }, tool_response: {}, tool_use_id: 'e2' }, other);
+    await settle();
+    assert.deepEqual(heard, [], 'a note is no news');
+    const before = refreshes;
+    t.advance(60_000);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.ok(refreshes > before, '"just now" became "1 min ago" with no event');
+    t.send('PostToolUse', { tool_name: 'Write', tool_input: { file_path: file, content: 'x' }, tool_response: {}, tool_use_id: 'w1' }, other);
+    await settle();
+    assert.deepEqual(heard, ['api-server: Foreman (crew 2) wrote over src/auth.ts, which Foreman (crew 1) changed 1 min ago']);
   });
 });

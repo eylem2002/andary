@@ -6,6 +6,7 @@ import { createApprovalBroker } from './approvals.mjs';
 import { createUsageTracker } from './usage.mjs';
 import { createProgress } from './progress.mjs';
 import { createNotifier } from './notify.mjs';
+import { createWorkTrees } from './work-trees.mjs';
 import { announceTeam, createHub, handleUpgrade } from './browsers.mjs';
 import { createTeamHost, createTeamRelay, lanAddresses, teamSecret } from './team.mjs';
 import { DEFAULT_APPROVAL_TIMEOUT_MS, DEFAULT_HOST, DEFAULT_PORT, LIMITS, PUBLIC_DIR, readVersion, resolveClaudeConfigDir, resolveHome } from './config.mjs';
@@ -53,6 +54,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {ReturnType<typeof createUsageTracker>} usage
  * @property {ReturnType<typeof createProgress>} progress
  * @property {ReturnType<typeof createNotifier>} notifier
+ * @property {import('./work-trees.mjs').WorkTrees} [workTrees]  where local hooks' work trees start (andary_root)
  * @property {import('./browsers.mjs').Hub} hub
  * @property {ReturnType<typeof createTeamHost>|null} team    set on a team host
  * @property {ReturnType<typeof createTeamRelay>|null} relay  set when sharing to a team host
@@ -218,6 +220,7 @@ function createContext(config, options) {
       onChange: (record, days) => hub.broadcastOwners({ t: 'usage', u: record, days }),
     }),
     notifier,
+    workTrees: createWorkTrees(),
     progress: createProgress({
       stateFile: config.writeState ? join(config.home, 'progress.json') : null,
       onChange: (progress) => hub.broadcast({ t: 'progress', p: progress }),

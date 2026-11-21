@@ -57,6 +57,7 @@ describe('activity log', () => {
     assert.equal(iconForEntry({ kind: 'tool.fail', icon: '❌', level: 'error' }), 'warning');
     assert.equal(iconForEntry({ kind: 'achievement', icon: '🤷', level: 'success' }), 'medal');
     assert.equal(iconForEntry({ kind: 'stuck', icon: '🔁', level: 'warn' }), 'repeat');
+    assert.equal(iconForEntry({ kind: 'conflict', icon: '👥', level: 'warn' }), 'users', 'two agents on the same files');
     assert.equal(iconForEntry({ kind: 'mystery', icon: '', level: 'info' }), 'spark');
   });
 

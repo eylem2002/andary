@@ -46,7 +46,8 @@ public/js/core/              Pure logic, no DOM, no I/O: events (normalize), sto
                              town-weather, humor, dialogs (open dialogs), waits, attention,
                              card-fields (what an approval card shows), permission-rules (what
                              "Allow always" may save), loops (when an agent seems stuck), shell
-                             (shell command lines read as a shell reads them, for every rule)
+                             (shell command lines read as a shell reads them, for every rule),
+                             conflicts (two agents on the same files, + git-commands, paths)
 public/js/sources/           Where events come from: live.js (WebSocket) and demo.js (simulation),
                              one TownSource shape (types.js)
 public/js/world/layout.js    Town plan (shared, pure data)
@@ -433,6 +434,12 @@ Settled during implementation; they refine §4.3–§4.5.
   key from a teammate's server is kept (§4.11). A forwarder's never arrives (its `andary_` fields
   are dropped, §4.12). A renamed call without a key (from an older teammate's server) gets null and
   goes by name. Other hooks lose any `andary_key`. Sanitising keeps it: envelopes carry it.
+- **Work-tree tops** (`server/work-trees.mjs`): in ingest, the same tool hooks from this computer
+  get `andary_root`, the top of the git work tree their `cwd` is in: the nearest folder up that
+  holds `.git` (a folder, or a linked worktree's or submodule's file), looked up again after five
+  minutes, kept for at most 256 folders; none when the `cwd` is in no repository or not absolute.
+  Any `andary_root` that arrived is dropped first, and a teammate's hooks get none (their folders
+  are on their computer). The town's git rules use it (§5.1), and guess without it.
 - **Open dialogs** (`public/js/core/dialogs.js`): what an agent has asked you and had no answer to,
   one dialog per call. The phone notes (§4.10), the approval broker (§4.5) and the town (§5.1)
   each keep their own tracker and follow one table, `afterHook()`, at each hook's own time (`hookTime()`,
@@ -627,18 +634,22 @@ the WebSocket `hello`. Only this computer's events count (§4.11).
 This computer (`public/js/ui/notifications.js`), opt-in in Settings (`prefs.desktopNotify`, after
 the browser's permission), follows "needs you" (§5.1): while the page is hidden, each new counted
 item becomes one system notification naming the crew (its title, or its project's folder), never
-a request's or a stuck step's command or file ("Permission needed", "Question for you", "Plan to
-approve", "Turn stopped", "Crews stopped", "Seems stuck", "Turn finished"; a stuck crew's says
-"<crew> seems stuck: the same step keeps failing." or, for rule 2, "<crew> seems stuck: it keeps
-repeating the same step."). An item the viewer could already see (the
-page in front, or notifications off) never pops up later, nor one that started to count more
-than two minutes ago (a reconnect or a page opened in the background); changes that arrive
-together (a reconnect's history) are checked once. A permission request waits until its request
-reaches the town (or three seconds), so it is worded right the first time. No "Turn finished"
-while only one of your crews is in town, and nothing for someone watching a team town with its
-view link. The same watcher keeps the page title's count current in a background tab, redraws
-the HUD when the clock alone changes the list, and tells screen readers of new questions, plans,
-stops and stuck agents, in the item's words without backticks.
+a command or a file, a request's, a stuck step's or another agent's ("Permission needed",
+"Question for you", "Plan to approve", "Turn stopped", "Crews stopped", "Seems stuck", "Two agents
+in one folder", "Turn finished"; a stuck crew's says "<crew> seems stuck: the same step keeps
+failing." or, for rule 2, "<crew> seems stuck: it keeps repeating the same step."). Two agents on
+the same files (a Write over another agent's change, or a git command over others' changes)
+read "<crew> (crew 2) may be undoing another agent's work." (crews in one folder share a project
+name, so the number tells which); an Edit's note is not counted, so it never pops up. An item's id is the notification's tag, so no id holds a path or a command: a file goes in
+hashed. An item the viewer could already see (the page in front, or notifications off) never pops
+up later, nor one that started to count more than two minutes ago (a reconnect or a page opened
+in the background); changes that arrive together (a reconnect's history) are checked once. A
+permission request waits until its request reaches the town (or three seconds), so it is worded
+right the first time. No "Turn finished" while only one of your crews is in town, and nothing for
+someone watching a team town with its view link. The same watcher keeps the page title's count
+current in a background tab, redraws the HUD when the clock alone changes what the list says (a
+note's "4 min ago" too), and tells screen readers of new questions, plans, stops, stuck agents and
+agents on the same files, in the item's words without backticks.
 
 ### 4.11 Team town
 
@@ -740,11 +751,12 @@ sets them).
 `subagent.start`, `subagent.stop`, `turn.stop`, `turn.fail`, `task.created`, `task.completed`,
 `teammate.idle`, `compact.start`, `compact.end`, `model.switch`, `todos.set`, `task.upsert`,
 `spawn.request`, `spawn.result`, `message.send`, `unknown`. `tool.start` carries
-`{toolUseId, tool, input, building, activity, summary, callKey}` where `summary` is a short human
-string ("Read src/auth/login.ts", "$ npm test", "grep \"TODO\" in src") and `callKey` the server's
-key for the call's input (`andary_key`, §4.6), or null. `tool.fail` adds `error` (its first line)
-and `errorText` (every line, up to 2,000 characters, for the stuck rules). `turn.stop` carries
-`interrupted` (Codex's interrupt).
+`{toolUseId, tool, input, building, activity, summary, callKey, root}` where `summary` is a short
+human string ("Read src/auth/login.ts", "$ npm test", "grep \"TODO\" in src"), `callKey` the
+server's key for the call's input (`andary_key`, §4.6), or null, and `root` the top of the hook
+folder's work tree as the server found it (`andary_root`, §4.6), or null. `tool.fail` adds
+`error` (its first line) and `errorText` (every line, up to 2,000 characters, for the stuck
+rules). `turn.stop` carries `interrupted` (Codex's interrupt).
 
 `store.js` keeps sessions (crews), agents, tasks/todos, approvals, the activity log (ring buffer)
 and stats, and emits change notifications. `director.js` turns TownEvents into world calls and
@@ -779,6 +791,8 @@ StoreState {
   sessions: Session[]                            // in order first seen
   agents: Record<agentKey, AgentState>
   approvals: Approval[]                          // pending first, then most recent
+  dialogs: Dialog[]                              // open: asked and not answered yet, oldest first
+  hazards: Hazard[]                              // two agents on the same files now, oldest first
   log: LogEntry[]                                // newest last, capped at maxLog
   stats: { events, toolCalls, failures, approvals, subagents, byBuilding: Record<BuildingKey, number> }
   achievements: Achievement[]
@@ -816,8 +830,16 @@ Dialog { id, sessionId, agentId: string|null, kind: 'permission'|'question'|'pla
 Stuck { rule: 1|2|3, step /* short, for display: "npm test" */,
         since /* when the episode started */, count /* failures (rules 1, 3) or runs (rule 2) */,
         text /* "Seems stuck: `npm test` failed 3 times, nothing changed" */ }
+Hazard { id /* one per episode: kind:agentKey:at, and for a file the other's key and the path hashed */,
+         kind: 'edit'|'write'|'git', sessionId, agentKey /* who changed the file or ran the command */,
+         others: { key, sessionId, files /* how many of its changed files */, at /* its latest */ }[]
+           /* whose changes it is about: one for a file, one or more for a command */,
+         at /* hook time */, folder /* where: the hook's cwd, or the command's after cd or git -C */,
+         path: string|null /* edit, write: the file, absolute */, tool: string|null /* edit, write */,
+         command: string|null /* git: "git stash", "git add -A && git commit" */,
+         toolUseId: string|null, callKey: string|null /* git: the call's ids, to end it when refused */ }
 LogEntry { id, ts, sessionId, agentKey, agentName, color, kind /* a TownEvent kind, 'approval',
-           'achievement' or 'stuck' */, icon, text, level: 'info'|'success'|'warn'|'error' }
+           'achievement', 'stuck' or 'conflict' */, icon, text, level: 'info'|'success'|'warn'|'error' }
 Achievement { id, title, description, icon, unlockedAt }
 FileChange { id, path /* relative to the crew's folder */, tool, ts, whole: boolean /* Write */,
              hunks: { before: string, after: string }[] /* from tool_input, ≤ 4,000 characters each */ }
@@ -850,8 +872,9 @@ queued behind it starts none.
 `attentionItems(state, now, { dismissed? }) → AttentionItem[]`, most urgent first:
 
 ```js
-AttentionItem { id /* one per episode: dialog:agentKey:at:input, kind:agentKey:since, limit:since */,
-                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'finished',
+AttentionItem { id /* one per episode: dialog:agentKey:at:input, kind:agentKey:since, limit:since,
+                      conflict:<Hazard id> */,
+                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'finished',
                 level: 'blocked'|'stopped'|'alert'|'ready', sessionId, agentKey,
                 agentKeys: string[] /* everyone it stands for */,
                 approvalId: string|null /* a request the town holds */, since, countedSince,
@@ -866,14 +889,20 @@ agent's `stuck` is a `stuck` item of its own (level `alert`, counted, dismissabl
 carries the episode's start), also while the agent waits for you on something else. A finished turn
 is listed at once and counted from `idle_prompt` (Codex: `CODEX_IDLE_MS`, a minute) for `READY_MS`
 (30 minutes). Stops by one rate limit (`cause: 'rate_limit'`) within ten minutes merge into one
-item for all their agents (two crews at least: a lead and its helper are one crew). Ended
-sessions and teammates' crews are left out. `ui/needs-you.js` adds the viewer's dismissals
-(stops, stuck alerts and finished turns, kept in `localStorage["andary:dismissed"]` for a day and
-shared with the town's other tabs; someone watching a team town with its view link gets no items,
-as they can answer nothing) and drives the masthead button (its name: the visible words, then
-where a click goes), the `I` key, the page title, the crew rows, the inspector and the desktop
-notifications. A crew row says how long: "waiting for 4m 05s", "finished 4m 05s ago", "stuck for
-4m 05s".
+item for all their agents (two crews at least: a lead and its helper are one crew). A hazard
+(below) is a `conflict` item of level `alert`, listed for every agent it names (`agentKeys`: the
+one who did it, then the others): a `write` or `git` hazard is counted and dismissable, an `edit`
+one is a note, neither counted nor dismissable. It is left out once `CONFLICT_MS` (30 minutes) old,
+or when the crew or agent that did it is gone or done; others that are, are left out of it. Ended
+sessions and teammates' crews are left out. `ui/needs-you.js` adds the viewer's dismissals (stops, stuck alerts, finished turns and
+conflicts, kept in `localStorage["andary:dismissed"]` for a day and shared with the town's other
+tabs; someone watching a team town with its view link gets no items, as they can answer nothing)
+and drives the masthead button (its name: the visible words, then where a click goes), the `I`
+key, the page title, the crew rows, the inspector and the desktop notifications. A note
+(`isNote`: an alert that is not counted) never takes the place of what an agent does: the crew row
+shows it on a line of its own under it (`[data-testid="agent-note"]`), the inspector under its Now
+line. A crew row says how long: "waiting for 4m 05s", "finished 4m 05s ago", "stuck for 4m 05s",
+and "4m 05s ago" for a conflict.
 
 **Shell** (`core/shell.js`, pure, shared with the server): the one reader of Bash and
 PowerShell command lines. `readShell(command, { powershell?, folder?, root?, resolve? }) →
@@ -946,6 +975,88 @@ time, `e.ts` in the town, `hookTime` on the server) or a fresh start, `reset(age
   the step run most recently shown, its count updated). Memory is bounded: 200 agents (the one
   quiet the longest goes first, its alert ending with it), 64 steps each (one that has not failed
   goes first, else the one run the longest ago), 12 failures per step.
+
+**Same files** (`core/conflicts.js` with `core/git-commands.js` and `core/paths.js`, all pure;
+docs/design/agent-health.md §6). The store keeps their memory in its model, runs them after each
+event and keeps what they find on `StoreState.hazards`, with a `conflict` log line (`warn`, or
+`info` for an edit) when one starts. Its words name who did it with its crew's number, and the
+others with theirs when of another crew (every lead is a Foreman), so every row, the inspector,
+the button's "Next:" and the announcements read right: "Foreman (crew 2) wrote over src/auth.ts,
+which Foreman (crew 1) changed 4 min ago" (the time counted from now), "… edited …", "…
+deleted …", "Builder 1 (crew 2) runs git stash in api-server, where Foreman (crew 1) and Scout 1
+have changed 5 files" (two names, or the first and "N others").
+
+- **A file change** is a successful (`PostToolUse`) Edit, MultiEdit, NotebookEdit or Write, or a
+  Codex patch: an added file is a Write, an updated one an Edit or MultiEdit, a deleted one stays
+  `apply_patch` and counts as a write ("deleted"). It is remembered by its path, normalised
+  (`normalizePath`: backslashes to slashes, `.` and `..` resolved, a relative path joined to the
+  hook's `cwd`, a drive letter in capitals, Git Bash's `/c/…` as `C:/…` beside a folder on a drive;
+  nothing else, so case and links are compared as given; a path under `~` or a variable is not
+  placed), with its agent, crew, folder (the `cwd`), time, kind (edit or write) and whether it made
+  the file (`created`: a Write whose `tool_response.type` is `create`, or a Codex patch adding it),
+  which stays so until a commit takes it in. An agent's older change arriving late leaves its newer
+  one standing.
+- **Same file**: an agent changes a path another agent changed at most 30 minutes before. An Edit
+  (also MultiEdit, NotebookEdit) is an `edit` hazard, a Write (or a deletion) a `write` one. One
+  per pair of agents and file: the episode goes on while the agent changes it again; a new one
+  replaces it when the other changes it again or an edit turns into a write. A `write` stays
+  counted until it ends: an edit after it adds nothing. A change that arrives after another
+  agent's strictly newer change of the file is judged the other way round (that one is over it).
+- **Git hazard**: when a Bash or PowerShell call starts (`PreToolUse`, so it shows while the
+  command asks for permission or runs), `gitHazardOf(command, { folder, sessionFolder, root },
+  { staged, known })` reads its line for the first command that sweeps changes up (`effect:
+  'sweep'`: `git add …` and a `git commit` later on the line, or a `git commit` after the agent's
+  earlier adds there (`staged`), `git commit -a`, `git commit <pathspec>`) or throws them away
+  (`'discard'`: `git stash` [push|save] [`--` pathspec], `git checkout .|-- <pathspec>|-f`, `git
+  checkout <path>` when `known(path)` says an agent changed it or a file in it, `git switch
+  --discard-changes|-f`, `git restore <pathspec>` (not `--staged` alone), `git reset --hard`,
+  `git clean -f…` (not `-n`)), with what it acts on: its pathspecs made absolute (`:/x` from the
+  top; exclusions left out; a glob stands for its folder; only exclusions, or more than 64
+  different ones, count as none), or with none the whole work tree (`git clean`, `checkout`,
+  `restore`: the folder), and which files (`files`: `tracked` for stash without `-u`, checkout,
+  switch, restore, reset, `commit -a`, `add -u`, `commit <path>`; `untracked` for clean; else
+  `all`). The line is read by `readShell` (**Shell**, below): a segment whose program is `git` is a
+  git call, in the segment's `folder`, given the hook's folder, `root` (the top of the work tree,
+  for `cd "$(git rev-parse --show-toplevel)[/more]"`) and `resolve` (`core/paths.js`: Git Bash's
+  `/c/…` as `C:/…` beside a folder on a drive; `~` or a variable: unknown, and that call is not
+  judged). `git -C` then moves the folder, up to 64 times a call.
+- **The work tree** (`core/paths.js` `workTreeOf`): the top the server found for the hook's folder
+  (`root`, from `andary_root`, §4.6) holds for any folder inside it, but a worktree Claude Code
+  makes inside a repository (`…/.claude/worktrees/<name>`), which is one of its own, both ways
+  (`exact: true`). Otherwise the top is guessed as that worktree, else the crew's session folder
+  (where it started) when that holds the command's folder, else that folder (`exact: false`). A
+  command counts another agent's change only in the same work tree and of the files it takes:
+  under its pathspecs (each file matched by its own folders against them), or, with none, under
+  that top, or, with a guessed top, in the folder the other agent worked in when the command runs
+  inside it. One `git` hazard per command names every other agent with such changes in the last
+  30 minutes. The same command in the same place by the same agent is a new hazard only for newer
+  changes. The last 50 commands are kept for half an hour: a change that arrives after one that
+  started later counts for it too, in its hazard or a new one.
+- **Refused**: a `PermissionDenied` for the call (by `toolUseId`), or its approval denied in the
+  town (by `callKey`), ends the command's hazard.
+- **Committed work**: when a Bash or PowerShell call succeeds (`PostToolUse`), `gitCommitsOf`
+  says what each `git commit` on it took in, and the committer's changes there are forgotten: all
+  of them in that work tree for `-a` or a whole-tree add, else those under the paths it or the
+  `git add` before it named, on the line or in the agent's earlier calls; with `-a`, `add -u` or a
+  pathspec (`tracked`), not the files it made. `gitAddsOf` says what the line left staged, kept
+  for the agent (`staged`, at most 16 for each of 200 agents) until a commit there takes it in.
+- **A hand-off**: what a helper's lead changed before the helper started (its `SubagentStart`) does
+  not count for the helper's file changes or its sweeping commands; a command that throws changes
+  away still counts it.
+- **Active** agents only: a crew leaving (`SessionEnd`) forgets its changes and ends its hazards
+  (a git hazard about several goes on without it). A helper finishing ends the hazards it did, and
+  leaves its changes and what it staged to its lead (`finished(helper, lead)`): the newer of two
+  changes of one file stands, a file either made stays new, and hazards about them name the lead
+  (one the lead did over them ends). A helper finishes with its
+  `SubagentStop`, with the end of the Agent call that started it (`PostToolUseFailure`, or a
+  `PostToolUse` not `async_launched`), or with its lead's interrupted `Stop`; a lead whose turn
+  ended is still at work. A hazard ends 30 minutes after it started. Teammates' crews (a team
+  town) are left out: their files are on their computers. Agents of different crews in one folder
+  count, and so do a lead and its own helper.
+- **Bounds**: 1,000 files (the one changed the longest ago goes first), 8 agents per file (the
+  latest), 100 hazards (the oldest note gives way, a new note too, else the oldest alert), 50
+  commands, 16 adds for each of 200 agents, 64 pathspecs a command; a command line is read up to
+  20,000 characters.
 
 `director.js`: `createDirector({ world, store, backlog?, humor?, random? }) → { dispose() }`
 subscribes to the store and drives the world. `recordChanges(store) → { stop() }` keeps the
@@ -1156,10 +1267,10 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="login-hint"]` | shown when a server is running but the browser has no valid token |
 | `[data-testid="demo-button"]` | starts the simulation (shown when there is nothing live to watch) |
 | `[data-testid="crew-list"]` | crews panel; children `[data-testid="crew"][data-session-id]` |
-| `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects; `data-need` is the level of what it needs you for; a lead's row holds its context in use in `[data-testid="crew-context"]` (hidden without one, §4.8) |
-| `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn, stop or stuck alert aside; `[data-testid="agent-context"]` holds the exact context in use (§4.8) |
+| `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects; `data-need` is the level of what it needs you for; a lead's row holds its context in use in `[data-testid="crew-context"]` (hidden without one, §4.8); `[data-testid="agent-note"]` inside it, a note (an edit of a file another agent changed) |
+| `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn, stop, stuck alert or conflict aside; `[data-testid="agent-context"]` holds the exact context in use (§4.8); `[data-testid="inspector-note"]`, its newest note |
 | `[data-testid="waiting-for-you"]` | the masthead's "N need you" button (`data-level` is the most urgent level); click goes to the next item |
-| `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn, a stop or a stuck alert aside |
+| `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn, a stop, a stuck alert or a conflict aside |
 | `[data-testid="activity-log"]` | log; children `[data-testid="log-entry"]` |
 | `[data-testid="tasks-panel"]` | goals/tasks; children `[data-testid="task-item"]` |
 | `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]`, and, when a rule can be saved, `[data-testid="approve-always"]` with the rule in `[data-testid="approve-always-rule"]`; a hint in `[data-testid="approval-hint"]` |

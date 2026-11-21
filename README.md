@@ -195,6 +195,24 @@ step that kept failing, the step working at last. Steps that wait by nature (rea
 task's output, `sleep` loops, `gh run watch` and other CI checks, health checks, `ps` or `docker
 ps`) never count.
 
+**Two agents on the same files.** Several sessions in one repository can undo each other's work.
+When an agent writes a whole file over a change another agent made in the last half hour, or runs
+a git command that sweeps up or throws away another agent's uncommitted changes in that work tree
+(`git add -A` with a commit, `git commit -a`, `git stash`, `git checkout .`, `git restore`,
+`git reset --hard`, `git clean -f`), the rows of everyone involved say so ("Foreman (crew 2) wrote
+over src/auth.ts, which Foreman (crew 1) changed 4 min ago", "Builder 1 (crew 2) runs git stash in
+api-server, where Foreman (crew 1) has changed 3 files") and it counts in **need you** until you set
+it aside. A git command shows as soon as it starts, while it may still ask for your permission, and
+counts only what it acts on: a `git restore src/a.ts` is not about another agent's `src/b.ts`.
+Committed work no longer counts (also when the `git add` came in an earlier call), a helper
+finishing what its lead handed it is no conflict, and what a finished helper left uncommitted is
+still its lead's. Andary finds where each repository starts on disk, so several repositories in
+one workspace, and worktrees, are told apart; `git clean` counts only new files. A command you
+deny in the town ends its alert. An edit of such a
+file is only a note under both rows, as an edit must match what is in the file. It lasts half an
+hour, or until the agents finish. Andary compares paths as written: a symbolic link, or a disk that
+ignores case, can hide one.
+
 ### Everything else
 
 - **Cost and tokens:** each crew shows what it has cost so far, estimated at API list prices from

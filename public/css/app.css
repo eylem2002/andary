@@ -923,7 +923,8 @@ body {
   grid-template-columns: 26px minmax(0, 1fr) auto;
   grid-template-areas:
     'mark name time'
-    'mark doing doing';
+    'mark doing doing'
+    'mark note note';
   column-gap: 12px;
   width: 100%;
   padding: 6px 4px 6px 0;
@@ -1022,10 +1023,21 @@ body {
   font-weight: 600;
 }
 
-/* A stop, or an agent that seems stuck (core/loops.js): something went wrong, not a wait. */
+/* A stop, an agent that seems stuck (core/loops.js) or two agents on the same files
+   (core/conflicts.js): something went wrong, not a wait. */
 .hud-station[data-need="stopped"] .hud-station__doing,
 .hud-station[data-need="alert"] .hud-station__doing {
   color: var(--error);
+}
+
+/* A note under what the agent does: another agent changed a file it edits. */
+.hud-station__note {
+  grid-area: note;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .hud-stations__item {
@@ -1943,6 +1955,14 @@ body {
   color: var(--ink-2);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+}
+
+/* Another agent changed a file this one edits (core/conflicts.js): beside what it does. */
+.hud-inspector__note {
+  margin-top: 6px;
+  color: var(--ink-2);
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .hud-inspector__brief,

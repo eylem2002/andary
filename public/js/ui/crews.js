@@ -2,8 +2,10 @@
 // and its agents are the stations along it. A station shows the agent's status, what it is doing
 // and for how long; clicking it selects the agent and points the camera at it. An agent that waits
 // for you or seems stuck ("needs you", core/attention.js) says what for and since when instead,
-// and a finished turn, a stop or a stuck alert can be set aside from its row. The lead's row also
-// shows the crew's context in use, under its time, where it takes no room from the crew's name.
+// and a finished turn, a stop, a stuck alert or two agents on the same files can be set aside from
+// its row. A note (an edit of a file another agent changed) goes on a line of its own under what
+// the agent does. The lead's row also shows the crew's context in use, under its time, where it
+// takes no room from the crew's name.
 import { contextShort, crewUsage, liveContext, usageShort } from './usage.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from './dom.js';
 import { icon } from './icons.js';
@@ -11,7 +13,7 @@ import { modelLabel } from '../core/catalog.js';
 import { agentKeyOf } from '../core/ids.js';
 import { doingText, formatDuration, isCommandText, plural, truncate } from './format.js';
 import { approvalAgentKey, roundel, setCurrent, statusChip, updateRoundel, updateStatusChip } from './parts.js';
-import { itemsByAgent, waitedText } from './needs-you.js';
+import { itemsByAgent, notesByAgent, waitedText } from './needs-you.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -125,8 +127,9 @@ export function createCrewsPanel(ctx) {
     setText(count, active.length ? `${active.length} active` : '');
     setText(empty, emptyText(ctx));
     setHidden(empty, state.sessions.length > 0);
+    const now = Date.now();
     /** @type {RowFacts} */
-    const facts = { needs: itemsByAgent(state, ctx.needsYou, Date.now()), asking: new Map(), contexts: new Map() };
+    const facts = { needs: itemsByAgent(state, ctx.needsYou, now), notes: notesByAgent(state, ctx.needsYou, now), asking: new Map(), contexts: new Map() };
     for (const approval of state.approvals) {
       if (approval.status === 'pending' && !facts.asking.has(approvalAgentKey(approval))) facts.asking.set(approvalAgentKey(approval), approval);
     }
@@ -155,6 +158,7 @@ export function createCrewsPanel(ctx) {
 /**
  * @typedef {object} RowFacts  what the rows show besides each agent's own state, by agent key
  * @property {Map<string, import('../core/attention.js').AttentionItem>} needs  their "needs you" item
+ * @property {Map<string, import('../core/attention.js').AttentionItem>} notes  their newest note (needs-you.js isNote)
  * @property {Map<string, import('./types.js').Approval>} asking  their pending approval
  * @property {Map<string, string>} contexts  a lead's context in use ("182k in context")
  */
@@ -174,8 +178,9 @@ function createStation(ctx, parts, agent) {
   const context = h('span', { class: 'hud-station__context', 'data-testid': 'crew-context', hidden: true });
   const time = h('span', { class: 'hud-station__time' }, clock, clockWords, context);
   const doing = h('span', { class: 'hud-station__doing' });
+  const note = h('span', { class: 'hud-station__note', 'data-testid': 'agent-note', hidden: true });
   const button = h('button', { type: 'button', class: 'hud-station', 'data-testid': 'agent-row', 'data-agent-key': agent.key },
-    h('span', { class: 'hud-station__mark' }, chip), name, time, doing);
+    h('span', { class: 'hud-station__mark' }, chip), name, time, doing, note);
   // detail is 0 for keyboard activation: then focus follows into the inspector.
   button.addEventListener('click', (event) => ctx.select({ type: 'agent', id: agent.key }, { camera: true, focus: event.detail === 0 }));
   const dismiss = h('button', { type: 'button', class: 'hud-iconbtn hud-station__dismiss', hidden: true, 'data-testid': 'dismiss-need' }, icon('close', { size: 16 }));
@@ -189,7 +194,7 @@ function createStation(ctx, parts, agent) {
     ctx.announcer.polite(`Set aside: ${need.text}`);
     ctx.refresh();
   });
-  parts.set(item, { chip, name, clock, clockWords, context, doing, button, dismiss });
+  parts.set(item, { chip, name, clock, clockWords, context, doing, note, button, dismiss });
   return item;
 }
 
@@ -211,6 +216,9 @@ function updateStation(ctx, parts, item, agent, facts) {
   const inContext = facts.contexts.get(agent.key) ?? '';
   setText(p.context, inContext);
   setHidden(p.context, !inContext);
+  const note = facts.notes.get(agent.key);
+  setText(p.note, note ? truncate(note.text, 90) : '');
+  setHidden(p.note, !note);
   setAttr(p.button, 'data-status', agent.status);
   setAttr(p.button, 'data-need', need?.level ?? null);
   setCurrent(p.button, ctx.view.selection?.type === 'agent' && ctx.view.selection.id === agent.key);

@@ -357,6 +357,59 @@ test('a crew whose npm test fails three times with nothing changed seems stuck, 
   await expect(row).not.toContainText('Seems stuck');
 });
 
+test('two crews in one folder: an edit of the same file is a note on both rows, a write over it needs you', async ({ page }) => {
+  await signIn(page);
+  const crew = (/** @type {string} */ session) => (/** @type {string} */ name, /** @type {Record<string, unknown>} */ extra = {}) => hook(name, { session_id: session, ...extra });
+  const first = crew('e2e-first');
+  const second = crew('e2e-second');
+  const file = '/work/e2e-app/src/app.ts';
+  /** @param {string} tool @param {string} id @param {Record<string, unknown>} input */
+  const done = (tool, id, input) => ({ tool_name: tool, tool_use_id: id, tool_input: { file_path: file, ...input }, tool_response: {} });
+  for (const payload of [
+    first('SessionStart', { source: 'startup' }),
+    second('SessionStart', { source: 'startup' }),
+    first('PostToolUse', done('Edit', 'e1', { old_string: 'light', new_string: 'dark' })),
+    second('PostToolUse', done('Edit', 'e2', { old_string: 'dark', new_string: 'dim' })),
+  ]) {
+    expect(await town.sendHook(payload)).toMatchObject({ code: 0 });
+  }
+  const row = (/** @type {string} */ session) => page.locator(`[data-testid="agent-row"][data-agent-key="${session}:main"]`);
+  // An edit must match what is there: a note under what both agents do, and nothing counted.
+  const note = 'Foreman (crew 2) edited src/app.ts, which Foreman (crew 1) changed just now';
+  for (const session of ['e2e-first', 'e2e-second']) await expect(row(session).getByTestId('agent-note')).toHaveText(note);
+  const button = page.getByTestId('waiting-for-you');
+  await expect(button).toBeHidden();
+  await row('e2e-second').click();
+  const inspector = page.getByTestId('agent-inspector');
+  await expect(inspector.getByTestId('inspector-note')).toHaveText(note);
+  await expect(inspector.getByTestId('inspector-dismiss')).toBeHidden();
+
+  // A write over the first crew's change needs you, on both rows.
+  await town.sendHook(second('PostToolUse', done('Write', 'w1', { content: 'export const theme = "dim";' })));
+  const words = 'Foreman (crew 2) wrote over src/app.ts, which Foreman (crew 1) changed just now';
+  await expect(button).toHaveAttribute('aria-label', `1 needs you. Next: ${words}`);
+  await expect(button).toHaveAttribute('data-level', 'alert');
+  await expect(page).toHaveTitle('(1) Andary');
+  for (const session of ['e2e-first', 'e2e-second']) {
+    await expect(row(session)).toContainText(words);
+    await expect(row(session)).toHaveAttribute('data-need', 'alert');
+    await expect(row(session).getByTestId('agent-note')).toBeHidden();
+  }
+  await expect(inspector).toContainText(words);
+  await expect(inspector.getByTestId('inspector-note')).toBeHidden();
+  await expect(inspector.getByTestId('inspector-dismiss')).toBeVisible();
+  await expect(page.getByTestId('log-entry').filter({ hasText: words })).toHaveCount(1);
+
+  // Set aside once, it is gone from both rows. On a phone the agent's details sheet covers the
+  // crew rows, so the set-aside there is the one at hand.
+  const setAside = test.info().project.name === 'mobile'
+    ? inspector.getByTestId('inspector-dismiss')
+    : page.locator('.hud-stations__item:has([data-agent-key="e2e-first:main"]) [data-testid="dismiss-need"]');
+  await setAside.click();
+  await expect(button).toBeHidden();
+  await expect(row('e2e-second')).not.toContainText(words);
+});
+
 test('with --notify-url, Settings shows the phone topic and sends a test', async ({ page }) => {
   await town.stop();
   town = await startTown({ args: ['--notify-url', 'http://127.0.0.1:9/e2e-topic'] });

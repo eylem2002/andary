@@ -8,11 +8,13 @@
 //
 // Which observers see an event depends on where it came from, and that is written down once, in
 // POLICIES, instead of in each route. Before any of them, a tool hook gets its call key
-// (`andary_key`, hook-steps.mjs), from its input as it arrived. The town, the phone notes and the
-// approval broker get the hook's own time (`ts`, hookTime) with it: hooks may arrive out of order.
+// (`andary_key`, hook-steps.mjs), from its input as it arrived, and a local one the top of its
+// folder's work tree (`andary_root`, work-trees.mjs). The town, the phone notes and the approval
+// broker get the hook's own time (`ts`, hookTime) with it: hooks may arrive out of order.
 import { toTownPayloads } from './adapters/index.mjs';
 import { hookTime, withCallKey } from './hook-steps.mjs';
 import { sanitize } from './sanitize.mjs';
+import { withWorkTree } from './work-trees.mjs';
 
 /** @typedef {import('./app.mjs').TownContext} TownContext */
 /** @typedef {import('./history.mjs').Envelope & { event: Record<string, any> }} TownEnvelope */
@@ -78,8 +80,9 @@ export function ingestTeam(ctx, member, items, now = Date.now()) {
  */
 function admit(ctx, origin, item) {
   const policy = POLICIES[origin];
-  // The call key first, from the input as it arrived: every reader below matches calls by it.
-  const event = withCallKey(item.event);
+  // The call key first, from the input as it arrived: every reader below matches calls by it. A
+  // work tree's top is this computer's to find: a teammate's folders are on theirs.
+  const event = withWorkTree(withCallKey(item.event), origin === 'local' ? ctx.workTrees : null);
   if (policy.growth) ctx.progress.observe(event);
   if (policy.notify) ctx.notifier.observe(event, item.ts);
   const envelope = record(ctx, { ts: item.ts, event });

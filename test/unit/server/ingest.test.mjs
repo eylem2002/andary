@@ -124,6 +124,22 @@ describe('ingest', () => {
     assert.deepEqual([theirs.event.andary_key, unkeyed.event.andary_key, renamed.event.andary_key], ['from-their-server', inputKey({ command: 'ls' }), null]);
   });
 
+  it("a local tool hook gets the top of its folder's work tree; a stamp from elsewhere is dropped, and a teammate's hooks get none", () => {
+    const { ctx } = fakeContext();
+    /** @type {string[]} */
+    const asked = [];
+    ctx.workTrees = { rootOf: (/** @type {unknown} */ folder) => (asked.push(String(folder)), folder === '/w/app/src' ? '/w/app' : null) };
+    const tool = { hook_event_name: 'PreToolUse', session_id: 's', cwd: '/w/app/src', tool_name: 'Bash', tool_input: { command: 'git stash' } };
+    const [local] = ingestHook(ctx, { ts: 1, source: 'claude', event: { ...tool, andary_root: '/forged' } });
+    const [outside] = ingestHook(ctx, { ts: 1, source: 'claude', event: { ...tool, cwd: '/tmp' } });
+    const [stop] = ingestHook(ctx, { ts: 1, source: 'claude', event: { hook_event_name: 'Stop', session_id: 's', cwd: '/w/app/src' } });
+    assert.deepEqual([local.event.andary_root, 'andary_root' in outside.event, 'andary_root' in stop.event], ['/w/app', false, false]);
+    assert.deepEqual(asked, ['/w/app/src', '/tmp'], 'only tool hooks are looked up');
+    const [theirs] = ingestTeam(ctx, 'Sam', [{ ts: 1, event: { ...tool, andary_root: '/their/app' } }], 1);
+    assert.equal('andary_root' in theirs.event, false, 'their folders are on their computer');
+    assert.equal(asked.length, 2);
+  });
+
   it("a teammate's batch: named, sessions prefixed, dated within the last hour, and kept to themselves", () => {
     const { ctx, seen } = fakeContext();
     const now = 10 * 60 * 60 * 1000;
