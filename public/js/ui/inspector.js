@@ -1,6 +1,6 @@
 // The agent inspector: everything known about the selected agent — role, crew, status, what it is
-// doing (or waiting for you on, and since when), its brief, which tools it used how often, recent
-// files and activity, its last message.
+// doing (or waiting for you on, or why it seems stuck, and since when), its brief, which tools it
+// used how often, recent files and activity, its last message.
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { doingText, formatAgo, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
@@ -183,8 +183,8 @@ function changeItem(change, open) {
 }
 
 /**
- * Under the Now line while the agent waits for you: since when, and a Set aside button for a
- * finished turn or a stop.
+ * Under the Now line while the agent waits for you or seems stuck: since when, and a Set aside
+ * button for a finished turn, a stop or a stuck alert.
  * @param {HudContext} ctx
  * @param {HTMLElement} focusAfter  where the keyboard goes when the button goes
  */

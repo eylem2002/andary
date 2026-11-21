@@ -1,13 +1,15 @@
 // Notifications on this computer while the town is in a background tab, following "needs you"
 // (core/attention.js): an agent asks for your permission, asks a question, has a plan for you, a
-// turn stopped, or a finished turn waited with nobody answering. Off until the viewer turns them on
-// (the browser then asks for permission); clicking one brings the town back. They name the crew
-// (its title, or its project's folder) and never show a request's command or file: they can show
-// on a locked screen. Phone notifications are the server's (server/notify.mjs).
+// turn stopped, an agent seems stuck, or a finished turn waited with nobody answering. Off until
+// the viewer turns them on (the browser then asks for permission); clicking one brings the town
+// back. They name the crew (its title, or its project's folder) and never show a command or a
+// file, a request's or a stuck step's: they can show on a locked screen. Phone notifications are
+// the server's (server/notify.mjs).
 //
 // The same watcher keeps the page title's count current: the HUD renders on animation frames,
 // which a background tab does not get, yet a background tab's title is the one you look at.
 import { countedItems } from '../core/attention.js';
+import { stuckWords } from '../core/loops.js';
 import { updateTitle } from './masthead.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
@@ -47,6 +49,9 @@ export function notificationFor(item, state, now) {
       return note('Plan to approve', `${crew} has a plan for you to approve in its terminal.`);
     case 'stopped':
       return item.crews > 1 ? note('Crews stopped', `${item.text}.`) : note('Turn stopped', `${crew}: ${item.text}.`);
+    case 'stuck':
+      // The item's own words name the command: these may show on a locked screen.
+      return note('Seems stuck', `${crew} seems stuck: ${stuckWords(state.agents[item.agentKey]?.stuck?.rule ?? 1)}.`);
     case 'finished':
       // With one crew at work you are probably at its terminal already.
       return activeCrews(state) > 1 ? note('Turn finished', `${crew} is waiting for your next prompt.`) : null;
@@ -86,13 +91,16 @@ function show(note) {
 
 /** A request reaches the town a moment after its hook: until then it may still be held there. */
 const SETTLE_MS = 3000;
-/** New items a screen reader hears of (approvals are announced with their cards). */
-const ANNOUNCED = new Set(['question', 'plan', 'stopped']);
+/**
+ * New items a screen reader hears of (approvals are announced with their cards). A stuck agent's
+ * storm is in the town only, and its row changes without a sound, so it is announced too.
+ */
+const ANNOUNCED = new Set(['question', 'plan', 'stopped', 'stuck']);
 
 /**
  * Watches the store and the clock: keeps the title's count and the HUD current, notifies each new
- * item once, and tells screen readers of new questions, plans and stops. An item the viewer could
- * already see (the tab in front, or notifications off) never pops up later.
+ * item once, and tells screen readers of new questions, plans, stops and stuck agents. An item the
+ * viewer could already see (the tab in front, or notifications off) never pops up later.
  * @param {Pick<HudContext, 'store'|'needsYou'|'prefs'|'refresh'|'announcer'>} ctx
  * @param {{ now?: () => number, every?: number }} [options]  the clock and how often it is read (tests)
  * @returns {() => void} stops watching
@@ -119,7 +127,8 @@ export function installNotifications(ctx, { now: clock = Date.now, every = CHECK
       seen.add(item.id);
       if (seen.size > MAX_SEEN) seen.delete(seen.values().next().value ?? '');
       if (now - item.countedSince > NEWS_MS) continue;
-      if (ANNOUNCED.has(item.kind)) ctx.announcer.polite(`${crewName(state, item)}: ${item.text}`);
+      // Backticks mark a command on screen; read aloud they are noise.
+      if (ANNOUNCED.has(item.kind)) ctx.announcer.polite(`${crewName(state, item)}: ${item.text.replaceAll('`', '')}`);
       const note = notify ? notificationFor(item, state, now) : null;
       if (note) show(note);
     }

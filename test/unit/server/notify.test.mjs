@@ -643,6 +643,8 @@ test('dispose drops what is waiting, and nothing is sent or started afterwards',
   notifier.observe(codex(hook('Stop', { session_id: 'thr_2' }))[0]);
   notifier.observe(hook('Notification', { notification_type: 'idle_prompt' }));
   notifier.observe(hook('StopFailure', { error: 'server_error' }));
+  // Three failures of one step: a stuck agent, but the town is shutting down.
+  for (const id of ['t1', 't2', 't3']) notifier.observe(hook('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_use_id: id, error: 'Exit code 1' }));
   notifier.approvalChanged(/** @type {any} */ ({ id: 'a1', status: 'pending', held: true, sessionId: 's2', agentId: null, toolName: 'Bash' }));
   assert.equal(clock.pending, 0, 'nothing starts a timer');
   await at(120_000);
@@ -711,6 +713,97 @@ test('a Codex lead that stopped gets the waiting note after a minute without a p
   const many = testNotifier();
   for (let i = 0; i < 150; i += 1) many.notifier.observe(event('Stop', { session_id: `thr_${i}` }));
   assert.equal(many.clock.pending, 100);
+});
+
+/** The same command failing, as Claude Code reports it. @param {Record<string, any>} [extra] */
+const red = (extra = {}) => hook('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command: 'npm test -- secret.test.ts' }, tool_use_id: 'toolu_t', error: 'Exit code 1\nFAIL secret.test.ts', is_interrupt: false, ...extra });
+/** @param {any[]} posts */
+const stuckNotes = (posts) => posts.filter((post) => post.body.includes('stuck'));
+
+test('an agent that seems stuck gets one note per episode, naming nothing', async () => {
+  const { notifier, posts, at } = testNotifier();
+  notifier.observe(red());
+  notifier.observe(red());
+  await at(1_000);
+  assert.equal(posts.length, 0);
+  notifier.observe(red());
+  await at(2_000);
+  assert.deepEqual(posts.map((post) => [post.body, post.headers]), [['A crew seems stuck: the same step keeps failing.', { Title: 'Andary', Priority: 'default', Tags: 'repeat' }]]);
+  await at(40_000);
+  for (let i = 0; i < 5; i += 1) notifier.observe(red({ error: 'Exit code 1' }));
+  await at(60_000);
+  assert.equal(posts.length, 1, 'still the same episode, though the 30 s limit would let one through');
+  // An edit is progress: the episode ends, and failing on afterwards is a new one.
+  notifier.observe(hook('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: '/work/secret-project/src/a.ts', old_string: 'a', new_string: 'b' }, tool_use_id: 'toolu_e', tool_response: {} }));
+  for (let i = 0; i < 3; i += 1) notifier.observe(red({ error: 'Exit code 2' }));
+  await at(61_000);
+  assert.equal(stuckNotes(posts).length, 2);
+  for (const word of ['npm', 'secret', 'Bash', 'Exit']) assert.ok(!JSON.stringify(posts).includes(word), word);
+});
+
+test('the words follow the rule: a step run over and over need not fail', async () => {
+  const { notifier, posts, at } = testNotifier();
+  const piped = hook('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test 2>&1 | tail -40' }, tool_use_id: 'toolu_p', tool_response: { stdout: 'ok' } });
+  for (let i = 0; i < 5; i += 1) notifier.observe(piped);
+  await at(1_000);
+  assert.deepEqual(stuckNotes(posts).map((post) => post.body), ['A crew seems stuck: it keeps repeating the same step.']);
+});
+
+test('goes by when each hook was sent: a failure arriving after a later edit does not count', async () => {
+  const { notifier, posts, at } = testNotifier();
+  await at(10_000);
+  const edit = hook('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: '/work/secret-project/src/a.ts', old_string: 'a', new_string: 'b' }, tool_use_id: 'toolu_e', tool_response: {} });
+  notifier.observe(edit, 2_000);
+  for (const ts of [1_000, 3_000, 4_000]) notifier.observe(red(), ts);
+  await at(11_000);
+  assert.equal(stuckNotes(posts).length, 0, 'two failures since the edit');
+  notifier.observe(red(), 5_000);
+  await at(12_000);
+  assert.equal(stuckNotes(posts).length, 1);
+});
+
+test('a stuck note held back by the 30 s limit is dropped, not sent later', async () => {
+  const { notifier, posts, at } = testNotifier();
+  for (let i = 0; i < 3; i += 1) notifier.observe(red({ session_id: 'crew-a' }));
+  await at(10_000);
+  for (let i = 0; i < 3; i += 1) notifier.observe(red({ session_id: 'crew-b' }));
+  await at(120_000);
+  assert.equal(stuckNotes(posts).length, 1);
+});
+
+test('the count starts again for a fresh start; steps that wait by nature are never stuck', async () => {
+  const interrupt = toTownPayloads('codex', hook('Interrupt'))[0];
+  const helper = { agent_id: 'agent-h1', agent_type: 'Explore' };
+  /** @type {[string, Record<string, any>, Record<string, any>, number][]} */
+  const cases = [
+    ['a prompt', hook('UserPromptSubmit', { prompt: 'try again' }), {}, 0],
+    ['the turn ending', hook('Stop'), {}, 0],
+    ['the turn failing', hook('StopFailure', { error: 'server_error' }), {}, 0],
+    ['the session ending', hook('SessionEnd', { reason: 'other' }), {}, 0],
+    ['the session starting afresh', hook('SessionStart', { source: 'clear' }), {}, 0],
+    ['a Codex interrupt', interrupt, {}, 0],
+    ['an interrupt in the terminal', red({ is_interrupt: true, error: 'Interrupted by user' }), {}, 0],
+    ['the helper finishing', hook('SubagentStop', helper), helper, 0],
+    ['a teammate going idle', hook('TeammateIdle', { teammate_name: 'qa', ...helper }), helper, 0],
+    ['the session ending, for a helper', hook('SessionEnd', { reason: 'other' }), helper, 0],
+    ['a compaction', hook('SessionStart', { source: 'compact' }), {}, 1],
+    ["a teammate's idle that names no agent", hook('TeammateIdle', { teammate_name: 'qa' }), {}, 1],
+    ['a prompt in another crew', hook('UserPromptSubmit', { session_id: 's2', prompt: 'hi' }), {}, 1],
+    ['the lead stopping, for its helper', hook('Stop'), helper, 1],
+  ];
+  for (const [what, between, who, notes] of cases) {
+    const { notifier, posts, at } = testNotifier();
+    notifier.observe(red(who));
+    notifier.observe(red(who));
+    notifier.observe(between);
+    notifier.observe(red(who));
+    await at(1_000);
+    assert.equal(stuckNotes(posts).length, notes, what);
+  }
+  const { notifier, posts, at } = testNotifier();
+  for (let i = 0; i < 10; i += 1) notifier.observe(red({ tool_input: { command: 'sleep 60 && gh pr checks 42' }, error: 'Exit code 8' }));
+  await at(1_000);
+  assert.equal(posts.length, 0, 'waiting for CI is no loop');
 });
 
 test('notes are posted to ntfy with a title, priority and tags, and rate-limited', async () => {

@@ -126,15 +126,21 @@ out; a view-only viewer gets no attention items.
 
 `public/js/core/loops.js` (pure, self-contained, also run by the server for the phone).
 
-**Step key** per tool call: the shell command with whitespace collapsed, a leading `cd <dir> &&`
-and a trailing `2>&1`, `| tail …`, `| head …`, `| grep …` dropped; file tools by tool and path
+**Step key** per tool call: the shell command (inside one level of `bash -lc '…'`) with
+whitespace collapsed, a leading `sleep N &&` and a trailing `2>&1`, `| tail …`, `| head …` dropped,
+and `| grep …` too after a test or build run; leading `cd <dir> &&` followed to the folder the
+command runs in, which is part of the key (a `cd` into the cwd or `.` is nothing, so `cd
+packages/a && npm test` and `cd packages/b && npm test` are two steps); file tools by tool and path
 (Read adds offset and limit); searches by tool, pattern and path; anything else by tool and its
 input, stable-stringified and clipped.
 
 **A change** (progress) is a successful Edit, MultiEdit, Write, NotebookEdit or patch by **any
 agent working in the same folder** (helpers share the tree), or a successful shell command that
-edits files in place (`sed -i`, `perl -i`, formatters with `--write`/`--fix`, `git checkout`,
-`git apply`, `git stash`, `git reset`).
+reads as changing files (`sed -i`, `perl -i`, `--write`/`--fix`/`-w`, formatters, scripts named for
+format, fix, codegen or generate, `node|python scripts/…`, git commands that rewrite the work tree
+or the index, package installs, `rm`/`mv`/`cp`/`mkdir`/`touch`, `>`/`>>`/`tee` to a file that is
+not a log or temporary one, an inline script that writes a file); ASSUMPTIONS 112 lists it, and
+what it gets wrong both ways.
 
 **Rules**, per agent:
 
@@ -142,13 +148,19 @@ edits files in place (`sed -i`, `perl -i`, formatters with `--write`/`--fix`, `g
 2. **Same step, nothing changed**: the identical step ran 5 times with no change in between,
    whatever its exit code (`npm test 2>&1 | tail -40` exits with tail's status, so failures can hide).
 3. **Keeps failing the same way**: the same step failed 6 times within 20 minutes with the same
-   first error line, changes or not.
+   error, changes or not: its first meaningful line, past `Exit code N`, the command echoed back,
+   npm's, pnpm's and yarn's lifecycle lines and the like (ASSUMPTIONS 123). A failure with nothing
+   specific left is left out of rule 3, so red, edit, red again while writing tests is no loop.
 
 A failure is `PostToolUseFailure` or `PermissionDenied`. The alert ends when the step succeeds
 (rules 1, 3), a change happens (1, 2), the turn ends, you send a prompt, or the agent finishes.
+Steps that wait by nature (CI checks, health checks, `sleep`, background output) are never
+counted. Everything goes by each hook's own time: a call made before the agent's latest change
+counts for rule 3 only.
 
 **Where it shows:** an alert item, a storm over the agent in the town, a log line, and a phone note
-("A crew seems stuck: the same step keeps failing").
+("A crew seems stuck: the same step keeps failing" for rules 1 and 3, "A crew seems stuck: it
+keeps repeating the same step" for rule 2).
 
 **Decision:** do. Size: small–medium.
 

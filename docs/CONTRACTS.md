@@ -41,10 +41,12 @@ public/index.html            The app shell (import map, fonts, HUD markup roots)
 public/css/*.css             HUD styles (app.css) and in-world overlay styles (world.css)
 public/js/page.js            What the page was opened with (the town look), read once at load
 public/js/core/              Pure logic, no DOM, no I/O: events (normalize), store (+ crews, changes,
-                             store-model), director (+ director-queue), catalog, text, summaries,
-                             ids, dates, looks, prices, growth, records, town-weather, humor,
-                             dialogs (open dialogs), card-fields (what an approval card shows),
-                             permission-rules (what "Allow always" may save)
+                             store-model, store-dialogs), director (+ director-queue), catalog,
+                             text, summaries, ids, dates, looks, prices, growth, records,
+                             town-weather, humor, dialogs (open dialogs), waits, attention,
+                             card-fields (what an approval card shows), permission-rules (what
+                             "Allow always" may save), loops (when an agent seems stuck), shell
+                             (shell command lines read as a shell reads them, for every rule)
 public/js/sources/           Where events come from: live.js (WebSocket) and demo.js (simulation),
                              one TownSource shape (types.js)
 public/js/world/layout.js    Town plan (shared, pure data)
@@ -572,20 +574,29 @@ the WebSocket `hello`. Only this computer's events count (§4.11).
   the lead's next `Stop`. At most 100 sessions wait at once; the oldest gives way. Andary cannot
   see you typing in Codex, so a reply that takes over a minute still sends the note.
 - **Stopped**: `StopFailure` posts a limit or an error note.
+- **Stuck**: "A crew seems stuck: the same step keeps failing." (rules 1 and 3) or "A crew seems
+  stuck: it keeps repeating the same step." (rule 2), by the rule that started the episode, once
+  per episode of the stuck rules (§5.1, `public/js/core/loops.js`, `stuckWords`), which the
+  notifier runs on this computer's events, at each hook's own time (`hookTime`), with a memory of
+  its own: the note goes out when an episode starts, through the usual limits. One held back by
+  the 30 s limit is dropped, not sent later, and the episode sends nothing more.
 - A finished turn posts nothing by itself. Stopping the server drops every note still waiting.
 
 This computer (`public/js/ui/notifications.js`), opt-in in Settings (`prefs.desktopNotify`, after
 the browser's permission), follows "needs you" (§5.1): while the page is hidden, each new counted
 item becomes one system notification naming the crew (its title, or its project's folder), never
-a request's command or file ("Permission needed", "Question for you", "Plan to approve", "Turn
-stopped", "Crews stopped", "Turn finished"). An item the viewer could already see (the page in
-front, or notifications off) never pops up later, nor one that started to count more than two
-minutes ago (a reconnect or a page opened in the background); changes that arrive together (a
-reconnect's history) are checked once. A permission request waits until its request reaches the
-town (or three seconds), so it is worded right the first time. No "Turn finished" while only one
-of your crews is in town, and nothing for someone watching a team town with its view link. The
-same watcher keeps the page title's count current in a background tab, redraws the HUD when the
-clock alone changes the list, and tells screen readers of new questions, plans and stops.
+a request's or a stuck step's command or file ("Permission needed", "Question for you", "Plan to
+approve", "Turn stopped", "Crews stopped", "Seems stuck", "Turn finished"; a stuck crew's says
+"<crew> seems stuck: the same step keeps failing." or, for rule 2, "<crew> seems stuck: it keeps
+repeating the same step."). An item the viewer could already see (the
+page in front, or notifications off) never pops up later, nor one that started to count more
+than two minutes ago (a reconnect or a page opened in the background); changes that arrive
+together (a reconnect's history) are checked once. A permission request waits until its request
+reaches the town (or three seconds), so it is worded right the first time. No "Turn finished"
+while only one of your crews is in town, and nothing for someone watching a team town with its
+view link. The same watcher keeps the page title's count current in a background tab, redraws
+the HUD when the clock alone changes the list, and tells screen readers of new questions, plans,
+stops and stuck agents, in the item's words without backticks.
 
 ### 4.11 Team town
 
@@ -688,8 +699,9 @@ sets them).
 `spawn.request`, `spawn.result`, `message.send`, `unknown`. `tool.start` carries
 `{toolUseId, tool, input, building, activity, summary, callKey}` where `summary` is a short human
 string ("Read src/auth/login.ts", "$ npm test", "grep \"TODO\" in src") and `callKey` the server's
-key for the call's input (`andary_key`, §4.6), or null. `turn.stop` carries `interrupted` (Codex's
-interrupt).
+key for the call's input (`andary_key`, §4.6), or null. `tool.fail` adds `error` (its first line)
+and `errorText` (every line, up to 2,000 characters, for the stuck rules). `turn.stop` carries
+`interrupted` (Codex's interrupt).
 
 `store.js` keeps sessions (crews), agents, tasks/todos, approvals, the activity log (ring buffer)
 and stats, and emits change notifications. `director.js` turns TownEvents into world calls and
@@ -744,7 +756,8 @@ AgentState { key, sessionId, agentId: string|null, name, role: 'lead'|'subagent'
              changes: FileChange[] /* finished Edit/MultiEdit/Write/NotebookEdit, ≤ 20, newest last */,
              recent: LogEntry[] /* ≤ 30 */, errors: number, lastMessage?,
              wait: Wait|null /* what it waits for you on, below */,
-             movedAt /* hook time it last moved on: a prompt, a tool call… */ }
+             movedAt /* hook time it last moved on: a prompt, a tool call… */,
+             stuck: Stuck|null /* why it seems stuck, below */ }
 Wait { kind: 'finished'|'stopped', since /* hook time */, text /* one line */,
        idleAt: number|null /* finished: when idle_prompt said nobody answered */,
        cause: string|null /* stopped: StopFailure's error code */ }
@@ -754,8 +767,11 @@ Dialog { id, sessionId, agentId: string|null, kind: 'permission'|'question'|'pla
          requested: boolean /* its permission request came */,
          begun: boolean /* its PreToolUse came */, text /* what it is about */ }
          // StoreState.dialogs: open ones
-LogEntry { id, ts, sessionId, agentKey, agentName, color, kind, icon, text,
-           level: 'info'|'success'|'warn'|'error' }
+Stuck { rule: 1|2|3, step /* short, for display: "npm test" */,
+        since /* when the episode started */, count /* failures (rules 1, 3) or runs (rule 2) */,
+        text /* "Seems stuck: `npm test` failed 3 times, nothing changed" */ }
+LogEntry { id, ts, sessionId, agentKey, agentName, color, kind /* a TownEvent kind, 'approval',
+           'achievement' or 'stuck' */, icon, text, level: 'info'|'success'|'warn'|'error' }
 Achievement { id, title, description, icon, unlockedAt }
 FileChange { id, path /* relative to the crew's folder */, tool, ts, whole: boolean /* Write */,
              hunks: { before: string, after: string }[] /* from tool_input, ≤ 4,000 characters each */ }
@@ -789,7 +805,7 @@ queued behind it starts none.
 
 ```js
 AttentionItem { id /* one per episode: dialog:agentKey:at:input, kind:agentKey:since, limit:since */,
-                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'finished',
+                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'finished',
                 level: 'blocked'|'stopped'|'alert'|'ready', sessionId, agentKey,
                 agentKeys: string[] /* everyone it stands for */,
                 approvalId: string|null /* a request the town holds */, since, countedSince,
@@ -799,15 +815,91 @@ AttentionItem { id /* one per episode: dialog:agentKey:at:input, kind:agentKey:s
 
 A permission dialog is an `approval` item while the town holds its request, else `terminal`;
 its id stays the same either way. A dialog the town does not hold can be set aside once it has
-waited `STALE_DIALOG_MS` (five minutes): it may be stale, as an interrupted helper sends nothing. A finished turn is listed at once and counted from
-`idle_prompt` (Codex: `CODEX_IDLE_MS`, a minute) for `READY_MS` (30 minutes). Stops by one rate
-limit (`cause: 'rate_limit'`) within ten minutes merge into one item for all their agents (two
-crews at least: a lead and its helper are one crew). Ended
+waited `STALE_DIALOG_MS` (five minutes): it may be stale, as an interrupted helper sends nothing. An
+agent's `stuck` is a `stuck` item of its own (level `alert`, counted, dismissable, settled; its id
+carries the episode's start), also while the agent waits for you on something else. A finished turn
+is listed at once and counted from `idle_prompt` (Codex: `CODEX_IDLE_MS`, a minute) for `READY_MS`
+(30 minutes). Stops by one rate limit (`cause: 'rate_limit'`) within ten minutes merge into one
+item for all their agents (two crews at least: a lead and its helper are one crew). Ended
 sessions and teammates' crews are left out. `ui/needs-you.js` adds the viewer's dismissals
-(stops and finished turns, kept in `localStorage["andary:dismissed"]` for a day and shared with the
-town's other tabs; someone watching a team town with its view link gets no items, as they can
-answer nothing) and drives the masthead button (its name: the visible words, then where a click
-goes), the `I` key, the page title, the crew rows, the inspector and the desktop notifications.
+(stops, stuck alerts and finished turns, kept in `localStorage["andary:dismissed"]` for a day and
+shared with the town's other tabs; someone watching a team town with its view link gets no items,
+as they can answer nothing) and drives the masthead button (its name: the visible words, then
+where a click goes), the `I` key, the page title, the crew rows, the inspector and the desktop
+notifications. A crew row says how long: "waiting for 4m 05s", "finished 4m 05s ago", "stuck for
+4m 05s".
+
+**Shell** (`core/shell.js`, pure, shared with the server): the one reader of Bash and
+PowerShell command lines. `readShell(command, { powershell?, folder?, root?, resolve? }) →
+{ segments, pipefail, truncated }` reads a string or a Codex argument list (at most
+`MAX_SHELL_CHARS`, 20,000) into segments, one per simple command, each `{ text, argv, words,
+program, redirects, separator, pipeline, condition, succeeded, decides, depth, folder }`: its text
+as written; its words with quotes resolved, redirections and leading keywords left out; its program
+behind assignments, wrappers and launchers (`programOf`); its redirections `{ op, fd, target,
+body }` with here-document bodies; the separator after it (`&&`, `||`, `;`, `|`, `|&`, `&`, '');
+its pipeline; what the line's exit status proves of it (pipes, `||`, `&`, conditions, `set -o
+pipefail`); 1 inside a shell's `-c` script, which is read in its place one level deep; and, given a
+starting folder, where it runs after `cd`, `pushd`/`popd` (`Set-Location`, `sl`, `Push-Location`,
+`Pop-Location`), `env -C` and `cd "$(git rev-parse --show-toplevel)"` (with `root`), unknown
+(`null`) for `~`, `$VAR`, `cd -` or past `MAX_MOVES` (64) moves. `shellCommands(command, options)
+→ { words, succeeded, decides }[]` is the short form; `isTestRun(words)` and `gitAction(words)`
+read a program's words; `normalizedPath(path)` drops `.` and `..`. It never throws.
+
+**Stuck** (`core/loops.js`, pure; docs/design/agent-health.md §4). The store runs it after each
+event and keeps the result on `AgentState.stuck` (and a `stuck` log line, level `warn`, when an
+episode starts); the server's notifier runs the same module for its phone note (§4.10), and the
+boundary check lists it among the core modules the server may import. Each side maps its events
+to the module's own input: a finished call `{ agent, folder, tool, input, ok, error, at }`
+(PostToolUse; PostToolUseFailure and PermissionDenied are failures; shell commands are read
+through `core/shell.js`, PowerShell's in its mode; `error` is the whole error
+text, `tool.fail`'s `data.errorText` in the town, or a refusal's reason; `at` is the hook's own
+time, `e.ts` in the town, `hookTime` on the server) or a fresh start, `reset(agent)`, and
+`resetAll(belongs)` when a session ends.
+
+- **The same step**: a shell command read inside one level of `bash|sh|zsh -c|-lc '…'`, with
+  whitespace collapsed, a leading `sleep N &&` and a trailing `2>&1`, `| tail …`, `| head …`
+  dropped, and a trailing `| grep …` too after a test or build run; leading `cd <dir> &&` are
+  followed, from the hook's cwd, to the folder the command runs in, which is part of the step
+  (`cd packages/a && npm test` is not `cd packages/b && npm test`; a `cd` into the cwd or `.` is
+  nothing); file tools by tool and path (`Read` adds offset and limit); `Grep`/`Glob` by tool,
+  pattern and path; anything else by tool and its input as JSON with sorted keys; each key cut at
+  300 characters.
+- **A change** (progress): a successful Edit, MultiEdit, Write, NotebookEdit or `apply_patch`, or
+  a successful shell command that changes files, judged by the command (`sed -i`, `perl -i`,
+  `--write`/`--fix`/`-w`, formatters, scripts named for format, fix, codegen, generate or
+  `build:types`, `node|python scripts/…`, git commands that rewrite the work tree or the index,
+  `patch`, package installs, `rm`/`mv`/`cp`/`mkdir`/`touch`, `>`/`>>`/`tee` to a file that is not
+  a log or temporary one, an inline python/node/ruby/perl/shell script that writes a file). It
+  counts for the agent that made it, every agent of any crew working in the same folder, and every
+  agent whose folder holds the changed file.
+- **Rules**, per agent: (1) the same step failed 3 times with no change in between; (2) the
+  identical step ran 5 times with no change in between, whatever its exit code; (3) the same step
+  failed 6 times within 20 minutes with the same error, changes or not: its first line that says
+  something (`errorSignature`: not blank, not `Exit code N`, not the command echoed back, not
+  npm's, pnpm's, yarn's, make's or CI's lines about a script failing, not a banner, a passing test
+  or a runner's header; times left out); a failure with no such line is left out of rule 3. A
+  success of the step ends 1 and 3, a change ends 1 and 2. When several hold, the words follow 1,
+  then 3, then 2.
+- **Order**: hooks arrive out of order, so each agent keeps the time of the latest change that
+  counted for it; a call made before it counts for rule 3 only; rule 3's window is in time order,
+  20 minutes back from the latest failure.
+- **A fresh start** forgets everything about the agent and ends its alert: a prompt, the turn
+  ending (`Stop`, `StopFailure`, a Codex interrupt), an interrupt (`is_interrupt`: you are at the
+  terminal, so it is no failure), the agent finishing (`SubagentStop`, a teammate's
+  `TeammateIdle`), its session starting again (not after a compaction) or ending.
+- **Steps that wait or poll by nature** are never counted, under any rule: `BashOutput`,
+  `TaskOutput`, `Monitor`, `ScheduleWakeup`, `WaitForMcpServers`, `TaskList`, `TaskGet`; a `Read`
+  (or a shell command) of a background task's output file (`…/tasks/<id>.output`); shell commands
+  that loop with `sleep`; and shell commands (read inside `bash -lc '…'`) whose every part waits,
+  besides `cd` and `echo`: `sleep`, `watch`, CI and deployment checks (`gh run watch|view|list`,
+  `gh pr checks|status`, `gh pr view --json statusCheckRollup`, `gh api` on runs and checks,
+  `glab ci`, `kubectl rollout status|wait`, `kubectl get pods`), health checks (`curl …/health`,
+  `curl -f` or `wget` of localhost), logs and processes (`tail … *.log`, `ps`, `pgrep`, `docker
+  ps`, `docker compose ps`, `lsof -i`). `sleep 5 && npm test` is the test run.
+- **One alert per agent**: while any of its steps stays stuck the episode goes on (`since` kept,
+  the step run most recently shown, its count updated). Memory is bounded: 200 agents (the one
+  quiet the longest goes first, its alert ending with it), 64 steps each (one that has not failed
+  goes first, else the one run the longest ago), 12 failures per step.
 
 `director.js`: `createDirector({ world, store, backlog?, humor?, random? }) → { dispose() }`
 subscribes to the store and drives the world. `recordChanges(store) → { stop() }` keeps the
@@ -883,7 +975,9 @@ World {
   say(id, text: string, opts?: { ms?: number, tone?: 'speech'|'thought'|'shout'|'code' }): void
   emote(id, emoji: string): void
   setBadge(id, text: string|null): void            // chip beside the name, e.g. "×4"
-  weather(id, kind: 'rain'|'storm'|null): void     // personal cloud over an agent
+  weather(id, kind: 'rain'|'storm'|null): void     // personal cloud over an agent: the director
+    // sends rain after failures, and a storm for a failed turn or while the agent seems stuck
+    // (AgentState.stuck; another step succeeding meanwhile does not clear it)
 
   effect(kind: EffectKind, at: {agent: string}|{building: BuildingKey}, opts?: { color?: string }): void
   sendMessage(fromId: string, to: {agent: string}|{building: BuildingKey}): Promise<void>  // paper plane
@@ -1016,10 +1110,10 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="login-hint"]` | shown when a server is running but the browser has no valid token |
 | `[data-testid="demo-button"]` | starts the simulation (shown when there is nothing live to watch) |
 | `[data-testid="crew-list"]` | crews panel; children `[data-testid="crew"][data-session-id]` |
-| `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects |
-| `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn or stop aside |
+| `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects; `data-need` is the level of what it needs you for |
+| `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn, stop or stuck alert aside |
 | `[data-testid="waiting-for-you"]` | the masthead's "N need you" button (`data-level` is the most urgent level); click goes to the next item |
-| `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn or a stop aside |
+| `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn, a stop or a stuck alert aside |
 | `[data-testid="activity-log"]` | log; children `[data-testid="log-entry"]` |
 | `[data-testid="tasks-panel"]` | goals/tasks; children `[data-testid="task-item"]` |
 | `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]`, and, when a rule can be saved, `[data-testid="approve-always"]` with the rule in `[data-testid="approve-always-rule"]`; a hint in `[data-testid="approval-hint"]` |

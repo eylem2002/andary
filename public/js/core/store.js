@@ -1,8 +1,9 @@
 // The single source of truth the HUD renders and the director follows (CONTRACTS.md §5.1).
 // It applies TownEvents to crews (sessions), agents, todos/tasks, approvals, the activity log and
-// stats; works out who each event belongs to (subagent labels, teammate names); and unlocks
-// achievements. The town may open mid-session, so every session or agent an event mentions is
-// created on first sight.
+// stats; works out who each event belongs to (subagent labels, teammate names); keeps what each
+// agent has asked you (store-dialogs.js) or waits for you on (waits.js), and whether it seems
+// stuck (loops.js); and unlocks achievements. The town may open mid-session, so every session or
+// agent an event mentions is created on first sight.
 
 import { ACHIEVEMENTS, achievementFor } from './achievements.js';
 import { BUILDINGS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
@@ -61,7 +62,7 @@ export { ACHIEVEMENTS };
  * @property {string} agentKey
  * @property {string} agentName
  * @property {string} color
- * @property {string} kind     TownEvent kind, or 'approval' / 'achievement'
+ * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck'
  * @property {string} icon
  * @property {string} text
  * @property {'info'|'success'|'warn'|'error'} level
@@ -94,6 +95,7 @@ export { ACHIEVEMENTS };
  * @property {string} [model]
  * @property {import('./waits.js').Wait|null} wait  what it waits for you on, if anything (waits.js)
  * @property {number} movedAt  when it last moved on (a prompt, a tool call…): a stop sent earlier is stale
+ * @property {import('./loops.js').Stuck|null} stuck  why it seems stuck, if it does (loops.js)
  */
 
 /**
@@ -583,12 +585,83 @@ function apply(m, input) {
   if (a) setWait(a, e);
   // A teammate's crew (a team town) is theirs to answer: its dialogs are not kept.
   if (!s.member && dialogsAfterEvent(m.dialogs, e, a ? a.agentId : e.agentId)) m.state.dialogs = m.dialogs.list();
+  const newlyStuck = followLoops(m, e, s, a);
   if (relabels.length) e.data.relabels = relabels;
   s.lastActivity = Math.max(s.lastActivity, e.ts);
   if (a) a.lastActivity = Math.max(a.lastActivity, e.ts);
   if (s.status !== 'ended') s.status = sessionStatus(m, s);
   if (draft) pushLog(m, e, s, a, draft);
+  for (const change of newlyStuck) logStuck(m, e, s, change);
   return e;
+}
+
+/**
+ * The activity log's line when an agent starts to seem stuck, after the line of the event that
+ * did it.
+ * @param {Model} m
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {import('./loops.js').LoopChange} change
+ */
+function logStuck(m, e, s, change) {
+  pushLog(m, { ...e, kind: 'stuck' }, s, m.state.agents[change.agent], { icon: '🔁', text: change.stuck?.text ?? '', level: 'warn' });
+}
+
+/** Events after which an agent starts afresh for the stuck rules: its turn ended, you sent a prompt, it finished. */
+const FRESH_STARTS = new Set(['prompt', 'turn.stop', 'turn.fail', 'subagent.stop']);
+/** Finished tool calls, for the stuck rules: a success, a failure, or a refusal (a failure too). */
+const FINISHED_CALLS = new Set(['tool.end', 'tool.fail', 'permission.denied']);
+
+/**
+ * Runs the stuck rules (loops.js) on an event and keeps every alert it starts, changes or ends on
+ * its agent: one agent's change can end another's alert. Returns the alerts that just started.
+ * @param {Model} m
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {AgentState|undefined} a
+ * @returns {import('./loops.js').LoopChange[]}
+ */
+function followLoops(m, e, s, a) {
+  /** @type {import('./loops.js').LoopChange[]} */
+  let changes = [];
+  // A session's end forgets all its agents, those it no longer lists too.
+  if (e.kind === 'session.end') changes = m.loops.resetAll((key) => key.startsWith(`${s.id}:`));
+  else if (!a) return [];
+  else if (startsAfresh(e, a)) changes = m.loops.reset(a.key);
+  else if (FINISHED_CALLS.has(e.kind)) changes = m.loops.record(loopCall(e, s, a));
+  for (const change of changes) {
+    const agent = m.state.agents[change.agent];
+    if (agent) agent.stuck = change.stuck;
+  }
+  return changes.filter((change) => change.started && m.state.agents[change.agent]);
+}
+
+/**
+ * @param {TownEvent} e
+ * @param {AgentState} a
+ */
+function startsAfresh(e, a) {
+  if (FRESH_STARTS.has(e.kind)) return true;
+  // A teammate going idle ends its turn; one the store cannot place lands on the lead: not its turn
+  // (as waits.js has it).
+  if (e.kind === 'teammate.idle') return a.role === 'teammate';
+  // A compaction carries on with the same work, loops and all.
+  if (e.kind === 'session.start') return e.data.source !== 'compact';
+  // You interrupted it, so you are at its terminal: like a prompt, not a failure.
+  return e.kind === 'tool.fail' && e.data.isInterrupt === true;
+}
+
+/**
+ * A finished tool call as the stuck rules read it.
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {AgentState} a
+ * @returns {import('./loops.js').LoopCall}
+ */
+function loopCall(e, s, a) {
+  const ok = e.kind === 'tool.end';
+  const error = e.kind === 'permission.denied' ? str(e.data.reason) || 'Permission denied' : str(e.data.errorText);
+  return { agent: a.key, folder: e.cwd || s.cwd, tool: e.data.tool, input: e.data.input, ok, error: ok ? '' : error, at: e.ts };
 }
 
 /**

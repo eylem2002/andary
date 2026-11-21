@@ -73,8 +73,10 @@ once, in `page.js`, and the HUD and the town's environment take it from there. T
 the few core modules both sides must read the same way: identifiers, dates, text helpers, prices,
 the growth rules, when an agent is waiting for you (open dialogs: the phone notes, the approval
 broker and the town's "needs you" follow one model), what an approval card shows of a request
-(card fields), and which permission rules an approval may offer to save (permission rules; the
-demo plays the server's part there).
+(card fields), which permission rules an approval may offer to save (permission rules; the demo
+plays the server's part there), when an agent seems stuck (the town's alert and the phone's
+note follow one set of rules), and how a shell command line reads (`core/shell.js`, the one reader
+of Bash and PowerShell commands that every rule about what an agent ran goes through).
 
 **The world behind a facade.** The app talks to the 3D world only through `world/world.js`
 (CONTRACTS §6). Inside it, the town (`env/`) and the people (`agents/`) never import each other;
@@ -88,7 +90,7 @@ references may cross.
 | Area | May import |
 | --- | --- |
 | `hooks/` | Node built-ins only (it is copied out and must stand alone) |
-| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules` |
+| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules`, `loops`, `shell` |
 | `server/cli/`, `cli/` | the server, those core modules, the simulation (for `andary simulate`) |
 | `public/js/core/` | `core/` only |
 | `public/js/sources/` | `sources/`, `core/` |
@@ -112,6 +114,8 @@ references may cross.
 | the team town | `server/team.mjs`, `ingestTeam` in `server/ingest.mjs` |
 | how a hook becomes town events | `public/js/core/events.js`, `summaries.js` |
 | crews, agents, the log | `public/js/core/store.js`, `crews.js` |
+| what needs you, and when an agent seems stuck | `public/js/core/dialogs.js`, `store-dialogs.js`, `waits.js`, `attention.js`, `loops.js`, `public/js/ui/needs-you.js` |
+| how a shell command line reads (segments, programs, redirections, folders) | `public/js/core/shell.js` |
 | who walks where, and what they say | `public/js/core/director.js`, `director-queue.js`, `humor.js` |
 | the HUD | `public/js/ui/` (`hud.js` composes it) |
 | the town's buildings, sea, sky and looks | `public/js/world/env/`, `core/looks.js`, `page.js` |

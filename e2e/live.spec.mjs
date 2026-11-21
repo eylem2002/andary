@@ -304,6 +304,27 @@ test('what needs you: rows say what for, the button and I go through it, a stop 
   await expect(page).toHaveTitle('Andary');
 });
 
+test('a crew whose npm test fails three times with nothing changed seems stuck, and counts', async ({ page }) => {
+  await signIn(page);
+  const failure = (/** @type {string} */ id) => hook('PostToolUseFailure', { tool_name: 'Bash', tool_use_id: id, tool_input: { command: 'npm test 2>&1 | tail -40' }, error: 'Exit code 1\nFAIL test/app.test.js', is_interrupt: false });
+  for (const payload of [hook('SessionStart', { source: 'startup' }), failure('t1'), failure('t2'), failure('t3')]) {
+    expect(await town.sendHook(payload)).toMatchObject({ code: 0 });
+  }
+  const words = 'Seems stuck: `npm test` failed 3 times, nothing changed';
+  const row = page.locator('[data-testid="agent-row"][data-agent-key="e2e-session:main"]');
+  await expect(row).toContainText(words);
+  await expect(row).toHaveAttribute('data-need', 'alert');
+  const button = page.getByTestId('waiting-for-you');
+  await expect(button).toHaveAttribute('aria-label', `1 needs you. Next: ${words}`);
+  await expect(page).toHaveTitle('(1) Andary');
+  await expect(page.getByTestId('log-entry').filter({ hasText: words })).toHaveCount(1);
+
+  // An edit is progress: the alert ends, and nothing needs you.
+  await town.sendHook(hook('PostToolUse', { tool_name: 'Edit', tool_use_id: 'e1', tool_input: { file_path: '/work/e2e-app/src/app.js', old_string: 'a', new_string: 'b' }, tool_response: {} }));
+  await expect(button).toBeHidden();
+  await expect(row).not.toContainText('Seems stuck');
+});
+
 test('with --notify-url, Settings shows the phone topic and sends a test', async ({ page }) => {
   await town.stop();
   town = await startTown({ args: ['--notify-url', 'http://127.0.0.1:9/e2e-topic'] });

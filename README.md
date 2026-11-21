@@ -174,12 +174,25 @@ whether a command asks to leave its sandbox, so a Codex command's card says that
 When an agent stops for you (a permission request, a question, a plan to approve, a turn that
 stopped on an error, or a finished turn nobody answered for a minute), its row in **Crews** says
 what for and how long it has waited, the browser tab reads **(2) Andary**, and a **2 need you**
-button sits at the top right: yellow while an agent is blocked or stopped, quieter when crews only
-finished their turns. Click it (or press `I`) to go to the most urgent: a request the town can
-answer opens its card in Approvals, anything else selects the agent; click again for the next.
-A stop or a finished turn can be set aside from its row or the agent's details, and so can a
-request still waiting after five minutes, in case it is stale. With
+button sits at the top right: yellow while an agent is blocked, stopped or stuck, quieter when
+crews only finished their turns. Click it (or press `I`) to go to the most urgent: a request the
+town can answer opens its card in Approvals, anything else selects the agent; click again for the
+next. A stop, a stuck alert or a finished turn can be set aside from its row or the agent's
+details, and so can a request still waiting after five minutes, in case it is stale. With
 notifications on (Settings), each new one also pops up while the tab is in the background.
+
+An agent that **seems stuck** counts too: one whose step failed three times with nothing changed
+in between, ran five times with nothing changed whatever its exit code (`npm test 2>&1 | tail`
+reports tail's exit code, not the tests'), or failed six times in 20 minutes with the same error
+(the first line that says something, not `Exit code 1` or npm's own lines). A step is the command
+and the folder it runs in, so `cd packages/a && npm test` and `cd packages/b && npm test` are two.
+Its row says so ("Seems stuck: `npm test` failed 3 times, nothing changed"), a storm gathers over
+it in the town, and the activity log notes when it started. An edit by any agent in the same
+folder is progress and ends the alert, and so is a command that writes files (`sed -i`, a
+formatter, `cat > file`, a script that writes); so do your next prompt, the turn ending, and, for a
+step that kept failing, the step working at last. Steps that wait by nature (reading a background
+task's output, `sleep` loops, `gh run watch` and other CI checks, health checks, `ps` or `docker
+ps`) never count.
 
 ### Everything else
 
@@ -187,7 +200,7 @@ notifications on (Settings), each new one also pops up while the tab is in the b
   Claude Code's own transcripts (on a Pro or Max plan, a measure of value, not a bill). `U` opens
   today's total and the last 14 days.
 - **Weather:** rain when commands fail, a storm when they keep failing, a rainbow when tests pass
-  again, fog while a crew thinks for a long time.
+  again, fog while a crew thinks for a long time; a storm cloud over an agent that seems stuck.
 - **The town grows:** finished turns and tasks earn points, and points build landmarks, from
   bunting at 10 to a golden dome on the Town Hall at 500. `L` shows how far the town has come.
 - **Town looks:** Settings → Town look: the sunset coast, a snowy village, a neon city, a desert
@@ -201,7 +214,9 @@ notifications on (Settings), each new one also pops up while the tab is in the b
   waits ten seconds, and none is sent if Andary sees the answer first: a decision in the town, the
   tool finishing after your answer in the terminal, or your next prompt. Andary sees a yes for a
   longer command only when it finishes, and a "No" only at your next prompt, so those can still
-  send one.
+  send one. An agent that seems stuck sends one note each time it gets stuck ("A crew seems
+  stuck: the same step keeps failing", or "…: it keeps repeating the same step" for a step run
+  over and over that need not fail).
 
 ![The town's five looks](docs/media/andary-looks.webp)
 

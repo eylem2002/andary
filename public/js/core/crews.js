@@ -115,6 +115,7 @@ export function baseAgent(s, key, agentId, ts) {
     model: undefined,
     wait: null,
     movedAt: 0,
+    stuck: null,
   };
 }
 
@@ -325,6 +326,7 @@ export function dropAgent(m, s, key) {
   m.awaiting.delete(key);
   m.turnFailed.delete(key);
   m.spawnOf.delete(key);
+  m.loops.reset(key);
 }
 
 /** @param {Model} m @param {Session} s */

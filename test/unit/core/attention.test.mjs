@@ -284,6 +284,44 @@ describe('attentionItems', () => {
     assert.equal(t.items(T0 + 81_000, dismissed).filter((i) => i.kind === 'finished').length, 1, 'a new turn is a new item');
   });
 
+  test('an agent that seems stuck is an alert: counted, and set aside until its next episode', () => {
+    const t = town();
+    /** @param {number} ts */
+    const red = (ts) => t.send('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_use_id: `t${ts}`, error: 'Exit code 1\nTypeError: token is undefined', is_interrupt: false }, ts);
+    red(T0);
+    red(T0 + 1);
+    assert.deepEqual(t.items(T0 + 10), []);
+    red(T0 + 2);
+    let [item] = t.items(T0 + 10);
+    assert.deepEqual(
+      [item.kind, item.level, item.counted, item.dismissable, item.since, item.id, item.text],
+      ['stuck', 'alert', true, true, T0 + 2, `stuck:${LEAD}:${T0 + 2}`, 'Seems stuck: `npm test` failed 3 times, nothing changed'],
+    );
+    assert.deepEqual([item.agentKeys, item.settled], [[LEAD], true], 'its own agent, and nothing left to change its kind');
+    const dismissed = new Set([item.id]);
+    red(T0 + 3);
+    assert.deepEqual(t.items(T0 + 10, dismissed), [], 'still the same episode: still set aside');
+    t.send('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: '/home/dev/code/api-server/src/auth/login.ts', old_string: 'a', new_string: 'b' }, tool_response: {}, tool_use_id: 'e1' }, T0 + 4);
+    assert.deepEqual(t.items(T0 + 10), [], 'a change ends it');
+    red(T0 + 5);
+    assert.deepEqual(t.items(T0 + 10), []);
+    red(T0 + 6);
+    [item] = t.items(T0 + 10, dismissed);
+    assert.deepEqual(
+      [item?.kind, item?.since, item?.text],
+      ['stuck', T0 + 6, 'Seems stuck: `npm test` failed 6 times with the same error'],
+      'four failures before the change and two after, all alike: stuck again, a new item',
+    );
+  });
+
+  test('a stuck agent that asks you something has both items, the question first', () => {
+    const t = town();
+    for (const ts of [T0, T0 + 1, T0 + 2]) t.send('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_use_id: `t${ts}`, error: 'Exit code 1', is_interrupt: false }, ts);
+    t.send('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Skip the flaky test?' }] }, tool_use_id: 'q1' }, T0 + 3);
+    assert.deepEqual(t.items(T0 + 10).map((i) => [i.kind, i.level]), [['question', 'blocked'], ['stuck', 'alert']]);
+    assert.equal(countedItems(t.items(T0 + 10)).length, 2);
+  });
+
   test("teammates' crews and ended crews are not yours to answer", () => {
     const t = town();
     t.store.ingest(envelope({ ...hook('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: {}, tool_use_id: 'q' }), andary_member: 'sam', session_id: 'sam~s9' }, T0));
