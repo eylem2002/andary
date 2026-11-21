@@ -9,10 +9,13 @@
 //     by name only, as Claude Code adds your answer to their input; a call an adapter renamed by
 //     name too, as its input was rewritten);
 //   - the town deciding the request it holds for it;
-//   - your prompt (the lead's dialogs only: a helper's request held in the town does not stop you
-//     typing), the agent's turn ending, or the session ending.
+//   - your prompt or /compact (the lead's dialogs only: a helper's request held in the town does
+//     not stop you typing), the agent's turn ending (also in an error, or a teammate going idle),
+//     or the session ending.
 // A request that went back to the terminal (timed out, released) is no proof, and neither is a
-// new request from the same agent: parallel tool calls each ask on their own.
+// new request from the same agent: parallel tool calls each ask on their own. A session's notice
+// (whose dialog is unknown) closes when the lead starts a new call, never on a tool result.
+// afterHook() is the table of which hook does what; every consumer follows it.
 import { isObject, shellWords } from './text.js';
 
 /** Tools that stop the agent until you answer them in the terminal. */
@@ -165,6 +168,16 @@ export function createDialogs({ max = 200 } = {}) {
       return close((d) => d.sessionId === sessionId && d.agentId === agentId);
     },
 
+    /**
+     * The lead started a new tool call: a session's notice that came before it was answered (an
+     * agent waiting on a dialog starts nothing). Tool results prove nothing for such a dialog: a
+     * parallel call may finish while it still waits.
+     * @param {string} sessionId @param {number} at @returns {Dialog[]}
+     */
+    movedOn(sessionId, at) {
+      return close((d) => d.sessionId === sessionId && d.kind === 'unknown' && d.at <= at);
+    },
+
     /** The session ended or was interrupted: all of its dialogs. @param {string} sessionId @returns {Dialog[]} */
     closeSession(sessionId) {
       return close((d) => d.sessionId === sessionId);
@@ -180,14 +193,80 @@ export function createDialogs({ max = 200 } = {}) {
       return open.some((d) => d.id === id);
     },
 
-    /** Open dialogs, oldest first. Read-only. @returns {readonly Dialog[]} */
+    /** Open dialogs, oldest first (a copy). @returns {Dialog[]} */
     list() {
-      return open;
+      return open.slice();
     },
   };
 }
 
 /** @typedef {ReturnType<typeof createDialogs>} Dialogs */
+
+/**
+ * @typedef {object} HookStep  one hook as the dialog rules read it
+ * @property {string} hook          its name: PermissionRequest, PostToolUse, …
+ * @property {Call} call            whose and which call (tools and input when it has any)
+ * @property {number} at            the hook's time
+ * @property {string} [text]        what a dialog it opens is about
+ * @property {string} [notice]      Notification: its notification_type
+ * @property {string} [trigger]     PreCompact: manual or auto
+ * @property {boolean} [interrupted]  Stop: Codex's interrupt
+ */
+
+/** @typedef {{ opened: Dialog|null, closed: Dialog[] }} HookChange */
+
+/** @type {HookChange} */
+const NO_CHANGE = Object.freeze({ opened: null, closed: [] });
+
+/** @param {{ dialog: Dialog, opened: boolean }} asked @returns {HookChange} */
+const opening = (asked) => ({ opened: asked.opened ? asked.dialog : null, closed: [] });
+/** @param {Dialog[]} closed @returns {HookChange} */
+const closing = (closed) => ({ opened: null, closed });
+
+/** @type {Readonly<Record<string, (d: Dialogs, step: HookStep) => HookChange>>} */
+const HOOK_RULES = Object.freeze({
+  PermissionRequest: (d, s) => opening(d.ask(s.call, s.at, s.text)),
+  PreToolUse: toolStarted,
+  Notification: (d, s) => {
+    if (s.notice !== 'permission_prompt') return NO_CHANGE;
+    return { opened: d.notice(s.call.sessionId, s.at, s.text), closed: [] };
+  },
+  PostToolUse: (d, s) => closing(d.result(s.call)),
+  PostToolUseFailure: (d, s) => closing(d.result(s.call)),
+  PermissionDenied: (d, s) => closing(d.result(s.call)),
+  // You typed (a prompt, or /compact): the lead's dialogs were answered.
+  UserPromptSubmit: (d, s) => closing(d.prompted(s.call.sessionId)),
+  PreCompact: (d, s) => (s.trigger === 'manual' ? closing(d.prompted(s.call.sessionId)) : NO_CHANGE),
+  // Codex's interrupt arrives as an interrupted Stop: you are at that session's terminal.
+  Stop: (d, s) => closing(s.interrupted ? d.closeSession(s.call.sessionId) : d.stopped(s.call.sessionId, s.call.agentId)),
+  SubagentStop: (d, s) => closing(d.stopped(s.call.sessionId, s.call.agentId)),
+  StopFailure: (d, s) => closing(d.stopped(s.call.sessionId, s.call.agentId)),
+  // One without an agent id cannot be placed: it must not close the lead's.
+  TeammateIdle: (d, s) => (s.call.agentId === null ? NO_CHANGE : closing(d.stopped(s.call.sessionId, s.call.agentId))),
+  SessionEnd: (d, s) => closing(d.closeSession(s.call.sessionId)),
+});
+
+/**
+ * A question or a plan stops the agent until you answer, permission or not. Any other call the
+ * lead starts means it got past a dialog its session only told of.
+ * @param {Dialogs} d @param {HookStep} s @returns {HookChange}
+ */
+function toolStarted(d, s) {
+  if (kindOf(s.call.tools) !== 'permission') return opening(d.ask(s.call, s.at, s.text));
+  return s.call.agentId === null ? closing(d.movedOn(s.call.sessionId, s.at)) : NO_CHANGE;
+}
+
+/**
+ * What one hook does to the dialogs: the one table the phone notes, the approval broker and the
+ * town all follow, so they agree on when an agent waits for you.
+ * @param {Dialogs} dialogs
+ * @param {HookStep} step
+ * @returns {HookChange}
+ */
+export function afterHook(dialogs, step) {
+  const rule = Object.hasOwn(HOOK_RULES, step.hook) ? HOOK_RULES[step.hook] : null;
+  return rule ? rule(dialogs, step) : NO_CHANGE;
+}
 
 /**
  * cyrb53: a fast 53-bit string hash (public domain, bryc). Equal inputs give equal keys; unequal

@@ -3,7 +3,7 @@
 // could otherwise be lost.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { createDialogs, inputKey } from '../../../public/js/core/dialogs.js';
+import { afterHook, createDialogs, inputKey } from '../../../public/js/core/dialogs.js';
 
 const S = 'session-1';
 const lead = (/** @type {string[]} */ tools, /** @type {unknown} */ input = {}) => ({ sessionId: S, agentId: null, tools, input: inputKey(input) });
@@ -109,5 +109,57 @@ describe('inputKey', () => {
     assert.notEqual(inputKey({ command: ['rm', 'a b'] }), inputKey({ command: 'rm a b' }));
     assert.notEqual(inputKey({ command: 'npm test' }), inputKey({ command: 'npm test ' }));
     assert.equal(inputKey(undefined), inputKey(null));
+  });
+});
+
+describe('afterHook: the one table every consumer follows', () => {
+  /** @param {ReturnType<typeof createDialogs>} d @param {string} hook @param {Record<string, any>} [extra] @param {import('../../../public/js/core/dialogs.js').Call} [call] */
+  const step = (d, hook, extra = {}, call = lead(['Bash'], { command: 'npm publish' })) => afterHook(d, { hook, call, at: 10, ...extra });
+
+  test('a request opens; its own result closes it', () => {
+    const d = createDialogs();
+    assert.equal(step(d, 'PermissionRequest').opened?.kind, 'permission');
+    assert.equal(step(d, 'PostToolUse').closed.length, 1);
+    assert.equal(step(d, 'PreToolUse', {}, lead(['AskUserQuestion'])).opened?.kind, 'question');
+    assert.equal(step(d, 'PermissionRequest', {}, lead(['AskUserQuestion'])).opened, null, 'its permission request joins it');
+  });
+
+  test('every way a turn ends closes its dialogs; an idle teammate nobody can place closes none', () => {
+    for (const [hook, extra, who] of /** @type {const} */ ([
+      ['Stop', {}, null],
+      ['StopFailure', {}, null],
+      ['SubagentStop', {}, 'h1'],
+      ['TeammateIdle', {}, 'h1'],
+      ['UserPromptSubmit', {}, null],
+      ['PreCompact', { trigger: 'manual' }, null],
+      ['SessionEnd', {}, 'h1'],
+    ])) {
+      const d = createDialogs();
+      const call = { ...lead(['Bash']), agentId: who };
+      step(d, 'PermissionRequest', {}, call);
+      assert.equal(step(d, hook, extra, call).closed.length, 1, hook);
+    }
+    const d = createDialogs();
+    step(d, 'PermissionRequest');
+    assert.equal(step(d, 'TeammateIdle').closed.length, 0, "a TeammateIdle without an agent id is not the lead's");
+    assert.equal(step(d, 'PreCompact', { trigger: 'auto' }).closed.length, 0, 'Claude Code compacting by itself is not you');
+    assert.equal(step(d, 'Stop', { interrupted: true }, { ...lead(['Bash']), agentId: 'h1' }).closed.length, 1, "Codex's interrupt: the whole session");
+  });
+
+  test("a session's notice closes when the lead starts a new call after it, never on a tool result", () => {
+    const d = createDialogs();
+    afterHook(d, { hook: 'PreToolUse', call: lead(['Bash'], { command: 'curl x' }), at: 1 });
+    assert.equal(afterHook(d, { hook: 'Notification', notice: 'permission_prompt', call: lead([]), at: 2, text: 'Claude needs your permission' }).opened?.kind, 'unknown');
+    assert.equal(afterHook(d, { hook: 'PostToolUse', call: lead(['Read'], { file_path: 'x' }), at: 3 }).closed.length, 0, 'a parallel call finishing proves nothing');
+    assert.equal(afterHook(d, { hook: 'PreToolUse', call: helper(['Read']), at: 4 }).closed.length, 0, "a helper's call is not the lead's");
+    assert.equal(afterHook(d, { hook: 'PreToolUse', call: lead(['Read'], { file_path: 'y' }), at: 5 }).closed.length, 1);
+    assert.equal(afterHook(d, { hook: 'Notification', notice: 'idle_prompt', call: lead([]), at: 6 }).opened, null);
+  });
+
+  test('hooks with no rule change nothing', () => {
+    const d = createDialogs();
+    step(d, 'PermissionRequest');
+    assert.deepEqual(step(d, 'SessionStart'), { opened: null, closed: [] });
+    assert.equal(d.list().length, 1);
   });
 });
