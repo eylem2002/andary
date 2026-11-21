@@ -56,6 +56,7 @@ async function boot() {
       },
       setSpeed: (speed) => source?.setSpeed?.(speed),
       notifyTest: () => source?.notifyTest?.() ?? false,
+      requestDigest: (since) => source?.requestDigest(since) ?? false,
     },
   });
 
@@ -106,13 +107,15 @@ async function boot() {
       onError: (message) => hud.notify({ tone: 'error', icon: 'warning', title: message }),
       onProgress: (progress) => hud.setProgress(progress),
       onNotifyTest: (ok) => hud.notify(ok ? { icon: 'bell', title: 'Test notification sent', body: 'Check the ntfy app on your phone.' } : { tone: 'error', icon: 'warning', title: 'The test notification was not sent', body: 'The server could not reach ntfy, or sent one a moment ago.' }),
+      onDigest: (digest) => hud.setDigest(digest),
+      onAway: (away, offset) => hud.setAway(away, offset),
     });
   }
 
   /** @param {{ hosted: boolean }} options  hosted: no server at all, so offer the setup steps */
   async function startDemo({ hosted }) {
     const { createSimulation } = await import('./sim/simulation.js');
-    const demo = createDemo({ store, createSimulation, speed: prefs.speed, seed: seedParam(), onProgress: (progress) => hud.setProgress(progress) });
+    const demo = createDemo({ store, createSimulation, speed: prefs.speed, seed: seedParam(), onProgress: (progress) => hud.setProgress(progress), onDigest: (digest) => hud.setDigest(digest) });
     source = demo;
     app.mode = 'demo';
     hud.setMode('demo');

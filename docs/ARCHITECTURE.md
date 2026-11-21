@@ -15,7 +15,7 @@ How Andary is put together, and why. The exact interfaces (payloads, messages, A
  │                      `codex` argument)  signed reply)  │ adapters→ one event contract    │ │
  │                                                        │ ingest  → policy per origin:    │ │
  │  A teammate's Andary ──POST /api/team (member key)───▶ │   usage, growth, notifications, │ │
- │                                                        │   approvals, team relay         │ │
+ │                                                        │   approvals, digest, team relay │ │
  │                                                        │ record  → sanitize, history,    │ │
  │                                                        │   recording, broadcast          │ │
  │                                                        └──────────────┬──────────────────┘ │
@@ -48,8 +48,9 @@ browser) reads one format. A new agent is one new adapter (ADR 0013).
 
 **One ingest pipeline.** `server/ingest.mjs` is the only way an event enters the town. Routes
 only authenticate and parse. What an event does besides appearing in the town is decided by where
-it came from, in one table (`POLICIES`): a local event counts toward growth, notifications and
-approvals and is relayed to a team host; a teammate's event grows the town and nothing else.
+it came from, in one table (`POLICIES`): a local event counts toward growth, notifications,
+approvals and the catch-up (what your crews did while you were away) and is relayed to a team
+host; a teammate's event grows the town and nothing else.
 Token usage is read before the adapter, and only for Claude Code (its transcripts).
 
 **Security at every boundary.** The forwarder only talks to a live server of yours that proves it
@@ -75,8 +76,10 @@ the growth rules, when an agent is waiting for you (open dialogs: the phone note
 broker and the town's "needs you" follow one model), what an approval card shows of a request
 (card fields), which permission rules an approval may offer to save (permission rules; the demo
 plays the server's part there), when an agent seems stuck (the town's alert and the phone's
-note follow one set of rules), and how a shell command line reads (`core/shell.js`, the one reader
-of Bash and PowerShell commands that every rule about what an agent ran goes through).
+note follow one set of rules), how a shell command line reads (`core/shell.js`, the one reader
+of Bash and PowerShell commands that every rule about what an agent ran goes through: the
+catch-up's test runs, commits and pushes too), what an error is about (summaries) and what each
+crew did, for the catch-up (digest; the demo keeps the same counts).
 
 **The world behind a facade.** The app talks to the 3D world only through `world/world.js`
 (CONTRACTS §6). Inside it, the town (`env/`) and the people (`agents/`) never import each other;
@@ -90,7 +93,7 @@ references may cross.
 | Area | May import |
 | --- | --- |
 | `hooks/` | Node built-ins only (it is copied out and must stand alone) |
-| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules`, `loops`, `shell` |
+| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules`, `loops`, `shell`, `summaries`, `digest` |
 | `server/cli/`, `cli/` | the server, those core modules, the simulation (for `andary simulate`) |
 | `public/js/core/` | `core/` only |
 | `public/js/sources/` | `sources/`, `core/` |
@@ -110,6 +113,7 @@ references may cross.
 | how another agent's events are translated | `server/adapters/` |
 | what happens to an event on the server | `server/ingest.mjs` |
 | when an agent waits for you, and what each hook proves | `public/js/core/dialogs.js` (`afterHook`), `server/hook-steps.mjs` |
+| when you were away, and what your crews did meanwhile (Catch me up) | `server/digest.mjs`, `public/js/core/digest.js`, `public/js/core/shell.js`, `public/js/ui/catch-up.js` |
 | who may connect, and what they may do | `server/auth.mjs`, `server/browsers.mjs`, `server/security.mjs` |
 | the team town | `server/team.mjs`, `ingestTeam` in `server/ingest.mjs` |
 | how a hook becomes town events | `public/js/core/events.js`, `summaries.js` |

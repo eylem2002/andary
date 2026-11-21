@@ -72,6 +72,8 @@ describe('fromCodex', () => {
     assert.equal(ok.hook_event_name, 'PostToolUse');
     const [unknown] = fromCodex(codex('PostToolUse', { tool_name: 'Bash', tool_use_id: 'b', tool_input: { command: 'ls' }, tool_response: 'plain text' }));
     assert.equal(unknown.hook_event_name, 'PostToolUse', 'no exit code: not a failure');
+    // Only a found exit code proves the command succeeded (the catch-up reads it).
+    assert.deepEqual([ok.andary_exit_known, failure.andary_exit_known, unknown.andary_exit_known], [true, true, undefined]);
   });
 
   it('an interrupt ends the turn; permission requests and other events pass through unchanged', () => {

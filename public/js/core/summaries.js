@@ -1,6 +1,8 @@
 // Tool calls in a few words ("Read src/auth/login.ts", "$ npm test"), and what a shell command or
 // an error is about (tests, installs, pushes; not found, permission, timeout). Used by the event
-// normaliser, the approvals and the director. Pure, defensive, never throws.
+// normaliser, the approvals and the director, and by the server's catch-up (core/digest.js), which
+// reads a failed test run's error as the town does (a timeout is no red test). Pure, defensive,
+// never throws.
 
 import { clip, hostPath, isObject, listOf, oneLine, own, quoted, shortCommand, shortPath, str } from './text.js';
 

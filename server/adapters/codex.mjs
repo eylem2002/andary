@@ -7,7 +7,8 @@
 //     the files and their diffs (deletes stay `apply_patch`);
 //   - `spawn_agent` becomes an `Agent` call (a helper joins the crew);
 //   - a shell command that ends with a non-zero exit code becomes PostToolUseFailure (Codex has no
-//     failure event), so failures still bring rain;
+//     failure event), so failures still bring rain; one whose exit code was found is marked
+//     `andary_exit_known`, as only then does its PostToolUse prove it succeeded;
 //   - `Interrupt` becomes `Stop`.
 // A renamed tool call keeps Codex's own name in `andary_tool` and the call key of its original
 // input in `andary_key` (ingest keys every other call), so the approval it may have needed, asked
@@ -49,7 +50,7 @@ function toolEvents(event) {
   // Keyed before its input is rewritten: each payload made from it keeps the call's own key.
   if (event.tool_name === 'apply_patch') return patchEvents({ ...event, andary_tool: 'apply_patch', andary_key: inputKey(event.tool_input, { tool: event.tool_name, source: 'codex' }) });
   if (event.tool_name === 'spawn_agent') return [spawnEvent({ ...event, andary_tool: 'spawn_agent', andary_key: inputKey(event.tool_input, { tool: event.tool_name, source: 'codex' }) })];
-  const shell = event.tool_name === 'Bash' ? withShellCommand(event) : event;
+  const shell = event.tool_name === 'Bash' ? withExitKnown(withShellCommand(event)) : event;
   return [failed(shell) ?? shell];
 }
 
@@ -102,6 +103,26 @@ function withShellCommand(event) {
 }
 
 /**
+ * A finished command's exit code, when Codex said it.
+ * @param {Payload} event
+ * @returns {number|undefined}
+ */
+function exitCodeOf(event) {
+  const response = event.tool_response;
+  return [response?.exit_code, response?.exitCode, response?.metadata?.exit_code, event.exit_code].find((value) => Number.isInteger(value));
+}
+
+/**
+ * A finished command whose exit code was found, marked so: the catch-up states a test result, a
+ * commit or a push from a Codex command only then.
+ * @param {Payload} event
+ * @returns {Payload}
+ */
+function withExitKnown(event) {
+  return event.hook_event_name === 'PostToolUse' && exitCodeOf(event) !== undefined ? { ...event, andary_exit_known: true } : event;
+}
+
+/**
  * A finished command with a non-zero exit code, as PostToolUseFailure; null otherwise.
  * @param {Payload} event
  * @returns {Payload|null}
@@ -109,7 +130,7 @@ function withShellCommand(event) {
 function failed(event) {
   if (event.hook_event_name !== 'PostToolUse') return null;
   const response = event.tool_response;
-  const code = [response?.exit_code, response?.exitCode, response?.metadata?.exit_code, event.exit_code].find((value) => Number.isInteger(value));
+  const code = exitCodeOf(event);
   if (code === undefined || code === 0) return null;
   const output = [response?.stderr, response?.output, response?.stdout].find((value) => typeof value === 'string' && value.trim());
   const error = (output ?? `Exit code ${code}`).slice(0, ERROR_PREVIEW_CHARS);

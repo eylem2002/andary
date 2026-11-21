@@ -159,7 +159,7 @@ export { ACHIEVEMENTS };
 
 /** @typedef {{ date: string, tokens: number, costUsd: number }} UsageDay */
 
-/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'reset'}} StoreChange */
+/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'reset'}} StoreChange */
 
 /**
  * @typedef {object} Store
@@ -1022,7 +1022,8 @@ export function createStore(options = {}) {
       }
       const at = { ts, sessionId: str(next.sessionId), agentKey: agentKeyOf(str(next.sessionId), normalizeAgentId(next.agentId)) };
       const unlocked = unlock(ids, at);
-      emit({ type: 'approval', approval: next });
+      // The status before this change, so a reaction plays once (a late proof re-sends an expired one).
+      emit({ type: 'approval', approval: next, previous: previous ? str(previous.status) : null });
       for (const achievement of unlocked) emit({ type: 'achievement', achievement });
     },
     setUsage(record, days) {

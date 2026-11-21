@@ -410,6 +410,160 @@ test('two crews in one folder: an edit of the same file is a note on both rows, 
   await expect(row('e2e-second')).not.toContainText(words);
 });
 
+test('catch me up: W shows what each crew did, crews that need you first, and remembers when you looked', async ({ page }) => {
+  await signIn(page);
+  const crew = (/** @type {string} */ session, /** @type {string} */ cwd) => (/** @type {string} */ name, /** @type {Record<string, unknown>} */ extra = {}) => hook(name, { session_id: session, cwd, ...extra });
+  const api = crew('e2e-session', '/work/api-server');
+  const web = crew('e2e-other', '/work/web-app');
+  const docs = crew('e2e-third', '/work/docs-site');
+  const edit = { file_path: '/work/api-server/src/login.ts', old_string: 'if (user)', new_string: 'if (user && token)' };
+  for (const payload of [
+    api('SessionStart', { source: 'startup' }),
+    api('UserPromptSubmit', { prompt: 'Fix the login bug' }),
+    api('PreToolUse', { tool_name: 'Edit', tool_use_id: 'e1', tool_input: edit }),
+    api('PostToolUse', { tool_name: 'Edit', tool_use_id: 'e1', tool_input: edit, tool_response: {} }),
+    api('PostToolUse', { tool_name: 'Bash', tool_use_id: 'b1', tool_input: { command: 'npm test' }, tool_response: { stdout: 'ok' } }),
+    api('PostToolUse', { tool_name: 'Bash', tool_use_id: 'b2', tool_input: { command: 'git commit -am "Fix the login" && git push' }, tool_response: {} }),
+    api('Stop', { last_assistant_message: 'Fixed the login bug and pushed it.' }),
+    web('SessionStart', { source: 'startup' }),
+    web('PreToolUse', { tool_name: 'AskUserQuestion', tool_use_id: 'q1', tool_input: { questions: [{ question: 'Which port should the dev server use?' }] } }),
+    docs('SessionStart', { source: 'startup' }),
+  ]) {
+    expect(await town.sendHook(payload)).toMatchObject({ code: 0 });
+  }
+  await expect(page.locator('[data-testid="crew"][data-session-id="e2e-third"]')).toBeAttached();
+
+  await page.keyboard.press('w');
+  const dialog = page.getByTestId('catch-up');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId('catch-up-period')).toHaveText(/^Everything the town remembers: since \d\d:\d\d, when it started\.$/);
+  const lines = dialog.getByTestId('catch-up-crew');
+  await expect(lines).toHaveCount(2);
+  // The crew that needs you first, with the way to what it needs; then what the other one did.
+  await expect(lines.nth(0)).toHaveAttribute('data-session-id', 'e2e-other');
+  await expect(lines.nth(0).getByTestId('catch-up-need')).toContainText('Asks: Which port should the dev server use?');
+  await expect(lines.nth(1)).toContainText('api-server: 1 turn, tests passing, 1 commit pushed, 1 file changed');
+  await expect(lines.nth(1)).toContainText('Last turn: Fixed the login bug and pushed it.');
+  await expect(dialog.getByTestId('catch-up-quiet')).toHaveText('Quiet: docs-site.');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+
+  // The browser remembers what you saw: the next look starts there, and nothing came since.
+  await page.keyboard.press('W');
+  await expect(dialog.getByTestId('catch-up-period')).toHaveText('Nothing new since you last looked, a moment ago.');
+  await expect(lines.nth(0)).toContainText('web-app: nothing new');
+  await lines.nth(0).getByTestId('catch-up-need').click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator('[data-testid="agent-row"][data-agent-key="e2e-other:main"]')).toHaveAttribute('aria-current', 'true');
+
+  // Closed and opened again at once (Esc, then W, faster than the page's next task): the old
+  // close must not cancel the new look.
+  await page.keyboard.press('W');
+  await expect(dialog.getByTestId('catch-up-period')).toHaveText('Nothing new since you last looked, a moment ago.');
+  await page.evaluate(() => {
+    const open = /** @type {HTMLDialogElement} */ (document.querySelector('[data-testid="catch-up"]'));
+    open.close();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'W', shiftKey: true, bubbles: true }));
+  });
+  await expect(dialog.getByTestId('catch-up-period')).toHaveText('Nothing new since you last looked, a moment ago.');
+});
+
+/**
+ * Keeps what the page tells screen readers, so a test can see every announcement, not the last.
+ * @param {import('@playwright/test').Page} page
+ */
+async function recordAnnouncements(page) {
+  await page.addInitScript(() => {
+    /** @type {string[]} */
+    const said = [];
+    /** What each live region said last, so each announcement is kept once. @type {Map<Element, string>} */
+    const last = new Map();
+    Object.assign(window, { __said: said });
+    new MutationObserver(() => {
+      for (const region of document.querySelectorAll('.hud-sr[aria-live]')) {
+        const text = region.textContent ?? '';
+        if (text && last.get(region) !== text) said.push(text);
+        last.set(region, text);
+      }
+    }).observe(document, { subtree: true, childList: true, characterData: true });
+  });
+}
+
+/** @param {import('@playwright/test').Page} page @returns {Promise<string[]>} */
+const announced = (page) => page.evaluate(() => /** @type {any} */ (window).__said);
+
+/**
+ * A town that counts you away after a second (ANDARY_AWAY_MS, tests only): you prompt, your crew
+ * works on alone, and the town says you are away.
+ * @param {import('@playwright/test').Page} page
+ */
+async function goAway(page) {
+  await town.stop();
+  town = await startTown({ env: { ANDARY_AWAY_MS: '1000' } });
+  await signIn(page);
+  const api = (/** @type {string} */ name, /** @type {Record<string, unknown>} */ extra = {}) => hook(name, { session_id: 'e2e-away', cwd: '/work/api-server', ...extra });
+  expect(await town.sendHook(api('UserPromptSubmit', { prompt: 'Run the tests while I am out' }))).toMatchObject({ code: 0 });
+  expect(await town.sendHook(api('PostToolUse', { tool_name: 'Bash', tool_use_id: 'b1', tool_input: { command: 'npm test' }, tool_response: {} }))).toMatchObject({ code: 0 });
+  expect(await town.sendHook(api('Stop', { last_assistant_message: 'All tests pass.' }))).toMatchObject({ code: 0 });
+  // Offered while you are away, as an open town should.
+  await expect(page.getByTestId('catch-up-button')).toBeVisible();
+  return api;
+}
+
+test('after time away: the masthead offers Catch me up, says welcome back once, and keeps focus when it goes', async ({ page, context }) => {
+  await recordAnnouncements(page);
+  const api = await goAway(page);
+  // A second tab of the same town hears of your return too, but only one of them says it.
+  const second = await context.newPage();
+  await recordAnnouncements(second);
+  await second.goto(`${town.baseUrl}/?${PAGE_OPTIONS}`);
+  await expect(second.getByTestId('catch-up-button')).toBeVisible();
+  expect(await town.sendHook(api('UserPromptSubmit', { prompt: 'I am back' }))).toMatchObject({ code: 0 });
+  const welcomes = async () => [...(await announced(page)), ...(await announced(second))].filter((text) => /^Welcome back\. Catch me up, or press W/.test(text)).length;
+  await expect.poll(welcomes).toBe(1);
+  await page.waitForTimeout(500);
+  expect(await welcomes()).toBe(1);
+  await second.close();
+  // A reload within the half hour offers it still, but says nothing again.
+  await page.reload();
+  await expect(page.getByTestId('connection-status')).toContainText('Live');
+  const button = page.getByTestId('catch-up-button');
+  await expect(button).toBeVisible();
+  await page.waitForTimeout(500);
+  expect((await announced(page)).filter((text) => text.startsWith('Welcome back'))).toEqual([]);
+
+  await button.click();
+  const dialog = page.getByTestId('catch-up');
+  // The finished turn is counted in a five-minute count that began before you left: "about".
+  await expect(dialog.getByTestId('catch-up-period')).toHaveText(/^Since (you left, (a moment|\d+s) ago|about \d\d:\d\d \(you left (a moment|\d+s) ago\))\.$/);
+  await expect(dialog.getByTestId('catch-up-crew')).toContainText('api-server: 1 turn, tests passing');
+  // The button that opened it stays until it closes, so focus has somewhere to go back to.
+  await expect(button).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(button).toBeHidden();
+  // Then focus moves on to what is still there: the "need you" button (the finished turn), or the toolbar.
+  await expect.poll(() => page.evaluate(() => {
+    const active = /** @type {HTMLElement|null} */ (document.activeElement);
+    if (!active || active === document.body || !active.checkVisibility()) return 'lost';
+    return active.closest('.hud-toolbar') ? 'toolbar' : active.getAttribute('data-testid');
+  })).toMatch(/^(waiting-for-you|toolbar)$/);
+});
+
+test('the offer ends half an hour after you came back, timed on the server\'s clock', async ({ page }) => {
+  // This browser's clock is two hours ahead of the server's: the half hour must still be the server's.
+  await page.clock.install({ time: Date.now() + 2 * 60 * 60_000 });
+  const api = await goAway(page);
+  expect(await town.sendHook(api('UserPromptSubmit', { prompt: 'I am back' }))).toMatchObject({ code: 0 });
+  const button = page.getByTestId('catch-up-button');
+  await page.waitForTimeout(500);
+  await expect(button).toBeVisible();
+  await page.clock.fastForward('29:00');
+  await expect(button).toBeVisible();
+  await page.clock.fastForward('02:00');
+  await expect(button).toBeHidden();
+});
+
 test('with --notify-url, Settings shows the phone topic and sends a test', async ({ page }) => {
   await town.stop();
   town = await startTown({ args: ['--notify-url', 'http://127.0.0.1:9/e2e-topic'] });

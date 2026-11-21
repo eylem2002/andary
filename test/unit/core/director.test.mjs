@@ -424,6 +424,22 @@ describe('director: permits, compaction, models, board, shipping', () => {
     assert.ok(!says().some((s) => s.startsWith('[wait.')), 'no nagging once answered');
   });
 
+  it('an expiry reacts once: the late proof that sends it again plays nothing', async () => {
+    const { send, ready, store, says, calls, clock } = setup();
+    await ready();
+    await send(FIXTURES.PermissionRequest);
+    await clock.advance(2000);
+    const approval = { id: 'a1', status: 'pending', held: true, sessionId: SESSION, agentId: null, toolName: 'Bash', toolInput: {}, createdAt: 1, expiresAt: null };
+    store.setApproval(/** @type {any} */ (approval));
+    store.setApproval(/** @type {any} */ ({ ...approval, status: 'expired', held: false }));
+    await clock.advance(5000);
+    const expiries = () => [says().filter((s) => s === '[permission.expired]').length, calls('emote').filter((c) => c[2] === '⌛').length];
+    assert.deepEqual(expiries(), [1, 1]);
+    store.setApproval(/** @type {any} */ ({ ...approval, status: 'expired', held: false, proof: 'ran' }));
+    await clock.advance(5000);
+    assert.deepEqual(expiries(), [1, 1], 'no second ⌛ or quip after the tool ran');
+  });
+
   it('compaction: a held visit to the spa, steam, then a bright idea', async () => {
     const { send, ready, calls, says, clock } = setup();
     await ready();

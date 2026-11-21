@@ -7,10 +7,11 @@ import { applyMotion, applyTheme, applyWorldPrefs } from './appearance.js';
 import { createApprovalsPanel, pendingCount } from './approvals.js';
 import { createBoard } from './board.js';
 import { createBuildingCard } from './building-card.js';
+import { createCatchUp } from './catch-up.js';
 import { createCinema } from './cinema.js';
 import { createCrewsPanel } from './crews.js';
 import { createHelpDialog, createSettingsDialog, createSetupDialog } from './dialogs.js';
-import { handleShortcut, openDialog, panelsHidden, runAction, select, setFollow } from './hud-actions.js';
+import { goToNeed, handleShortcut, openDialog, panelsHidden, runAction, select, setFollow } from './hud-actions.js';
 import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
 import { createInspector } from './inspector.js';
 import { createWeatherDriver } from '../core/town-weather.js';
@@ -74,10 +75,13 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     },
     // Someone watching a team town with its view link can answer nothing: nothing needs them.
     needsYou: createNeedsYou({ viewOnly: () => view.serverSettings.team?.role === 'viewer', onChange: () => ctx.refresh() }),
-    // The director camera needs the finished context, so it is attached right below.
+    goToNeed: (item) => goToNeed(hud, item),
+    // The director camera and the catch-up need the finished context, so they are attached right below.
     cinema: /** @type {any} */ (null),
+    catchUp: /** @type {any} */ (null),
   };
   ctx.cinema = createCinema(ctx);
+  ctx.catchUp = createCatchUp(ctx);
   const ui = createParts(ctx);
   const hud = { ctx, ui };
   const effects = createEffectQueue();
@@ -87,14 +91,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
   applyTheme(prefs, null);
   applyMotion(prefs, null);
 
-  store.subscribe((change) => {
-    if (change.type === 'reset') {
-      ui.activity.reset();
-      if (view.selection?.type === 'agent') select(hud, null, { camera: false });
-    }
-    effects.push(change);
-    ctx.refresh();
-  });
+  followStore(hud, effects);
   const stopShortcuts = installShortcuts({ getMode: () => view.mode, handle: (action, event) => handleShortcut(hud, action, event) });
   const stopTicker = watchEnvironment(ctx, ui, shell);
   installNotifications(ctx);
@@ -127,6 +124,17 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       if (mode === 'live') view.paused = false;
       ctx.refresh();
     },
+    /**
+     * The latest time you were away, from the server (Catch me up), and how far the server's clock
+     * is ahead of this browser's.
+     * @param {unknown} away @param {number} [offset]
+     */
+    setAway: (away, offset) => ctx.catchUp.setAway(away, offset),
+    /**
+     * What each crew did in the period Catch me up asked about, from the server or the demo.
+     * @param {unknown} digest
+     */
+    setDigest: (digest) => ctx.catchUp.showDigest(digest),
     /** @param {import('./types.js').ConnectionStatus} status */
     setConnection(status) {
       view.connection = status;
@@ -274,7 +282,7 @@ function createParts(ctx) {
     place: createBuildingCard(ctx),
     toolbar: createToolbar(ctx),
     notices: createNotices(ctx),
-    dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx), usage: createUsageDialog(ctx), leaderboard: createLeaderboard(ctx) },
+    dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx), usage: createUsageDialog(ctx), leaderboard: createLeaderboard(ctx), catchUp: ctx.catchUp },
   };
 }
 
@@ -291,6 +299,24 @@ function mount(ctx, ui) {
   main.before(ui.masthead.el, ui.board.leftDock, ui.inspector.el);
   main.append(ui.notices.el, ui.place.el, ctx.cinema.el, ui.toolbar.el, ...ctx.announcer.elements);
   main.after(ui.board.el, ctx.toasts.el, ...Object.values(ui.dialogs).map((dialog) => dialog.el));
+}
+
+/**
+ * Every change of the store: its effects are queued and the next frame redraws; a reset (a
+ * reconnect's hello) clears the log and an agent's selection.
+ * @param {{ ctx: HudContext, ui: Parts }} hud
+ * @param {ReturnType<typeof createEffectQueue>} effects
+ */
+function followStore(hud, effects) {
+  const { ctx, ui } = hud;
+  ctx.store.subscribe((change) => {
+    if (change.type === 'reset') {
+      ui.activity.reset();
+      if (ctx.view.selection?.type === 'agent') select(hud, null, { camera: false });
+    }
+    effects.push(change);
+    ctx.refresh();
+  });
 }
 
 /**
@@ -329,6 +355,7 @@ function flush(hud, shell, effects) {
   ui.dialogs.settings.sync();
   ui.dialogs.usage.render();
   ui.dialogs.leaderboard.render();
+  ui.dialogs.catchUp.render();
   playEffects(ctx, effects.take(), state);
   ui.activity.settle();
 }

@@ -3,8 +3,11 @@
 // can answer; the simulation waits on it and continues with the decision, or after 25 seconds of
 // story time without one (so the card's countdown runs faster at 2× and 4×, like the story, and
 // stands still while the demo is paused). Like the server, an approval offers the permission
-// rules the server would offer, and "Allow always" hands the chosen one back with the allow.
+// rules the server would offer, and "Allow always" hands the chosen one back with the allow. It
+// also plays the server's part for "Catch me up": the same counts (core/digest.js) of the story's
+// crews, though nobody is ever away in a demo.
 
+import { createDigest } from '../core/digest.js';
 import { normalizeAgentId } from '../core/ids.js';
 import { offerableSuggestions } from '../core/permission-rules.js';
 import { createDemoUsage } from './demo-usage.js';
@@ -36,10 +39,11 @@ export const DEMO_APPROVAL_MS = 25_000;
  * @property {number} [approvalMs]
  * @property {() => number} [now]
  * @property {(progress: { points: number, days: string[] }) => void} [onProgress]  the town's growth
+ * @property {(digest: import('../core/digest.js').Digest) => void} [onDigest]  the answer to requestDigest()
  */
 
 /** @param {DemoOptions} options */
-export function createDemo({ store, createSimulation, seed, speed = 1, approvalMs = DEMO_APPROVAL_MS, now = Date.now, onProgress }) {
+export function createDemo({ store, createSimulation, seed, speed = 1, approvalMs = DEMO_APPROVAL_MS, now = Date.now, onProgress, onDigest = () => {} }) {
   let sequence = 0;
   let currentSpeed = speed;
   let paused = false;
@@ -51,6 +55,7 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
   const waiting = new Map();
   const usage = createDemoUsage(store, now);
   const progress = onProgress ? createDemoProgress(onProgress, now) : () => {};
+  const digest = createDigest({ startedAt: now() });
 
   /** @param {any} payload */
   function emit(payload) {
@@ -59,6 +64,7 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
     store.ingest({ id, ts, rx: ts, event: payload });
     usage(payload);
     progress(payload);
+    digest.observe(payload, ts);
     if (payload?.hook_event_name === 'PermissionRequest') return hold(payload, id, ts);
     return undefined;
   }
@@ -131,7 +137,9 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
     clearTimeout(entry.timer);
     const note = String(message).trim().slice(0, 500);
     const always = offer ? { always: { rules: offer.rules, destination: offer.destination, at: now() } } : {};
-    store.setApproval({ ...entry.approval, status, decidedBy, ...(note ? { message: note } : {}), ...always });
+    const settled = { ...entry.approval, status, decidedBy, ...(note ? { message: note } : {}), ...always };
+    store.setApproval(settled);
+    digest.answered(settled, now());
     entry.resolve(answerFor(status, offer ? entry.payload.permission_suggestions[offer.index] : null));
     return true;
   }
@@ -170,6 +178,14 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
       if (always === undefined) return settle(id, decision === 'allow' ? 'allowed' : 'denied', 'town', decision === 'deny' ? message : '');
       const offer = waiting.get(id)?.approval.suggestions?.find((suggestion) => suggestion.index === always);
       return decision === 'allow' && offer ? settle(id, 'allowed', 'town', '', offer) : false;
+    },
+    /**
+     * What each of the story's crews did since a time, answered a moment later as the server would.
+     * @param {number} since
+     */
+    requestDigest(since) {
+      queueMicrotask(() => onDigest(digest.summary(since, now())));
+      return true;
     },
     /** Stops the simulation and lets anything still waiting carry on. */
     close() {

@@ -47,7 +47,8 @@ public/js/core/              Pure logic, no DOM, no I/O: events (normalize), sto
                              card-fields (what an approval card shows), permission-rules (what
                              "Allow always" may save), loops (when an agent seems stuck), shell
                              (shell command lines read as a shell reads them, for every rule),
-                             conflicts (two agents on the same files, + git-commands, paths)
+                             conflicts (two agents on the same files, + git-commands, paths),
+                             digest (what each crew did, for Catch me up)
 public/js/sources/           Where events come from: live.js (WebSocket) and demo.js (simulation),
                              one TownSource shape (types.js)
 public/js/world/layout.js    Town plan (shared, pure data)
@@ -279,13 +280,15 @@ shows up as a crew of its own.
 Server → browser:
 
 ```js
-{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs }, history: Envelope[], approvals: Approval[], usage: { agents: UsageRecord[], days: UsageDay[] }, progress: { points, days }, notifyUrl: string|null }
+{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs }, history: Envelope[], approvals: Approval[], usage: { agents: UsageRecord[], days: UsageDay[] }, progress: { points, days }, notifyUrl: string|null, away: Away|null }
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
 { t: 'settings', settings: {...} }
 { t: 'usage', u: UsageRecord, days: UsageDay[] }   // §4.8, when an agent's totals change
 { t: 'progress', p: { points, days: string[] } }   // §4.9, when a point or a busy day is added
 { t: 'notify-test', ok: boolean }                  // §4.10, the answer to a test
+{ t: 'away', away: Away }                          // §4.13, owners: an absence began or ended
+{ t: 'digest', d: Digest }                         // §4.13, the answer to a digest request
 { t: 'error', message }
 // Envelope = { id: number /* server sequence */, ts: number /* hook start, ms, never after rx nor more than an hour before it (a teammate's: §7) */, rx: number /* server receive */, event: object /* sanitized payload */ }
 // Approval = { id, status: 'pending'|'allowed'|'denied'|'expired'|'resolved', held: boolean, sessionId, agentId: string|null,
@@ -301,6 +304,7 @@ Browser → server:
 { t: 'decide', id, decision: 'allow'|'deny', message?: string /* ≤ 500 chars */, always?: number /* allow only: a suggestion's index */ }
 { t: 'settings', settings: { remoteApprovals: boolean } }
 { t: 'notify-test' }   // sends a test phone notification (rate limits apply)
+{ t: 'digest', since: number }   // §4.13: what each crew did since then (ms, the server's clock; 0: all kept)
 { t: 'ping' }
 ```
 
@@ -319,9 +323,10 @@ new question or plan). A held approval is not resolved by the terminal while the
 Released, it waits in the terminal like any other and is resolved when its dialog closes, or at
 once if its dialog closed while it was held (its turn or session ended; `proof` says by what). An
 expired one stays expired, but its dialog shows in the terminal now, so your next prompt answers
-it. `callKey` is the request's call key (§4.6): the phone notes and the town find the approval's
-own dialog by it (§4.10, §5.1), as a parallel call of the same tool may be open beside it. At
-most 50 pending.
+it; when its dialog then closes on `'ran'` or `'denied'` (answered in the terminal after all) it
+gets that `proof`, once, and is broadcast again. `callKey` is the request's call key (§4.6): the
+phone notes and the town find the approval's own dialog by it (§4.10, §5.1), as a parallel call
+of the same tool may be open beside it. At most 50 pending.
 `ExitPlanMode` and `AskUserQuestion` requests are never held: a plain allow or deny cannot approve
 a plan or answer a question, so they are answered with `null` at once (`held: false`) and their
 `message` always says they are answered in the terminal. A request is held only when its card
@@ -683,11 +688,12 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
   read) and at most 4 bodies read at once answer 429. Each event is ingested like
   a hook (sanitized again) with `andary_member: <name>` and `session_id: "<name>~<id>"`, its
   `ts` kept within the last hour and not in the future; it counts towards the town's growth
-  (§4.9) but not usage, notifications or approvals: a teammate answers their own prompts.
+  (§4.9) but not usage, notifications, approvals or the catch-up (§4.13): a teammate answers
+  their own prompts.
   A local `/api/hook` event never keeps an `andary_member` field.
 - **Browsers** are `owner` (the UI token) or `viewer` (the view token, team hosts only); `/api/hello` reports `authenticated: true` for both. A viewer's `hello` has no
-  approvals, empty usage, `notifyUrl: null` and `remoteApprovals: false`; `approval`, `usage` and
-  `settings` broadcasts go to owners only; a viewer's messages other than `ping` get
+  approvals, empty usage, `notifyUrl: null`, `away: null` and `remoteApprovals: false`;
+  `approval`, `usage`, `away` and `settings` broadcasts go to owners only; a viewer's messages other than `ping` get
   `{t:'error', message:'Viewers can only watch…'}`. Viewers never use the last 4 connections, and
   held prompts wait only while an owner is connected. On a team host `settings.team` is
   `{ role, members }` (members: names seen since start); when a new member's first batch
@@ -741,6 +747,90 @@ sets them).
 - The browser reads `andary_source` into `TownEvent.source` and `Session.source`
   (`'claude'|'codex'`); a Codex crew has a `crew-agent` badge, OpenAI model ids get a cap and a
   label such as "GPT-5.3 Codex", and `apply_patch`/`spawn_agent` map to the Workshop/Town Hall.
+
+### 4.13 Catch me up
+
+`server/digest.mjs` with `public/js/core/digest.js` and `public/js/core/shell.js`
+(docs/design/agent-health.md §7). Only this computer's hooks count (ingest's policy: a teammate's
+crews are theirs, and so are their prompts), and only owners hear of it: a viewer's `hello` has
+`away: null`, gets no `away` message, and a `digest` request gets the viewer error (§4.11). All of
+it is kept in memory, never on disk (it holds your agents' last messages); a restart forgets it.
+
+- **Away** (`createAwayWatch`): nothing from you in any local session for `AWAY_MS` (20 minutes)
+  or more, while crews kept working. You are a prompt (`UserPromptSubmit`, or a manual
+  `PreCompact`, as the dialog model reads your prompt, §4.6), a `SessionStart` with `source`
+  `startup`, `resume` or `clear`, a `SessionEnd` with `reason` `prompt_input_exit` or `clear`, an
+  interrupted `Stop` (Codex's `Interrupt`), a decision (an approval `allowed` or `denied` with
+  `decidedBy: 'town'`), and an answer in the terminal (an approval `resolved` with
+  `decidedBy: 'terminal'` and `proof` `'ran'` or `'denied'`). Crews kept working: a
+  hook that adds to the counts below (`tallyOf` is not null) arrived since you were last seen (the
+  doctor's probe aside). Before you first do something, the town's start counts as when you were
+  last seen. An absence begins at the 20-minute mark (on a timer) or with the first counted hook
+  after it, and the next thing you do ends it. A request the agent moved on from
+  (`proof: 'stopped'`), an expiry and a release are not counted as you.
+
+  ```js
+  Away { since /* the last thing you did before it */, until: number|null /* the first thing after it; null while away */ }
+  ```
+
+  `hello.away` is the latest absence, going on or over (null when there has been none), and owners
+  get `{ t: 'away', away }` when one begins and when it ends.
+- **Counts** (`createDigest({ startedAt })`; the demo keeps its own the same way): per crew, timed by
+  when each hook arrived (`envelope.rx`), from the sanitized payload, for the last 24 hours
+  (`KEEP_MS`) and never before the server started.
+
+  | Hook | Counts as |
+  | --- | --- |
+  | `Stop` | a finished turn (`turns`, by its time), and the latest turn's `last_assistant_message`, one line, ≤ 200 characters (`lastMessage`, null when that turn said nothing); not with `stop_reason: "interrupted"`; with `stop_hook_active: true` its words only, as the same turn goes on |
+  | `StopFailure` | a stop, by its `error` (`stops: { rate_limit: 2 }`) |
+  | `PreToolUse` | a tool call (`toolCalls`); a Codex patch's later files (`andary_tool: 'apply_patch'`, `tool_use_id` ending in `#2`, `#3`…) are the same call |
+  | `PostToolUseFailure` | a failed tool call (`failures`), unless `is_interrupt`; a test run that alone could have failed it and runs tests, with an error that is not a timeout (`classifyError`): `tests: 'failed'` |
+  | `PostToolUse` | a file changed (`files`: distinct paths of `Edit`, `MultiEdit`, `Write`, `NotebookEdit`, and a Codex `apply_patch` that deletes one); test runs that all must have succeeded and run tests: `tests: 'passed'`; each new commit and each push that sends something, that must have succeeded; from Codex (`andary_source: 'codex'`), these only with `andary_exit_known` (its adapter found the exit code) |
+  | `PermissionRequest` | a permission asked for (`asked`); not for `AskUserQuestion` or `ExitPlanMode` |
+  | `SubagentStart`, `SubagentStop` | a helper started (`helpersStarted`), finished (`helpersFinished`) |
+  | an approval settling `allowed` or `denied`, or `resolved` or `expired` with `proof` `'ran'` or `'denied'` (the broker's `onChange`; `'stopped'` is not an answer) | a permission answered (`answered`) |
+
+  A `Bash` or `PowerShell` command (a line, or a Codex argument list) is read by `shellCommands`
+  (core/shell.js, the shared reader) as a shell runs it: quoted strings, heredoc bodies, comments
+  and redirections are text, and a substitution stays whole in its word; each simple command's
+  program (lower case) is found behind assignments, wrappers and launchers (`cd x &&` is a command
+  of its own; `env`, `time`, `timeout`, `npx`, `npm exec`, `uv run`, `poetry run`, `bundle exec`,
+  `python -m`…), and a shell's `-c` script is read inside, one level deep. Each command `succeeded`
+  when the line succeeding proves it (it is in the line's last item, with no `||` and not sent off
+  with `&`, and is the last of its pipeline, or any of it after `set -o pipefail`), and `decides`
+  when the line failing proves it failed (it succeeded in that sense and every other such command
+  is one that does not fail in practice: `cd`, `export`, `set`, `echo`, `tail`, `head`, `tee`…). A
+  test run is `isTestRun` (a runner, a package's `test` script, a tool's `test` subcommand); it runs
+  no tests with `--no-run`, `--collect-only`, `--co`, `--list…`, `-l`, a `list` argument, `--help`,
+  `-h`, `--version`, `--if-present`, or as `go test -run`, and then gives no result. A commit or a
+  push is `gitAction` (git in command position after its own options such as `-C` and `-c`; not
+  `--dry-run` or push's `-n`); a commit with `--amend` is not a new one, a push with `--delete`,
+  `-d` or a `:branch` refspec sends nothing, and each "Everything up-to-date" in the tool's output
+  is one push less. `allPushed` says a push came after the latest commit. A
+  command sent to the background (`run_in_background`) has only started when its hook comes, so it
+  is a tool call and nothing more.
+
+  Tool calls and helpers are kept in five-minute buckets (`BUCKET_MS`), each with the time of the
+  latest thing it counted; turns, failures, permissions asked and answered, commits, pushes and
+  stops keep each one's time (the latest 200 of each per crew), and changed files (200 per crew,
+  by a short key of the path), the latest message and the latest test result keep theirs. Bounds:
+  100 crews (the one quiet for longest gives way), a day of buckets each.
+- **The request** `{ t: 'digest', since }`: `since` must be a number ≥ 0 (otherwise
+  `{ t: 'error', message: 'digest.since must be a time in milliseconds' }`). The answer goes to the
+  browser that asked only. The period starts at `since`, or later when the town remembers no
+  further back (`max(server start, now − 24 h)`, and `limit` says which); one after now counts from
+  now. Everything is counted from `from`: `since`, or the start of the bucket `since` falls in when
+  any crew's bucket began before `since` and counted something since then (up to five minutes
+  earlier), so the counts are never mixed:
+
+  ```js
+  Digest { since /* the period's start */, from /* where every count starts: since, or a bucket's start before it */,
+           until /* now, the server's clock */, limit: 'started'|'day'|null /* why since is later than asked */,
+           crews: CrewDigest[] /* those that did something, the most recently active first */ }
+  CrewDigest { sessionId, cwd, title: string|null, lastAt /* its latest hook */, turns, lastMessage: string|null,
+               stops: Record<string, number>, failures, tests: 'passed'|'failed'|null, commits, pushes,
+               allPushed: boolean, files, asked, answered, helpersStarted, helpersFinished, toolCalls }
+  ```
 
 ## 5. Browser: events, store, director
 
@@ -1058,6 +1148,36 @@ have changed 5 files" (two names, or the first and "N others").
   commands, 16 adds for each of 200 agents, 64 pathspecs a command; a command line is read up to
   20,000 characters.
 
+**Catch me up** (`ui/catch-up.js`, §4.13). The source asks
+(`TownSource.requestDigest(since) → boolean`: live sends `{ t: 'digest', since }`; the demo answers
+from its own `createDigest({ startedAt })`) and the answer comes back through the source's
+`onDigest`; live's `onAway(away, offset)` also gives the server's clock minus the page's, measured
+at `hello` (`serverTime`). A period starts when you last looked (the `until` of the last summary
+shown, in the server's time, kept in `localStorage["andary:caught-up"]` and shared with the town's
+other tabs) or when you left (`away.since`), whichever is later: the first look ever (nothing kept)
+asks for `away.since` when an absence is known, and `since: 0` (everything kept) otherwise. The
+period's words follow the answer: "Since you last looked, 25m ago."; "Since about 10:00 (you last
+looked 3m ago)." when `from` is before `since` (every count is from `from`); "Nothing new since you
+last looked, …" when no crew did anything since; "… The town only remembers since 09:12 (it
+restarted)." or "… the last day." when `limit` is set, with "No crew did anything since it
+restarted." under it when `limit` is `'started'` and no crew did anything (times of day on this
+computer's clock, from the server's times and the offset); the first look: "Everything the town
+remembers: since 09:12, when it started." (or "the last day"). The masthead's "need you" area
+offers **Catch me up** while you are away and for `OFFER_MS` (30 minutes, on the server's clock)
+after you came back, unless this browser has looked since you left, and keeps it while the dialog
+is open if it was offered when it opened; when it goes, focus on it moves to the "need you" button,
+or else the toolbar's. Screen readers hear "Welcome back…" once per absence in a browser: each tab
+that hears of your return writes its claim (`<since>:<tab>`) in
+`localStorage["andary:welcomed-back"]`, and only the one whose claim is still there 150 ms later
+says it; a tab that finds that absence's `since` already there says nothing. `W` opens it any time.
+One line per crew ("api-server: 3 turns, tests passing, 1 commit pushed, 2 files changed", then
+"Last turn:" and the latest turn's words, when it said something): crews with a counted "needs you"
+item first, the most urgent first, each with a button that goes to that item as the "need you"
+button does; then the crews that did something, the most recently active first (one that has left
+town too, named by its folder); then your other crews in one line ("Quiet: web-app and
+docs-site."). Someone watching a team town with its view link is told that only the host can catch
+up.
+
 `director.js`: `createDirector({ world, store, backlog?, humor?, random? }) → { dispose() }`
 subscribes to the store and drives the world. `recordChanges(store) → { stop() }` keeps the
 store's changes until the director starts: `main.js` starts the source, the store and the HUD
@@ -1243,9 +1363,12 @@ decision is treated as "answered in the terminal" and the story carries on as al
 - `npm run test:e2e` runs Playwright. In containers without Playwright's browser set
   `CHROME_PATH=/usr/bin/google-chrome`.
 - `e2e/helpers/town.mjs`:
-  `startTown({ remoteApprovals?, args? }) → { baseUrl, loginUrl, port, home, secret, uiToken,
+  `startTown({ remoteApprovals?, args?, env? }) → { baseUrl, loginUrl, port, home, secret, uiToken,
   sendHook(payload) → Promise<{code, stdout}>, stop() }` — starts a real server on a free port with
   a temporary `ANDARY_HOME`; `sendHook` runs the real `hooks/hook.mjs` with the payload on stdin.
+- `ANDARY_AWAY_MS` (tests only, read by `andary start`; not a setting): how long without you
+  counts as away (§4.13), a whole number of milliseconds from 100 on, so a test can start an
+  absence in a second.
 - `node scripts/shot.mjs <url> <out.png> [--wait=ms] [--size=WxH]` takes a screenshot with WebGL
   enabled, for visual checks.
 - Pages: `public/index.html` (the app), `public/world-lab.html` (full world + scripted scenario),
@@ -1271,6 +1394,8 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn, stop, stuck alert or conflict aside; `[data-testid="agent-context"]` holds the exact context in use (§4.8); `[data-testid="inspector-note"]`, its newest note |
 | `[data-testid="waiting-for-you"]` | the masthead's "N need you" button (`data-level` is the most urgent level); click goes to the next item |
 | `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn, a stop, a stuck alert or a conflict aside |
+| `[data-testid="catch-up-button"]` | the masthead's "Catch me up", offered after time away (`W` opens the dialog any time) |
+| `[data-testid="catch-up"]` | the Catch me up dialog: `[data-testid="catch-up-period"]`, one `[data-testid="catch-up-crew"][data-session-id]` per crew (with `[data-testid="catch-up-need"]` when it needs you), `[data-testid="catch-up-quiet"]` |
 | `[data-testid="activity-log"]` | log; children `[data-testid="log-entry"]` |
 | `[data-testid="tasks-panel"]` | goals/tasks; children `[data-testid="task-item"]` |
 | `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]`, and, when a rule can be saved, `[data-testid="approve-always"]` with the rule in `[data-testid="approve-always-rule"]`; a hint in `[data-testid="approval-hint"]` |

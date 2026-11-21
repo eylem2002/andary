@@ -36,6 +36,16 @@ export function stopLabel(error) {
 }
 
 /**
+ * Why a turn stopped, in a few words for the middle of a sentence: "rate limited", "server error",
+ * or an unknown code in words ("context window full" for context_window_full).
+ * @param {unknown} error
+ */
+export function stopWords(error) {
+  const label = own(STOP_LABELS, error);
+  return label ? label.charAt(0).toLowerCase() + label.slice(1) : String(error || 'error').replace(/_/g, ' ');
+}
+
+/**
  * @param {WaitKind} kind @param {number} since @param {string} text @param {string|null} [cause]
  * @returns {Wait}
  */

@@ -303,12 +303,26 @@ describe('the dialog model decides what the terminal answered (core/dialogs.js)'
     assert.deepEqual(broker.list().map((a) => [a.status, a.decidedBy]), [['resolved', 'terminal'], ['allowed', 'town']]);
   });
 
-  it('an expired request stays expired; a released one resolves when its call runs', () => {
+  it('an expired request stays expired, with proof once it ran or was denied in the terminal; a released one resolves when its call runs', () => {
     const expired = setup();
     expired.broker.create(ask('npm test'), { hold: true });
     expired.fireTimers();
+    const published = expired.changes.length;
     assert.equal(expired.broker.observe(result('PostToolUse', 'npm test')), 0);
-    assert.equal(expired.broker.list()[0].status, 'expired');
+    assert.deepEqual([expired.broker.list()[0].status, expired.broker.list()[0].proof], ['expired', 'ran']);
+    assert.deepEqual(expired.changes.slice(published).map((a) => [a.status, a.proof]), [['expired', 'ran']], 'told once, so the catch-up counts it answered');
+    const denied = setup();
+    denied.broker.create(ask('rm -rf /'), { hold: true });
+    denied.fireTimers();
+    denied.broker.observe(result('PermissionDenied', 'rm -rf /', { reason: 'no' }));
+    assert.equal(denied.broker.list()[0].proof, 'denied');
+    // The turn ending shows nothing about the request: it may have been left unanswered.
+    const stopped = setup();
+    stopped.broker.create(ask('npm test'), { hold: true });
+    stopped.fireTimers();
+    const before = stopped.changes.length;
+    stopped.broker.observe(keyed({ hook_event_name: 'Stop', session_id: 's1' }));
+    assert.deepEqual([stopped.broker.list()[0].proof, stopped.changes.length], [undefined, before]);
     const released = setup();
     const { approval } = released.broker.create(ask('npm test'), { hold: true });
     released.broker.release(approval.id);

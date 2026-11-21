@@ -165,4 +165,22 @@ describe('demo mode', () => {
     demo.setPaused(false);
     assert.equal(store.approvals.at(-1).status, 'allowed', 'resuming does not bring a settled request back');
   });
+
+  test('catch me up: the demo answers as the server would, from the story\'s own crews', async () => {
+    const store = fakeStore();
+    const { sim, create } = fakeSimulation();
+    /** @type {any[]} */
+    const digests = [];
+    const demo = createDemo({ store, createSimulation: create, onDigest: (d) => digests.push(d) });
+    sim.emit({ hook_event_name: 'Stop', session_id: 's1', cwd: '/w/app', last_assistant_message: 'Done.' });
+    const answer = sim.emit(permission);
+    demo.decide(store.approvals[0].id, 'allow');
+    await answer;
+    assert.equal(demo.requestDigest(0), true);
+    assert.equal(digests.length, 0, 'answered a moment later, like the server');
+    await Promise.resolve();
+    const [crew] = digests[0].crews;
+    assert.deepEqual([crew.sessionId, crew.cwd, crew.turns, crew.lastMessage, crew.asked, crew.answered], ['s1', '/w/app', 1, 'Done.', 1, 1]);
+    assert.equal(digests[0].until, Date.now());
+  });
 });

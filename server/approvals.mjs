@@ -11,7 +11,7 @@
 // dialog in the broker's own tracker, fed through afterHook() like the phone notes and the town,
 // at each hook's own time. When a dialog closes and its request is pending and not held, the
 // terminal answered it; a held one closed meanwhile (its turn or session ended) is resolved when
-// released.
+// released; one that expired and then ran or was denied was answered there too.
 //
 // An approval may offer to save one of the permission rules Claude Code suggested ("Allow
 // always"). Browsers see the offer; the suggestion itself, exactly as it arrived, stays here and
@@ -59,7 +59,8 @@ const MAX_DIALOGS = 500;
  * @property {number|null} expiresAt  when a held approval times out; null when not held
  * @property {OfferedSuggestion[]} suggestions  rules an allow may save ("Allow always"); [] for none
  * @property {'town'|'terminal'|'timeout'} [decidedBy]
- * @property {Proof} [proof]          set when resolved: what showed the terminal answered
+ * @property {Proof} [proof]          set when resolved: what showed the terminal answered; on an
+ *   expired one, 'ran' or 'denied' when it was answered in the terminal after it expired
  * @property {string} [message]
  * @property {{ rules: PermissionRule[], destination: string, at: number }} [always]  the rule an "Allow always" asked Claude Code to save, and when
  */
@@ -216,6 +217,17 @@ function proofOf(hook) {
 }
 
 /**
+ * A request that expired in the town, then ran or was denied: it was answered in the terminal
+ * after all. Marks it with that proof, once; true when it did.
+ * @param {Approval} approval @param {Proof} proof
+ */
+function answeredLate(approval, proof) {
+  if (approval.status !== 'expired' || proof === 'stopped' || approval.proof) return false;
+  approval.proof = proof;
+  return true;
+}
+
+/**
  * @typedef {object} BrokerOptions
  * @property {number} timeoutMs                    how long a held approval waits for the town
  * @property {number} [maxPending]                 the oldest pending approval expires past this
@@ -279,19 +291,23 @@ export function createApprovalBroker({
   /**
    * Dialogs a hook closed: the terminal answered their requests, if pending and not held. A held
    * one keeps waiting for the town, remembering what closed its dialog for when it is released.
+   * One that expired in the town and then ran or was denied was answered there too: it stays
+   * expired, with that proof.
    * @param {import('../public/js/core/dialogs.js').Dialog[]} closed @param {string} hook
    * @returns {number} how many approvals were resolved
    */
   function answered(closed, hook) {
     let resolved = 0;
+    const proof = proofOf(hook);
     for (const dialog of closed) {
       const entry = dialog.approvalId === null ? undefined : entries.get(dialog.approvalId);
+      if (entry && answeredLate(entry.approval, proof)) publish(entry);
       if (!entry || entry.approval.status !== 'pending') continue;
       if (entry.approval.held) {
-        entry.gone = proofOf(hook);
+        entry.gone = proof;
         continue;
       }
-      settle(entry, { status: 'resolved', decidedBy: 'terminal', proof: proofOf(hook) }, null);
+      settle(entry, { status: 'resolved', decidedBy: 'terminal', proof }, null);
       resolved += 1;
     }
     return resolved;
@@ -388,7 +404,8 @@ export function createApprovalBroker({
      * Follows a hook through the broker's dialogs (afterHook), at its own time. A request whose
      * dialog closes while it is pending and not held (never held, or released) was answered in
      * the terminal: it is resolved, with what proved it. A held one waits for the town, and is
-     * resolved if released after its dialog closed; an expired one stays expired.
+     * resolved if released after its dialog closed; an expired one stays expired (with `proof`
+     * when it ran or was denied after all).
      * @param {Record<string, any>} event  sanitized, with its call key
      * @param {number} [ts]  when the agent sent it (the forwarder's time)
      * @returns {number} how many approvals were resolved
