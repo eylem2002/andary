@@ -2,8 +2,9 @@
 // and its agents are the stations along it. A station shows the agent's status, what it is doing
 // and for how long; clicking it selects the agent and points the camera at it. An agent that waits
 // for you or seems stuck ("needs you", core/attention.js) says what for and since when instead,
-// and a finished turn, a stop or a stuck alert can be set aside from its row.
-import { crewUsage, usageShort } from './usage.js';
+// and a finished turn, a stop or a stuck alert can be set aside from its row. Under the model, the
+// lead's context in use.
+import { crewContext, crewUsage, usageShort } from './usage.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from './dom.js';
 import { icon } from './icons.js';
 import { modelLabel } from '../core/catalog.js';
@@ -62,6 +63,7 @@ export function createCrewsPanel(ctx) {
     const title = h('span', { class: 'hud-line__title' });
     const name = h('h3', { class: 'hud-line__name' }, number, title);
     const model = h('span', { class: 'hud-line__model' });
+    const context = h('span', { class: 'hud-line__context', 'data-testid': 'crew-context', hidden: true });
     const memberName = h('span', {});
     const member = h('span', { class: 'hud-line__member', 'data-testid': 'crew-member' }, srOnly('Shared by '), memberName);
     // Codex crews say so; Claude Code is the town's default and carries no badge.
@@ -76,8 +78,8 @@ export function createCrewsPanel(ctx) {
       render(ctx.store.getState());
     });
     const line = h('li', { class: 'hud-line', 'data-testid': 'crew', 'data-session-id': session.id },
-      h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, member, agent, model, cost)), goal, stations, more);
-    parts.set(line, { mark, number, title, name, model, cost, member, memberName, agent, goal, stations, more });
+      h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, member, agent, model, context, cost)), goal, stations, more);
+    parts.set(line, { mark, number, title, name, model, context, cost, member, memberName, agent, goal, stations, more });
     return line;
   }
 
@@ -101,6 +103,9 @@ export function createCrewsPanel(ctx) {
     setHidden(p.member, !session.member);
     setHidden(p.agent, session.source !== 'codex');
     setText(p.model, ended ? 'Ended' : modelLabel(session.model));
+    const inContext = crewContext(state, session.id);
+    setText(p.context, inContext);
+    setHidden(p.context, !inContext);
     const spent = usageShort(crewUsage(state, session.id));
     setText(p.cost, spent);
     setAttr(p.cost, 'aria-label', spent ? `Estimated cost ${spent}. Show usage` : null);

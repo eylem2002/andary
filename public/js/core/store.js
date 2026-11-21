@@ -148,6 +148,8 @@ export { ACHIEVEMENTS };
  * @property {number} costUsd
  * @property {boolean} unpriced
  * @property {string|null} model
+ * @property {{ tokens: number, at: number }|null} context  the context its newest message used, and
+ *   when that was written; null until one is read and after a compaction (§4.8)
  */
 
 /** @typedef {{ date: string, tokens: number, costUsd: number }} UsageDay */
@@ -929,8 +931,21 @@ function readUsage(raw) {
       costUsd: amount(raw.costUsd),
       unpriced: raw.unpriced === true,
       model: typeof raw.model === 'string' ? raw.model : null,
+      context: readContext(raw.context),
     },
   };
+}
+
+/**
+ * A context reading, or null for anything that is not a token count with a time.
+ * @param {unknown} raw
+ * @returns {AgentUsage['context']}
+ */
+function readContext(raw) {
+  if (!isObject(raw)) return null;
+  const tokens = Math.round(amount(raw.tokens));
+  const at = amount(raw.at);
+  return tokens > 0 && at > 0 ? { tokens, at } : null;
 }
 
 /** @param {unknown[]} days @returns {UsageDay[]} */

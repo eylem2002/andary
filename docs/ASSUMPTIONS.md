@@ -636,3 +636,45 @@ section.
     than it still clears them, which can hide a loop. An agent first seen after a change in its
     folder knows nothing of it, so its calls made before that change count: that could invent a
     loop, but only if its very first hooks arrive after another agent's later edit.
+125. **The context in use is shown in tokens, never as a share of a window, and raises no alert.**
+    It is the newest message's input, cache writes and cache reads, as Claude Code's status line
+    counts it. Today's default models run a 1M window with no `[1m]` in the model id and the user
+    can move the compaction point, so the window cannot be told from what Andary sees: a percentage
+    would be a guess. `/context` in Claude Code gives the whole picture; a percentage waits for
+    exact numbers from the status line (design §9).
+126. **The newest reading is the last message read from the agent's own transcript.** Lines are
+    written in order, so file order is time order; timestamps are not compared, since a clock
+    change could reorder them. A helper's transcript gives the helper's reading. A line marked
+    `isSidechain` in a lead's transcript (older Claude Code wrote helpers' messages there) is not
+    the lead's, and a message that read no tokens is no reading. A resumed session's copy of an
+    earlier message gives that session's reading though its usage is not counted again (the
+    resumed conversation holds it); a record with a reading and nothing counted shows no cost,
+    rather than "0 tokens".
+127. **A compaction makes the context unknown until the next message, cut at the hook's start
+    time.** `PreCompact`, `PostCompact` and `SessionStart` with `source: "compact"` drop the
+    reading at once. The transcript is read a moment after a hook, so a message written before the
+    compaction may still be waiting: messages written before the latest compaction hook started
+    give no reading (their usage still counts). Both times come from this computer's clock (the
+    forwarder's start time, Claude Code's timestamps). The first message after a compaction comes
+    an API round trip after `PostCompact`; should a hook start later than it, that one reading is
+    skipped and the next message brings one. A `compact_boundary` line in the transcript drops the
+    reading too, for setups without those hooks.
+128. **A reading that no longer holds is hidden, not labelled.** A finished helper's or an ended
+    crew's last reading describes a context that is gone, and a crew line has no room for
+    "(old)". A lead that finished its turn keeps its reading: its conversation is still there, and
+    that is when the number helps most, before the next prompt. The browser does not judge
+    compactions itself: the server and the demo drop the reading at the compaction hook, before the
+    town shows it. "Read 2m ago" is when the message was written; Andary reads it about a second
+    after the hook that follows it.
+129. **No context for Codex.** Andary reads no Codex usage yet (65), so there is nothing to count.
+    When its rollouts are read, the sum needs its own check: OpenAI's usage counts cached input
+    inside the input tokens, Claude's counts it apart.
+130. **After a restart, the context shows again with the next message.** Readings are not kept in
+    `usage.json`, like agent totals, and the tracker reads each transcript only from where it
+    stopped, so it does not see the last message again.
+131. **The crew line shows the context on its own line under the model.** "Opus 5.5 · 182k in
+    context" on one line would take room from the crew's name in a 268–320 px panel.
+132. **The demo's context is made up apart from its costs.** It starts at 18k (system prompt and
+    tools), grows by 0.6k–3.6k a step, starts again at 26k after a compaction, and stops at 950k: a
+    demo crew can go a long time without compacting, and Claude Code would compact before a 1M
+    window filled. The demo's costs are unchanged.

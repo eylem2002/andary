@@ -13,7 +13,7 @@ function fakeContext() {
   const seen = { usage: [], growth: [], notify: [], broker: [], relay: [], broadcast: [], history: [] };
   const ctx = {
     counts: { events: 0 },
-    usage: { observe: (/** @type {any} */ e) => seen.usage.push(e) },
+    usage: { observe: (/** @type {any} */ e, /** @type {number} */ ts) => seen.usage.push({ ...e, observedTs: ts }) },
     progress: { observe: (/** @type {any} */ e) => seen.growth.push(e) },
     notifier: { observe: (/** @type {any} */ e, /** @type {number} */ ts) => seen.notify.push({ ...e, ts }) },
     broker: { observe: (/** @type {any} */ e, /** @type {number} */ ts) => seen.broker.push({ ...e, ts }) },
@@ -41,6 +41,8 @@ describe('ingest', () => {
     assert.deepEqual([envelope.id, envelope.ts, envelope.event.andary_member], [1, 5, undefined]);
     for (const key of ['usage', 'growth', 'notify', 'broker', 'relay', 'history', 'broadcast']) assert.equal(seen[key].length, 1, key);
     assert.equal(seen.broadcast[0].e.id, 1);
+    // The usage reader gets the hook's start time: a compaction then drops older context readings.
+    assert.equal(seen.usage[0].observedTs, 5);
   });
 
   it("the phone notes and the approval broker get each hook's own time: hooks may arrive out of order", () => {

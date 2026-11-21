@@ -860,6 +860,15 @@ body {
   font-weight: 700;
 }
 
+/* The lead's context in use, under the model: secondary, so a shade lighter in weight. */
+.hud-line__context {
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .hud-line__cost {
   min-height: 24px;
   padding: 0 4px;
@@ -1941,6 +1950,13 @@ body {
   color: var(--ink);
   font-size: 13px;
   overflow-wrap: anywhere;
+}
+
+/* Usage: the context in use, then the totals, each its own line. */
+.hud-inspector__lines {
+  display: grid;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
 }
 
 .hud-inspector__message {

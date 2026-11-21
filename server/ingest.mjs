@@ -44,9 +44,10 @@ const TEAM_MAX_AGE_MS = 60 * 60 * 1000;
  * @returns {TownEnvelope[]}
  */
 export function ingestHook(ctx, body, now = Date.now()) {
-  if (body.source === 'claude') ctx.usage.observe(body.event);
   // Its own time, kept within the last hour (hookTime): the town, the notes and the broker go by it.
   const ts = hookTime(body.ts, now);
+  // With the hook's start time: a compaction drops context readings of messages written before it.
+  if (body.source === 'claude') ctx.usage.observe(body.event, ts);
   return toTownPayloads(body.source, body.event).map((event) => admit(ctx, 'local', { ts, event }));
 }
 
