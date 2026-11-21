@@ -930,7 +930,8 @@ test('a limit note names the account when two or more report, and a restart send
   first.at(31_000);
   first.notifier.limitsChanged({ ...work, account: 'default', label: null }, 2);
   assert.match(first.posts[1].body, /^Claude's 5-hour limit \(default folder\) is/);
-  assert.equal(statSync(limitNotesFile).mode & 0o777, 0o600);
+  // Windows has no POSIX modes; the user profile's permissions protect the file there.
+  if (process.platform !== 'win32') assert.equal(statSync(limitNotesFile).mode & 0o777, 0o600);
   // The town restarts: the same windows were noted already.
   const second = testNotifier({ limitNotes: true, limitNotesFile });
   second.notifier.limitsChanged(work, 2);
