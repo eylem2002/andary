@@ -1015,15 +1015,11 @@ have changed 5 files" (two names, or the first and "N others").
   different ones, count as none), or with none the whole work tree (`git clean`, `checkout`,
   `restore`: the folder), and which files (`files`: `tracked` for stash without `-u`, checkout,
   switch, restore, reset, `commit -a`, `add -u`, `commit <path>`; `untracked` for clean; else
-  `all`). The line is split at `&&`, `||`, `;`, `|`, `&`, newlines and parentheses outside quotes;
-  a shell's `-c` script (`bash -lc '…'`, as Codex sends it) is read one level deep; `cd`, `chdir`,
-  `Set-Location`, `sl`, `pushd`/`popd`, `Push-Location`/`Pop-Location` and `git -C` move the
-  folder, `env -C` for its own command (to `~`, `-` or a variable: unknown, and what follows is
-  not judged; after 64 moves, unknown), `cd "$(git rev-parse --show-toplevel)[/more]"` to the top
-  of the work tree (and on); quotes, escapes
-  (PowerShell's backtick), comments, redirections, `$(…)` and here-document bodies are read as a
-  shell reads them; `NAME=value`, shell keywords (`then`, `do`…) and wrappers with their options
-  (`sudo`, `env`, `nice`, `timeout 30`, `nohup`, `time`…) before a command are skipped.
+  `all`). The line is read by `readShell` (**Shell**, below): a segment whose program is `git` is a
+  git call, in the segment's `folder`, given the hook's folder, `root` (the top of the work tree,
+  for `cd "$(git rev-parse --show-toplevel)[/more]"`) and `resolve` (`core/paths.js`: Git Bash's
+  `/c/…` as `C:/…` beside a folder on a drive; `~` or a variable: unknown, and that call is not
+  judged). `git -C` then moves the folder, up to 64 times a call.
 - **The work tree** (`core/paths.js` `workTreeOf`): the top the server found for the hook's folder
   (`root`, from `andary_root`, §4.6) holds for any folder inside it, but a worktree Claude Code
   makes inside a repository (`…/.claude/worktrees/<name>`), which is one of its own, both ways

@@ -4,7 +4,7 @@
 // message that mentions a command is not that command.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { MAX_SPECS, gitAddsOf, gitCommitsOf, gitHazardOf, shellCommands } from '../../../public/js/core/git-commands.js';
+import { MAX_SPECS, gitAddsOf, gitCommitsOf, gitHazardOf } from '../../../public/js/core/git-commands.js';
 import { isInside } from '../../../public/js/core/paths.js';
 
 const CWD = '/home/dev/code/api-server';
@@ -300,42 +300,44 @@ describe('gitCommitsOf: what the commits on a line took in', () => {
   });
 });
 
-describe('shellCommands: a line read as a shell reads it', () => {
-  test('words, quotes and escapes', () => {
-    assert.deepEqual(shellCommands('git commit -m "Fix the \\"login\\" bug" --author=\'A B\' a\\ b'), [['git', 'commit', '-m', 'Fix the "login" bug', '--author=A B', 'a b']]);
-    assert.deepEqual(shellCommands('echo "C:\\temp" ""'), [['echo', 'C:\\temp', '']], 'in double quotes a backslash only escapes a few');
-  });
-
-  test('redirections and their targets are left out', () => {
-    assert.deepEqual(shellCommands('git stash 2>&1 | tail -5'), [['git', 'stash'], ['tail', '-5']]);
-    assert.deepEqual(shellCommands('npm test > out.log 2> err.log && git stash >/dev/null &>> all.log'), [['npm', 'test'], ['git', 'stash']]);
-    assert.deepEqual(shellCommands('echo 2 > x.txt'), [['echo', '2']], 'a number before a space is an argument');
-    assert.deepEqual(shellCommands('wc -l <<< "git stash"'), [['wc', '-l']]);
+describe('the line as core/shell.js reads it', () => {
+  test('quotes, redirections and comments are no commands of their own', () => {
+    assert.deepEqual(hazard("git checkout -- 'src/a file.ts' 2>&1 | tail -5")?.paths, [at('src/a file.ts')]);
+    assert.equal(hazard('npm test > "git stash.log" 2> err.log # git stash'), null);
+    assert.equal(hazard('wc -l <<< "git stash"'), null);
   });
 
   test('a commit message that mentions a command is not that command', () => {
     const line = 'git commit -m "$(cat <<\'EOF\'\nNever "git reset --hard"; it (really) can\'t be undone\nEOF\n)" && git push';
-    assert.deepEqual(shellCommands(line).map((words) => words.slice(0, 2)), [['git', 'commit'], ['git', 'push']]);
     assert.equal(hazard(line), null);
     const nested = 'git commit -m "$(printf "Fix (issue 12) ) twice")" && git stash';
     assert.equal(hazard(nested)?.command, 'git stash', 'a ) in quotes inside $(…) does not end it');
   });
 
-  test('here-document bodies and comments are no commands', () => {
-    assert.deepEqual(shellCommands("cat > notes.md <<'EOF'\ngit stash\ngit reset --hard\nEOF\necho done"), [['cat'], ['echo', 'done']]);
-    assert.deepEqual(shellCommands('cat <<-END\n\tgit clean -fd\n\tEND\nls'), [['cat'], ['ls']]);
-    assert.deepEqual(shellCommands('echo hi # git stash\nls'), [['echo', 'hi'], ['ls']]);
-    assert.deepEqual(shellCommands('echo a#b'), [['echo', 'a#b']], 'a # inside a word is no comment');
+  test('here-document bodies are no commands', () => {
+    assert.equal(hazard("cat > notes.md <<'EOF'\ngit stash\ngit reset --hard\nEOF\necho done"), null);
+    assert.equal(hazard('cat <<-END\n\tgit clean -fd\n\tEND\nls'), null);
+    assert.equal(hazard("cat > notes.md <<'EOF'\ngit stash\nEOF\ngit stash")?.command, 'git stash', 'the line after the body is');
+  });
+
+  test("a cd inside a shell's -c script stays in that shell", () => {
+    assert.equal(hazard("bash -c 'cd packages/web' && git stash")?.folder, CWD);
+    assert.equal(hazard("(cd packages/web) && git stash")?.folder, at('packages/web'), 'a subshell of parentheses is taken to carry it, as before');
   });
 
   test('defensive: any input, never throws', () => {
     for (const input of [undefined, null, 42, {}, 'echo "unclosed', "echo 'unclosed", 'echo $(unclosed', 'a\\', `${'x'.repeat(100_000)} git stash`, '<<', '2>&', 'cat <<EOF\nno end']) {
-      assert.doesNotThrow(() => shellCommands(input));
       assert.doesNotThrow(() => gitHazardOf(input, { folder: CWD }));
       assert.doesNotThrow(() => gitCommitsOf(input, { folder: CWD }));
+      assert.doesNotThrow(() => gitAddsOf(input, { folder: CWD }));
     }
-    assert.deepEqual(shellCommands({}), []);
-    assert.deepEqual(shellCommands("echo 'unclosed"), [['echo', 'unclosed']]);
     assert.equal(hazard(`echo ${'x'.repeat(30_000)}; git stash`), null, 'past the length read, nothing is judged');
+  });
+
+  test(`many git -C on one command stay cheap: past 64 the folder is unknown`, () => {
+    const started = performance.now();
+    assert.equal(hazard(`git ${'-C x '.repeat(3000)}stash`), null);
+    assert.ok(performance.now() - started < 200);
+    assert.equal(hazard(`git ${'-C x '.repeat(10)}stash`)?.folder, `${CWD}${'/x'.repeat(10)}`);
   });
 });

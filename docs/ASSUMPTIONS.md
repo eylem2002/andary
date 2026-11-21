@@ -782,7 +782,8 @@ section.
     the command runs inside it. One alert per command names every other agent with changes there,
     and how many files. The same command run again by the same agent in the same folder alerts
     again only for changes made after the last time: what it swept up was seen.
-142. **Reading a command line.** It is split at `&&`, `||`, `;`, `|`, `&`, newlines and
+142. **Reading a command line.** It is read by `core/shell.js`, the reader every rule about what
+    an agent ran goes through. It is split at `&&`, `||`, `;`, `|`, `&`, newlines and
     parentheses outside quotes; quotes, backslash escapes (a backtick in PowerShell, where a
     backslash is a path separator), comments, redirections and their targets (`2>&1`, `> log`),
     `$(…)` and here-document bodies are read as a shell would, so a commit message or a file
@@ -797,8 +798,10 @@ section.
     Beside a folder on a drive, Git Bash's `/c/Users/…` is read as `C:/Users/…`. A `cd` to `~`,
     `-` or a variable leaves the folder unknown and the commands after it
     unjudged (an absolute `cd` places it again), and so do more than 64 moves on one line, which
-    keeps a long line of `cd x;` cheap. A subshell's `cd` is taken to last past the subshell.
-    Only the first 20,000 characters are read.
+    keeps a long line of `cd x;` cheap; so do more than 64 `git -C` on one call. A subshell's
+    `cd` in parentheses is taken to last past the subshell; a `cd` inside a shell's `-c` script
+    stays in that shell (`bash -c 'cd web' && git stash` stashes where the line started), as
+    the shared reader has it. Only the first 20,000 characters are read.
 143. **The desktop notification says only "Two agents in one folder" and the crew, by name and
     number.** "api-server (crew 2) may be undoing another agent's work." fits a Write over another
     agent's change and a git command about to run alike, names no file, command or other agent
