@@ -33,13 +33,13 @@ export function createWorkTrees({ exists = onDisk, now = Date.now } = {}) {
   return {
     rootOf(folder) {
       if (typeof folder !== 'string' || !folder || folder.length > MAX_FOLDER_CHARS) return null;
-      folder = slashed(folder);
-      if (!ABSOLUTE.test(folder)) return null;
-      const hit = known.get(folder);
+      const dir = slashed(folder);
+      if (!ABSOLUTE.test(dir)) return null;
+      const hit = known.get(dir);
       if (hit && now() - hit.at < REFRESH_MS) return hit.root;
-      const root = topOf(folder, exists);
-      known.delete(folder);
-      known.set(folder, { root, at: now() });
+      const root = topOf(dir, exists);
+      known.delete(dir);
+      known.set(dir, { root, at: now() });
       if (known.size > MAX_FOLDERS) known.delete(/** @type {string} */ (known.keys().next().value));
       return root;
     },
