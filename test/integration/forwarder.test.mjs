@@ -59,16 +59,19 @@ describe('forwarder delivery', () => {
   });
 
   it('stamps the time its process started, before any start-up work', async () => {
-    // Start-up made slow on purpose (a module loaded before the forwarder waits 800 ms): the stamp
-    // is still the start, so a hook started earlier keeps its place ahead of one started later.
-    const slowStart = `--import=data:text/javascript,Atomics.wait(new%20Int32Array(new%20SharedArrayBuffer(4)),0,0,800)`;
+    // Start-up made slow on purpose (a module loaded before the forwarder waits 2 s): the stamp is
+    // still the start, so a hook started earlier keeps its place ahead of one started later.
+    // Measured against the slow part, not the clock: starting a process can take most of a second
+    // on Windows before Node runs at all.
+    const slowStart = `--import=data:text/javascript,Atomics.wait(new%20Int32Array(new%20SharedArrayBuffer(4)),0,0,2000)`;
     const started = Date.now();
     const payload = hookPayload('UserPromptSubmit', { session_id: 'deliver-slow', prompt: 'x' });
     const result = await town.sendHook(payload, { env: isolatedEnv({ ANDARY_HOME: town.home, NODE_OPTIONS: slowStart }) });
     assert.equal(result.code, 0);
     const message = await waitForMessage(browser, (m) => m?.t === 'hook' && m.e.event.session_id === 'deliver-slow');
-    assert.ok(message.e.rx - started >= 800, 'it started slowly');
-    assert.ok(message.e.ts >= started - 1 && message.e.ts - started < 500, `stamped ${message.e.ts - started} ms after it was started`);
+    assert.ok(message.e.rx - started >= 2000, 'it started slowly');
+    assert.ok(message.e.ts >= started - 1, 'not before it was started');
+    assert.ok(message.e.rx - message.e.ts >= 2000, `stamped ${message.e.rx - message.e.ts} ms before it arrived: before the slow start-up`);
   });
 
   it('forwards stdin that is not JSON as an Unknown event with a raw preview', async () => {
