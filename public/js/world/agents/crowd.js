@@ -22,6 +22,7 @@ import { PROP_BONE } from './rig.js';
 import { P } from './pose.js';
 import { clamp } from './easing.js';
 import { iconBoost, layoutTags, pillClearance } from './tags.js';
+import { positionAt } from '../../core/presence.js';
 
 const PACES = new Set(['walk', 'run', 'teleport']);
 /**
@@ -128,12 +129,43 @@ export class Crowd {
   }
 
   /**
-   * A person stands on their porch, facing the street (no walking yet: CONTRACTS §6).
+   * A person stands on their porch, facing the street, until they walk.
    * @param {Agent} agent @param {import('../../core/town-map.js').HomePlot} home
    */
   standAtHome(agent, home) {
     const door = tileToWorld(home.door[0], home.door[1]);
     this.place(agent.id, door.x, door.z - TILE * 0.375, 0);
+  }
+
+  /**
+   * Where a person is (World.placePerson): following a timed walk, or standing on a tile (on the
+   * porch when it is their door); dim while they are away.
+   * @param {string} id
+   * @param {{ tile: [number, number]|null, walk: { path: [number, number][], at: number }|null, dim: boolean }} where
+   */
+  placePerson(id, { tile, walk, dim }) {
+    const agent = this.agents.get(id);
+    if (!agent || agent.look.role !== 'person') return;
+    agent.tag.el.classList.toggle('is-away', dim);
+    if (walk) {
+      agent.resolveWaiters(false);
+      this.applyMoves(this.allocator.release(id));
+      agent.building = null;
+      agent.queued = false;
+      agent.follow((now) => {
+        const p = positionAt(walk.path, walk.at, now);
+        const w = tileToWorld(p.col, p.row);
+        return { x: w.x, z: w.z, done: p.done };
+      });
+      return;
+    }
+    if (!tile || agent.track) return;
+    const home = HOMES.find((plot) => plot.door[0] === tile[0] && plot.door[1] === tile[1]);
+    if (home) this.standAtHome(agent, home);
+    else {
+      const w = tileToWorld(tile[0], tile[1]);
+      this.place(id, w.x, w.z, 0);
+    }
   }
 
   /** @param {string} id @param {any} patch */

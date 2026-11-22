@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isClick, keyAction, raySegmentDistance } from '../../../../public/js/world/agents/input.js';
+import { isClick, keyAction, raySegmentDistance, stepToTile } from '../../../../public/js/world/agents/input.js';
 
 const v = (x, y, z) => ({ x, y, z });
 
@@ -38,4 +38,25 @@ test('a small, quick press is a click; a drag is not', () => {
   assert.equal(isClick({ x: 10, y: 10, t: 0 }, { x: 13, y: 12, t: 150 }), true);
   assert.equal(isClick({ x: 10, y: 10, t: 0 }, { x: 40, y: 10, t: 150 }), false);
   assert.equal(isClick({ x: 10, y: 10, t: 0 }, { x: 10, y: 10, t: 5000 }), false);
+});
+
+test('walk mode: arrows and WASD take a step, Shift+arrows still pan, the rest is unchanged', () => {
+  const walking = { walking: true };
+  assert.deepEqual(keyAction({ key: 'ArrowUp' }, walking), { type: 'step', right: 0, up: 1 });
+  assert.deepEqual(keyAction({ key: 'a' }, walking), { type: 'step', right: -1, up: 0 });
+  assert.deepEqual(keyAction({ key: 'S' }, walking), { type: 'step', right: 0, up: -1 });
+  assert.deepEqual(keyAction({ key: 'ArrowLeft', shiftKey: true }, walking), { type: 'pan', right: -1, up: 0 });
+  assert.equal(keyAction({ key: 'w' }), null, 'W belongs to the town only in walk mode');
+  assert.deepEqual(keyAction({ key: 'ArrowUp', shiftKey: true }), { type: 'pan', right: 0, up: 3 });
+  assert.deepEqual(keyAction({ key: 'q' }, walking), { type: 'rotate', dir: -1 });
+  assert.equal(keyAction({ key: 'w', ctrlKey: true }, walking), null);
+});
+
+test('a screen step becomes one grid step, each key its own direction, whatever the camera', () => {
+  for (const yaw of [Math.PI / 4, (3 * Math.PI) / 4, -Math.PI / 4, 0, 1]) {
+    const steps = [[0, 1], [1, 0], [0, -1], [-1, 0]].map(([r, u]) => stepToTile(r, u, yaw).join());
+    assert.equal(new Set(steps).size, 4, `yaw ${yaw}`);
+    for (const s of steps) assert.ok(['1,0', '-1,0', '0,1', '0,-1'].includes(s));
+  }
+  assert.deepEqual(stepToTile(0, 1, Math.PI / 4), [0, -1], 'the default camera: up goes north');
 });
