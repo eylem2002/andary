@@ -136,6 +136,11 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
      * @param {unknown} digest
      */
     setDigest: (digest) => ctx.catchUp.showDigest(digest),
+    /**
+     * The server's answer to a note sent from the agent's details (§4.15).
+     * @param {{ ref: string|null, ok: boolean, error?: string }} reply
+     */
+    noteReply: (reply) => ui.inspector.noteReply(reply),
     /** @param {import('./types.js').ConnectionStatus} status */
     setConnection(status) {
       view.connection = status;

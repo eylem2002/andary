@@ -26,7 +26,7 @@
 // bucket it falls in when a bucket counted something since then (`from`).
 import { INTERACTIVE_TOOLS, inputKey } from './dialogs.js';
 import { isDoctorSession } from './ids.js';
-import { gitAction, isTestRun, shellCommands } from './shell.js';
+import { gitAction, isTestRun, runsNoTests, shellCommands } from './shell.js';
 import { classifyError } from './summaries.js';
 import { clip, isObject, oneLine, own, str, textOf } from './text.js';
 
@@ -54,8 +54,6 @@ const NO_SESSION = 'unknown';
 const DECIDED = new Set(['allowed', 'denied']);
 /** What shows that a request in the terminal was answered there (`stopped` may be abandoned). */
 const PROOFS_OF_ANSWER = new Set(['ran', 'denied']);
-/** Arguments of a test command that runs no tests: it lists, collects, explains, or may find nothing. */
-const NO_RUN_ARGS = new Set(['--no-run', '--collect-only', '--co', '-l', 'list', '--help', '-h', '--version', '--if-present']);
 /** What git push says when it had nothing to send. */
 const UP_TO_DATE = /Everything up-to-date/g;
 
@@ -159,15 +157,6 @@ const isPatchPart = (event) => event.andary_tool === 'apply_patch' && /#\d+$/.te
 
 /** One more of something, and what else came with it. @param {CountName} name @param {Tally} [extra] @returns {Tally} */
 const one = (name, extra = {}) => ({ ...extra, count: name });
-
-/**
- * A test command that runs no tests (core/shell.js words): it lists or collects them, only builds,
- * explains itself, may find no script (`--if-present`), or is go's `-run`, which may select none.
- * @param {string[]} words
- */
-function runsNoTests([name, ...args]) {
-  return args.some((arg) => NO_RUN_ARGS.has(arg) || arg.startsWith('--list') || (name === 'go' && (arg === '-run' || arg.startsWith('-run='))));
-}
 
 /** A commit that makes a new one (an amend rewrites the last). @param {string[]} words */
 const isNewCommit = (words) => gitAction(words) === 'commit' && !words.includes('--amend');

@@ -23,6 +23,9 @@ const STATE_FILE = 'server.json';
  * @property {boolean} [team]     hosts a team town (§4.11)
  * @property {boolean} [tls]      serves HTTPS to the network (ADR 0016)
  * @property {string[]} [teamHosts]  names a team host is reached by (--team-host)
+ * @property {{ url: string|null, pid?: number, port?: number, error?: string }} [tunnel]  a team
+ *   host's Quick Tunnel (--tunnel, ADR 0019): its address, cloudflared's pid and the loopback port
+ *   it forwards to while it runs; url null with the reason once it stopped
  */
 
 /**

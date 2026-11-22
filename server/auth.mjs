@@ -98,8 +98,50 @@ export function signHookReply(responseKey, nonce, body) {
   return createHmac('sha256', responseKey).update(`${nonce}\n${body}`).digest('base64url');
 }
 
+/** Requests that came in through the tunnel's own port (marked by the server, app.mjs). */
+const TUNNELLED = new WeakSet();
+
 /**
- * Who a browser is: the owner (signed in), a teammate watching (view token), or nobody.
+ * Marks a request as one from the internet through the Quick Tunnel (ADR 0019). The server does
+ * this for every request on the loopback port it opened for cloudflared.
+ * @param {import('node:http').IncomingMessage} req
+ */
+export function markTunnelled(req) {
+  TUNNELLED.add(req);
+}
+
+/** Headers Cloudflare's edge adds to every request it forwards; a client cannot remove them. */
+const CLOUDFLARE_HEADERS = ['cf-connecting-ip', 'cf-ray', 'cf-visitor', 'cf-ipcountry'];
+
+/**
+ * Whether a request came from the internet through a Cloudflare tunnel (ADR 0019). Such a request
+ * reaches the server from cloudflared on this computer, so its socket is loopback: that says
+ * nothing about who sent it. It is one if it arrived on the tunnel's port, or if it carries
+ * Cloudflare's headers on any port (a tunnel someone pointed at the town's own port). A tunnelled
+ * request is never the owner and never reaches the owner's routes.
+ * @param {import('node:http').IncomingMessage} req
+ * @returns {boolean}
+ */
+export function isTunnelled(req) {
+  if (TUNNELLED.has(req)) return true;
+  if (CLOUDFLARE_HEADERS.some((name) => req.headers[name] !== undefined)) return true;
+  return /\bcloudflare\b/i.test(String(req.headers['cdn-loop'] ?? ''));
+}
+
+/**
+ * The Host names a request may use: a tunnelled one only the tunnel's own name (none until
+ * cloudflared printed it), anything else the town's local and network names.
+ * @param {import('node:http').IncomingMessage} req
+ * @param {{ allowedHosts: Set<string>, tunnelHosts: Set<string> }} hosts
+ * @returns {Set<string>}
+ */
+export function allowedHostsFor(req, { allowedHosts, tunnelHosts }) {
+  return isTunnelled(req) ? tunnelHosts : allowedHosts;
+}
+
+/**
+ * Who a browser is: the owner (signed in), a teammate watching (view token), or nobody. The
+ * owner's token counts only on this computer: through the tunnel it is ignored (ADR 0019).
  * @param {import('node:http').IncomingMessage} req
  * @param {string} uiToken
  * @param {string|null} view  the team's view token, null when this is not a team host
@@ -107,7 +149,7 @@ export function signHookReply(responseKey, nonce, body) {
  */
 export function browserRole(req, uiToken, view) {
   const credentials = browserCredentials(req);
-  if (safeEqual(credentials.token, uiToken)) return 'owner';
+  if (!isTunnelled(req) && safeEqual(credentials.token, uiToken)) return 'owner';
   if (view && safeEqual(credentials.view, view)) return 'viewer';
   return null;
 }

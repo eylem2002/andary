@@ -30,6 +30,23 @@ export async function runTeam(values, positionals, io) {
 }
 
 /**
+ * The address the invite names: --url, else the town's Quick Tunnel (--tunnel), else its network
+ * address (the name on its certificate with HTTPS).
+ * @param {Record<string, any>} values
+ * @param {import('../state-file.mjs').ServerState|null} state
+ * @returns {{ base: string, viaTunnel: boolean, lan: string|undefined }}
+ */
+function inviteAddress(values, state) {
+  const lan = lanAddresses()[0];
+  if (values.url) return { base: parseTeamUrl(values.url, '--url'), viaTunnel: false, lan };
+  if (state?.tunnel?.url) return { base: state.tunnel.url, viaTunnel: true, lan };
+  // With a certificate, the address must be the name on it (the first --team-host).
+  const scheme = state?.tls ? 'https' : 'http';
+  const address = state?.tls ? (state.teamHosts?.[0] ?? lan) : lan;
+  return { base: `${scheme}://${address ?? '127.0.0.1'}:${state?.port ?? DEFAULT_PORT}`, viaTunnel: false, lan };
+}
+
+/**
  * @param {string} rawName
  * @param {Record<string, any>} values
  * @param {string} home
@@ -40,12 +57,7 @@ function invite(rawName, values, home, io) {
   if (!name) throw new UsageError('Give the teammate a name: letters, digits, spaces, dots, dashes or underscores (at most 24).');
   const secret = /** @type {string} */ (teamSecret(home));
   const state = readStateFile(home);
-  const port = state?.port ?? DEFAULT_PORT;
-  const lan = lanAddresses()[0];
-  // With a certificate, the address must be the name on it (the first --team-host).
-  const scheme = state?.tls ? 'https' : 'http';
-  const address = state?.tls ? (state.teamHosts?.[0] ?? lan) : lan;
-  const base = values.url ? parseTeamUrl(values.url, '--url') : `${scheme}://${address ?? '127.0.0.1'}:${port}`;
+  const { base, viaTunnel, lan } = inviteAddress(values, state);
   // The key goes in the environment: as an argument it would sit in ps and the shell history.
   const command = `ANDARY_TEAM_KEY=${memberKey(secret, name)} andary start --share-to ${base}`;
   io.out(`Invite for ${name}. Send them these two lines privately: the key lets anyone add sessions to your town as ${name}.`);
@@ -57,12 +69,32 @@ function invite(rawName, values, home, io) {
   io.out(`    ${base}/?view=${viewToken(secret)}`);
   io.out('');
   io.out('Whoever has the view link sees every crew\'s prompts, commands, file paths and edits, yours');
-  io.out('included, over plain HTTP: share it only with the team, on a network you trust.');
-  if (!values.url && !lan) io.out('No network address found: pass the address teammates use with --url http://<address>:<port>.');
+  if (viaTunnel) {
+    io.out('included. This address is on the internet (a Cloudflare Quick Tunnel): the key and the link are');
+    io.out('all that protect it, and it changes when the town restarts (then send a new invite).');
+  } else if (base.startsWith('https:')) {
+    io.out('included: share it only with the team.');
+  } else {
+    io.out('included, over plain HTTP: share it only with the team, on a network you trust.');
+  }
+  inviteNotes(values, state, base, lan, io);
+  io.out(`Revoke every key and the view link with: ${cliInvocation()} team reset`);
+  return 0;
+}
+
+/**
+ * What may still stop the invite from working.
+ * @param {Record<string, any>} values
+ * @param {import('../state-file.mjs').ServerState|null} state
+ * @param {string} base
+ * @param {string|undefined} lan
+ * @param {import('./io.mjs').CliIo} io
+ */
+function inviteNotes(values, state, base, lan, io) {
+  if (state?.tunnel && !state.tunnel.url) io.out(`The town's tunnel is down (${state.tunnel.error ?? 'cloudflared stopped'}): restart it with ${cliInvocation()} start --team --tunnel`);
+  if (!values.url && !state?.tunnel?.url && !lan) io.out('No network address found: pass the address teammates use with --url http://<address>:<port>.');
   if (!state) io.out(`The team town is not running: start it with ${cliInvocation()} start --team`);
   else if (!state.team) io.out(`The running town is not a team host: restart it with ${cliInvocation()} start --team`);
   const host = new URL(base).hostname;
-  if (values.url && !/^[\d.]+$/.test(host)) io.out(`For the view link to work at ${host}, start the team town with --team-host ${host}`);
-  io.out(`Revoke every key and the view link with: ${cliInvocation()} team reset`);
-  return 0;
+  if (values.url && !/^[\d.]+$/.test(host) && !host.endsWith('.trycloudflare.com')) io.out(`For the view link to work at ${host}, start the team town with --team-host ${host}`);
 }

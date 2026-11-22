@@ -198,7 +198,7 @@ describe('the town digest', () => {
     digest.observe(FIXTURES.PermissionRequest);
     await clock.advance(AWAY_MS);
     assert.deepEqual(digest.away(), { since: 0, until: null });
-    digest.approvalChanged({ id: 'a1', status: 'allowed', decidedBy: 'town', held: false, sessionId: FIXTURES.Stop.session_id, agentId: null, source: 'claude', toolName: 'Bash', toolInput: {}, callKey: null, cwd: '/w', createdAt: 0, expiresAt: null, suggestions: [] });
+    digest.approvalChanged({ id: 'a1', status: 'allowed', decidedBy: 'town', held: false, sessionId: FIXTURES.Stop.session_id, agentId: null, source: 'claude', toolName: 'Bash', toolInput: {}, callKey: null, cwd: '/w', createdAt: 0, expiresAt: null, suggestions: [], canStop: false });
     assert.deepEqual(aways, [{ since: 0, until: null }, { since: 0, until: AWAY_MS + 1000 }]);
     digest.observe(hook('Stop', { last_assistant_message: 'Shipped.' }));
     const [crew] = digest.summary(0).crews;

@@ -1702,6 +1702,23 @@ body {
   color: var(--ink);
 }
 
+/* "Deny and stop" takes a row of its own under Allow and Deny, its line first and the button only
+   as wide as its label, like "Allow always" below it; a card that cannot stop its agent shows the
+   line alone, saying why. */
+.hud-approval__stop {
+  display: grid;
+  flex: 1 1 100%;
+  justify-items: start;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.hud-approval__stop-note {
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
 /* "Allow always" takes a row of its own under Allow and Deny (three buttons do not fit the
    board). The rule it saves is written out first, between them and the button, and the button is
    set apart and only as wide as its label: a tap that falls short of Allow lands on words, not
@@ -1971,6 +1988,68 @@ body {
   color: var(--ink-2);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+}
+
+/* Send a note (ui/agent-note.js): the field, what it is for, then this agent's latest notes. */
+.hud-note-form {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.hud-note-form label {
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.hud-note-field {
+  width: 100%;
+  padding: 6px 10px;
+  resize: vertical;
+}
+
+.hud-note-help {
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.hud-note-status.is-error {
+  color: var(--error);
+  font-weight: 700;
+}
+
+.hud-note-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.hud-note-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  font-size: 12.5px;
+}
+
+.hud-note-item__state {
+  color: var(--ink-2);
+  font-weight: 700;
+}
+
+.hud-note-item[data-status="expired"] .hud-note-item__state {
+  color: var(--error);
+}
+
+.hud-note-item__text {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* Another agent changed a file this one edits (core/conflicts.js): beside what it does. */
@@ -3492,4 +3571,38 @@ body {
   animation: none !important;
   transition: none !important;
   scroll-behavior: auto !important;
+}
+
+/* ---- turn receipts: a lead's last turn, in its details (core/receipts.js) ------------------ */
+
+.hud-receipt {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+
+.hud-receipt__row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 13px;
+}
+
+.hud-receipt__row dt {
+  color: var(--ink-3);
+  font-weight: 600;
+}
+
+.hud-receipt__row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.hud-receipt__row[data-tone="ok"] dd { color: var(--done); }
+.hud-receipt__row[data-tone="warn"] dd { color: var(--ink); font-weight: 700; }
+.hud-receipt__row[data-tone="error"] dd { color: var(--error); }
+
+.hud-receipt__row[data-tone="warn"] dt::before {
+  content: "⚠ ";
+  color: var(--waiting);
 }

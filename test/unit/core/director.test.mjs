@@ -746,3 +746,23 @@ describe('director: lifecycle and robustness', () => {
     assert.ok(calls('emote').some((c) => c[2] === '🙋'));
   });
 });
+
+describe('director: notes to agents', () => {
+  it('shows an envelope on the badge while notes wait, beside a combo, until they are delivered', async () => {
+    const { store, send, ready, calls, clock } = setup();
+    await ready();
+    const note = (/** @type {string} */ id, /** @type {string} */ status) => ({ id, status, sessionId: SESSION, agentId: null, text: 'hi', createdAt: 1, expiresAt: 2 });
+    store.setNote(note('n1', 'queued'));
+    store.setNote(note('n2', 'queued'));
+    assert.deepEqual(calls('setBadge').map((c) => c[2]), ['✉', '✉2']);
+    for (const id of ['a', 'b']) {
+      await send(read(id));
+      await send(readDone(id));
+      await clock.advance(1000);
+    }
+    assert.deepEqual(calls('setBadge').at(-1), ['setBadge', MAIN, '✉2 ×2']);
+    store.setNote(note('n1', 'delivered'));
+    store.setNote(note('n2', 'expired'));
+    assert.deepEqual(calls('setBadge').at(-1), ['setBadge', MAIN, '×2']);
+  });
+});

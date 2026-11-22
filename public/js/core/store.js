@@ -2,9 +2,9 @@
 // It applies TownEvents to crews (sessions), agents, todos/tasks, approvals, the activity log and
 // stats; works out who each event belongs to (subagent labels, teammate names); keeps what each
 // agent has asked you (store-dialogs.js) or waits for you on (waits.js), whether it seems stuck
-// (loops.js), and where two agents work on the same files (conflicts.js); and unlocks
-// achievements. The town may open mid-session, so every session or agent an event mentions is
-// created on first sight.
+// (loops.js), and where two agents work on the same files (conflicts.js); keeps a receipt of each
+// lead's turn (receipts.js); and unlocks achievements. The town may open mid-session, so every
+// session or agent an event mentions is created on first sight.
 
 import { ACHIEVEMENTS, achievementFor } from './achievements.js';
 import { BUILDINGS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
@@ -16,6 +16,8 @@ import { NO_SESSION, normalize } from './events.js';
 import { gitAddsOf, gitCommitsOf, gitHazardOf } from './git-commands.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { rulesText } from './permission-rules.js';
+import { noteStateText } from './notes.js';
+import { receiptLine } from './receipts.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
 import { dialogsAfterApproval, dialogsAfterEvent } from './store-dialogs.js';
@@ -65,10 +67,11 @@ export { ACHIEVEMENTS };
  * @property {string} agentKey
  * @property {string} agentName
  * @property {string} color
- * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict'
+ * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict' / 'receipt'
  * @property {string} icon
  * @property {string} text
  * @property {'info'|'success'|'warn'|'error'} level
+ * @property {string} [receiptId]  a 'receipt' line: the receipt it stands for (StoreState.receipts)
  */
 
 /**
@@ -119,6 +122,9 @@ export { ACHIEVEMENTS };
  * @property {string} [message]
  * @property {string|null} [callKey]  the server's key for the call's input (§4.5), to find its dialog
  * @property {import('./permission-rules.js').OfferedSuggestion[]} [suggestions]  rules an allow may save ("Allow always")
+ * @property {boolean} [canStop]   a deny from the town may also stop the agent ("Deny and stop", Claude Code only)
+ * @property {string} [stopNote]   why it may not, when it may not
+ * @property {boolean} [stopped]   denied from the town with a stop
  * @property {{ rules: import('./permission-rules.js').PermissionRule[], destination: string, at: number }} [always]  the rule an "Allow always" asked Claude Code to save, and when
  */
 
@@ -144,6 +150,8 @@ export { ACHIEVEMENTS };
  * @property {Achievement[]} achievements
  * @property {Record<string, AgentUsage>} usage   agentKey → tokens and estimated cost (§4.8)
  * @property {UsageDay[]} usageDays             the last 30 days, oldest first
+ * @property {Note[]} notes                       the owner's notes to agents (§4.15), oldest first
+ * @property {readonly import('./receipts.js').Receipt[]} receipts  a receipt per lead's turn that ended, newest last
  */
 
 /**
@@ -158,8 +166,9 @@ export { ACHIEVEMENTS };
  */
 
 /** @typedef {{ date: string, tokens: number, costUsd: number }} UsageDay */
+/** @typedef {import('./notes.js').Note} Note */
 
-/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'reset'}} StoreChange */
+/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'note', note: Note}|{type: 'reset'}} StoreChange */
 
 /**
  * @typedef {object} Store
@@ -167,6 +176,7 @@ export { ACHIEVEMENTS };
  * @property {(event: TownEvent) => void} dispatch
  * @property {(approval: Approval) => void} setApproval
  * @property {(record: unknown, days?: unknown) => void} setUsage  one agent's usage totals, and the day totals
+ * @property {(note: unknown) => void} setNote  a note to an agent, as the server last told of it (§4.15)
  * @property {(listener: (change: StoreChange) => void) => () => void} subscribe
  * @property {() => StoreState} getState
  * @property {() => void} reset
@@ -601,7 +611,25 @@ function apply(m, input) {
   if (draft) pushLog(m, e, s, a, draft);
   for (const change of newlyStuck) logStuck(m, e, s, change);
   for (const hazard of hazards) logHazard(m, e, s, hazard);
+  if (a) followTurn(m, e, s, a);
   return e;
+}
+
+/**
+ * Keeps the lead's turn (receipts.js); when it ends, its receipt gets a line in the activity log,
+ * after the line of the turn's end: a warning when it has something to check.
+ * @param {Model} m
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {AgentState} a
+ */
+function followTurn(m, e, s, a) {
+  const receipt = m.receipts.record(e, a, { costs: m.state.usage, cwd: s.cwd, member: Boolean(s.member) });
+  if (!receipt) return;
+  m.state.receipts = m.receipts.list();
+  const level = receipt.flag || receipt.othersEdited || receipt.test?.result === 'failed' ? 'warn' : 'info';
+  const entry = pushLog(m, { ...e, kind: 'receipt' }, s, a, { icon: '🧾', text: receiptLine(receipt), level });
+  entry.receiptId = receipt.id;
 }
 
 /**
@@ -892,7 +920,7 @@ function approvalChanged(m, approval, ts) {
   if (log) {
     const saved = savedRules(approval);
     const at = { ts, sessionId: approval.sessionId, agentKey: key, kind: 'approval' };
-    pushLog(m, at, s, a, { icon: log.icon, text: saved ? `Allowed; asked to save ${saved}` : `${log.prefix}: ${summary}`, level: /** @type {LogDraft['level']} */ (log.level) });
+    pushLog(m, at, s, a, { icon: log.icon, text: saved ? `Allowed; asked to save ${saved}` : `${approval.stopped === true ? 'Denied and stopped the agent' : log.prefix}: ${summary}`, level: /** @type {LogDraft['level']} */ (log.level) });
   }
   if (approval.status === 'denied') {
     m.awaiting.delete(key);
@@ -1026,10 +1054,16 @@ export function createStore(options = {}) {
       emit({ type: 'approval', approval: next, previous: previous ? str(previous.status) : null });
       for (const achievement of unlocked) emit({ type: 'achievement', achievement });
     },
+    setNote(raw) {
+      const note = readNote(raw);
+      if (note && noteChanged(m, note, now())) emit({ type: 'note', note });
+    },
     setUsage(record, days) {
       const usage = readUsage(record);
       if (usage) {
         m.state.usage[usage.key] = usage.value;
+        // The turn that ended last gets its cost as the transcript catches up.
+        m.receipts.priced(usage.sessionId, m.state.usage);
         emit({ type: 'usage', agentKey: usage.key });
       }
       if (Array.isArray(days)) m.state.usageDays = readDays(days);
@@ -1048,6 +1082,49 @@ export function createStore(options = {}) {
   };
 }
 
+/** Notes the store keeps; the oldest give way. */
+const MAX_NOTES = 100;
+const NOTE_STATUSES = new Set(['queued', 'delivered', 'expired']);
+
+/**
+ * Keeps a note's latest state, with a line in the activity log for each new state (queued, handed
+ * to the agent with the hook that carried it, expired). False when nothing changed.
+ * @param {Model} m @param {Note} note @param {number} ts
+ */
+function noteChanged(m, note, ts) {
+  const list = m.state.notes;
+  const index = list.findIndex((n) => n.id === note.id);
+  if (index >= 0 && list[index].status === note.status) return false;
+  if (index >= 0) list[index] = note;
+  else boundedPush(list, note, MAX_NOTES);
+  const key = agentKeyOf(note.sessionId, note.agentId);
+  const level = /** @type {LogDraft['level']} */ (note.status === 'expired' ? 'warn' : 'info');
+  const draft = { icon: '✉️', text: `${noteStateText(note)} — “${clip(oneLine(note.text), 60)}”`, level };
+  pushLog(m, { ts, sessionId: note.sessionId, agentKey: key, kind: 'note' }, m.sessions.get(note.sessionId), m.state.agents[key], draft);
+  return true;
+}
+
+/**
+ * A note from the server, read defensively (it crosses the network).
+ * @param {unknown} raw
+ * @returns {Note|null}
+ */
+function readNote(raw) {
+  if (!isObject(raw) || typeof raw.id !== 'string' || typeof raw.sessionId !== 'string' || !NOTE_STATUSES.has(raw.status)) return null;
+  return {
+    id: raw.id,
+    status: raw.status,
+    sessionId: raw.sessionId,
+    agentId: normalizeAgentId(typeof raw.agentId === 'string' ? raw.agentId : null),
+    text: str(raw.text),
+    createdAt: amount(raw.createdAt),
+    expiresAt: amount(raw.expiresAt),
+    ...(amount(raw.deliveredAt) ? { deliveredAt: amount(raw.deliveredAt) } : {}),
+    ...(typeof raw.hook === 'string' && /^\w{1,40}$/.test(raw.hook) ? { hook: raw.hook } : {}),
+    ...(typeof raw.reason === 'string' ? { reason: clip(oneLine(raw.reason), 200) } : {}),
+  };
+}
+
 /** @param {unknown} n */
 function amount(n) {
   return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 0;
@@ -1056,13 +1133,14 @@ function amount(n) {
 /**
  * A usage record from the server or the demo, read defensively (it crosses the network).
  * @param {unknown} raw
- * @returns {{ key: string, value: AgentUsage }|null}
+ * @returns {{ key: string, sessionId: string, value: AgentUsage }|null}
  */
 function readUsage(raw) {
   if (!isObject(raw) || typeof raw.sessionId !== 'string' || !raw.sessionId) return null;
   const tokens = isObject(raw.tokens) ? raw.tokens : {};
   return {
     key: agentKeyOf(raw.sessionId, normalizeAgentId(typeof raw.agentId === 'string' ? raw.agentId : null)),
+    sessionId: raw.sessionId,
     value: {
       tokens: { input: amount(tokens.input), output: amount(tokens.output), cacheRead: amount(tokens.cacheRead), cacheWrite: amount(tokens.cacheWrite) },
       costUsd: amount(raw.costUsd),

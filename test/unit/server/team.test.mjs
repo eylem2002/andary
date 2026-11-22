@@ -97,6 +97,8 @@ test('--share-to and --team-key go together and must look right', () => {
   const key = memberKey(SECRET, 'Lina');
   assert.equal(parseShareTo(undefined, undefined), null);
   assert.deepEqual(parseShareTo('http://192.168.1.20:4747/', key), { url: 'http://192.168.1.20:4747', key, member: 'Lina' });
+  // A Quick Tunnel's address (--tunnel): https on the default port.
+  assert.deepEqual(parseShareTo('https://seasonal-deck-organisms-sf.trycloudflare.com', key), { url: 'https://seasonal-deck-organisms-sf.trycloudflare.com', key, member: 'Lina' });
   assert.throws(() => parseShareTo('http://192.168.1.20:4747', undefined), /needs both/);
   assert.throws(() => parseShareTo(undefined, key), /needs both/);
   assert.throws(() => parseShareTo('http://192.168.1.20:4747', 'Lina.short'), /does not look like a key/);

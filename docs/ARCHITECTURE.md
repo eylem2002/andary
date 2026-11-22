@@ -38,7 +38,9 @@ How Andary is put together, and why. The exact interfaces (payloads, messages, A
 
 Everything runs on your machine. The server listens on `127.0.0.1` unless you host a team town,
 has no runtime dependencies, and keeps none of your prompts or commands on disk unless you ask it
-to record.
+to record. A team host started with `--tunnel` also runs your own `cloudflared`, which carries
+teammates' requests from a public `https://….trycloudflare.com` address to a loopback port the
+server opened only for it (ADR 0019).
 
 ## The design, part by part
 
@@ -62,8 +64,14 @@ holds a key that never leaves `~/.andary`, and only obeys replies signed with it
 header (DNS rebinding) and the WebSocket `Origin`, signs browsers in with a per-start token the
 page keeps for its own origin (ADR 0015; no cookie, which every port would see), sanitizes every
 payload (secrets redacted, sizes capped) before anything is kept or sent, and never holds a
-permission request it cannot show in full. A team town adds keys that are HMACs of one secret and a
-view-only role that sees the town but cannot act.
+permission request it cannot show in full. Notes to agents (CONTRACTS §4.15) travel the same
+signed replies: only the signed-in owner sends one, only to agents this computer's forwarder told
+the server about, and the forwarder checks each note again before it prints it (ADR 0018). A team
+town adds keys that are HMACs of one secret and a view-only role that sees the town but cannot act.
+A request that came through a tunnel reaches the server from this computer, so the socket proves
+nothing: `auth.isTunnelled` (the tunnel's own port, or Cloudflare's headers) makes it a request
+from the internet, which only the team's keys and view link can use; the owner's token and routes
+never work for it (ADR 0019).
 
 **The browser has one store and one source.** `sources/live.js` (the WebSocket link) and
 `sources/demo.js` (the simulation, which also plays the server's part for approvals, usage and
@@ -82,9 +90,10 @@ broker and the town's "needs you" follow one model), what an approval card shows
 plays the server's part there), when an agent seems stuck (the town's alert and the phone's
 note follow one set of rules), how a shell command line reads (`core/shell.js`, the one reader
 of Bash and PowerShell commands that every rule about what an agent ran goes through: the
-catch-up's test runs, commits and pushes too), what an error is about (summaries) and what each
-crew did, for the catch-up (digest; the demo keeps the same counts), and the words for plan
-limits (so the phone note and the town agree).
+catch-up's test runs, commits and pushes too, and the turn receipts' test and build runs), what an
+error is about (summaries) and what each crew did, for the catch-up (digest; the demo keeps the
+same counts), the words for plan limits (so the phone note and the town agree), and which hooks
+can carry a note to an agent and how a note is cleaned (notes; the forwarder keeps its own copy).
 
 **The world behind a facade.** The app talks to the 3D world only through `world/world.js`
 (CONTRACTS §6). Inside it, the town (`env/`) and the people (`agents/`) never import each other;
@@ -99,7 +108,7 @@ references may cross.
 | --- | --- |
 | `hooks/` | Node built-ins only (it is copied out and must stand alone) |
 | `mods/` | its own folder only, no packages (Claude Code copies only the plugin's folder and runs the module without Node.js) |
-| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules`, `loops`, `shell`, `summaries`, `digest`, `limits` |
+| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules`, `loops`, `shell`, `summaries`, `digest`, `limits`, `notes` |
 | `server/cli/`, `cli/` | the server, those core modules, the simulation (for `andary simulate`) |
 | `public/js/core/` | `core/` only |
 | `public/js/sources/` | `sources/`, `core/` |
@@ -122,11 +131,14 @@ references may cross.
 | when you were away, and what your crews did meanwhile (Catch me up) | `server/digest.mjs`, `public/js/core/digest.js`, `public/js/core/shell.js`, `public/js/ui/catch-up.js` |
 | who may connect, and what they may do | `server/auth.mjs`, `server/browsers.mjs`, `server/security.mjs` |
 | the team town | `server/team.mjs`, `ingestTeam` in `server/ingest.mjs` |
+| notes to agents, and Deny and stop | `server/notes.mjs`, `public/js/core/notes.js`, `hooks/hook.mjs` (`notesFrom`, `decisionFrom`), `public/js/ui/agent-note.js`, `public/js/ui/approvals.js` |
+| the team town on the internet (`--tunnel`) | `server/tunnel.mjs` (cloudflared), `server/tunnel-watchdog.mjs` (stops it with the town), `isTunnelled` in `server/auth.mjs`, `openTunnel` in `server/cli/start.mjs` |
 | plan limits (the andary-limits mod) | `mods/andary-limits/`, `server/limits.mjs`, `public/js/core/limits.js`, `ui/limits.js` |
 | how a hook becomes town events | `public/js/core/events.js`, `summaries.js` |
 | crews, agents, the log | `public/js/core/store.js`, `crews.js` |
 | what needs you, and when an agent seems stuck | `public/js/core/dialogs.js`, `store-dialogs.js`, `waits.js`, `attention.js`, `loops.js`, `public/js/ui/needs-you.js` |
 | how a shell command line reads (segments, programs, redirections, folders) | `public/js/core/shell.js` |
+| what a lead's turn did (turn receipts: files, tests after the last edit, cost) | `public/js/core/receipts.js`, `public/js/core/shell.js`, `public/js/ui/inspector.js` |
 | two agents on the same files, and the git commands that put their work at risk | `public/js/core/conflicts.js`, `git-commands.js`, `paths.js`, `server/work-trees.mjs` |
 | who walks where, and what they say | `public/js/core/director.js`, `director-queue.js`, `humor.js` |
 | the HUD | `public/js/ui/` (`hud.js` composes it) |
