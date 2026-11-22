@@ -265,6 +265,21 @@ file is only a note under both rows, as an edit must match what is in the file. 
 hour, or until the agents finish. Andary compares paths as written: a symbolic link, or a disk that
 ignores case, can hide one.
 
+### Turn receipts
+
+When a lead's turn ends, its details (**Last turn**) and the activity log get a receipt: the files
+its crew changed with lines added and removed (from the edits' own text; a file
+written whole over an old one has no "removed"; a shell command such as `sed -i` or a formatter
+"may have changed" files, unnamed), whether another crew edited files in its folder after its last
+test, the last test run and the last build with what
+their exit status proves (`npm test | tail` proves nothing: the status is tail's; a Codex command
+only with its exit code), the calls that failed, the helpers it used, how long it took, and for
+Claude Code what it cost (an estimate, once the transcript catches up). When files changed and no
+test ran after the last of them, it says so: "Said done, but tests were not re-run since the last
+edit". A filtered run (`pytest -k`, one test file) passes only "selected tests", and a helper's run
+says who ran it. A turn the town joined midway says "at least" and "since the town joined", and has
+no cost.
+
 ### Catch up
 
 Away for a while? If 20 minutes pass with nothing from you in any session while your crews keep

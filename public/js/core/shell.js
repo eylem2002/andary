@@ -170,10 +170,60 @@ export function isTestRun([name, ...args]) {
   if (TEST_RUNNERS.has(name)) return true;
   if (PACKAGE_MANAGERS.has(name)) {
     const script = args[0] === 'run' || args[0] === 'run-script' ? args[1] : args[0];
+    // npm's own aliases of `npm test`: `npm t`, `npm tst`.
+    if (name === 'npm' && (args[0] === 't' || args[0] === 'tst')) return true;
     return /^test(?:$|[:-])/.test(script ?? '') || TEST_RUNNERS.has(script ?? '');
   }
   if (TEST_SUBCOMMANDS.has(name)) return args[0] === 'test';
   return name === 'node' && args.includes('--test');
+}
+
+/** Arguments of a test command that runs no tests: it lists, collects, explains, or may find nothing. */
+const NO_RUN_ARGS = new Set(['--no-run', '--collect-only', '--co', '-l', 'list', '--help', '-h', '--version', '--if-present']);
+
+/**
+ * A test command that runs no tests (its program's words, programOf): it lists or collects them,
+ * only builds, explains itself, may find no script (`--if-present`), or is go's `-run`, which may
+ * select none.
+ * @param {string[]} words
+ */
+export function runsNoTests([name, ...args]) {
+  return args.some((arg) => NO_RUN_ARGS.has(arg) || arg.startsWith('--list') || (name === 'go' && (arg === '-run' || arg.startsWith('-run='))));
+}
+
+/** Options that pick some tests by name: pytest -k, jest -t, mocha --grep, go -run, … */
+const SELECTING_OPTIONS = /^(?:-k|-t|-g|-m|--grep|--filter|--testNamePattern|--test-name-pattern|--testPathPattern|--test-path-pattern|-run|--run)(?:=|$)/;
+/** A test file or folder named on the line: a.test.ts, test_a.py, a_test.go, spec/a_spec.rb, tests/unit/… */
+const TEST_PATH = /(?:\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|\/)test_[^/]*\.py$|_test\.(?:py|go)$|_spec\.rb$|\.py::|(?:^|\/)(?:tests?|spec|__tests__|e2e)\/.+)/;
+
+/**
+ * Whether a test run (its program's words) runs only some of the tests: a name filter, or test
+ * files or folders named. `npm test -- a.test.ts` and `npx vitest run src/a.test.ts` pick some;
+ * `npm test` and `pytest` run them all.
+ * @param {string[]} words
+ */
+export function selectsTests([, ...args]) {
+  return args.some((arg) => SELECTING_OPTIONS.test(arg) || TEST_PATH.test(arg));
+}
+
+/** Tools whose `build` subcommand builds the project. */
+const BUILD_SUBCOMMANDS = new Set(['go', 'cargo', 'uv', 'dotnet', 'vite', 'next', 'astro', 'mkdocs', 'gradle', 'gradlew', 'docker', 'swift', 'zig']);
+
+/**
+ * Whether a command (its program's words, programOf) builds the project: a package's `build`
+ * script (`npm run build`, `pnpm build:types`), the TypeScript compiler, a tool's `build`
+ * subcommand (`cargo build`, `vite build`), `make` (its default target, `all` or `build`), or
+ * `python -m build`.
+ * @param {string[]} words
+ */
+export function isBuildRun([name, ...args]) {
+  if (PACKAGE_MANAGERS.has(name)) {
+    const script = args[0] === 'run' || args[0] === 'run-script' ? args[1] : args[0];
+    return /^build(?:$|[:-])/.test(script ?? '');
+  }
+  if (name === 'tsc' || name === 'build') return true;
+  if (name === 'make') return args.filter((arg) => !arg.startsWith('-')).every((arg) => arg === 'all' || arg === 'build' || arg.includes('='));
+  return BUILD_SUBCOMMANDS.has(name) && args[0] === 'build';
 }
 
 /** git's options before its subcommand that take the next word as their value. */

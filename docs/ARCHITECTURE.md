@@ -84,10 +84,10 @@ broker and the town's "needs you" follow one model), what an approval card shows
 plays the server's part there), when an agent seems stuck (the town's alert and the phone's
 note follow one set of rules), how a shell command line reads (`core/shell.js`, the one reader
 of Bash and PowerShell commands that every rule about what an agent ran goes through: the
-catch-up's test runs, commits and pushes too), what an error is about (summaries) and what each
-crew did, for the catch-up (digest; the demo keeps the same counts), the words for plan
-limits (so the phone note and the town agree), and which hooks can carry a note to an agent and
-how a note is cleaned (notes; the forwarder keeps its own copy).
+catch-up's test runs, commits and pushes too, and the turn receipts' test and build runs), what an
+error is about (summaries) and what each crew did, for the catch-up (digest; the demo keeps the
+same counts), the words for plan limits (so the phone note and the town agree), and which hooks
+can carry a note to an agent and how a note is cleaned (notes; the forwarder keeps its own copy).
 
 **The world behind a facade.** The app talks to the 3D world only through `world/world.js`
 (CONTRACTS §6). Inside it, the town (`env/`) and the people (`agents/`) never import each other;
@@ -131,6 +131,7 @@ references may cross.
 | crews, agents, the log | `public/js/core/store.js`, `crews.js` |
 | what needs you, and when an agent seems stuck | `public/js/core/dialogs.js`, `store-dialogs.js`, `waits.js`, `attention.js`, `loops.js`, `public/js/ui/needs-you.js` |
 | how a shell command line reads (segments, programs, redirections, folders) | `public/js/core/shell.js` |
+| what a lead's turn did (turn receipts: files, tests after the last edit, cost) | `public/js/core/receipts.js`, `public/js/core/shell.js`, `public/js/ui/inspector.js` |
 | two agents on the same files, and the git commands that put their work at risk | `public/js/core/conflicts.js`, `git-commands.js`, `paths.js`, `server/work-trees.mjs` |
 | who walks where, and what they say | `public/js/core/director.js`, `director-queue.js`, `humor.js` |
 | the HUD | `public/js/ui/` (`hud.js` composes it) |
