@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { createStore } from '../../../public/js/core/store.js';
-import { durationWords, fileLines, lineDelta, receiptLine, receiptRows } from '../../../public/js/core/receipts.js';
+import { durationWords, fileLines, lineDelta, receiptLine, receiptRows, runWords } from '../../../public/js/core/receipts.js';
 import { fromCodex } from '../../../server/adapters/codex.mjs';
 import { PATCH, codex } from '../server/adapters/fixtures.mjs';
 import { CWD, FIXTURES, SESSION, envelope, hook } from './helpers.mjs';
@@ -172,6 +172,83 @@ describe('receipts: what a turn did', () => {
     const entry = store.getState().log.at(-1);
     assert.deepEqual([entry?.kind, entry?.level, entry?.receiptId], ['receipt', 'warn', last()?.id]);
     assert.match(entry?.text ?? '', /Said done, but no test ran/);
+  });
+});
+
+describe('receipts: edits through the shell, other crews, what a test run selects', () => {
+  test('tests, then a shell command that changes files: not re-run since the last edit', () => {
+    for (const command of ["sed -i 's/old/new/' src/auth.ts", "cat > src/auth.ts <<'EOF'\nexport const a = 1;\nEOF", 'npx prettier --write src', "bash -lc 'python - <<EOF\nopen(\"a.txt\", \"w\").write(\"x\")\nEOF'"]) {
+      const { send, last } = setup();
+      send(FIXTURES.UserPromptSubmit);
+      send(edit('e1'));
+      send(test_('npm test', 'b1'));
+      send(test_(command, 'sh'));
+      send(FIXTURES.Stop);
+      assert.equal(last()?.flag, 'Said done, but tests were not re-run since the last edit', command);
+      assert.equal(last()?.shellEdits, 1, command);
+    }
+  });
+
+  test('only shell edits: files may have changed, and no test ran after them', () => {
+    const { send, last } = setup();
+    send(FIXTURES.UserPromptSubmit);
+    send(test_("sed -i 's/a/b/' README.md", 'sh'));
+    send(FIXTURES.Stop);
+    assert.match(receiptLine(/** @type {any} */ (last())), /^Turn receipt: no file edits seen; files may have changed through the shell, .*Said done, but no test ran this turn after the edits$/);
+  });
+
+  test('git bookkeeping, a test run writing its report and a build are no edits', () => {
+    const { send, last } = setup();
+    send(FIXTURES.UserPromptSubmit);
+    send(edit('e1'));
+    send(test_('npm test > report.txt', 'b1'));
+    send(test_('npm run build', 'b2'));
+    send(test_('git add -A && git commit -m "fix" && git push', 'g'));
+    send(FIXTURES.Stop);
+    assert.deepEqual([last()?.shellEdits, last()?.flag], [0, null]);
+  });
+
+  test('another crew edited files in this folder after the last test', () => {
+    const { send, last } = setup();
+    send(FIXTURES.UserPromptSubmit);
+    send(edit('e1'));
+    send(test_('npm test', 'b1'));
+    send(hook('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: `${CWD}/src/db.ts`, old_string: 'a', new_string: 'b' }, tool_use_id: 'o1', tool_response: {} }, { session: 'other-crew' }));
+    send(FIXTURES.Stop);
+    assert.equal(last()?.othersEdited, 'after-test');
+    assert.deepEqual(receiptRows(/** @type {any} */ (last())).find((row) => row.label === 'Others')?.text, 'Another crew edited files in this folder after the last test');
+    assert.doesNotMatch(receiptLine(/** @type {any} */ (last())), /db\.ts/, 'no file named');
+  });
+
+  test('another crew elsewhere, or before the last test, is not mentioned', () => {
+    const { send, last } = setup();
+    send(FIXTURES.UserPromptSubmit);
+    send(hook('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: `${CWD}/src/db.ts`, old_string: 'a', new_string: 'b' }, tool_use_id: 'o1', tool_response: {} }, { session: 'other-crew' }));
+    send(test_('npm test', 'b1'));
+    send(hook('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: '/home/dev/code/web/a.ts', old_string: 'a', new_string: 'b' }, tool_use_id: 'o2', tool_response: {} }, { session: 'web-crew' }));
+    send(FIXTURES.Stop);
+    assert.equal(last()?.othersEdited, null);
+  });
+
+  test('npm t is a test run; a filtered one passed only the tests it selected; a helper\'s run says who', () => {
+    const helper = { agent: { id: 'agent-a1b2c3', type: 'Explore' } };
+    const { send, last } = setup();
+    send(FIXTURES.UserPromptSubmit);
+    send(test_('npm t', 'b0'));
+    assert.equal(last(), undefined);
+    send(FIXTURES.SubagentStart);
+    send(call('Bash', { command: 'npx vitest run src/auth.test.ts' }, 'b1', {}, helper));
+    send(FIXTURES.Stop);
+    const run = /** @type {any} */ (last()?.test);
+    assert.deepEqual([run.some, run.by], [true, 'Scout 1']);
+    assert.equal(runWords(run), 'npx vitest run src/auth.test.ts (by Scout 1): selected tests passed');
+  });
+
+  test('a turn joined midway counts its files since the town joined', () => {
+    const { send, last } = setup();
+    send(edit('e1'));
+    send(FIXTURES.Stop);
+    assert.equal(receiptRows(/** @type {any} */ (last())).find((row) => row.label === 'Files')?.text, '1 file changed (+2 −1) since the town joined');
   });
 });
 

@@ -1087,10 +1087,12 @@ section.
      lane; the merged item reads "N calls (M failed)" and goes to its agent without a detail.
 191. **A turn's work is the crew's.** Helpers' files, failures and tests count for their lead's turn
      (they work for it); agent-team teammates have turns of their own and are left out.
-192. **An edit is a file tool's change.** "Tests not re-run since the last edit" compares the last
-     test run's start with the last Edit, MultiEdit, Write, NotebookEdit or Codex patch; a `sed -i`
-     or a formatter run through the shell is not counted (the town has no diff of it, and a
-     commit or an install is no edit either).
+192. **An edit is a file tool's change or a shell command that may change files.** "Tests not
+     re-run since the last edit" compares the last test run's start with the last Edit, MultiEdit,
+     Write, NotebookEdit, Codex patch, or shell command that `changesFiles` (the stuck rules' reader)
+     says may change files: `sed -i`, heredocs, formatters, installs. git's bookkeeping, test runs and
+     builds are not edits (a commit or a report file changes no source). The town cannot tell which
+     files a shell edit touched, so the receipt says "may have changed" and names none.
 193. **Lines from the hook's own text.** Added and removed lines per hunk are what is left once the
      lines both texts start and end with are set aside: exact for a typical Edit, approximate for a
      hunk that moves lines around. Text longer than the town keeps marks the counts "≥". A Write
@@ -1107,3 +1109,9 @@ section.
      prompt is a new turn that started before the town saw it ("at least").
 197. **A receipt's log line is written again when a Stop hook updates it**, with the newer words;
      the inspector shows the latest.
+198. **Another crew's edits are judged by folder.** An edit by another crew inside this crew's
+     session folder while its turn is open is reported, naming no file: the receipt cannot prove
+     which of its files it touched. A teammate's crew in a team town works on another computer and
+     is left out.
+199. **A test run "selects" tests** when a name filter or a test file or folder is on its line; a pass
+     then reads "selected tests passed", as the rest may not have run.

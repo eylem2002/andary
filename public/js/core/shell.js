@@ -170,6 +170,8 @@ export function isTestRun([name, ...args]) {
   if (TEST_RUNNERS.has(name)) return true;
   if (PACKAGE_MANAGERS.has(name)) {
     const script = args[0] === 'run' || args[0] === 'run-script' ? args[1] : args[0];
+    // npm's own aliases of `npm test`: `npm t`, `npm tst`.
+    if (name === 'npm' && (args[0] === 't' || args[0] === 'tst')) return true;
     return /^test(?:$|[:-])/.test(script ?? '') || TEST_RUNNERS.has(script ?? '');
   }
   if (TEST_SUBCOMMANDS.has(name)) return args[0] === 'test';
@@ -187,6 +189,21 @@ const NO_RUN_ARGS = new Set(['--no-run', '--collect-only', '--co', '-l', 'list',
  */
 export function runsNoTests([name, ...args]) {
   return args.some((arg) => NO_RUN_ARGS.has(arg) || arg.startsWith('--list') || (name === 'go' && (arg === '-run' || arg.startsWith('-run='))));
+}
+
+/** Options that pick some tests by name: pytest -k, jest -t, mocha --grep, go -run, … */
+const SELECTING_OPTIONS = /^(?:-k|-t|-g|-m|--grep|--filter|--testNamePattern|--test-name-pattern|--testPathPattern|--test-path-pattern|-run|--run)(?:=|$)/;
+/** A test file or folder named on the line: a.test.ts, test_a.py, a_test.go, spec/a_spec.rb, tests/unit/… */
+const TEST_PATH = /(?:\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|\/)test_[^/]*\.py$|_test\.(?:py|go)$|_spec\.rb$|\.py::|(?:^|\/)(?:tests?|spec|__tests__|e2e)\/.+)/;
+
+/**
+ * Whether a test run (its program's words) runs only some of the tests: a name filter, or test
+ * files or folders named. `npm test -- a.test.ts` and `npx vitest run src/a.test.ts` pick some;
+ * `npm test` and `pytest` run them all.
+ * @param {string[]} words
+ */
+export function selectsTests([, ...args]) {
+  return args.some((arg) => SELECTING_OPTIONS.test(arg) || TEST_PATH.test(arg));
 }
 
 /** Tools whose `build` subcommand builds the project. */

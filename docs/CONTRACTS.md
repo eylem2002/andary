@@ -1303,8 +1303,8 @@ the same items as a list of buttons, newest first (at most 300). A teammate's cr
 show too; viewers can only look.
 
 **Turn receipts** (`core/receipts.js`, pure). The store runs `createReceipts().record(event, who,
-{ costs: state.usage, cwd })` after each event and keeps its receipts on `StoreState.receipts`,
-with a `receipt` log line (level `warn` when it has a `flag` or the last test failed, else `info`)
+{ costs: state.usage, cwd, member })` after each event and keeps its receipts on `StoreState.receipts`,
+with a `receipt` log line (level `warn` when it has a `flag`, `othersEdited` or the last test failed, else `info`)
 when one is made or updated.
 
 ```js
@@ -1313,10 +1313,12 @@ Receipt { id, sessionId, agentKey /* the lead's */, source: 'claude'|'codex', st
           files: { path, added, removed: number|null /* a file written whole over an old one */,
                    approx /* an edit's text was cut */, deleted, edits }[] /* newest first, ≤ 12 */, moreFiles,
           test: ReceiptRun|null, build: ReceiptRun|null, lastEditAt: number|null,
-          testedAfterEdit: boolean|null /* null: no edit */, flag: string|null,
+          shellEdits /* shell commands that may have changed files */,
+          othersEdited: 'after-test'|'during'|null, testedAfterEdit: boolean|null /* null: no edit */, flag: string|null,
           failures, failed: string[] /* ≤ 3 */, helpers: string[], costUsd: number|null /* an estimate */ }
 ReceiptRun { kind: 'test'|'build', command, at /* its PreToolUse, else its end */,
-             result: 'passed'|'failed'|'unproven'|'started'|'interrupted', why: string|null }
+             result: 'passed'|'failed'|'unproven'|'started'|'interrupted', why: string|null,
+             some /* only some tests: shell.js selectsTests */, by: string|null /* the helper that ran it */ }
 ```
 
 - **A turn** of a crew starts at its lead's `prompt`; work with no turn open (the town joined midway,
@@ -1331,6 +1333,17 @@ ReceiptRun { kind: 'test'|'build', command, at /* its PreToolUse, else its end *
   that made the file (`tool_response.type: 'create'`, or a Codex patch adding it) removed nothing; one
   over an old file, or a notebook cell, removed what the hook does not show (`removed: null`). A Codex
   patch deleting a file is `deleted`. Each is an edit for `lastEditAt` (its PostToolUse time).
+- **Shell edits**: a successful Bash or PowerShell call with a command on its line that may change
+  files (`core/loops.js` `changesFiles`, per command, with its here-documents: `sed -i`, a heredoc or
+  `>` to a file, formatters, `--fix`, `rm`, `mv`, installs…), but not git's bookkeeping (`add`,
+  `commit`, `push`, `tag`, `fetch`, `status`, `log`, `diff`, `show`), a test run or a build, counts
+  in `shellEdits` and is an edit for `lastEditAt`; the town cannot say which files, so Files adds
+  "files may have changed through the shell" ("no file edits seen; …" when it is the only kind).
+- **Other crews**: a file tool's edit, or a shell edit (its folder), by another crew (not a
+  teammate's crew in a team town) inside this turn's crew folder (normalised, `isInside`) while the
+  turn is open: `othersEdited` is `after-test` when it came after the last test started, `during`
+  when there was no test, and the row says "Another crew edited files in this folder after the last
+  test" (or "during this turn"), naming no file.
 - **Test and build runs**: a Bash or PowerShell call (finished or failed) whose line runs tests
   (`isTestRun` and not `runsNoTests`) or a build (`isBuildRun`), read by `shellCommands`, as the
   catch-up reads it: `passed` when every such command must have succeeded for the line to (a Codex
@@ -1338,7 +1351,10 @@ ReceiptRun { kind: 'test'|'build', command, at /* its PreToolUse, else its end *
   when the line's failure can only be one of them (`decides`; `why` is the failure's line that says
   something, `errorSignature`); `unproven` otherwise ("the exit status shown is another
   command's", "the line failed, maybe not here"); `started` for one sent to the background;
-  `interrupted`. The latest of each kind, by when it started.
+  `interrupted`. The latest of each kind, by when it started. `some` when every test command of the
+  line selects tests (`selectsTests`: `-k`, `-t`, `-g`, `-m`, `--grep`, `--filter`,
+  `--testNamePattern`, `--testPathPattern`, go's `-run`, or a test file or folder named): a pass
+  reads "selected tests passed". A helper's run says who ran it ("npm test (by Scout 1): passed").
 - **Flag**: with edits, "No test ran this turn after the edits", "Tests were not re-run since the
   last edit" (the last test started before the last edit), "The last test run after the edits
   failed", each after "Said done, but " when the turn ended normally; "The test run after the last
@@ -1354,7 +1370,9 @@ ReceiptRun { kind: 'test'|'build', command, at /* its PreToolUse, else its end *
   crew's latest turn until your next prompt starts another.
 - Words (`receiptLine` for the log: "Turn receipt: 3 files changed (+40 −12), tests passed, 1
   helper, 4m 10s. Said done, but …"; `receiptRows` for the inspector's **Last turn** section of a
-  lead: Took, Files, Last test, Last build, Check, Failed, Helpers, and Cost as "$0.42 (estimate)").
+  lead: Took, Files, Last test, Last build, Check, Others, Failed, Helpers, and Cost as "$0.42
+  (estimate)"). A turn joined midway says "at least" for its time and "since the town joined" for its
+  files.
 
 **Catch me up** (`ui/catch-up.js`, §4.13). The source asks
 (`TownSource.requestDigest(since) → boolean`: live sends `{ t: 'digest', since }`; the demo answers

@@ -660,10 +660,10 @@ function syncWaits(m, keys, at) {
  * @param {AgentState} a
  */
 function followTurn(m, e, s, a) {
-  const receipt = m.receipts.record(e, a, { costs: m.state.usage, cwd: s.cwd });
+  const receipt = m.receipts.record(e, a, { costs: m.state.usage, cwd: s.cwd, member: Boolean(s.member) });
   if (!receipt) return;
   m.state.receipts = m.receipts.list();
-  const level = receipt.flag || receipt.test?.result === 'failed' ? 'warn' : 'info';
+  const level = receipt.flag || receipt.othersEdited || receipt.test?.result === 'failed' ? 'warn' : 'info';
   const entry = pushLog(m, { ...e, kind: 'receipt' }, s, a, { icon: '🧾', text: receiptLine(receipt), level });
   entry.receiptId = receipt.id;
 }

@@ -2,8 +2,10 @@
 // prove it. The files its crew changed (with lines added and removed where the town has the
 // edit's text), the last test run and the last build with what their exit status proves
 // (core/shell.js reads the command line, as for the catch-up), whether a test ran after the last
-// edit, the calls that failed, the helpers it used, how long it took and, from Claude Code's
-// transcripts, what it cost (an estimate). Pure: the store feeds it the events it applied.
+// edit (a file tool's, or a shell command that may change files), whether another crew edited
+// files in its folder after its last test, the calls that failed, the helpers it used, how long it
+// took and, from Claude Code's transcripts, what it cost (an estimate). Pure: the store feeds it
+// the events it applied.
 //
 // A turn starts at your prompt; one the town joined midway starts at its first event and says so
 // (`sawStart: false`), and has no cost: what it cost before the town looked is unknown. A Stop
@@ -11,8 +13,9 @@
 // updated. Helpers' events count for their lead's turn; agent-team teammates have turns of their
 // own and are left out.
 import { changeHunks } from './changes.js';
-import { errorSignature } from './loops.js';
-import { isBuildRun, isTestRun, runsNoTests, shellCommands } from './shell.js';
+import { changesFiles, errorSignature } from './loops.js';
+import { isInside, normalizePath } from './paths.js';
+import { gitAction, isBuildRun, isTestRun, readShell, runsNoTests, selectsTests, shellCommands } from './shell.js';
 import { clip, oneLine, relativePath, str } from './text.js';
 
 /** @typedef {import('./events.js').TownEvent} TownEvent */
@@ -36,6 +39,8 @@ import { clip, oneLine, relativePath, str } from './text.js';
  *   unproven: the line's exit status is another command's (`npm test | tail`), or Codex did not
  *   report it; started: sent to the background, its result comes through other tools
  * @property {string|null} why  a failure's first line, or why the result is not proven
+ * @property {boolean} some     it ran only some tests (a name filter, or test files named: shell.js selectsTests)
+ * @property {string|null} by   the helper that ran it, or null for the lead
  */
 
 /**
@@ -53,7 +58,9 @@ import { clip, oneLine, relativePath, str } from './text.js';
  * @property {number} moreFiles    changed files beyond those
  * @property {ReceiptRun|null} test   the last test run
  * @property {ReceiptRun|null} build  the last build
- * @property {number|null} lastEditAt
+ * @property {number|null} lastEditAt  the last file tool's edit or shell command that may have changed files
+ * @property {number} shellEdits   shell commands that may have changed files (core/loops.js changesFiles)
+ * @property {'after-test'|'during'|null} othersEdited  another crew edited files in this crew's folder after its last test (or, with none, during the turn)
  * @property {boolean|null} testedAfterEdit  null when nothing was edited
  * @property {string|null} flag    what deserves a second look, in words
  * @property {number} failures     failed calls (not interrupts)
@@ -85,6 +92,9 @@ const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
  * @property {ReceiptRun|null} test
  * @property {ReceiptRun|null} build
  * @property {number|null} lastEditAt
+ * @property {number} shellEdits
+ * @property {string} folder       the crew's folder, normalised, for other crews' edits
+ * @property {number|null} othersAt  another crew's latest edit in that folder
  * @property {number} failures
  * @property {string[]} failed
  * @property {Set<string>} helpers
@@ -105,12 +115,12 @@ export function createReceipts() {
   let seq = 0;
 
   /**
-   * @param {string} sessionId @param {number} at @param {boolean} sawStart @param {Costs} costs
+   * @param {string} sessionId @param {number} at @param {boolean} sawStart @param {Costs} costs @param {string} folder
    * @returns {Turn}
    */
-  function startTurn(sessionId, at, sawStart, costs) {
+  function startTurn(sessionId, at, sawStart, costs, folder) {
     seq += 1;
-    const turn = { id: `r${seq}`, start: at, sawStart, files: new Map(), test: null, build: null, lastEditAt: null, failures: 0, failed: [], helpers: new Set(), agents: new Set(), starts: new Map(), base: sawStart ? baseOf(sessionId, costs) : null, receipt: null };
+    const turn = { id: `r${seq}`, start: at, sawStart, files: new Map(), test: null, build: null, lastEditAt: null, shellEdits: 0, folder, othersAt: null, failures: 0, failed: [], helpers: new Set(), agents: new Set(), starts: new Map(), base: sawStart ? baseOf(sessionId, costs) : null, receipt: null };
     turns.set(sessionId, turn);
     return turn;
   }
@@ -129,10 +139,11 @@ export function createReceipts() {
    * Adds one applied event to its crew's turn; returns the receipt its end made or updated.
    * @param {TownEvent} e
    * @param {Who} who
-   * @param {{ costs: Costs, cwd: string }} context
+   * @param {{ costs: Costs, cwd: string, member?: boolean }} context  member: a teammate's crew (a team town), whose files are on their computer
    * @returns {Receipt|null}
    */
-  function record(e, who, { costs, cwd }) {
+  function record(e, who, { costs, cwd, member = false }) {
+    if (!member) othersEdited(e, cwd);
     if (e.kind === 'session.end') {
       turns.delete(e.sessionId);
       fresh.delete(e.sessionId);
@@ -145,7 +156,7 @@ export function createReceipts() {
     }
     const lead = who.role === 'lead';
     if (e.kind === 'prompt' && lead) {
-      startTurn(e.sessionId, e.ts, true, costs).agents.add(e.agentKey);
+      startTurn(e.sessionId, e.ts, true, costs, member ? '' : normalizePath(cwd)).agents.add(e.agentKey);
       fresh.delete(e.sessionId);
       return null;
     }
@@ -153,7 +164,7 @@ export function createReceipts() {
     const ending = lead && (e.kind === 'turn.stop' || e.kind === 'turn.fail');
     // Work after a turn ended, with no prompt seen: a turn whose prompt the town missed, or the same
     // turn going on after a Stop hook (its next Stop says which).
-    if (!turn || (turn.receipt && !ending && countsFor(e))) turn = continueAfter(e, turn, costs);
+    if (!turn || (turn.receipt && !ending && countsFor(e))) turn = continueAfter(e, turn, costs, member ? '' : normalizePath(cwd));
     if (!ending) {
       addWork(turn, e, who, cwd);
       return null;
@@ -163,11 +174,23 @@ export function createReceipts() {
   }
 
   /**
-   * @param {TownEvent} e @param {Turn|undefined} ended @param {Costs} costs
+   * An edit by one crew is news for every other crew's turn working in that folder.
+   * @param {TownEvent} e @param {string} cwd
+   */
+  function othersEdited(e, cwd) {
+    const where = editedPath(e, cwd);
+    if (!where) return;
+    for (const [sessionId, turn] of turns) {
+      if (sessionId !== e.sessionId && !turn.receipt && isInside(where, turn.folder)) turn.othersAt = Math.max(turn.othersAt ?? 0, e.ts);
+    }
+  }
+
+  /**
+   * @param {TownEvent} e @param {Turn|undefined} ended @param {Costs} costs @param {string} folder
    * @returns {Turn}
    */
-  function continueAfter(e, ended, costs) {
-    const turn = startTurn(e.sessionId, e.ts, false, costs);
+  function continueAfter(e, ended, costs, folder) {
+    const turn = startTurn(e.sessionId, e.ts, false, costs, folder);
     if (ended) turn.previous = ended;
     return turn;
   }
@@ -201,6 +224,8 @@ export function createReceipts() {
     const files = [...turn.files.values()].reverse();
     const ended = e.kind === 'turn.fail' ? 'error' : e.data.interrupted === true ? 'interrupted' : 'done';
     const testedAfterEdit = turn.lastEditAt === null ? null : Boolean(turn.test && turn.test.at >= turn.lastEditAt);
+    const since = turn.test?.at ?? turn.start;
+    const othersEdited = turn.othersAt !== null && turn.othersAt >= since ? (turn.test ? 'after-test' : 'during') : null;
     /** @type {Omit<Receipt, 'flag'>} */
     const base = {
       id: turn.id,
@@ -217,6 +242,8 @@ export function createReceipts() {
       test: turn.test,
       build: turn.build,
       lastEditAt: turn.lastEditAt,
+      shellEdits: turn.shellEdits,
+      othersEdited,
       testedAfterEdit,
       failures: turn.failures,
       failed: [...turn.failed],
@@ -274,15 +301,59 @@ function addWork(turn, e, who, cwd) {
   }
   if (e.kind === 'tool.end') {
     if (FILE_TOOLS.has(d.tool) || (d.tool === 'apply_patch' && d.file)) changedFile(turn, e, cwd);
-    else if (SHELL_TOOLS.has(d.tool)) ran(turn, e);
+    else if (SHELL_TOOLS.has(d.tool)) {
+      ran(turn, e, who);
+      if (shellChanges(d)) {
+        turn.shellEdits += 1;
+        turn.lastEditAt = Math.max(turn.lastEditAt ?? 0, e.ts);
+      }
+    }
   }
   if (e.kind === 'tool.fail') {
     if (d.isInterrupt !== true) {
       turn.failures += 1;
       if (turn.failed.length < MAX_FAILED_SHOWN) turn.failed.push(clip(`${d.summary}: ${failureLine(d)}`, 160));
     }
-    if (SHELL_TOOLS.has(d.tool)) ran(turn, e);
+    if (SHELL_TOOLS.has(d.tool)) ran(turn, e, who);
   }
+}
+
+/** git commands that record or send work without changing a file: no edit. */
+const GIT_BOOKKEEPING = new Set(['add', 'commit', 'push', 'tag', 'fetch', 'status', 'log', 'diff', 'show']);
+
+/**
+ * Whether a shell command that went through may have changed files (core/loops.js changesFiles,
+ * judged per command of its line), git's bookkeeping (add, commit, push…), test runs and builds aside.
+ * @param {Record<string, any>} d
+ */
+function shellChanges(d) {
+  const powershell = d.tool === 'PowerShell';
+  return readShell(d.input?.command, { powershell }).segments.some((segment) => !isBookkeeping(segment.words) && changesFiles(segmentLine(segment), powershell));
+}
+
+/** A segment as a line again, with its here-documents' bodies. @param {import('./shell.js').Segment} segment */
+function segmentLine(segment) {
+  const bodies = segment.redirects.filter((r) => r.body !== null).map((r) => `\n${r.body}\n${r.target}`);
+  return `${segment.text}${bodies.join('')}`;
+}
+
+/** A command that records work, or runs tests or a build (whose output is no edit of the sources). @param {string[]} words */
+function isBookkeeping(words) {
+  if (isTestRun(words) || isBuildRun(words)) return true;
+  if (words[0] !== 'git') return false;
+  return gitAction(words) !== null || GIT_BOOKKEEPING.has(words.slice(1).find((word) => !word.startsWith('-')) ?? '');
+}
+
+/**
+ * Where an event edited files, for other crews: a file tool's file, or the folder a shell command
+ * that may have changed files ran in. '' for anything else.
+ * @param {TownEvent} e @param {string} cwd
+ */
+function editedPath(e, cwd) {
+  if (e.kind !== 'tool.end') return '';
+  const d = e.data;
+  if (FILE_TOOLS.has(d.tool) || (d.tool === 'apply_patch' && d.file)) return normalizePath(d.file, e.cwd || cwd);
+  return SHELL_TOOLS.has(d.tool) && shellChanges(d) ? normalizePath(e.cwd || cwd) : '';
 }
 
 /** A failure's line that says something (as the stuck rules read it), else its first. @param {Record<string, any>} d */
@@ -336,9 +407,9 @@ export function lineDelta(before, after) {
  * A shell call that ran tests or a build (or both): what its exit status proves of each
  * (core/shell.js), as the catch-up reads it. A Codex command proves it succeeded only with its
  * exit code.
- * @param {Turn} turn @param {TownEvent} e
+ * @param {Turn} turn @param {TownEvent} e @param {Who} who
  */
-function ran(turn, e) {
+function ran(turn, e, who) {
   const d = e.data;
   const commands = shellCommands(d.input?.command, { powershell: d.tool === 'PowerShell' });
   const runs = {
@@ -349,7 +420,9 @@ function ran(turn, e) {
   for (const kind of /** @type {const} */ (['test', 'build'])) {
     if (!runs[kind].length) continue;
     const last = turn[kind];
-    if (!last || at >= last.at) turn[kind] = { kind, command: clip(oneLine(d.input?.command), COMMAND_CHARS), at, ...resultOf(e, runs[kind]) };
+    const some = kind === 'test' && runs.test.every((c) => selectsTests(c.words));
+    const by = who.role === 'lead' ? null : who.name;
+    if (!last || at >= last.at) turn[kind] = { kind, command: clip(oneLine(d.input?.command), COMMAND_CHARS), at, ...resultOf(e, runs[kind]), some, by };
   }
 }
 
@@ -405,6 +478,8 @@ function mergeInto(into, later) {
     if (run && (!into[kind] || run.at >= /** @type {ReceiptRun} */ (into[kind]).at)) into[kind] = run;
   }
   if (later.lastEditAt !== null) into.lastEditAt = Math.max(into.lastEditAt ?? 0, later.lastEditAt);
+  into.shellEdits += later.shellEdits;
+  if (later.othersAt !== null) into.othersAt = Math.max(into.othersAt ?? 0, later.othersAt);
   into.failures += later.failures;
   into.failed = [...into.failed, ...later.failed].slice(0, MAX_FAILED_SHOWN);
   for (const name of later.helpers) if (into.helpers.size < MAX_HELPERS) into.helpers.add(name);
@@ -472,18 +547,28 @@ export function fileLines(f) {
 /** "npm test passed", "npm test | tail: result not proven (…)". @param {ReceiptRun} run */
 export function runWords(run) {
   const why = run.why && run.result !== 'started' ? ` (${run.why})` : '';
-  return `${run.command}: ${RESULT_WORDS[run.result]}${why}`;
+  const by = run.by ? ` (by ${run.by})` : '';
+  const result = run.some && run.result === 'passed' ? 'selected tests passed' : RESULT_WORDS[run.result];
+  return `${run.command}${by}: ${result}${why}`;
 }
 
 /** What every changed file adds up to. @param {Receipt} r */
 function filesTotal(r) {
   const count = r.files.length + r.moreFiles;
-  if (!count) return 'no files changed';
+  const since = r.sawStart ? '' : ' since the town joined';
+  const shell = r.shellEdits ? `${count ? ', and ' : ''}files may have changed through the shell` : '';
+  if (!count) return shell ? `no file edits seen${since}; files may have changed through the shell` : `no files changed${since}`;
   const added = r.files.reduce((n, f) => n + f.added, 0);
   const known = r.files.every((f) => f.removed !== null);
   const removed = r.files.reduce((n, f) => n + (f.removed ?? 0), 0);
   const lines = r.moreFiles ? '' : known ? ` (+${added} −${removed})` : ` (+${added})`;
-  return `${count} file${count === 1 ? '' : 's'} changed${lines}`;
+  return `${count} file${count === 1 ? '' : 's'} changed${lines}${since}${shell}`;
+}
+
+/** Another crew's edits in this crew's folder, in words. @param {Receipt} r */
+function othersWords(r) {
+  if (r.othersEdited === 'after-test') return 'Another crew edited files in this folder after the last test';
+  return r.othersEdited === 'during' ? 'Another crew edited files in this folder during this turn' : null;
 }
 
 /** "about $0.42 (estimate)". @param {number} usd */
@@ -497,13 +582,13 @@ export function costWords(usd) {
  */
 export function receiptLine(r) {
   const parts = [filesTotal(r)];
-  if (r.test) parts.push(`tests ${RESULT_WORDS[r.test.result]}`);
+  if (r.test) parts.push(r.test.some && r.test.result === 'passed' ? 'selected tests passed' : `tests ${RESULT_WORDS[r.test.result]}`);
   else if (r.build) parts.push(`build ${RESULT_WORDS[r.build.result]}`);
   if (r.failures) parts.push(`${r.failures} failed call${r.failures === 1 ? '' : 's'}`);
   if (r.helpers.length) parts.push(`${r.helpers.length} helper${r.helpers.length === 1 ? '' : 's'}`);
   parts.push(r.sawStart ? durationWords(r.end - r.start) : `at least ${durationWords(r.end - r.start)}`);
-  const flag = r.flag ? `. ${r.flag}` : '';
-  return `Turn receipt: ${parts.join(', ')}${flag}`;
+  const checks = [r.flag, othersWords(r)].filter(Boolean).map((text) => `. ${text}`).join('');
+  return `Turn receipt: ${parts.join(', ')}${checks}`;
 }
 
 /**
@@ -520,6 +605,8 @@ export function receiptRows(r) {
   if (r.test) rows.push({ label: 'Last test', text: runWords(r.test), tone: toneOf(r.test), mono: true });
   if (r.build) rows.push({ label: 'Last build', text: runWords(r.build), tone: toneOf(r.build), mono: true });
   if (r.flag) rows.push({ label: 'Check', text: r.flag, tone: 'warn' });
+  const others = othersWords(r);
+  if (others) rows.push({ label: 'Others', text: others, tone: 'warn' });
   if (r.failures) rows.push({ label: 'Failed', text: `${r.failures} call${r.failures === 1 ? '' : 's'}: ${r.failed.join('; ')}${r.failures > r.failed.length ? '; …' : ''}`, tone: 'error' });
   if (r.helpers.length) rows.push({ label: 'Helpers', text: r.helpers.join(', '), tone: null });
   if (r.costUsd !== null) rows.push({ label: 'Cost', text: costWords(r.costUsd), tone: null });
