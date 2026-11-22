@@ -114,7 +114,9 @@ export function createBeamGeometry() {
   const pos = geo.attributes.position;
   const colors = new Float32Array(pos.count * 4);
   for (let i = 0; i < pos.count; i++) {
-    const u = pos.getY(i) / 3.2;
+    // Clamped: the top ring sits at 3.2000000477 in float32, and a negative base to a fractional
+    // power is NaN. A NaN alpha there turned the whole frame black once bloom spread it.
+    const u = Math.min(1, Math.max(0, pos.getY(i) / 3.2));
     colors.set([0.45, 0.78, 1, Math.pow(1 - u, 1.4) * 0.6], i * 4);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 4));

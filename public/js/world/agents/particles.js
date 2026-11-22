@@ -14,6 +14,8 @@ export const CURVE = Object.freeze({ POP: 0, SHRINK: 1, PUFF: 2, FLASH: 3, GROW:
  * @param {number} curve @param {number} u
  */
 export function curveScale(curve, u) {
+  // Clamped so a particle a frame past its life never yields NaN (FLASH takes a fractional power).
+  u = Number.isFinite(u) ? Math.min(1, Math.max(0, u)) : 1;
   switch (curve) {
     case CURVE.POP:
       if (u < 0.18) return easeOutBack(u / 0.18);
