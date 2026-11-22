@@ -43,7 +43,7 @@ describe('parseTunnelUrl', () => {
 });
 
 describe('findCloudflared', () => {
-  it('finds an executable cloudflared on the PATH, first directory first', () => {
+  it('finds an executable cloudflared on the PATH, first directory first', { skip: process.platform === 'win32' && 'Linux paths and modes: Windows has its own test below' }, () => {
     const empty = join(scratch, 'empty');
     const notExec = join(scratch, 'not-exec');
     const bin = join(scratch, 'bin');
@@ -59,7 +59,7 @@ describe('findCloudflared', () => {
     assert.equal(findCloudflared({}, 'linux'), null);
   });
 
-  it('skips relative PATH entries', () => {
+  it('skips relative PATH entries', { skip: process.platform === 'win32' && 'Linux paths and modes: Windows has its own test below' }, () => {
     const cwd = process.cwd();
     process.chdir(scratch);
     try {
