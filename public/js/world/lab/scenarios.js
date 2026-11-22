@@ -234,14 +234,16 @@ function entrances(lab) {
 
 /** @type {Record<string, (lab: Lab) => void>} */
 /**
- * A full team town, the phone's frame budget case: six people at home, each with four helpers
+ * A full team town, the phone's frame budget case: six people at home in their most detailed
+ * looks (a pet, a hat, glasses, a patterned top, something in hand), each with four helpers
  * walking about (30 figures), every home lived in. Watch the readout with ?quality=low.
  * @param {Lab} lab
  */
 function people(lab) {
   const names = ['Sam', 'Lina', 'Omar', 'Rui', 'Ana', 'Kai'];
   names.forEach((name, slot) => {
-    const profile = randomProfile();
+    const random = randomProfile();
+    const profile = { ...random, look: { ...random.look, pet: /** @type {const} */ (['cat', 'dog', 'bird'])[slot % 3], hat: 'viking', glasses: 'round', topPattern: 'stripes', extra: 'backpack', hand: 'coffee', facialHair: 'beard', earrings: 'hoops' } };
     lab.world.setHome(slot, { name, color: CREW_COLORS[slot], style: HOUSE_STYLES[slot % HOUSE_STYLES.length], lights: true });
     lab.spawn('foreman', { name, role: 'person', person: profile.look, home: slot, color: CREW_COLORS[slot], entrance: 'none' });
   });

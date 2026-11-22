@@ -1203,3 +1203,14 @@ section.
 221. **"Show me as away" and walking up to an agent to open it** (design §2 and §6) are not in this
      pull request: online status follows connections only, and an agent opens by click or from the
      crews board as before.
+222. **Only notifications that need the person block their walking**: `permission_prompt`,
+     `elicitation_dialog` (and a question). Claude Code's `idle_prompt`, a minute after Stop, is
+     not a reason to keep a character at work. A duty lapses to free after 10 minutes with no
+     event from that person (their relay going quiet counts), so a lost Stop cannot pin them.
+223. **"Come look" at an agent names one the host has seen**: the host remembers the newest 2,000
+     agent keys from the town's events, so a look never carries an invented key to a teammate.
+224. **Six detailed people on a phone, measured**: world-lab `?scenario=people&quality=low` at
+     390×844 (×3) draws six people in their most detailed looks (pet, hat, glasses, striped top,
+     backpack, cup, beard, earrings) plus 24 helpers in 55–57 draw calls, one per figure as
+     before. Frame rate is not meaningful under the software renderer here; on a phone it is
+     bound by those draw calls, unchanged from PR 1's 58–60.

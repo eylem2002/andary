@@ -750,19 +750,23 @@ prints the view link; `andary team reset` makes a new secret, which revokes ever
   their last `walk` (`path` from tile to tile on the town plan's walking grid, `at` on the
   host's clock), `online` (a connection plays them), `away` (no connection: `porch` after 60 s,
   dimmed on their porch and back at their door; `inside` after 10 min, not shown),
-  `duty` (from their own events: a prompt `work`; a permission request, a notification or a
-  failed turn `needs`; Stop or SessionEnd `free`) and `lights` (online, or their relay posted in
+  `duty` (from their own events: a prompt `work`; a permission request, a failed turn or a
+  `permission_prompt`, `elicitation_dialog` or question notification `needs` (an `idle_prompt`
+  changes nothing); Stop or SessionEnd `free`; and `free` again after 10 min without an event
+  from them, their relay's included) and `lights` (online, or their relay posted in
   the last 2 min). Changes go out as `{t:'presence'}` at most ten times a second.
   `{t:'walk', to}` comes from a person or the owner, for the character the connection plays
   (never a name from the message): the tile must be walkable and reachable in at most 60 steps,
   it is refused while `duty` is not `free` ("Your character is at work"), and a walk asked less
-  than 250 ms after the last waits for its turn (the latest wins). A new walk carries on from
+  than 250 ms after the last waits for its turn (the latest wins; if it can no longer start, the
+  person's browsers get `{t:'error', message:'Walk dropped: …'}`). A new walk carries on from
   where the figure is (`continueWalk`: mid-step it finishes the step first, `at` set back by the
   part walked), so it never jumps. Every browser places the figure with `positionAt(path, at,
   now + offset)` at 2.2 tiles a second (offset: `hello.serverTime` against its own clock).
   `emote` and `phrase` are indices into fixed lists (no free text reaches another screen), at
   most one emote per 2 s and one phrase per 5 s per person, broadcast with the sender's name.
-  `look` names a teammate and an agent key or a building; at most one per 30 s per pair, sent
+  `look` names a teammate and an agent key the host has seen in the town's events (the newest
+  2,000) or a building; at most one per 30 s per pair, sent
   as `look-ask` to that person's browsers only. A viewer's walk, emote, phrase or look gets the
   viewer error. `ANDARY_PORCH_MS` and `ANDARY_INSIDE_MS` shorten the away times (tests).
 - **Walking in the browser** (`ui/walk.js`): walk mode is the toolbar's Walk button or **G**
