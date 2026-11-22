@@ -77,8 +77,7 @@ export function createInspector(ctx) {
   /** @type {HTMLElement|null} where focus returns when the inspector closes */
   let opener = null;
 
-  const dismiss = () => ctx.select(null);
-  for (const button of [close, closeText]) button.addEventListener('click', dismiss);
+  for (const button of [close, closeText]) button.addEventListener('click', () => ctx.select(null));
   follow.addEventListener('click', () => ctx.setFollow(!ctx.view.follow));
 
   /**
@@ -111,7 +110,7 @@ export function createInspector(ctx) {
     if (!agentKey) return;
     const agent = state.agents[agentKey];
     if (!agent) {
-      dismiss();
+      ctx.select(null);
       return;
     }
     const session = findSession(state, agent.sessionId);
