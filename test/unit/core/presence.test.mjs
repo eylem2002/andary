@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EMOTES, MAX_ROUTE_TILES, PHRASES, WALK_TILES_PER_SECOND, isTile, planWalk, positionAt, stepFrom, tileAt, walkDuration } from '../../../public/js/core/presence.js';
+import { EMOTES, MAX_ROUTE_TILES, PHRASES, WALK_TILES_PER_SECOND, continueWalk, headingTile, isTile, planWalk, positionAt, stepFrom, walkDuration } from '../../../public/js/core/presence.js';
 import { HOMES, LOTS, isWalkable } from '../../../public/js/core/town-map.js';
 
 test('a walk goes on the walking grid, to a reachable tile at most 60 steps away', () => {
@@ -30,7 +30,6 @@ test('positionAt moves 2.2 tiles a second along the path, and stops at its end',
   assert.ok(Math.abs(turn.row - 3.5) < 1e-9 && turn.col === 4);
   assert.deepEqual(positionAt(path, 0, 1e9), { col: 4, row: 4, done: true });
   assert.equal(walkDuration(path), (3 / WALK_TILES_PER_SECOND) * 1000);
-  assert.deepEqual(tileAt(path, 0, (1.9 / WALK_TILES_PER_SECOND) * 1000), [3, 3], 'mid-step: the tile being left');
   assert.deepEqual(positionAt([], 0, 0).done, true);
 });
 
@@ -41,4 +40,27 @@ test('one step at a time only onto walkable tiles; emotes and phrases are a fixe
   assert.equal(isTile([-1, 0]), false);
   assert.equal(EMOTES.length, 8);
   assert.ok(PHRASES.length >= 8 && PHRASES.length <= 12);
+});
+
+test('a new walk carries on from where the figure is: mid-step it finishes the step first', () => {
+  /** @type {[number, number][]} */
+  const path = [[2, 3], [3, 3], [4, 3]];
+  const tick = 1000 / WALK_TILES_PER_SECOND;
+  // Standing: from their tile, now.
+  const still = continueWalk({ tile: [2, 3], walk: null }, [4, 3], 500);
+  assert.deepEqual(still, { ok: true, path, at: 500 });
+  // A finished walk: from its last tile.
+  assert.deepEqual(continueWalk({ tile: [2, 3], walk: { path, at: 0 } }, [3, 3], 1e6).path, [[4, 3], [3, 3]]);
+  // Mid-step (0.4 of the way from [2,3] to [3,3]): the step is kept, and `at` set back by 0.4 of a step.
+  const now = 0.4 * tick;
+  const turn = /** @type {{ path: [number, number][], at: number }} */ (continueWalk({ tile: [2, 3], walk: { path, at: 0 } }, [2, 3], now));
+  assert.deepEqual(turn.path, [[2, 3], [3, 3], [2, 3]]);
+  assert.ok(Math.abs(turn.at - 0) < 1e-6, 'the figure is where it was');
+  const p = positionAt(turn.path, turn.at, now);
+  assert.ok(Math.abs(p.col - 2.4) < 1e-9 && p.row === 3);
+  assert.equal(continueWalk({ tile: [2, 3], walk: { path, at: 0 } }, [0, 0], now).ok, false);
+  // Keys step from the tile being entered, so a held key never walks back.
+  assert.deepEqual(headingTile({ tile: [2, 3], walk: { path, at: 0 } }, now), [3, 3]);
+  assert.deepEqual(headingTile({ tile: [2, 3], walk: { path, at: 0 } }, 1e6), [4, 3]);
+  assert.deepEqual(headingTile({ tile: [5, 5], walk: null }, now), [5, 5]);
 });

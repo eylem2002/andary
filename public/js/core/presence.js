@@ -74,14 +74,47 @@ export function positionAt(path, at, now) {
 }
 
 /**
- * The tile a walk stands on at a time: where the next walk starts. Mid-step it is the tile being
- * left, so a new route never skips a corner.
- * @param {Tile[]} path @param {number} at @param {number} now
+ * A new walk from wherever a person is now. Standing (no walk, or a finished one), it starts on
+ * their tile. Mid-step it first finishes the step to the tile being entered, and `at` is set back
+ * by the part already walked, so the figure carries on from where it is on every screen and never
+ * cuts a corner.
+ * @param {{ tile: Tile, walk: Walk|null }} where  where they stand, and their last walk
+ * @param {unknown} to @param {number} now (ms)
+ * @returns {{ ok: boolean, path?: Tile[], at?: number, error?: string }}
+ */
+export function continueWalk({ tile, walk }, to, now) {
+  const step = walk ? stepOf(walk, now) : null;
+  if (!step || step.part === 0) {
+    const plan = planWalk(step ? step.from : tile, to);
+    return plan.ok ? { ...plan, at: now } : plan;
+  }
+  const plan = planWalk(/** @type {Tile} */ (step.into), to, MAX_ROUTE_TILES - 1);
+  if (!plan.ok) return plan;
+  return { ok: true, path: [step.from, .../** @type {Tile[]} */ (plan.path)], at: now - (step.part / WALK_TILES_PER_SECOND) * 1000 };
+}
+
+/**
+ * The tile a person stands on, or is stepping onto: where their next step by key starts.
+ * @param {{ tile: Tile, walk: Walk|null }} where @param {number} now
  * @returns {Tile}
  */
-export function tileAt(path, at, now) {
+export function headingTile({ tile, walk }, now) {
+  if (!walk) return tile;
+  const step = stepOf(walk, now);
+  return step.part > 0 && step.into ? step.into : step.from;
+}
+
+/**
+ * Where a walk is at a time, by tile: the step under way (from → into, `part` of it walked), or
+ * the last tile once it is over (part 0, into null).
+ * @param {Walk} walk @param {number} now
+ */
+function stepOf({ path, at }, now) {
   const steps = Math.max(0, ((now - at) / 1000) * WALK_TILES_PER_SECOND);
-  return path[Math.min(path.length - 1, Math.floor(steps))] ?? [0, 0];
+  const last = path.length - 1;
+  if (steps >= last) return { from: path[last] ?? [0, 0], into: null, part: 0 };
+  const i = Math.floor(steps);
+  return { from: path[i], into: path[i + 1], part: steps - i };
 }
 
 /**

@@ -1,13 +1,14 @@
 // Where the people of a team town are, on the host (CONTRACTS §4.11): each person's tile, their
-// walk, whether they are online (a connection, or their relay posted in the last 2 minutes),
-// away (no connection: on their porch after 60 s, inside after 10 min) and their duty from
+// walk, whether they are online (a connection), their home's lights (online, or their relay
+// posted in the last 2 minutes), away (no connection: on their porch after 60 s, inside after
+// 10 min) and their duty from
 // their own events (a prompt: work; a permission request, a question or a failed turn: needs;
 // Stop or SessionEnd: free). Walks are planned with core/presence.js on the town plan and timed
-// on this clock; while a person's duty is not free their character is at work and stays put.
+// on this clock (a new walk carries on from where the figure is); while a person's duty is not free their character is at work and stays put.
 // Changes go out at most ten times a second, a person at a time. Nothing here is ever stored or
 // recorded: after a restart everyone starts at home.
 import { HOMES } from '../public/js/core/town-map.js';
-import { EMOTES, PHRASES, planWalk, tileAt } from '../public/js/core/presence.js';
+import { EMOTES, PHRASES, continueWalk } from '../public/js/core/presence.js';
 
 /** @typedef {import('../public/js/core/presence.js').Tile} Tile */
 /** @typedef {'free'|'work'|'needs'} Duty */
@@ -88,14 +89,13 @@ export function createPresence({ homeOf, hostName, onChange, now = Date.now, por
     if (names.length) onChange(names);
   }
 
-  const standing = (/** @type {PersonState} */ person) => standingAt(person, now());
   /** @param {string} name @param {PersonState} person @param {Tile} to */
   function startWalk(name, person, to) {
-    const from = standing(person);
-    const plan = planWalk(from, to);
+    const plan = continueWalk(person, to, now());
     if (!plan.ok) return plan;
-    person.tile = from;
-    person.walk = { path: /** @type {Tile[]} */ (plan.path), at: now() };
+    const path = /** @type {Tile[]} */ (plan.path);
+    person.tile = path[0];
+    person.walk = { path, at: /** @type {number} */ (plan.at) };
     person.last.walk = now();
     changed(name);
     return { ok: true };
@@ -173,7 +173,7 @@ export function createPresence({ homeOf, hostName, onChange, now = Date.now, por
     walk(name, to) {
       const person = state(name);
       if (person.duty !== 'free') return { ok: false, error: 'Your character is at work' };
-      const plan = planWalk(standing(person), to);
+      const plan = continueWalk(person, to, now());
       if (!plan.ok) return plan;
       const wait = (person.last.walk ?? -Infinity) + WALK_EVERY_MS - now();
       if (wait <= 0) return startWalk(name, person, /** @type {Tile} */ (to));
@@ -205,7 +205,6 @@ export function createPresence({ homeOf, hostName, onChange, now = Date.now, por
       if (from === to || homeOf(to) === null) return { ok: false, error: 'look.to is a teammate' };
       return allowed(state(from), `look:${to}`, LOOK_EVERY_MS, now()) ? { ok: true } : { ok: false, error: 'You asked them a moment ago' };
     },
-    /** How long a person's walk still takes (ms), for tests and the live region. @param {string} name */
     /** Forgets everyone not on the roster any more. @param {Set<string>} names */
     forgetAllBut(names) {
       for (const name of [...people.keys()]) if (!names.has(name)) forget(name);
@@ -233,11 +232,6 @@ function viewOf(person, t, porchMs, insideMs) {
 /** The door of a home, where its person starts. @param {number|null} slot @returns {Tile} */
 function doorOf(slot) {
   return /** @type {Tile} */ ([...(HOMES[slot ?? 0] ?? HOMES[0]).door]);
-}
-
-/** Where a person stands at a time (the end of a finished walk). @param {PersonState} person @param {number} t */
-function standingAt(person, t) {
-  return person.walk ? tileAt(person.walk.path, person.walk.at, t) : person.tile;
 }
 
 /** A timer that never keeps the process alive. @param {() => void} fn @param {number} ms */
