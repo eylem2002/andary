@@ -2,7 +2,7 @@
 // §4.11). Run on the computer that hosts the team town (`andary start --team`). Invite and remove
 // edit people.json; a running town reads it again within seconds.
 import { resolveHome, DEFAULT_PORT } from '../config.mjs';
-import { addPerson, readRoster, removePerson, writeRoster } from '../people.mjs';
+import { addPerson, removePerson, updateRoster } from '../people.mjs';
 import { readStateFile } from '../state-file.mjs';
 import { cleanMemberName, lanAddresses, memberKey, personToken, teamSecret, viewToken } from '../team.mjs';
 import { cliInvocation } from './io.mjs';
@@ -61,14 +61,16 @@ function baseAddress(values, state) {
  * @param {import('./io.mjs').CliIo} io
  */
 function invite(name, values, home, io) {
-  const added = addPerson(readRoster(home), name);
-  if (!added.ok) throw new UsageError(added.error);
-  writeRoster(home, added.roster);
+  const added = updateRoster(home, (roster) => addPerson(roster, name));
+  if (!added.ok) throw new UsageError(/** @type {string} */ (added.error));
+  const roster = /** @type {import('../people.mjs').Roster} */ (added.roster);
+  // Invited again: the same nonce, so the same key and link. After a removal: a new one.
+  const { nonce } = roster.people[name];
   const secret = /** @type {string} */ (teamSecret(home));
   const state = readStateFile(home);
   const { base, lan } = baseAddress(values, state);
   // The key goes in the environment: as an argument it would sit in ps and the shell history.
-  const command = `ANDARY_TEAM_KEY=${memberKey(secret, name)} andary start --share-to ${base}`;
+  const command = `ANDARY_TEAM_KEY=${memberKey(secret, name, nonce)} andary start --share-to ${base}`;
   io.out(`Invite for ${name}. Send them these two lines privately: the key lets anyone add sessions to your town as ${name},`);
   io.out(`and the link lets anyone open the town as ${name} and change ${name}'s character.`);
   io.out('');
@@ -76,11 +78,11 @@ function invite(name, values, home, io) {
   io.out(`    ${command}`);
   io.out('  (In PowerShell: $env:ANDARY_TEAM_KEY="<key>"; andary start --share-to <address>)');
   io.out(`  Their personal link to the team town, where they have a character and a home:`);
-  io.out(`    ${base}/?me=${encodeURIComponent(personToken(secret, name))}`);
+  io.out(`    ${base}/?me=${encodeURIComponent(personToken(secret, name, nonce))}`);
   io.out('');
   io.out('Whoever has a personal link or the view link sees every crew\'s prompts, commands, file paths');
   io.out('and edits, yours included, over plain HTTP: share them only with the team, on a network you trust.');
-  io.out(`${Object.keys(added.roster.people).length} of 6 homes taken. The view-only link for anyone else: ${cliInvocation()} team view-link`);
+  io.out(`${Object.keys(roster.people).length} of 6 homes taken. The view-only link for anyone else: ${cliInvocation()} team view-link`);
   if (!values.url && !lan) io.out('No network address found: pass the address teammates use with --url http://<address>:<port>.');
   if (!state) io.out(`The team town is not running: start it with ${cliInvocation()} start --team`);
   else if (!state.team) io.out(`The running town is not a team host: restart it with ${cliInvocation()} start --team`);
@@ -96,10 +98,9 @@ function invite(name, values, home, io) {
  * @param {import('./io.mjs').CliIo} io
  */
 function remove(name, home, io) {
-  const removed = removePerson(readRoster(home), name);
-  if (!removed.ok) throw new UsageError(removed.error);
-  writeRoster(home, removed.roster);
-  io.out(`Removed ${name}: their key and personal link stopped working, and their home is free again.`);
+  const removed = updateRoster(home, (roster) => removePerson(roster, name));
+  if (!removed.ok) throw new UsageError(/** @type {string} */ (removed.error));
+  io.out(`Removed ${name}: their key and personal link stopped working for good (inviting ${name} again makes new ones), and their home is free again.`);
   return 0;
 }
 

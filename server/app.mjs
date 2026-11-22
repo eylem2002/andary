@@ -233,9 +233,11 @@ function createContext(config, options) {
     team: options.team
       ? createTeamHost({
           secret: /** @type {string} */ (teamSecret(config.home)),
+          log: config.log,
           people: createPeople({
             home: config.home,
             host: options.teamName ?? null,
+            log: config.log,
             onChange: () => {
               dropRemovedPeople(ctx);
               announcePeople(ctx);

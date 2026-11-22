@@ -343,7 +343,12 @@ What is shared and what is not:
   which never leaves it. A self-signed certificate works too if every teammate trusts it
   (`NODE_EXTRA_CA_CERTS=<cert> andary start --share-to …`, and in their browser).
 - **Revoke:** `andary team remove Lina` on the host stops Lina's key and personal link at once
-  and frees her home; `andary team reset` invalidates every key and link (profiles are kept).
+  and for good (inviting her again makes new ones) and frees her home; `andary team reset`
+  invalidates every key and link (profiles are kept).
+- **Upgrading from a town without homes:** a key now works only for someone on the roster. Run
+  `andary team invite <name>` once for each teammate (at most five) and send them the new lines;
+  until then the host's log names each refused key. A team of more than six people cannot all
+  have a place.
 
 ### A demo anyone can open
 

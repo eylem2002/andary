@@ -685,15 +685,22 @@ host, `andary team invite <name> [--url <address>]` adds a teammate and prints t
 and personal link; `andary team remove <name>` takes one off; `andary team view-link [--url]`
 prints the view link; `andary team reset` makes a new secret, which revokes every key and link.
 
-- **People** (`people.json`): `{ v: 1, host: <name>, people: { <name>: { slot, color, profile } } }`,
+- **People** (`people.json`): `{ v: 1, host: <name>, people: { <name>: { slot, color, nonce, profile } } }`,
   at most 6 (the host and 5 teammates; a seventh invite is refused, and a teammate never takes
   the last place before the host has one). `slot` (0–5) is their home in the residential quarter
   (`core/town-map.js` `HOMES`) and `color` (0–7) an index into `CREW_COLORS`, both the first free
   one on joining and never shared. `--name` names the host (default `Host`; a later `--name`
   renames the host's entry, keeping its home, colour and profile; a teammate's name is refused).
-  The host cannot be removed. A running host reads the file again within 2 s of a change (the CLI
-  edits it), and a hand-edited file is read defensively: malformed entries are dropped, a bad
-  profile cleared. Invite again with the same name to print the same key and link.
+  The host cannot be removed, nor invited as a teammate; with no `--name` and a teammate called
+  Host, the host becomes "Host 2" (and the log says so). `nonce` (16 random base64url characters)
+  is part of the person's key and link: inviting someone already on the roster prints the same
+  key and link, and inviting them again after `team remove` makes new ones, so a removed key or
+  link never works again. Every read-modify-write of the file (the CLI's invite and remove, the
+  host's profile saves) holds `<ANDARY_HOME>/people.lock` (created exclusively; waited for up to
+  2 s; one older than 5 s is taken over). A running host reads the file again within 2 s of a
+  change and before every key or link check; any change it sees is announced once (the removed
+  person's connections close, everyone gets `{t:'people'}`). A hand-edited file is read
+  defensively: malformed entries are dropped, a bad profile cleared.
 - **Profile** (`public/js/core/profile.js`, shared with the server): version 1,
   `{ v: 1, color: 0–7, house: 'coast'|'snow'|'neon'|'desert'|'amman', look: { skin: 0–7,
   hair: 'short'|'long'|'bun'|'curly'|'buzz'|'bald', hairColor: 0–8, eyes: 'dot'|'round'|'happy',
@@ -710,15 +717,18 @@ prints the view link; `andary team reset` makes a new secret, which revokes ever
   (`andary:profile`) and sends it again when the host has none for it (after a fresh
   `people.json`); the demo starts with it too.
 
-- **Member key**: `encodeURIComponent(name) + "." + HMAC-SHA256(secret, "member:" + name)`
+- **Member key**: `encodeURIComponent(name) + "." + HMAC-SHA256(secret, "member:" + name + ":" + nonce)`
   (base64url, first 32 characters). Names keep letters, digits, spaces and `._-`, at most 24.
-- **Personal link**: `encodeURIComponent(name) + "." + HMAC-SHA256(secret, "person:" + name)`
+- **Personal link**: `encodeURIComponent(name) + "." + HMAC-SHA256(secret, "person:" + name + ":" + nonce)`
   (base64url, first 32 characters): separate from the member key, so a leaked link cannot post
   events and a leaked key cannot drive a character. `GET /?me=<token>` (pages only) redirects to
   the same page with `#me=<token>` (percent-encoded), which the page keeps like the sign-in
   (`x-andary-person`, subprotocol `andary.person.<token>`). A member key and a personal link work
-  only while their name is on the roster: `team remove` stops both at once (a person's open
-  connections close with "Removed from the team"), and their `POST /api/team` answers 401.
+  only while their name is on the roster with that nonce: `team remove` stops both at once (a
+  person's open connections close with "Removed from the team"), and their `POST /api/team`
+  answers 401. A key signed for a name not on the roster (a team from before rosters) is refused
+  with one log line per name ("Refused <name>'s key: not on the roster. Run: andary team invite
+  <name>"); the member's relay logs "key refused by the host".
 - **View token**: `HMAC-SHA256(secret, "view")`, same length. `GET /?view=<token>` (pages only)
   redirects to the same page with `#view=<token>`, which the page keeps like the sign-in (§4.4;
   `x-andary-view`, subprotocol `andary.view.<token>`); a wrong token answers 403.

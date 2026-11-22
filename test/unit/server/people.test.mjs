@@ -1,9 +1,9 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MAX_PEOPLE, PROFILE_EVERY_MS, addPerson, claimHost, createPeople, emptyRoster, peoplePath, readRoster, removePerson, setProfile, writeRoster } from '../../../server/people.mjs';
+import { MAX_PEOPLE, PROFILE_EVERY_MS, addPerson, claimHost, createPeople, emptyRoster, peoplePath, readRoster, removePerson, setProfile, updateRoster, writeRoster } from '../../../server/people.mjs';
 import { defaultProfile } from '../../../public/js/core/profile.js';
 
 const temp = mkdtempSync(join(tmpdir(), 'people-'));
@@ -77,7 +77,7 @@ test('people.json is private, and a broken or hand-edited file never breaks the 
   assert.deepEqual(readRoster(home), emptyRoster());
 });
 
-test('the running host sees CLI edits, saves profiles at most every 10 s, and lists by home', () => {
+test('the running host sees CLI edits, saves profiles at most every 10 s, and lists by home', async () => {
   const home = join(temp, 'live');
   let clock = 0;
   let changes = 0;
@@ -85,8 +85,17 @@ test('the running host sees CLI edits, saves profiles at most every 10 s, and li
   assert.equal(people.host, 'Sam');
   writeRoster(home, withPeople(readRoster(home), ['Lina']));
   people.poll();
+  await Promise.resolve();
   assert.equal(changes, 1);
   assert.equal(people.has('Lina'), true);
+  // A key check that sees a change first must not swallow it: the change is still announced.
+  writeRoster(home, withPeople(readRoster(home), ['Omar']));
+  assert.equal(people.has('Omar'), true);
+  people.poll();
+  await Promise.resolve();
+  assert.equal(changes, 2, 'once, whoever saw it first');
+  const { Omar: _gone, ...rest } = readRoster(home).people;
+  writeRoster(home, { ...readRoster(home), people: rest });
   assert.deepEqual(people.list().map((p) => [p.name, p.slot, p.host]), [['Sam', 0, true], ['Lina', 1, false]]);
   assert.deepEqual(people.setProfile('Lina', defaultProfile(5)), { color: 5 });
   assert.equal(readRoster(home).people.Lina.color, 5, 'saved to people.json');
@@ -95,4 +104,38 @@ test('the running host sees CLI edits, saves profiles at most every 10 s, and li
   assert.deepEqual(people.setProfile('Lina', defaultProfile(6)), { color: 6 });
   assert.equal(people.setProfile('Omar', defaultProfile(2)), null);
   assert.throws(() => createPeople({ home, host: 'Lina' }), /already a teammate/);
+});
+
+test('nonces: a new one for each invite after a removal, the same one when invited again', () => {
+  const roster = withPeople(/** @type {any} */ (claimHost(emptyRoster(), 'Sam')).roster, ['Lina']);
+  const first = roster.people.Lina.nonce;
+  assert.match(first, /^[\w-]{16}$/);
+  assert.equal(/** @type {any} */ (addPerson(roster, 'Lina')).roster.people.Lina.nonce, first);
+  const again = withPeople(/** @type {any} */ (removePerson(roster, 'Lina')).roster, ['Lina']);
+  assert.notEqual(again.people.Lina.nonce, first);
+});
+
+test('the host\'s name is never a teammate\'s, and "Host" makes way for a teammate called Host', () => {
+  const roster = withPeople(/** @type {any} */ (claimHost(emptyRoster(), 'Sam')).roster, ['Lina']);
+  assert.match(addPerson(roster, 'Sam').error ?? '', /hosts the town/);
+  const team = withPeople(emptyRoster(), ['Host']);
+  assert.equal(/** @type {any} */ (claimHost(team, null)).roster.host, 'Host 2');
+  const logs = /** @type {string[]} */ ([]);
+  const home = join(temp, 'host2');
+  writeRoster(home, team);
+  createPeople({ home, host: null, log: (m) => logs.push(m) });
+  assert.match(logs[0], /you are Host 2/);
+});
+
+test('every read-modify-write holds the lock; a lock left behind is taken over', () => {
+  const home = join(temp, 'lock');
+  writeRoster(home, emptyRoster());
+  writeFileSync(join(home, 'people.lock'), '1');
+  utimesSync(join(home, 'people.lock'), new Date(0), new Date(0));
+  const result = updateRoster(home, (r) => claimHost(r, 'Sam'));
+  assert.equal(result.ok, true);
+  assert.equal(readRoster(home).host, 'Sam');
+  assert.equal(existsSync(join(home, 'people.lock')), false, 'let go afterwards');
+  writeFileSync(join(home, 'people.lock'), '1');
+  assert.throws(() => updateRoster(home, (r) => claimHost(r, 'Sam')), /busy/);
 });

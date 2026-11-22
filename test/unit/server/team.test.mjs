@@ -49,7 +49,7 @@ test('a personal link names its person, and is never a member key (nor the other
 test('keys and links work only while their name is on the roster', () => {
   const home = join(temp, 'roster');
   const people = createPeople({ home, host: 'Sam' });
-  writeRoster(home, { ...readRoster(home), people: { ...readRoster(home).people, Lina: { slot: 1, color: 1, profile: null } } });
+  writeRoster(home, { ...readRoster(home), people: { ...readRoster(home).people, Lina: { slot: 1, color: 1, nonce: '', profile: null } } });
   const team = createTeamHost({ secret: SECRET, people });
   assert.equal(team.memberOf(memberKey(SECRET, 'Lina')), 'Lina');
   assert.equal(team.personOf(personToken(SECRET, 'Lina')), 'Lina');

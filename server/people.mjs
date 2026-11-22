@@ -1,12 +1,15 @@
 // The people of a team town (CONTRACTS §4.11): the host and up to five teammates, each with a
-// home slot (0–5, core/town-map.js HOMES), a colour (an index into the crew colours) and the
-// profile they chose in the "You" dialog. Kept in <ANDARY_HOME>/people.json (mode 0600):
-//   { v: 1, host: "Sam", people: { "Sam": { slot, color, profile|null }, "Lina": { … } } }
-// `andary team invite` and `team remove` edit the file while the town runs; the host's server
-// reads it again when it changes, so a removal revokes that person's key and link at once. The
-// pure functions below edit a roster value; createPeople is the running host's view of the file.
+// home slot (0–5, core/town-map.js HOMES), a colour (an index into the crew colours), a nonce
+// (part of their key and link: new when they are invited again after a removal) and the profile
+// they chose in the "You" dialog. Kept in <ANDARY_HOME>/people.json (mode 0600):
+//   { v: 1, host: "Sam", people: { "Sam": { slot, color, nonce, profile|null }, "Lina": { … } } }
+// `andary team invite` and `team remove` edit the file while the town runs, and the host's
+// server writes it when someone saves a profile; each read-modify-write holds people.lock, so
+// neither undoes the other. The server reads the file again when it changes, so a removal
+// revokes that person's key and link at once. The pure functions below edit a roster value;
+// createPeople is the running host's view of the file.
 import { randomBytes } from 'node:crypto';
-import { chmodSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureHome } from './state-file.mjs';
 import { cleanMemberName } from './team.mjs';
@@ -20,11 +23,15 @@ const PEOPLE_FILE = 'people.json';
 const MAX_FILE_BYTES = 16 * 1024;
 /** How often one person may change their profile. */
 export const PROFILE_EVERY_MS = 10_000;
+/** How long a read-modify-write waits for the lock, and when a lock is taken to be left over. */
+const LOCK_WAIT_MS = 2000;
+const LOCK_STALE_MS = 5000;
 
 /**
  * @typedef {object} Person
  * @property {number} slot     their home, 0–5
  * @property {number} color    their colour, 0–7, never shared with another person
+ * @property {string} nonce    part of their key and link ('' for someone invited before nonces)
  * @property {import('../public/js/core/profile.js').Profile|null} profile  null until they choose one
  */
 
@@ -65,11 +72,21 @@ export function readRoster(home) {
     if (!isIndex(slot, MAX_PEOPLE) || slots.has(slot) || !isIndex(color, PERSON_COLOR_COUNT) || colors.has(color)) continue;
     slots.add(slot);
     colors.add(color);
-    const check = entry.profile ? validateProfile(entry.profile) : null;
-    roster.people[name] = { slot, color, profile: check?.ok ? check.profile : null };
+    roster.people[name] = { slot, color, nonce: readNonce(entry.nonce), profile: readProfile(entry.profile) };
   }
   roster.host = typeof raw.host === 'string' && Object.hasOwn(roster.people, raw.host) ? raw.host : null;
   return roster;
+}
+
+/** @param {unknown} value @returns {string} */
+function readNonce(value) {
+  return typeof value === 'string' && /^[\w-]{0,32}$/.test(value) ? value : '';
+}
+
+/** @param {unknown} value */
+function readProfile(value) {
+  const check = value ? validateProfile(value) : null;
+  return check?.ok ? /** @type {import('../public/js/core/profile.js').Profile} */ (check.profile) : null;
 }
 
 /**
@@ -84,6 +101,60 @@ export function writeRoster(home, roster) {
   writeFileSync(temp, `${JSON.stringify(roster, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
   chmodSync(temp, 0o600);
   renameSync(temp, target);
+}
+
+/**
+ * Runs a read-modify-write of people.json under people.lock (created exclusively; a lock older
+ * than LOCK_STALE_MS was left by a process that died and is taken over). The change is written
+ * when `change` returns a roster.
+ * @template {{ roster?: Roster }} T
+ * @param {string} home
+ * @param {(roster: Roster) => T} change
+ * @returns {T}
+ */
+export function updateRoster(home, change) {
+  ensureHome(home);
+  const lock = join(home, 'people.lock');
+  const until = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 });
+      break;
+    } catch (error) {
+      if (/** @type {NodeJS.ErrnoException} */ (error).code !== 'EEXIST') throw error;
+      if (lockAge(lock) > LOCK_STALE_MS) {
+        try {
+          unlinkSync(lock);
+        } catch {
+          // someone else took it over first
+        }
+      } else if (Date.now() > until) {
+        throw Object.assign(new Error('people.json is busy: another andary command is changing it. Try again.'), { code: 'EPEOPLE' });
+      } else {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+    }
+  }
+  try {
+    const result = change(readRoster(home));
+    if (result.roster) writeRoster(home, result.roster);
+    return result;
+  } finally {
+    try {
+      unlinkSync(lock);
+    } catch {
+      // already gone
+    }
+  }
+}
+
+/** @param {string} file @returns {number} ms since it was written, Infinity when it is gone */
+function lockAge(file) {
+  try {
+    return Date.now() - statSync(file).mtimeMs;
+  } catch {
+    return Infinity;
+  }
 }
 
 /** @param {unknown} value @param {number} count @returns {value is number} */
@@ -117,6 +188,7 @@ function takenBy(roster, field, except) {
  * @returns {{ ok: boolean, roster?: Roster, added?: boolean, error?: string }}
  */
 export function addPerson(roster, name, { host = false } = {}) {
+  if (!host && roster.host === name) return { ok: false, error: `${name} hosts the town: invite your teammates by their own names.` };
   if (Object.hasOwn(roster.people, name)) {
     if (host && roster.host !== name) return { ok: false, error: `${name} is already a teammate: choose another name for yourself with --name.` };
     return { ok: true, roster, added: false };
@@ -124,7 +196,7 @@ export function addPerson(roster, name, { host = false } = {}) {
   const count = Object.keys(roster.people).length;
   const room = MAX_PEOPLE - (host || roster.host ? 0 : 1);
   if (count >= room) return { ok: false, error: `A team town has room for ${MAX_PEOPLE} people, the host included. Remove someone first with: andary team remove <name>` };
-  const person = { slot: nextFree(takenBy(roster, 'slot'), MAX_PEOPLE), color: nextFree(takenBy(roster, 'color'), PERSON_COLOR_COUNT), profile: null };
+  const person = { slot: nextFree(takenBy(roster, 'slot'), MAX_PEOPLE), color: nextFree(takenBy(roster, 'color'), PERSON_COLOR_COUNT), nonce: randomBytes(12).toString('base64url'), profile: null };
   return { ok: true, roster: { ...roster, host: host ? name : roster.host, people: { ...roster.people, [name]: person } }, added: true };
 }
 
@@ -133,10 +205,11 @@ export function addPerson(roster, name, { host = false } = {}) {
  * colour and profile).
  * @param {Roster} roster
  * @param {string|null} name  already cleaned; null keeps the current host, or names one "Host"
+ *   ("Host 2", … when a teammate is called Host)
  * @returns {{ ok: boolean, roster?: Roster, error?: string }}
  */
 export function claimHost(roster, name) {
-  const wanted = name ?? roster.host ?? 'Host';
+  const wanted = name ?? roster.host ?? freeHostName(roster);
   if (roster.host === wanted) return { ok: true, roster };
   if (roster.host && !Object.hasOwn(roster.people, wanted)) {
     const { [roster.host]: entry, ...others } = roster.people;
@@ -144,6 +217,13 @@ export function claimHost(roster, name) {
   }
   const result = addPerson(roster, wanted, { host: true });
   return result.ok ? { ok: true, roster: result.roster } : result;
+}
+
+/** "Host", or "Host 2", "Host 3"… when a teammate has the name. @param {Roster} roster */
+function freeHostName(roster) {
+  let name = 'Host';
+  for (let n = 2; Object.hasOwn(roster.people, name); n++) name = `Host ${n}`;
+  return name;
 }
 
 /**
@@ -186,65 +266,80 @@ export function setProfile(roster, name, profile) {
 /**
  * The running host's people: people.json, read again whenever it changes on disk (the CLI edits
  * it), and written when someone saves a profile.
- * @param {{ home: string, host: string|null, onChange?: () => void, now?: () => number }} options
+ * @param {{ home: string, host: string|null, onChange?: () => void, now?: () => number, log?: (message: string) => void }} options
  *   host: the name from `andary start --team --name`
  */
-export function createPeople({ home, host, onChange = () => {}, now = Date.now }) {
-  const claimed = claimHost(readRoster(home), host);
+export function createPeople({ home, host, onChange = () => {}, now = Date.now, log = () => {} }) {
+  const claimed = updateRoster(home, (roster) => claimHost(roster, host));
   if (!claimed.ok) throw Object.assign(new Error(claimed.error), { code: 'EPEOPLE' });
-  let roster = claimed.roster;
-  writeRoster(home, roster);
+  let roster = /** @type {Roster} */ (claimed.roster);
+  if (!host && roster.host !== 'Host' && roster.host?.startsWith('Host ')) log(`A teammate is called Host, so you are ${roster.host} in the team town: name yourself with --name.`);
   let stamp = fileStamp(home);
+  let announcing = false;
   /** @type {Map<string, number>} when each person last saved a profile */
   const saved = new Map();
 
-  /** Reads the file again if it changed; true when the roster did. */
+  /** Tells onChange once, after the current task: whoever saw the change first. */
+  function announce() {
+    if (announcing) return;
+    announcing = true;
+    queueMicrotask(() => {
+      announcing = false;
+      onChange();
+    });
+  }
+
+  /** Reads the file again if it changed; any change of the roster is announced. */
   function refresh() {
     const next = fileStamp(home);
-    if (next === stamp) return false;
+    if (next === stamp) return;
     stamp = next;
     const before = JSON.stringify(roster);
     // The host stays the host even if the file lost it.
     const reread = claimHost(readRoster(home), roster.host);
-    roster = reread.ok ? reread.roster : readRoster(home);
-    return JSON.stringify(roster) !== before;
+    roster = reread.ok ? /** @type {Roster} */ (reread.roster) : readRoster(home);
+    if (JSON.stringify(roster) !== before) announce();
   }
 
   return {
     get host() {
       return roster.host;
     },
-    /** Reads people.json again; tells onChange when someone was added, removed or changed. */
+    /** Reads people.json again; onChange hears when someone was added, removed or changed. */
     poll() {
-      if (refresh()) onChange();
+      refresh();
     },
     /** Whether a name is on the roster now (a key or link of anyone else is refused). @param {string|null} name */
     has(name) {
       refresh();
       return typeof name === 'string' && Object.hasOwn(roster.people, name);
     },
+    /** A name's nonce, null when it is not on the roster. @param {string} name */
+    nonceOf(name) {
+      refresh();
+      return Object.hasOwn(roster.people, name) ? roster.people[name].nonce : null;
+    },
     /** @returns {PersonView[]} by home slot */
     list() {
+      refresh();
       return Object.entries(roster.people)
         .map(([name, person]) => ({ name, slot: person.slot, color: person.color, host: name === roster.host, profile: person.profile }))
         .sort((a, b) => a.slot - b.slot);
     },
     /**
-     * Saves a validated profile; null when the name is not on the roster or saved one less than
-     * PROFILE_EVERY_MS ago (then `wait` says so).
+     * Saves a validated profile; null when the name is not on the roster, `wait` when they saved
+     * one less than PROFILE_EVERY_MS ago.
      * @param {string} name
      * @param {import('../public/js/core/profile.js').Profile} profile
      * @returns {{ color: number } | { wait: true } | null}
      */
     setProfile(name, profile) {
-      refresh();
       const last = saved.get(name);
       if (last !== undefined && now() - last < PROFILE_EVERY_MS) return { wait: true };
-      const result = setProfile(roster, name, profile);
-      if (!result) return null;
+      const result = updateRoster(home, (current) => setProfile(current, name, profile) ?? { roster: undefined, color: -1 });
+      if (!result.roster) return null;
       saved.set(name, now());
       roster = result.roster;
-      writeRoster(home, roster);
       stamp = fileStamp(home);
       onChange();
       return { color: result.color };

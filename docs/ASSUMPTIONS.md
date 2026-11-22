@@ -1092,10 +1092,12 @@ section.
 191. **The host is named "Host" until `--name` says otherwise**, never the computer's user name (it
      shows on a name plate to everyone). A later `--name` renames the host's entry and keeps its home,
      colour and profile; a name a teammate already has is refused at start.
-192. **The roster file is shared by the CLI and the running host, last write wins.** `team invite`
-     and `team remove` rewrite it atomically; the host looks at it every 2 s and before every key or
-     link check, and rewrites it when someone saves a profile. A save in the same instant as an
-     invite could undo the invite; both are rare and the invite can be repeated.
+192. **The roster file is shared by the CLI and the running host under a lock.** `team invite`,
+     `team remove` and the host's profile saves each read, change and write people.json while
+     holding `people.lock` (an exclusive create, retried every 20 ms for up to 2 s; a lock older
+     than 5 s is taken to be left by a process that died). The host also re-reads the file every 2 s
+     and before every key or link check, and announces any change it sees once (a microtask), so a
+     key check that notices a removal first still closes the removed person's town.
 193. **A teammate never takes the host's home.** Before the host has started once, five invites fill
      the roster; the sixth place is the host's.
 194. **Every profile key is required, not only known ones.** "Unknown keys rejected" is read as an
@@ -1137,3 +1139,12 @@ section.
      props are in the town batch) and the same frame rate as `main` there, so the 30 fps target on a
      phone is as near as it was. A person costs one figure geometry and one draw call like any
      helper.
+205. **A nonce per person makes a removal final.** Keys and links are HMACs of the name and a
+     random 16-character nonce kept in people.json; inviting someone already on the roster keeps
+     it (the same lines print again), inviting them after a removal makes a new one. People from
+     before nonces have an empty one, which signs exactly as before.
+206. **The host is told which old keys it refuses**, once per name, and a member's relay words a 401
+     as "key refused by the host", so a team upgrading from a town without rosters is not left
+     guessing (README "Upgrading").
+207. **With no `--name` and a teammate called "Host", the host becomes "Host 2"** (then 3…), with a
+     line in the log, rather than refusing to start.

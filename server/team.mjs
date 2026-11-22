@@ -60,20 +60,23 @@ function mac(secret, purpose) {
 }
 
 /**
- * A name, a dot, and an HMAC of the name for one purpose. Names are percent-encoded so a dot in
- * a name cannot be confused with the separator.
+ * A name, a dot, and an HMAC of the name for one purpose and the person's nonce (people.mjs: new
+ * on every invite after a removal, so a removed person's old key and link never come back).
+ * Names are percent-encoded so a dot in a name cannot be confused with the separator.
  * @param {string} secret @param {'member'|'person'} purpose @param {string} name  already cleaned
+ * @param {string} nonce  '' for a person invited before nonces
  */
-function signName(secret, purpose, name) {
-  return `${encodeURIComponent(name)}.${mac(secret, `${purpose}:${name}`)}`;
+function signName(secret, purpose, name, nonce) {
+  return `${encodeURIComponent(name)}.${mac(secret, `${purpose}:${name}${nonce ? `:${nonce}` : ''}`)}`;
 }
 
 /**
  * The name a signed value belongs to, or null.
  * @param {string} secret @param {'member'|'person'} purpose @param {unknown} value
+ * @param {(name: string) => string|null} nonceOf  the name's nonce; null: not on the roster
  * @returns {string|null}
  */
-function verifyName(secret, purpose, value) {
+function verifyName(secret, purpose, value, nonceOf) {
   if (typeof value !== 'string' || value.length > 200) return null;
   const dot = value.lastIndexOf('.');
   if (dot <= 0) return null;
@@ -84,26 +87,30 @@ function verifyName(secret, purpose, value) {
     return null;
   }
   if (cleanMemberName(name) !== name) return null;
-  return safeEqual(value.slice(dot + 1), mac(secret, `${purpose}:${name}`)) ? name : null;
+  const nonce = nonceOf(name);
+  if (nonce === null) return null;
+  return safeEqual(value.slice(dot + 1), mac(secret, `${purpose}:${name}${nonce ? `:${nonce}` : ''}`)) ? name : null;
 }
 
 /**
  * A teammate's key, for their relay: it may add sessions to the town as them.
  * @param {string} secret
  * @param {string} name  already cleaned
+ * @param {string} [nonce]
  */
-export function memberKey(secret, name) {
-  return signName(secret, 'member', name);
+export function memberKey(secret, name, nonce = '') {
+  return signName(secret, 'member', name, nonce);
 }
 
 /**
- * The member a key belongs to, or null. The caller also checks the roster.
+ * The member a key belongs to, or null.
  * @param {string} secret
  * @param {unknown} key
+ * @param {(name: string) => string|null} [nonceOf]  the roster's nonce for a name (null: not on it)
  * @returns {string|null}
  */
-export function verifyMemberKey(secret, key) {
-  return verifyName(secret, 'member', key);
+export function verifyMemberKey(secret, key, nonceOf = () => '') {
+  return verifyName(secret, 'member', key, nonceOf);
 }
 
 /**
@@ -111,19 +118,21 @@ export function verifyMemberKey(secret, key) {
  * the key, so a leaked link cannot post events and a leaked key cannot drive a character.
  * @param {string} secret
  * @param {string} name  already cleaned
+ * @param {string} [nonce]
  */
-export function personToken(secret, name) {
-  return signName(secret, 'person', name);
+export function personToken(secret, name, nonce = '') {
+  return signName(secret, 'person', name, nonce);
 }
 
 /**
- * The person a personal link token belongs to, or null. The caller also checks the roster.
+ * The person a personal link token belongs to, or null.
  * @param {string} secret
  * @param {unknown} token
+ * @param {(name: string) => string|null} [nonceOf]
  * @returns {string|null}
  */
-export function verifyPersonToken(secret, token) {
-  return verifyName(secret, 'person', token);
+export function verifyPersonToken(secret, token, nonceOf = () => '') {
+  return verifyName(secret, 'person', token, nonceOf);
 }
 
 /**
@@ -173,27 +182,38 @@ const MAX_MEMBERS = 50;
 /**
  * The host side of a team town: the secret, the view token, the people (people.mjs), a rate limit
  * per member and the list of members seen since the server started.
- * @param {{ secret: string, people: import('./people.mjs').People, onMember?: (members: string[]) => void, ratePerSecond?: number, burst?: number }} options
+ * @param {{ secret: string, people: import('./people.mjs').People, onMember?: (members: string[]) => void, log?: (message: string) => void, ratePerSecond?: number, burst?: number }} options
  */
-export function createTeamHost({ secret, people, onMember = () => {}, ratePerSecond = 300, burst = 600 }) {
+export function createTeamHost({ secret, people, onMember = () => {}, log = () => {}, ratePerSecond = 300, burst = 600 }) {
   /** @type {Map<string, import('./rate-limit.mjs').TokenBucket>} */
   const buckets = new Map();
   const overflow = createTokenBucket({ ratePerSecond, burst });
   /** @type {string[]} */
   const members = [];
+  /** Names whose key was refused for not being on the roster, told once each. */
+  const refused = new Set();
   return {
     secret,
     view: viewToken(secret),
     people,
-    /** The roster name a relay's key belongs to, or null. @param {unknown} key */
+    /**
+     * The roster name a relay's key belongs to, or null. A key signed before its name was on the
+     * roster (a team from before rosters) is refused with a line in the log, once per name.
+     * @param {unknown} key
+     */
     memberOf(key) {
-      const name = verifyMemberKey(secret, key);
-      return name && people.has(name) ? name : null;
+      const name = verifyMemberKey(secret, key, (n) => people.nonceOf(n));
+      if (name) return name;
+      const stranger = verifyMemberKey(secret, key);
+      if (stranger && !people.has(stranger) && !refused.has(stranger) && refused.size < MAX_MEMBERS) {
+        refused.add(stranger);
+        log(`Refused ${stranger}'s key: not on the roster. Run: andary team invite ${stranger}`);
+      }
+      return null;
     },
     /** The roster name a personal link belongs to, or null. @param {unknown} token */
     personOf(token) {
-      const name = verifyPersonToken(secret, token);
-      return name && people.has(name) ? name : null;
+      return verifyPersonToken(secret, token, (n) => people.nonceOf(n));
     },
     /** Team requests whose body is being read now (routes.mjs keeps it below a few). */
     uploads: 0,
@@ -283,6 +303,7 @@ export function createTeamRelay({ url, key, fetchImpl = globalThis.fetch, log = 
         signal: AbortSignal.timeout(8000),
       });
       const answer = response.ok ? await response.json().catch(() => null) : null;
+      if (response.status === 401) throw new Error('key refused by the host: ask them to run andary team invite <your name> again');
       if (answer?.ok !== true) throw new Error(`HTTP ${response.status}`);
       // Remove exactly what was sent: the queue may have been trimmed meanwhile.
       const sent = new Set(batch);

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { memberKey, personToken, teamSecret, viewToken } from '../../server/team.mjs';
 import { defaultProfile } from '../../public/js/core/profile.js';
+import { readRoster } from '../../server/people.mjs';
 import { closeBrowser, connectBrowser, hookPayload, postHook, rawRequest, startTown, waitForMessage } from './helpers.mjs';
 
 /**
@@ -26,6 +27,8 @@ function team(home, args) {
 describe('Team town', () => {
   /** @type {Awaited<ReturnType<typeof startTown>>} */
   let host;
+  /** A name's nonce on the host's roster ('' when not on it), part of its key and link. @param {string} name */
+  const nonce = (name) => readRoster(host.home).people[name]?.nonce ?? '';
   /** @type {Awaited<ReturnType<typeof startTown>>} */
   let member;
   /** @type {string} */
@@ -38,7 +41,7 @@ describe('Team town', () => {
     secret = /** @type {string} */ (teamSecret(host.home, { create: false }));
     for (const name of ['Lina', 'Omar']) assert.equal(team(host.home, ['invite', name]).status, 0);
     // The key by environment, as the invite prints it.
-    member = await startTown({ args: ['--share-to', host.baseUrl], env: { ANDARY_TEAM_KEY: memberKey(secret, 'Lina') } });
+    member = await startTown({ args: ['--share-to', host.baseUrl], env: { ANDARY_TEAM_KEY: memberKey(secret, 'Lina', nonce('Lina')) } });
   });
   after(async () => {
     await member?.stop();
@@ -66,13 +69,13 @@ describe('Team town', () => {
     const batch = { v: 1, events: [{ ts: Date.now(), event: hookPayload('Stop') }] };
     assert.equal((await postTeam(host.port, batch)).status, 401);
     assert.equal((await postTeam(host.port, batch, { 'x-andary-team': `${memberKey('another-secret-another-secret-123', 'Lina')}` })).status, 401);
-    assert.equal((await postTeam(host.port, batch, { 'x-andary-team': memberKey(secret, 'Omar'), host: 'andary-host.tailnet.example:4747' })).status, 200);
-    assert.equal((await postTeam(host.port, { v: 2 }, { 'x-andary-team': memberKey(secret, 'Omar') })).status, 400);
+    assert.equal((await postTeam(host.port, batch, { 'x-andary-team': memberKey(secret, 'Omar', nonce('Omar')), host: 'andary-host.tailnet.example:4747' })).status, 200);
+    assert.equal((await postTeam(host.port, { v: 2 }, { 'x-andary-team': memberKey(secret, 'Omar', nonce('Omar')) })).status, 400);
     assert.equal((await postTeam(host.port, batch, { 'x-andary-team': memberKey(secret, 'Mallory') })).status, 401, 'a valid key for a name not on the roster');
     // Only the team endpoint skips the Host check: the rest of the town still refuses other names.
     assert.equal((await rawRequest(host.port, { path: '/', headers: { host: `evil.example:${host.port}` } })).status, 403);
     // A town that does not host a team has no team endpoint.
-    assert.equal((await postTeam(member.port, batch, { 'x-andary-team': memberKey(secret, 'Lina') })).status, 404);
+    assert.equal((await postTeam(member.port, batch, { 'x-andary-team': memberKey(secret, 'Lina', nonce('Lina')) })).status, 404);
 
     const owner = await connectBrowser(host);
     await waitForMessage(owner, (m) => m?.t === 'hello');
@@ -166,7 +169,7 @@ describe('Team town', () => {
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /ANDARY_TEAM_KEY=Omar\.[\w-]{32} andary start --share-to http:\/\/box\.tailnet\.example:4747/);
     assert.ok(!run.stdout.includes('--team-key'), 'the key is not an argument');
-    assert.ok(run.stdout.includes(`http://box.tailnet.example:4747/?me=${encodeURIComponent(personToken(secret, 'Omar'))}`));
+    assert.ok(run.stdout.includes(`http://box.tailnet.example:4747/?me=${encodeURIComponent(personToken(secret, 'Omar', nonce('Omar')))}`));
     assert.doesNotMatch(run.stdout, /\?view=/, 'the view link has its own command');
     assert.match(run.stdout, /sees every crew's prompts/);
     assert.match(run.stdout, /3 of 6 homes taken/);
@@ -188,7 +191,7 @@ describe('Team town', () => {
   });
 
   it('signs a teammate in with their personal link: their character, nothing of the host\'s', async () => {
-    const token = personToken(secret, 'Lina');
+    const token = personToken(secret, 'Lina', nonce('Lina'));
     assert.equal((await rawRequest(host.port, { path: `/?me=${encodeURIComponent(personToken(secret, 'Mallory'))}` })).status, 403);
     const login = await rawRequest(host.port, { path: `/?me=${encodeURIComponent(token)}` });
     assert.equal(login.status, 302);
@@ -234,15 +237,33 @@ describe('Team town', () => {
     await Promise.all([owner, viewer, lina].map(closeBrowser));
   });
 
-  it('team remove revokes one person at once: their open town, their link and their key', async () => {
-    const lina = await connectBrowser(host, { protocols: `andary, andary.person.${personToken(secret, 'Omar')}` });
-    await waitForMessage(lina, (m) => m?.t === 'hello');
-    const closed = new Promise((resolve) => lina.once('close', resolve));
+  it('team remove revokes one person at once: their open town, their link and their key, for good', async () => {
+    const omarNonce = nonce('Omar');
+    const link = personToken(secret, 'Omar', omarNonce);
+    const key = memberKey(secret, 'Omar', omarNonce);
+    const omar = await connectBrowser(host, { protocols: `andary, andary.person.${link}` });
+    await waitForMessage(omar, (m) => m?.t === 'hello');
+    const closed = new Promise((resolve) => omar.once('close', resolve));
     assert.equal(team(host.home, ['remove', 'Omar']).status, 0);
+    // A key check right away sees the change first: it must still close Omar's town.
+    assert.equal((await rawRequest(host.port, { path: `/?me=${encodeURIComponent(personToken(secret, 'Lina', nonce('Lina')))}` })).status, 302);
     assert.equal(/** @type {any} */ (await closed).reason, 'Removed from the team');
-    assert.equal((await rawRequest(host.port, { path: `/?me=${encodeURIComponent(personToken(secret, 'Omar'))}` })).status, 403);
+    assert.equal((await rawRequest(host.port, { path: `/?me=${encodeURIComponent(link)}` })).status, 403);
     const batch = { v: 1, events: [{ ts: Date.now(), event: hookPayload('Stop') }] };
-    assert.equal((await postTeam(host.port, batch, { 'x-andary-team': memberKey(secret, 'Omar') })).status, 401);
-    assert.equal((await postTeam(host.port, batch, { 'x-andary-team': memberKey(secret, 'Lina') })).status, 200, 'the others still work');
+    assert.equal((await postTeam(host.port, batch, { 'x-andary-team': key })).status, 401);
+    assert.equal((await postTeam(host.port, batch, { 'x-andary-team': memberKey(secret, 'Lina', nonce('Lina')) })).status, 200, 'the others still work');
+    // Invited again, Omar gets a new key and link: the old ones stay revoked.
+    assert.equal(team(host.home, ['invite', 'Omar']).status, 0);
+    assert.notEqual(nonce('Omar'), omarNonce);
+    assert.equal((await postTeam(host.port, batch, { 'x-andary-team': key })).status, 401);
+    assert.equal((await rawRequest(host.port, { path: `/?me=${encodeURIComponent(link)}` })).status, 403);
+  });
+
+  it('a key from before the roster is refused, and the host is told how to fix it, once', async () => {
+    const batch = { v: 1, events: [{ ts: Date.now(), event: hookPayload('Stop') }] };
+    for (let i = 0; i < 2; i++) assert.equal((await postTeam(host.port, batch, { 'x-andary-team': memberKey(secret, 'Rui') })).status, 401);
+    await host.waitForOutput(/Refused Rui's key: not on the roster\. Run: andary team invite Rui/);
+    assert.equal(host.output().match(/Refused Rui's key/g)?.length, 1);
+    assert.match(team(host.home, ['invite', 'Sam']).stderr, /hosts the town/);
   });
 });
