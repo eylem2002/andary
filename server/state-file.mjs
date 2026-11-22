@@ -23,6 +23,8 @@ const STATE_FILE = 'server.json';
  * @property {boolean} [team]     hosts a team town (§4.11)
  * @property {boolean} [tls]      serves HTTPS to the network (ADR 0016)
  * @property {string[]} [teamHosts]  names a team host is reached by (--team-host)
+ * @property {{ url: string|null, pid?: number, error?: string }} [tunnel]  a team host's Quick
+ *   Tunnel (--tunnel, ADR 0018): its address while it runs, null with the reason once it stopped
  */
 
 /**

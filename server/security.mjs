@@ -154,6 +154,18 @@ export function allowedHostHeaders(port, boundHost, extra = []) {
 }
 
 /**
+ * Host header values for requests through a Quick Tunnel: its name exactly, as browsers send it
+ * for https (no port, or 443). Empty until the tunnel has an address.
+ * @param {string|null} url  https://<words>.trycloudflare.com
+ * @returns {Set<string>}
+ */
+export function tunnelHostHeaders(url) {
+  if (!url) return new Set();
+  const name = new URL(url).hostname.toLowerCase();
+  return new Set([name, `${name}:443`]);
+}
+
+/**
  * DNS-rebinding defence: a page on evil.example that rebinds its name to 127.0.0.1 still sends
  * "Host: evil.example", so only our own names are accepted.
  * @param {string|undefined} hostHeader

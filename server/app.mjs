@@ -1,7 +1,7 @@
 // The Andary server: composes the HTTP routes, the WebSocket hub, the approval broker and the
 // history, and owns the lifecycle (listen, server.json, shutdown).
 import { join } from 'node:path';
-import { generateToken } from './auth.mjs';
+import { generateToken, markTunnelled } from './auth.mjs';
 import { createApprovalBroker } from './approvals.mjs';
 import { createUsageTracker } from './usage.mjs';
 import { createProgress } from './progress.mjs';
@@ -17,7 +17,7 @@ import { NOT_FOUND_PAGE, sendHtml, sendText } from './http-util.mjs';
 import { createListener } from './listener.mjs';
 import { createTokenBucket } from './rate-limit.mjs';
 import { handleRequest } from './routes.mjs';
-import { allowedHostHeaders, buildCsp, computeImportMapHashes, connectHost, hostWithPort, isWildcardHost, securityHeaders } from './security.mjs';
+import { allowedHostHeaders, buildCsp, computeImportMapHashes, connectHost, hostWithPort, isWildcardHost, securityHeaders, tunnelHostHeaders } from './security.mjs';
 import { loginUrl, removeStateFileIfOwned, serverOrigin, writeStateFile } from './state-file.mjs';
 import { createStaticHandler } from './static.mjs';
 import { CLOSE_CODE } from './ws-frame.mjs';
@@ -39,6 +39,8 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {{ url: string, key: string }|null} [shareTo]  send this town's events to a team host
  * @property {number} [approvalTimeoutMs]
  * @property {{ cert: Buffer|string, key: Buffer|string }|null} [tls]  serve HTTPS to the network with this certificate (ADR 0016)
+ * @property {boolean} [tunnel]            a team host: also listen on a loopback port of its own for
+ *   cloudflared (ADR 0018); every request there is from the internet
  * @property {boolean} [record]            append every envelope to <home>/recordings/*.jsonl
  * @property {boolean} [writeState]        write server.json (default true)
  * @property {(message: string) => void} [log]  lifecycle lines only, never payload content
@@ -52,6 +54,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {string} responseKey     signs /api/hook replies (see auth.signHookReply)
  * @property {{ remoteApprovals: boolean, approvalTimeoutMs: number }} settings
  * @property {Set<string>} allowedHosts
+ * @property {Set<string>} tunnelHosts    the Host names a tunnelled request may use (ADR 0018)
  * @property {Record<string, string>} headers
  * @property {ReturnType<typeof createHistory>} history
  * @property {import('./approvals.mjs').ApprovalBroker} broker
@@ -85,6 +88,10 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {import('./state-file.mjs').ServerState} state
  * @property {string|null} notifyUrl  where phone notifications go (null: off)
  * @property {string|null} viewUrl    a team host's view-only link for teammates (null: not a host)
+ * @property {number|null} tunnelPort the loopback port for cloudflared (null: no --tunnel)
+ * @property {(tunnel: { url: string|null, pid?: number, error?: string }) => string|null} setTunnel
+ *   answers to the tunnel's name (url null: the tunnel is down), records it in server.json, and
+ *   returns the view link at that address
  * @property {() => number} browserCount
  * @property {() => Promise<void>} stop
  */
@@ -100,6 +107,7 @@ export async function startTownServer(options = {}) {
   const listener = createHttpServer(ctx, options.tls ?? null);
   const server = listener.front;
   await listen(server, config.port, config.host);
+  const tunnelSide = await listenForTunnel(ctx, server, options.tunnel);
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : config.port;
   // A team host also answers to the names given with --team-host and, listening on every
@@ -115,6 +123,7 @@ export async function startTownServer(options = {}) {
     ctx.hostTimer.unref();
   }
 
+  /** @type {import('./state-file.mjs').ServerState} */
   const state = {
     pid: process.pid,
     port,
@@ -143,9 +152,49 @@ export async function startTownServer(options = {}) {
     state,
     notifyUrl: ctx.notifier.url,
     viewUrl: ctx.team ? `${listener.tls ? 'https' : 'http'}://${hostWithPort(extraHosts[0] ?? connectHost(config.host), port)}/?view=${ctx.team.view}` : null,
+    tunnelPort: tunnelSide.port,
+    setTunnel: tunnelSetter(ctx, state, config),
     browserCount: () => ctx.hub.size,
-    stop: once(() => stopServer(ctx, listener, config)),
+    stop: once(() => stopServer(ctx, [listener, ...tunnelSide.listeners], config)),
   };
+}
+
+/**
+ * TownServer.setTunnel: the tunnel's name becomes the only Host its requests may use, and
+ * server.json says where it is (for `team invite` and `doctor`).
+ * @param {TownContext} ctx
+ * @param {import('./state-file.mjs').ServerState} state
+ * @param {{ home: string, writeState: boolean }} config
+ * @returns {TownServer['setTunnel']}
+ */
+function tunnelSetter(ctx, state, config) {
+  return ({ url, pid, error }) => {
+    ctx.tunnelHosts = tunnelHostHeaders(url);
+    state.tunnel = { url, ...(pid ? { pid } : {}), ...(error ? { error } : {}) };
+    if (config.writeState) writeStateFile(config.home, state);
+    return url && ctx.team ? `${url}/?view=${ctx.team.view}` : null;
+  };
+}
+
+/**
+ * The tunnel's port (ADR 0018): only cloudflared connects here, from this computer, so it is plain
+ * HTTP on loopback, and every request on it is marked as from the internet.
+ * @param {TownContext} ctx
+ * @param {import('node:net').Server} town  closed again if the tunnel's port cannot be had
+ * @param {boolean|undefined} wanted  --tunnel (only a team host has one)
+ * @returns {Promise<{ listeners: import('./listener.mjs').Listener[], port: number|null }>}
+ */
+async function listenForTunnel(ctx, town, wanted) {
+  if (!wanted || !ctx.team) return { listeners: [], port: null };
+  const listener = createHttpServer(ctx, null, { tunnelled: true });
+  try {
+    await listen(listener.front, 0, '127.0.0.1');
+  } catch (error) {
+    town.close();
+    throw error;
+  }
+  const address = listener.front.address();
+  return { listeners: [listener], port: typeof address === 'object' && address ? address.port : null };
 }
 
 /** @param {ServerOptions} options */
@@ -163,20 +212,26 @@ function withDefaults(options) {
 
 /**
  * The server's socket (listener.mjs): routes and WebSocket upgrades, over plain HTTP, or with a
- * certificate HTTPS for the network and plain HTTP for this computer only.
+ * certificate HTTPS for the network and plain HTTP for this computer only. With `tunnelled`,
+ * the tunnel's port: every request on it is marked as from the internet (auth.isTunnelled).
  * @param {TownContext} ctx
  * @param {{ cert: Buffer|string, key: Buffer|string }|null} tls
+ * @param {{ tunnelled?: boolean }} [options]
  */
-function createHttpServer(ctx, tls) {
+function createHttpServer(ctx, tls, { tunnelled = false } = {}) {
   return createListener(
     (req, res) => {
+      if (tunnelled) markTunnelled(req);
       handleRequest(ctx, req, res).catch((error) => {
         // Name and code only: an error message could quote request data.
         ctx.log(`Internal error while answering a request (${error?.code ?? error?.name ?? 'unknown'})`);
         sendText(res, 500, 'Internal error\n');
       });
     },
-    (req, socket, head) => handleUpgrade(ctx, req, socket, head),
+    (req, socket, head) => {
+      if (tunnelled) markTunnelled(req);
+      handleUpgrade(ctx, req, socket, head);
+    },
     tls,
   );
 }
@@ -205,6 +260,7 @@ function createContext(config, options) {
     responseKey: generateToken(),
     settings: { remoteApprovals: Boolean(options.remoteApprovals), approvalTimeoutMs: config.approvalTimeoutMs },
     allowedHosts: new Set(),
+    tunnelHosts: new Set(),
     headers: securityHeaders(buildCsp(computeImportMapHashes(config.publicDir))),
     history: createHistory({ size: LIMITS.historySize, maxBytes: LIMITS.historyBytes }),
     broker: createApprovalBroker({
@@ -279,10 +335,11 @@ function listen(server, port, host) {
  * Gives held prompts back to the terminal, says goodbye to browsers, closes connections and
  * removes server.json if it is still ours.
  * @param {TownContext} ctx
- * @param {import('./listener.mjs').Listener} listener
+ * @param {import('./listener.mjs').Listener[]} listeners  the town's, then the tunnel's
  * @param {{ home: string, writeState: boolean }} config
  */
-async function stopServer(ctx, listener, config) {
+async function stopServer(ctx, listeners, config) {
+  ctx.tunnelHosts = new Set();
   if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
   if (ctx.hostTimer) clearInterval(ctx.hostTimer);
   // First, so no phone note goes out while the server stops: whoever stops it is at the computer.
@@ -295,10 +352,10 @@ async function stopServer(ctx, listener, config) {
   ctx.usage.dispose();
   ctx.progress.dispose();
   ctx.hub.closeAll(CLOSE_CODE.GOING_AWAY, 'Andary is shutting down');
-  const closed = new Promise((resolve) => listener.front.close(() => resolve(undefined)));
-  listener.closeIdle();
+  const closed = Promise.all(listeners.map((listener) => new Promise((resolve) => listener.front.close(() => resolve(undefined)))));
+  for (const listener of listeners) listener.closeIdle();
   const force = setTimeout(() => {
-    listener.closeAll();
+    for (const listener of listeners) listener.closeAll();
     ctx.hub.terminateAll();
   }, 1000);
   force.unref();
