@@ -1101,7 +1101,12 @@ starting folder, where it runs after `cd`, `pushd`/`popd` (`Set-Location`, `sl`,
 `Pop-Location`), `env -C` and `cd "$(git rev-parse --show-toplevel)"` (with `root`), unknown
 (`null`) for `~`, `$VAR`, `cd -` or past `MAX_MOVES` (64) moves. `shellCommands(command, options)
 → { words, succeeded, decides }[]` is the short form; `isTestRun(words)` and `gitAction(words)`
-read a program's words; `normalizedPath(path)` drops `.` and `..`. It never throws.
+read a program's words, and so do `runsNoTests(words)` (a test command that lists, collects or
+explains instead: `--list…`, `--collect-only`, `--no-run`, `--if-present`, go's `-run`…) and
+`isBuildRun(words)` (a package's `build` or `build:…` script, `tsc`, a `build` subcommand of go,
+cargo, uv, dotnet, vite, next, astro, mkdocs, gradle, docker, swift or zig, `make` with no target
+but `all` or `build`, `python -m build`); `normalizedPath(path)` drops `.` and `..`. It never
+throws.
 
 **Stuck** (`core/loops.js`, pure; docs/design/agent-health.md §4). The store runs it after each
 event and keeps the result on `AgentState.stuck` (and a `stuck` log line, level `warn`, when an

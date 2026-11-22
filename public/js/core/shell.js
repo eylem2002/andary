@@ -176,6 +176,39 @@ export function isTestRun([name, ...args]) {
   return name === 'node' && args.includes('--test');
 }
 
+/** Arguments of a test command that runs no tests: it lists, collects, explains, or may find nothing. */
+const NO_RUN_ARGS = new Set(['--no-run', '--collect-only', '--co', '-l', 'list', '--help', '-h', '--version', '--if-present']);
+
+/**
+ * A test command that runs no tests (its program's words, programOf): it lists or collects them,
+ * only builds, explains itself, may find no script (`--if-present`), or is go's `-run`, which may
+ * select none.
+ * @param {string[]} words
+ */
+export function runsNoTests([name, ...args]) {
+  return args.some((arg) => NO_RUN_ARGS.has(arg) || arg.startsWith('--list') || (name === 'go' && (arg === '-run' || arg.startsWith('-run='))));
+}
+
+/** Tools whose `build` subcommand builds the project. */
+const BUILD_SUBCOMMANDS = new Set(['go', 'cargo', 'uv', 'dotnet', 'vite', 'next', 'astro', 'mkdocs', 'gradle', 'gradlew', 'docker', 'swift', 'zig']);
+
+/**
+ * Whether a command (its program's words, programOf) builds the project: a package's `build`
+ * script (`npm run build`, `pnpm build:types`), the TypeScript compiler, a tool's `build`
+ * subcommand (`cargo build`, `vite build`), `make` (its default target, `all` or `build`), or
+ * `python -m build`.
+ * @param {string[]} words
+ */
+export function isBuildRun([name, ...args]) {
+  if (PACKAGE_MANAGERS.has(name)) {
+    const script = args[0] === 'run' || args[0] === 'run-script' ? args[1] : args[0];
+    return /^build(?:$|[:-])/.test(script ?? '');
+  }
+  if (name === 'tsc' || name === 'build') return true;
+  if (name === 'make') return args.filter((arg) => !arg.startsWith('-')).every((arg) => arg === 'all' || arg === 'build' || arg.includes('='));
+  return BUILD_SUBCOMMANDS.has(name) && args[0] === 'build';
+}
+
 /** git's options before its subcommand that take the next word as their value. */
 const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env']);
 
