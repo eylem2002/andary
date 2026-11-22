@@ -2,7 +2,7 @@
 // fog, reflections, window and lamp glow, bloom and exposure. 'auto' follows the local clock,
 // checked once a second and applied when the minute changes.
 import * as THREE from 'three';
-import { hourFromDate, normalizeHour, skyState } from './daynight.js';
+import { hourFromDate, normalizeHour, readable, skyState } from './daynight.js';
 import { CAMERA_DISTANCE } from './camera-rig.js';
 import { weatherSky } from './weather-sky.js';
 
@@ -50,13 +50,17 @@ export function createAtmosphere(deps, initial = 'auto') {
   let envDue = true;
   let envStamp = -Infinity;
   let clockCheck = 0;
+  /** Tone-mapping exposure for this hour; the environment adds the brightness guard and lightning. */
+  let exposure = 1.1;
   const uniforms = backdrop.material.uniforms;
   const envUniforms = skyEnv.material.uniforms;
 
   /** @param {number} h */
   function apply(h) {
     hour = normalizeHour(h);
-    const state = weatherSky(skyState(hour), weather);
+    // The weather dims the sky first; the night floor then keeps the town readable whatever it did.
+    const state = readable(weatherSky(skyState(hour), weather));
+    exposure = state.exposure;
     fog.near = FOG_NEAR * Math.max(0.15, state.fogScale);
     fog.far = FOG_NEAR + (FOG_FAR - FOG_NEAR) * Math.max(0.12, state.fogScale);
     lighting.apply(state, toColor);
@@ -118,6 +122,19 @@ export function createAtmosphere(deps, initial = 'auto') {
     },
     get hour() {
       return hour;
+    },
+    get exposure() {
+      return exposure;
+    },
+    /**
+     * The GPU lost and then restored its context (a laptop waking from sleep, a GPU switch): the
+     * reflection map lived in a render target and is now blank, so draw it again at once.
+     */
+    restore() {
+      envDue = true;
+      envStamp = -Infinity;
+      envHour = Number.NaN;
+      apply(mode === 'auto' ? hourFromDate(new Date()) : mode);
     },
     /** @param {{ overcast: number, fog: number }} w */
     setWeather(w) {

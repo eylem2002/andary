@@ -74,6 +74,8 @@ class World {
     /** @type {import('../core/place-names.js').PlaceNames} how place labels show (Settings → Place names) */
     this.placeNames = isPlaceNames(options.placeNames) ? options.placeNames : 'auto';
     this.paused = false;
+    /** The GPU context is gone until the browser restores it (webglcontextrestored). */
+    this.contextLost = false;
     this.disposed = false;
     /** Whether prepareContainer had to make the container a positioned box (undone on teardown). */
     this.positioned = false;
@@ -172,9 +174,25 @@ class World {
     observer.observe(this.container);
     const onVisibility = () => (document.hidden ? this.stop() : this.start());
     document.addEventListener('visibilitychange', onVisibility);
+    // A Mac waking from sleep or switching GPUs can lose the WebGL context. three.js asks for it
+    // back; meanwhile the loop rests, and once it returns whatever lived only on the GPU (the
+    // reflection map) is drawn again, or the town comes back darker than it was.
+    const onLost = () => {
+      this.contextLost = true;
+      this.stop();
+    };
+    const onRestored = () => {
+      this.contextLost = false;
+      this.envCall('restoreContext');
+      this.start();
+    };
+    canvas.addEventListener('webglcontextlost', onLost);
+    canvas.addEventListener('webglcontextrestored', onRestored);
     this.cleanups.push(
       () => observer.disconnect(),
       () => document.removeEventListener('visibilitychange', onVisibility),
+      () => canvas.removeEventListener('webglcontextlost', onLost),
+      () => canvas.removeEventListener('webglcontextrestored', onRestored),
     );
   }
 
@@ -192,7 +210,7 @@ class World {
   // ── frame loop ──────────────────────────────────────────────────────────────
 
   start() {
-    if (this.raf || this.paused || document.hidden || !this.env) return;
+    if (this.raf || this.paused || this.contextLost || document.hidden || !this.env) return;
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.frame);
   }

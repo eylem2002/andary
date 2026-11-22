@@ -1066,3 +1066,27 @@ section.
      to set it in the shell profile.
 185. **A team viewer is not told to install the mod.** Limits are the host's and never reach a
      viewer; their Usage dialog says only the host sees them.
+186. **"The town goes dark" was a blank canvas, not only a dim night.** The portal beam's top ring
+     sits at y = 3.2000000477 in float32, so its vertex alpha was `Math.pow(negative, 1.4)` = NaN.
+     In high quality (a MacBook's default) bloom blurred those NaN pixels over the whole HDR frame
+     and the canvas came out empty, showing the page behind it (dark at night). It happened each
+     time an agent arrived through the Town Hall portal, hence "sometimes". The beam is fixed, and
+     every post pass now reads the frame through a NaN/Inf guard, so one bad pixel can never blank
+     the town again. Low quality (phones, few cores) had no bloom and never showed it.
+187. **Night has a floor.** Whatever the hour, look or weather, the hemisphere fill keeps a linear
+     luminance of at least 0.2 and the full-night moon at least 0.42 (daynight.js `NIGHT_FLOOR`,
+     applied after the weather); exposure rises from 1.1 by day to 1.3 at night; night fog keeps
+     half its grey and is up to 40% thinner; at most 40% of windows go dark in the small hours.
+     The sky, stars, lit windows and lamps still read as night.
+188. **A brightness guard reads the finished frame every 4 s** (seven 8×8 patches in the middle,
+     where the town is) and lifts the exposure up to 1.8× when their mean sRGB luma is below 62,
+     easing back once bright. It skips lightning flashes and only judges settled frames. It should
+     stay idle with the floor in place; it covers what nobody foresaw (a blank reflection map,
+     a driver). One small read stall per 4 s fits the phone's frame budget.
+189. **A lost WebGL context (a Mac waking from sleep, a GPU switch) pauses the town** and, once the
+     browser restores it, redraws the reflection map, which lived only on the GPU; before, the town
+     came back without its reflections. If the browser never restores it, the page has to reload.
+190. **The e2e night check measures a screenshot, not the WebGL buffer**: the mean sRGB luma of the
+     middle half of the town view at 23:00 in Asia/Amman must stay ≥ 45 in a night storm with
+     portal arrivals and in thick fog at 02:00 (healthy: 70–95; blank canvas: ~17). Desktop forces
+     high quality, as a MacBook picks, since test machines with few cores would pick low.

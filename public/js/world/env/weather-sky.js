@@ -40,12 +40,14 @@ export function weatherSky(state, { overcast, fog }) {
     zenith: grey(state.zenith),
     horizon: grey(state.horizon),
     bottom: grey(state.bottom),
-    fog: f > 0 ? mix(fogColor, [0.82, 0.84, 0.86].map((c) => c * (0.25 + 0.75 * (1 - state.night))), f * 0.6) : fogColor,
+    // Night fog is a moonlit haze, not a black wall: its grey keeps at least half its day level.
+    fog: f > 0 ? mix(fogColor, [0.82, 0.84, 0.86].map((c) => c * (0.5 + 0.5 * (1 - state.night))), f * 0.6) : fogColor,
     lightIntensity: state.lightIntensity * (1 - 0.6 * o),
     hemiIntensity: state.hemiIntensity * (1 - 0.2 * o),
     envIntensity: state.envIntensity * (1 - 0.3 * o),
     stars: state.stars * (1 - o),
-    // Fog distances are multiplied by this: 1 is the usual haze, smaller is thicker.
-    fogScale: 1 - 0.75 * f - 0.2 * o,
+    // Fog distances are multiplied by this: 1 is the usual haze, smaller is thicker. At night the
+    // fog thins (by up to 40%) so the town is not swallowed in the dark.
+    fogScale: 1 - (0.75 * f + 0.2 * o) * (1 - 0.4 * state.night),
   };
 }

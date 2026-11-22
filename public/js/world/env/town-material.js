@@ -189,8 +189,8 @@ if ( ttGlow > 0.0 ) {
   } else {
     // Windows and lamps switch on one by one as dusk falls ...
     ttLit = smoothstep( ttSeed * 0.55 + 0.12, ttSeed * 0.55 + 0.2, uTtNight );
-    // ... and some windows go dark in the small hours.
-    if ( ttSurf == 3.0 ) ttLit *= step( uTtLate * 0.7, fract( ttSeed * 7.13 + 0.05 ) );
+    // ... and some windows go dark in the small hours (at most 40%, so the town stays lit).
+    if ( ttSurf == 3.0 ) ttLit *= step( uTtLate * 0.4, fract( ttSeed * 7.13 + 0.05 ) );
   }
   vec3 ttGlowColor = ttSurf == 3.0 ? mix( uTtWarmA, uTtWarmB, fract( ttSeed * 13.7 ) ) : diffuseColor.rgb;
   // A few windows glow cyan or pink instead (screens, party lights).
