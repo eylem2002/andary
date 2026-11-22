@@ -60,7 +60,7 @@ function hourIn(tz, iso) {
   return Number(execFileSync(process.execPath, ['--input-type=module', '-e', code], { env: { ...process.env, TZ: tz } }).toString());
 }
 
-test('hourFromDate follows the local clock in other time zones and across DST changes', () => {
+test('hourFromDate follows the local clock in other time zones and across DST changes', { skip: process.platform === 'win32' && 'Windows ignores IANA names in TZ' }, () => {
   // Amman is UTC+3 all year (no DST since 2022): 20:00 UTC is 23:00 there.
   assert.equal(hourIn('Asia/Amman', '2026-11-22T20:00:00Z'), 23);
   assert.equal(hourIn('Asia/Amman', '2026-07-01T18:30:00Z'), 21.5);
