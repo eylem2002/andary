@@ -2,9 +2,9 @@
 // It applies TownEvents to crews (sessions), agents, todos/tasks, approvals, the activity log and
 // stats; works out who each event belongs to (subagent labels, teammate names); keeps what each
 // agent has asked you (store-dialogs.js) or waits for you on (waits.js), whether it seems stuck
-// (loops.js), and where two agents work on the same files (conflicts.js); and unlocks
-// achievements. The town may open mid-session, so every session or agent an event mentions is
-// created on first sight.
+// (loops.js), and where two agents work on the same files (conflicts.js); keeps each agent's day
+// on the timeline (timeline.js); and unlocks achievements. The town may open mid-session, so
+// every session or agent an event mentions is created on first sight.
 
 import { ACHIEVEMENTS, achievementFor } from './achievements.js';
 import { BUILDINGS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
@@ -16,6 +16,7 @@ import { NO_SESSION, normalize } from './events.js';
 import { gitAddsOf, gitCommitsOf, gitHazardOf } from './git-commands.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { rulesText } from './permission-rules.js';
+import { recordEvent, recordWait } from './timeline.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
 import { dialogsAfterApproval, dialogsAfterEvent } from './store-dialogs.js';
@@ -144,6 +145,7 @@ export { ACHIEVEMENTS };
  * @property {Achievement[]} achievements
  * @property {Record<string, AgentUsage>} usage   agentKey → tokens and estimated cost (§4.8)
  * @property {UsageDay[]} usageDays             the last 30 days, oldest first
+ * @property {import('./timeline.js').Timeline} timeline  each agent's day, for timelineView()
  */
 
 /**
@@ -592,16 +594,56 @@ function apply(m, input) {
   if (a) setWait(a, e);
   // A teammate's crew (a team town) is theirs to answer: its dialogs are not kept.
   if (!s.member && dialogsAfterEvent(m.dialogs, e, a ? a.agentId : e.agentId)) m.state.dialogs = m.dialogs.list();
-  const newlyStuck = followLoops(m, e, s, a);
+  const loopChanges = followLoops(m, e, s, a);
   const hazards = followConflicts(m, e, s, a);
+  followTimeline(m, e, s, a, loopChanges);
   if (relabels.length) e.data.relabels = relabels;
   s.lastActivity = Math.max(s.lastActivity, e.ts);
   if (a) a.lastActivity = Math.max(a.lastActivity, e.ts);
   if (s.status !== 'ended') s.status = sessionStatus(m, s);
   if (draft) pushLog(m, e, s, a, draft);
-  for (const change of newlyStuck) logStuck(m, e, s, change);
+  for (const change of loopChanges) if (change.started && m.state.agents[change.agent]) logStuck(m, e, s, change);
   for (const hazard of hazards) logHazard(m, e, s, hazard);
   return e;
+}
+
+/** Dialog kinds as the timeline names the wait. */
+const DIALOG_WAITS = Object.freeze({ permission: 'permission', question: 'question', plan: 'plan' });
+
+/**
+ * What an agent waits for you on now, for the timeline: a dialog it opened, a turn stopped on an
+ * error, or a stuck alert.
+ * @param {StoreState} state
+ * @param {AgentState} a
+ * @returns {import('./timeline.js').WaitNow|null}
+ */
+function waitNow(state, a) {
+  const dialog = state.dialogs.find((d) => d.sessionId === a.sessionId && (d.agentId ?? null) === a.agentId);
+  if (dialog) return { kind: own(DIALOG_WAITS, dialog.kind) ?? 'input', text: dialog.text };
+  if (a.wait?.kind === 'stopped') return { kind: 'stopped', text: a.wait.text };
+  return a.stuck ? { kind: 'stuck', text: a.stuck.text } : null;
+}
+
+/**
+ * Keeps the timeline (timeline.js): the event on its agent's lane, and the waits of its crew's
+ * agents and of any agent whose stuck alert it changed.
+ * @param {Model} m
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {AgentState|undefined} a
+ * @param {import('./loops.js').LoopChange[]} loopChanges
+ */
+function followTimeline(m, e, s, a, loopChanges) {
+  if (a) recordEvent(m.state.timeline, e, a);
+  syncWaits(m, [...s.agentKeys, ...loopChanges.map((change) => change.agent)], e.ts);
+}
+
+/** @param {Model} m @param {string[]} keys @param {number} at */
+function syncWaits(m, keys, at) {
+  for (const key of new Set(keys)) {
+    const agent = m.state.agents[key];
+    if (agent) recordWait(m.state.timeline, agent, waitNow(m.state, agent), at);
+  }
 }
 
 /**
@@ -623,7 +665,7 @@ const FINISHED_CALLS = new Set(['tool.end', 'tool.fail', 'permission.denied']);
 
 /**
  * Runs the stuck rules (loops.js) on an event and keeps every alert it starts, changes or ends on
- * its agent: one agent's change can end another's alert. Returns the alerts that just started.
+ * its agent: one agent's change can end another's alert. Returns every change.
  * @param {Model} m
  * @param {TownEvent} e
  * @param {Session} s
@@ -642,7 +684,7 @@ function followLoops(m, e, s, a) {
     const agent = m.state.agents[change.agent];
     if (agent) agent.stuck = change.stuck;
   }
-  return changes.filter((change) => change.started && m.state.agents[change.agent]);
+  return changes;
 }
 
 /**
@@ -887,6 +929,7 @@ function approvalChanged(m, approval, ts) {
   if (a) waitForAnswer(m, a, key, approval.status, tool);
   dialogsAfterApproval(m.dialogs, approval, summary);
   m.state.dialogs = m.dialogs.list();
+  syncWaits(m, [key], ts);
   if (s && s.status !== 'ended') s.status = sessionStatus(m, s);
   const log = own(APPROVAL_LOG, approval.status);
   if (log) {
