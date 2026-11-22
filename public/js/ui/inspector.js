@@ -1,7 +1,7 @@
 // The agent inspector: everything known about the selected agent — role, crew, status, what it is
 // doing (or waiting for you on, or why it seems stuck, and since when; and a note when another
-// agent changed a file it edits), its brief, its context in use and what it cost, which tools it
-// used how often, recent files and activity, its last message.
+// agent changed a file it edits), a note to send it (agent-note.js), its brief, its context in
+// use and what it cost, which tools it used how often, recent files and activity, its last message.
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { doingText, formatAgo, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
@@ -9,6 +9,7 @@ import { changeSummary } from './changes.js';
 import { contextSentence, hasCounted, liveContext, usageSentence } from './usage.js';
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 import { isNote, waitedText } from './needs-you.js';
+import { createNoteSection } from './agent-note.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -48,8 +49,10 @@ export function createInspector(ctx) {
   const recent = h('ol', { class: 'hud-recent' });
   const message = h('p', { class: 'hud-inspector__message' });
   const usage = createUsageLines();
+  const toAgent = createNoteSection(ctx);
   const sections = {
     now: section('Now', h('div', {}, now, need.el, note)),
+    note: section('Send a note', toAgent.el),
     brief: section('Brief', brief),
     usage: section('Usage', usage.el),
     tools: section('Tools used', tools),
@@ -124,6 +127,7 @@ export function createInspector(ctx) {
     setText(note, newest?.text ?? '');
     setHidden(note, !newest);
     renderSections(agent, session?.cwd, asking);
+    setHidden(sections.note, !toAgent.update(state, agent, session));
     setHidden(sections.usage, !usage.update(state, agent.key, Date.now()));
     setAttr(follow, 'aria-pressed', String(ctx.view.follow));
     tick(Date.now());
@@ -163,8 +167,7 @@ export function createInspector(ctx) {
     if (!agent) return;
     const end = agent.status === 'done' ? agent.lastActivity : nowMs;
     setText(since, `Started ${formatAgo(agent.startedAt, nowMs)}, on the job for ${formatDuration(end - agent.startedAt)}`);
-    need.tick(nowMs);
-    usage.tick(nowMs);
+    for (const part of [need, usage, toAgent]) part.tick(nowMs);
     for (const item of recent.children) {
       const time = item.querySelector('time');
       if (time) setText(time, formatAgo(Number(/** @type {HTMLElement} */ (item).dataset.ts), nowMs, { short: true }));

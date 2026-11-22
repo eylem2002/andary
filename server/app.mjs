@@ -8,6 +8,7 @@ import { createProgress } from './progress.mjs';
 import { createNotifier } from './notify.mjs';
 import { createWorkTrees } from './work-trees.mjs';
 import { createTownDigest } from './digest.mjs';
+import { createNoteDesk } from './notes.mjs';
 import { createLimitsTracker } from './limits.mjs';
 import { announceTeam, createHub, handleUpgrade } from './browsers.mjs';
 import { createTeamHost, createTeamRelay, lanAddresses, teamSecret } from './team.mjs';
@@ -21,6 +22,9 @@ import { allowedHostHeaders, buildCsp, computeImportMapHashes, connectHost, host
 import { loginUrl, removeStateFileIfOwned, serverOrigin, writeStateFile } from './state-file.mjs';
 import { createStaticHandler } from './static.mjs';
 import { CLOSE_CODE } from './ws-frame.mjs';
+
+/** How often waiting notes are checked for their expiry. */
+const NOTE_SWEEP_MS = 15_000;
 
 /**
  * @typedef {object} ServerOptions
@@ -61,6 +65,9 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {import('./work-trees.mjs').WorkTrees} [workTrees]  where local hooks' work trees start (andary_root)
  * @property {ReturnType<typeof createTownDigest>} digest   what your crews did while you were away
  * @property {ReturnType<typeof createLimitsTracker>} limits  plan limits from the andary-limits mod
+ * @property {import('./notes.mjs').NoteDesk} notes  the owner's notes waiting for their agents' next step (§4.15)
+ * @property {import('./rate-limit.mjs').TokenBucket} noteLimiter  notes from browsers, all together
+ * @property {NodeJS.Timeout|null} [noteTimer]  expires notes that waited too long
  * @property {import('./browsers.mjs').Hub} hub
  * @property {ReturnType<typeof createTeamHost>|null} team    set on a team host
  * @property {ReturnType<typeof createTeamRelay>|null} relay  set when sharing to a team host
@@ -131,6 +138,9 @@ export async function startTownServer(options = {}) {
     ...(teamHosts.length ? { teamHosts } : {}),
   };
   if (config.writeState) writeStateFile(config.home, state);
+  // A note that waited too long shows as expired even when no hook comes to take it.
+  ctx.noteTimer = setInterval(() => ctx.notes.sweep(), NOTE_SWEEP_MS);
+  ctx.noteTimer.unref();
 
   return {
     port,
@@ -221,6 +231,9 @@ function createContext(config, options) {
     }),
     hub,
     digest,
+    // Owners only: a note is the owner's own words, for their own agents.
+    notes: createNoteDesk({ onChange: (note) => hub.broadcastOwners({ t: 'note', n: note }) }),
+    noteLimiter: createTokenBucket({ ratePerSecond: LIMITS.notesPerMinute / 60, burst: LIMITS.noteBurst }),
     team: options.team
       ? createTeamHost({
           secret: /** @type {string} */ (teamSecret(config.home)),
@@ -285,6 +298,7 @@ function listen(server, port, host) {
 async function stopServer(ctx, listener, config) {
   if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
   if (ctx.hostTimer) clearInterval(ctx.hostTimer);
+  if (ctx.noteTimer) clearInterval(ctx.noteTimer);
   // First, so no phone note goes out while the server stops: whoever stops it is at the computer.
   ctx.notifier.dispose();
   ctx.digest.dispose();

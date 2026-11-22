@@ -57,7 +57,7 @@ export function createModel(localHour, maxLog) {
   const model = {
     maxLog,
     /** @type {StoreState} */
-    state: { sessions: [], agents: {}, approvals: [], dialogs: [], hazards: [], log: [], stats: freshStats(), achievements: [], usage: {}, usageDays: [] },
+    state: { sessions: [], agents: {}, approvals: [], dialogs: [], hazards: [], log: [], stats: freshStats(), achievements: [], usage: {}, usageDays: [], notes: [] },
     /** What agents asked you and had no answer to yet (dialogs.js); state.dialogs is its list. */
     dialogs: createDialogs(),
     /** Who changed which file lately (conflicts.js); state.hazards is what it found. */

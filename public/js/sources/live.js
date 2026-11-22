@@ -106,7 +106,7 @@ export function socketUrl(pageUrl) {
 
 /**
  * @typedef {object} LiveOptions
- * @property {{ ingest: (e: any) => any, setApproval: (a: any) => void, setUsage?: (u: unknown, days?: unknown) => void, reset: () => void }} store
+ * @property {{ ingest: (e: any) => any, setApproval: (a: any) => void, setUsage?: (u: unknown, days?: unknown) => void, setNote?: (n: unknown) => void, reset: () => void }} store
  * @property {boolean} [authenticated]   false starts in "Sign in" and waits for a valid sign-in
  * @property {(status: LinkStatus) => void} [onStatus]
  * @property {(settings: object) => void} [onSettings]
@@ -138,6 +138,7 @@ const MESSAGES = Object.freeze({
   approval: (m, to) => {
     if (m.a) to.store.setApproval(m.a);
   },
+  note: (m, to) => to.store.setNote?.(m.n),
   settings: (m, to) => to.onSettings(m.settings ?? {}),
   usage: (m, to) => to.store.setUsage?.(m.u, m.days),
   progress: (m, to) => to.onProgress(m.p),
@@ -147,6 +148,14 @@ const MESSAGES = Object.freeze({
   away: (m, to) => to.onAway(m.away ?? null, to.clock.offset),
   error: (m, to) => to.onError(String(m.message ?? 'The server reported an error.')),
 });
+
+/**
+ * The owner's notes to agents from hello (§4.15): a viewer, and an older server, send none.
+ * @param {LiveOptions['store']} store @param {unknown} notes
+ */
+function applyNotes(store, notes) {
+  if (Array.isArray(notes)) for (const note of notes) store.setNote?.(note);
+}
 
 /**
  * Opens and keeps open the live connection.
@@ -238,6 +247,7 @@ export function connectLive({
     store.reset();
     for (const envelope of message.history ?? []) ingest(envelope);
     for (const approval of message.approvals ?? []) store.setApproval(approval);
+    applyNotes(store, message.notes);
     const usage = message.usage ?? {};
     for (const record of Array.isArray(usage.agents) ? usage.agents : []) store.setUsage?.(record);
     if (Array.isArray(usage.days)) store.setUsage?.(null, usage.days);
@@ -312,9 +322,19 @@ function requests(send) {
      * @param {'allow'|'deny'} decision
      * @param {string} [message]  why, for a denial
      * @param {number} [always]   with an allow: the index of the suggestion to save ("Allow always")
+     * @param {boolean} [stop]     with a denial: stop the agent too ("Deny and stop")
      */
-    decide(id, decision, message, always) {
-      return send({ t: 'decide', id, decision, ...(message ? { message: String(message).slice(0, 500) } : {}), ...(always === undefined ? {} : { always }) });
+    decide(id, decision, message, always, stop) {
+      return send({ t: 'decide', id, decision, ...(message ? { message: String(message).slice(0, 500) } : {}), ...(always === undefined ? {} : { always }), ...(stop ? { stop: true } : {}) });
+    },
+    /**
+     * Sends the owner's note to one agent, for its next step (CONTRACTS §4.15).
+     * @param {string} sessionId
+     * @param {string|null} agentId  null for the crew's lead
+     * @param {string} text
+     */
+    sendNote(sessionId, agentId, text) {
+      return send({ t: 'note', sessionId, ...(agentId ? { agentId } : {}), text });
     },
     /** Asks the server to send a test phone notification. */
     notifyTest() {

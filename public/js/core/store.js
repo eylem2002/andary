@@ -16,6 +16,7 @@ import { NO_SESSION, normalize } from './events.js';
 import { gitAddsOf, gitCommitsOf, gitHazardOf } from './git-commands.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { rulesText } from './permission-rules.js';
+import { noteStateText } from './notes.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
 import { dialogsAfterApproval, dialogsAfterEvent } from './store-dialogs.js';
@@ -119,6 +120,9 @@ export { ACHIEVEMENTS };
  * @property {string} [message]
  * @property {string|null} [callKey]  the server's key for the call's input (§4.5), to find its dialog
  * @property {import('./permission-rules.js').OfferedSuggestion[]} [suggestions]  rules an allow may save ("Allow always")
+ * @property {boolean} [canStop]   a deny from the town may also stop the agent ("Deny and stop", Claude Code only)
+ * @property {string} [stopNote]   why it may not, when it may not
+ * @property {boolean} [stopped]   denied from the town with a stop
  * @property {{ rules: import('./permission-rules.js').PermissionRule[], destination: string, at: number }} [always]  the rule an "Allow always" asked Claude Code to save, and when
  */
 
@@ -144,6 +148,7 @@ export { ACHIEVEMENTS };
  * @property {Achievement[]} achievements
  * @property {Record<string, AgentUsage>} usage   agentKey → tokens and estimated cost (§4.8)
  * @property {UsageDay[]} usageDays             the last 30 days, oldest first
+ * @property {Note[]} notes                       the owner's notes to agents (§4.15), oldest first
  */
 
 /**
@@ -158,8 +163,9 @@ export { ACHIEVEMENTS };
  */
 
 /** @typedef {{ date: string, tokens: number, costUsd: number }} UsageDay */
+/** @typedef {import('./notes.js').Note} Note */
 
-/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'reset'}} StoreChange */
+/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'note', note: Note}|{type: 'reset'}} StoreChange */
 
 /**
  * @typedef {object} Store
@@ -167,6 +173,7 @@ export { ACHIEVEMENTS };
  * @property {(event: TownEvent) => void} dispatch
  * @property {(approval: Approval) => void} setApproval
  * @property {(record: unknown, days?: unknown) => void} setUsage  one agent's usage totals, and the day totals
+ * @property {(note: unknown) => void} setNote  a note to an agent, as the server last told of it (§4.15)
  * @property {(listener: (change: StoreChange) => void) => () => void} subscribe
  * @property {() => StoreState} getState
  * @property {() => void} reset
@@ -892,7 +899,7 @@ function approvalChanged(m, approval, ts) {
   if (log) {
     const saved = savedRules(approval);
     const at = { ts, sessionId: approval.sessionId, agentKey: key, kind: 'approval' };
-    pushLog(m, at, s, a, { icon: log.icon, text: saved ? `Allowed; asked to save ${saved}` : `${log.prefix}: ${summary}`, level: /** @type {LogDraft['level']} */ (log.level) });
+    pushLog(m, at, s, a, { icon: log.icon, text: saved ? `Allowed; asked to save ${saved}` : `${approval.stopped === true ? 'Denied and stopped the agent' : log.prefix}: ${summary}`, level: /** @type {LogDraft['level']} */ (log.level) });
   }
   if (approval.status === 'denied') {
     m.awaiting.delete(key);
@@ -1026,6 +1033,10 @@ export function createStore(options = {}) {
       emit({ type: 'approval', approval: next, previous: previous ? str(previous.status) : null });
       for (const achievement of unlocked) emit({ type: 'achievement', achievement });
     },
+    setNote(raw) {
+      const note = readNote(raw);
+      if (note && noteChanged(m, note, now())) emit({ type: 'note', note });
+    },
     setUsage(record, days) {
       const usage = readUsage(record);
       if (usage) {
@@ -1045,6 +1056,49 @@ export function createStore(options = {}) {
       m = createModel(localHour, maxLog);
       emit({ type: 'reset' });
     },
+  };
+}
+
+/** Notes the store keeps; the oldest give way. */
+const MAX_NOTES = 100;
+const NOTE_STATUSES = new Set(['queued', 'delivered', 'expired']);
+
+/**
+ * Keeps a note's latest state, with a line in the activity log for each new state (queued, handed
+ * to the agent with the hook that carried it, expired). False when nothing changed.
+ * @param {Model} m @param {Note} note @param {number} ts
+ */
+function noteChanged(m, note, ts) {
+  const list = m.state.notes;
+  const index = list.findIndex((n) => n.id === note.id);
+  if (index >= 0 && list[index].status === note.status) return false;
+  if (index >= 0) list[index] = note;
+  else boundedPush(list, note, MAX_NOTES);
+  const key = agentKeyOf(note.sessionId, note.agentId);
+  const level = /** @type {LogDraft['level']} */ (note.status === 'expired' ? 'warn' : 'info');
+  const draft = { icon: '✉️', text: `${noteStateText(note)} — “${clip(oneLine(note.text), 60)}”`, level };
+  pushLog(m, { ts, sessionId: note.sessionId, agentKey: key, kind: 'note' }, m.sessions.get(note.sessionId), m.state.agents[key], draft);
+  return true;
+}
+
+/**
+ * A note from the server, read defensively (it crosses the network).
+ * @param {unknown} raw
+ * @returns {Note|null}
+ */
+function readNote(raw) {
+  if (!isObject(raw) || typeof raw.id !== 'string' || typeof raw.sessionId !== 'string' || !NOTE_STATUSES.has(raw.status)) return null;
+  return {
+    id: raw.id,
+    status: raw.status,
+    sessionId: raw.sessionId,
+    agentId: normalizeAgentId(typeof raw.agentId === 'string' ? raw.agentId : null),
+    text: str(raw.text),
+    createdAt: amount(raw.createdAt),
+    expiresAt: amount(raw.expiresAt),
+    ...(amount(raw.deliveredAt) ? { deliveredAt: amount(raw.deliveredAt) } : {}),
+    ...(typeof raw.hook === 'string' && /^\w{1,40}$/.test(raw.hook) ? { hook: raw.hook } : {}),
+    ...(typeof raw.reason === 'string' ? { reason: clip(oneLine(raw.reason), 200) } : {}),
   };
 }
 

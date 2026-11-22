@@ -46,7 +46,8 @@ async function boot() {
     store,
     prefs,
     controls: {
-      decide: (id, decision, message, always) => source?.decide(id, decision, message, always) ?? false,
+      decide: (id, decision, message, always, stop) => source?.decide(id, decision, message, always, stop) ?? false,
+      sendNote: (sessionId, agentId, text) => source?.sendNote?.(sessionId, agentId, text) ?? false,
       setRemoteApprovals: (on) => source?.setRemoteApprovals?.(on),
       startDemo: () => switchToDemo(),
       leaveDemo: () => location.assign(withoutParam('demo')),

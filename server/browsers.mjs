@@ -1,5 +1,5 @@
 // Browsers connect over /ws (CONTRACTS §4.5). This module accepts them (after the Host, Origin and
-// sign-in checks), sends the hello snapshot, and handles their decide/settings/digest/ping messages.
+// sign-in checks), sends the hello snapshot, and handles their decide/note/settings/digest/ping messages.
 // On a team host (§4.11) a browser is either the owner (signed in) or a teammate watching with
 // the view link: viewers get the town but not the owner's prompts, costs, settings or topic.
 import { WS_PROTOCOL, browserRole, offersAndaryProtocol } from './auth.mjs';
@@ -211,6 +211,7 @@ function attachBrowser(ctx, connection, role) {
     settings: settingsFor(ctx, role),
     history: ctx.history.list(),
     approvals: owner ? ctx.broker.list() : [],
+    notes: owner ? ctx.notes.list() : [],
     usage: owner ? ctx.usage.snapshot() : { agents: [], days: [] },
     limits: owner ? ctx.limits.snapshot() : { accounts: [], contexts: {} },
     progress: ctx.progress.snapshot(),
@@ -251,10 +252,13 @@ function handleBrowserMessage(ctx, connection, text) {
   }
   switch (message?.t) {
     case 'decide': {
-      const result = ctx.broker.decide(message.id, message.decision, message.message, message.always);
+      const result = ctx.broker.decide(message.id, message.decision, message.message, message.always, message.stop);
       if (!result.ok) sendError(ctx, connection, result.error);
       return;
     }
+    case 'note':
+      sendNote(ctx, connection, message);
+      return;
     case 'settings':
       applySettings(ctx, connection, message.settings);
       return;
@@ -304,6 +308,20 @@ function sendDigest(ctx, connection, since) {
     return;
   }
   ctx.hub.send(connection, { t: 'digest', d: ctx.digest.summary(since) });
+}
+
+/**
+ * Answers `{ t: 'note', sessionId, agentId?, text }` (CONTRACTS §4.15): the owner's note for one
+ * of this computer's agents, queued for its next step. Viewers never get this far; a teammate's
+ * agent is refused (server/notes.mjs). Notes that would be queued have a budget of their own,
+ * besides the socket's.
+ * @param {import('./app.mjs').TownContext} ctx
+ * @param {import('./websocket.mjs').WsConnection} connection
+ * @param {Record<string, unknown>} message
+ */
+function sendNote(ctx, connection, message) {
+  const result = ctx.notes.send(message, () => ctx.noteLimiter.take());
+  if ('error' in result) sendError(ctx, connection, `The note was not sent: ${result.error}.`);
 }
 
 /**

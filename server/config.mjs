@@ -43,6 +43,9 @@ export const LIMITS = Object.freeze({
   pendingApprovals: 50,
   settledApprovals: 50,
   approvalMessageChars: 500,
+  /** Notes to agents (§4.15) from every browser together: a steady rate, and a burst. */
+  notesPerMinute: 12,
+  noteBurst: 5,
   /** How long held approvals wait for a browser to come back (a page reload) before going to the terminal. */
   browserGraceMs: 5000,
 });
