@@ -317,7 +317,7 @@ function createParkPool(town) {
   const { x, z } = PARK_FOUNTAIN;
   const pool = new THREE.Mesh(new THREE.CircleGeometry(1.42, 32).rotateX(-Math.PI / 2), createPoolMaterial(town, x, z));
   pool.name = 'park-pool';
-  pool.position.set(x, 0.27, z);
+  pool.position.set(x, 0.31, z);
   pool.receiveShadow = true;
   return pool;
 }

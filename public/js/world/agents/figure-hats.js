@@ -1,6 +1,7 @@
 // Hats, bound to the hat bone so they can hop off the head when celebrating. The hat tells you
 // the model a crew runs on (crown = Opus, beret = Sonnet, sunhat = Haiku, wizard = …); the
-// Foreman's default is a hard hat.
+// Foreman's default is a hard hat. A person of a team town picks any of them, or a beanie in
+// their own colour.
 
 import { B } from './rig.js';
 import { ball, cone, cyl, dome, halfDisc, ring } from './figure-parts.js';
@@ -50,6 +51,11 @@ const HATS = {
     parts.add(B.HAT, cyl(0.125, 0.15, 0.1, 18).translate(0, 0.94, 0), '#E3C277');
     parts.add(B.HAT, cyl(0.152, 0.152, 0.032, 18).translate(0, 0.905, 0), crew);
     parts.add(B.HAT, ball(0.026, 8, 6).translate(0.13, 0.925, 0.075), '#FF6B8B');
+  },
+  beanie(parts, crew) {
+    parts.add(B.HAT, dome(0.182).scale(1, 0.95, 1.02).translate(0, 0.83, -0.005), crew);
+    parts.add(B.HAT, cyl(0.186, 0.186, 0.05, 20).translate(0, 0.845, -0.005), darken(crew, 0.22));
+    parts.add(B.HAT, ball(0.045, 8, 6).translate(0, 1.02, -0.01), lighten(crew, 0.45));
   },
   wizard(parts) {
     const purple = '#4C3A9E';

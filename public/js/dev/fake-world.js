@@ -65,6 +65,7 @@ export function createFakeWorld(container, { timeOfDay = 'auto', log = false } =
     setNodeModules: noop('setNodeModules'),
     addWorktree: noop('addWorktree'),
     removeWorktree: noop('removeWorktree'),
+    setHome: noop('setHome'),
     /** @param {{ id: string }} spec */
     addAgent(spec) {
       record('addAgent', [spec]);

@@ -1,11 +1,12 @@
 // Assembles toy figures. All figures share one vertex-coloured material; geometry is cached per
-// look (crew colour, hat, kit, wearable, skin, hair, trousers), so a crew of look-alikes shares
+// look (crew colour, hat, kit, wearable, skin, hair, trousers; a person's whole chosen look), so a crew of look-alikes shares
 // buffers. Each agent gets its own skeleton and a single SkinnedMesh: one draw call per agent.
 
 import * as THREE from 'three';
 import { PartList } from './figure-parts.js';
 import { addBody, addWearable } from './figure-body.js';
 import { addHat } from './figure-hats.js';
+import { addExtra } from './figure-person.js';
 import { addProps } from './figure-props.js';
 import { createSkeleton } from './rig.js';
 
@@ -28,6 +29,7 @@ function buildGeometry(look) {
   addBody(parts, look);
   addWearable(parts, look);
   addHat(parts, look);
+  addExtra(parts, look);
   addProps(parts, look);
   return parts.merge();
 }

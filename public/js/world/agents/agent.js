@@ -67,6 +67,8 @@ export class Agent {
     this.look = look;
     /** @type {string|undefined} agent type (Explore, Plan, …), kept so restyles can re-derive the look */
     this.type = undefined;
+    /** A person's chosen look (core/profile.js PersonLook), for role 'person'. @type {unknown} */
+    this.person = undefined;
     const { mesh, bones } = createFigure(look);
     this.mesh = mesh;
     this.bones = bones;

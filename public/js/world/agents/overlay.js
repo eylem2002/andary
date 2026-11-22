@@ -45,6 +45,9 @@ export class AgentTag {
     this.pill = el('div', 'tt-pill', stack);
     this.pill.appendChild(cursorGlyph());
     this.status = el('span', 'tt-pill__status tt-pill__status--idle', this.pill);
+    this.home = el('span', 'tt-pill__home', this.pill);
+    this.home.textContent = '🏠';
+    this.home.hidden = true;
     this.name = el('span', 'tt-pill__name', this.pill);
     this.badge = el('span', 'tt-pill__badge', this.pill);
     this.badge.hidden = true;
@@ -85,6 +88,12 @@ export class AgentTag {
   /** @param {string} name */
   setName(name) {
     this.name.textContent = name;
+    this.measurePill();
+  }
+
+  /** A person's pill carries a little house: they live in town. @param {boolean} on */
+  setHome(on) {
+    this.home.hidden = !on;
     this.measurePill();
   }
 
