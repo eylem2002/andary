@@ -242,9 +242,9 @@ file is only a note under both rows, as an edit must match what is in the file. 
 hour, or until the agents finish. Andary compares paths as written: a symbolic link, or a disk that
 ignores case, can hide one.
 
-### The timeline
+### The timeline and turn receipts
 
-A strip under the town (`T` or the toolbar's Timeline button; on phones it starts
+**Timeline.** A strip under the town (`T` or the toolbar's Timeline button; on phones it starts
 hidden, and Settings has a **Timeline** button) has one lane per agent, for one crew or every crew
 grouped: each tool call in its building's colour, a failed call as a red tick, the stretches an
 agent waited for you hatched (a permission, a question, a plan, a stopped turn, a stuck alert),
@@ -254,6 +254,15 @@ was; click it (or press Enter) to select the agent, point the camera at it and s
 the file or the error in its details, or the diff when the town has it. The arrow keys move
 between moments (Up and Down between lanes), and **List** shows the same moments as a plain list.
 It keeps the whole day: older stretches are merged into coarser ones rather than dropped.
+
+**Turn receipts.** When a lead's turn ends, its details (**Last turn**) and the activity log get a
+receipt: the files its crew changed with lines added and removed (from the edits' own text; a file
+written whole over an old one has no "removed"), the last test run and the last build with what
+their exit status proves (`npm test | tail` proves nothing: the status is tail's; a Codex command
+only with its exit code), the calls that failed, the helpers it used, how long it took, and for
+Claude Code what it cost (an estimate, once the transcript catches up). When files changed and no
+test ran after the last of them, it says so: "Said done, but tests were not re-run since the last
+edit". A turn the town joined midway says "at least" and has no cost.
 
 ### Catch up
 

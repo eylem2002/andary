@@ -1,6 +1,6 @@
-// The timeline under the town, end to end in the demo, on desktop and on a phone: lanes per
-// agent, keyboard moves between moments, Enter goes to one, the list view, the phone's way in
-// (Settings).
+// The timeline under the town and the turn receipts, end to end in the demo, on desktop and on a
+// phone: lanes per agent, keyboard moves between moments, Enter goes to one, the list view, the
+// phone's way in (Settings), and a lead's receipt in its details and in the activity log.
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { startStatic, watchConsole } from './helpers/static.mjs';
@@ -93,4 +93,22 @@ test('the timeline: lanes per agent, keys move between moments, Enter goes to on
     await page.keyboard.press('t');
     await expect(timeline).toBeVisible();
   }
+});
+
+test('a lead\'s turn ends with a receipt in its details and in the activity log', async ({ page }) => {
+  await openDemo(page);
+  const key = await expect
+    .poll(() => page.evaluate(() => /** @type {any} */ (window).__andary.store.getState().receipts.at(-1)?.agentKey ?? null), { timeout: 90_000 })
+    .not.toBeNull()
+    .then(() => page.evaluate(() => /** @type {any} */ (window).__andary.store.getState().receipts.at(-1).agentKey));
+  await page.evaluate(() => {
+    const state = /** @type {any} */ (window).__andary.store.getState();
+    if (!state.log.some((/** @type {any} */ entry) => entry.kind === 'receipt')) throw new Error('no receipt line in the log');
+  });
+  await page.locator(`[data-agent-key="${key}"]`).first().click();
+  const receipt = page.getByTestId('agent-receipt');
+  await expect(receipt).toBeVisible();
+  await expect(receipt).toContainText('Took');
+  await expect(receipt).toContainText('Files');
+  expect(await axe(page)).toEqual([]);
 });

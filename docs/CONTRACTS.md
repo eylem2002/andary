@@ -1613,6 +1613,7 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="limit-gauge"][data-kind]` | one plan limit in the Usage dialog; `[data-testid="limits-note"]` says why there is none |
 | `[data-testid="timeline"]` | the timeline strip; `[data-testid="timeline-lanes"]` holds `.hud-timeline__item[data-item][data-lane][data-type]` buttons, `[data-testid="timeline-list"]` the list view, toggled by `[data-testid="timeline-list-toggle"]`; `[data-testid="timeline-crews"]` picks the crew; Settings' `[data-testid="settings-timeline"]` shows or hides it |
 | `[data-testid="inspector-moment"]` | in the inspector: the moment picked on the timeline |
+| `[data-testid="agent-receipt"]` | in the inspector: the receipt of a lead's last turn |
 | `[data-testid="director-caption"]` | the director camera's caption (plain text, not a live region); shown while it has a shot, hidden while you hold the camera or an agent is selected |
 
 ### 8.2 URL options
