@@ -102,7 +102,7 @@ export function signHookReply(responseKey, nonce, body) {
 const TUNNELLED = new WeakSet();
 
 /**
- * Marks a request as one from the internet through the Quick Tunnel (ADR 0018). The server does
+ * Marks a request as one from the internet through the Quick Tunnel (ADR 0019). The server does
  * this for every request on the loopback port it opened for cloudflared.
  * @param {import('node:http').IncomingMessage} req
  */
@@ -114,7 +114,7 @@ export function markTunnelled(req) {
 const CLOUDFLARE_HEADERS = ['cf-connecting-ip', 'cf-ray', 'cf-visitor', 'cf-ipcountry'];
 
 /**
- * Whether a request came from the internet through a Cloudflare tunnel (ADR 0018). Such a request
+ * Whether a request came from the internet through a Cloudflare tunnel (ADR 0019). Such a request
  * reaches the server from cloudflared on this computer, so its socket is loopback: that says
  * nothing about who sent it. It is one if it arrived on the tunnel's port, or if it carries
  * Cloudflare's headers on any port (a tunnel someone pointed at the town's own port). A tunnelled
@@ -141,7 +141,7 @@ export function allowedHostsFor(req, { allowedHosts, tunnelHosts }) {
 
 /**
  * Who a browser is: the owner (signed in), a teammate watching (view token), or nobody. The
- * owner's token counts only on this computer: through the tunnel it is ignored (ADR 0018).
+ * owner's token counts only on this computer: through the tunnel it is ignored (ADR 0019).
  * @param {import('node:http').IncomingMessage} req
  * @param {string} uiToken
  * @param {string|null} view  the team's view token, null when this is not a team host

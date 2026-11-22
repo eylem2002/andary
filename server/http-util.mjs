@@ -95,7 +95,7 @@ export const BAD_TOKEN_PAGE = page('This sign-in link is not valid', [
     'or run <code>andary status</code> to print it again.',
 ]);
 
-/** The owner's sign-in link opened through the tunnel (ADR 0018). */
+/** The owner's sign-in link opened through the tunnel (ADR 0019). */
 export const LOCAL_SIGN_IN_PAGE = page('Sign in on your own computer', [
   'This address reaches the town over the internet, where only teammates\' view links work.',
   'Open the sign-in link that <code>andary start</code> printed on the computer that runs it.',

@@ -40,7 +40,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {number} [approvalTimeoutMs]
  * @property {{ cert: Buffer|string, key: Buffer|string }|null} [tls]  serve HTTPS to the network with this certificate (ADR 0016)
  * @property {boolean} [tunnel]            a team host: also listen on a loopback port of its own for
- *   cloudflared (ADR 0018); every request there is from the internet
+ *   cloudflared (ADR 0019); every request there is from the internet
  * @property {boolean} [record]            append every envelope to <home>/recordings/*.jsonl
  * @property {boolean} [writeState]        write server.json (default true)
  * @property {(message: string) => void} [log]  lifecycle lines only, never payload content
@@ -54,7 +54,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {string} responseKey     signs /api/hook replies (see auth.signHookReply)
  * @property {{ remoteApprovals: boolean, approvalTimeoutMs: number }} settings
  * @property {Set<string>} allowedHosts
- * @property {Set<string>} tunnelHosts    the Host names a tunnelled request may use (ADR 0018)
+ * @property {Set<string>} tunnelHosts    the Host names a tunnelled request may use (ADR 0019)
  * @property {Record<string, string>} headers
  * @property {ReturnType<typeof createHistory>} history
  * @property {import('./approvals.mjs').ApprovalBroker} broker
@@ -153,7 +153,7 @@ export async function startTownServer(options = {}) {
     notifyUrl: ctx.notifier.url,
     viewUrl: ctx.team ? `${listener.tls ? 'https' : 'http'}://${hostWithPort(extraHosts[0] ?? connectHost(config.host), port)}/?view=${ctx.team.view}` : null,
     tunnelPort: tunnelSide.port,
-    setTunnel: tunnelSetter(ctx, state, config),
+    setTunnel: tunnelSetter(ctx, state, config, tunnelSide.port),
     browserCount: () => ctx.hub.size,
     stop: once(() => stopServer(ctx, [listener, ...tunnelSide.listeners], config)),
   };
@@ -165,19 +165,21 @@ export async function startTownServer(options = {}) {
  * @param {TownContext} ctx
  * @param {import('./state-file.mjs').ServerState} state
  * @param {{ home: string, writeState: boolean }} config
+ * @param {number|null} port  the tunnel's loopback port
  * @returns {TownServer['setTunnel']}
  */
-function tunnelSetter(ctx, state, config) {
+function tunnelSetter(ctx, state, config, port) {
   return ({ url, pid, error }) => {
     ctx.tunnelHosts = tunnelHostHeaders(url);
-    state.tunnel = { url, ...(pid ? { pid } : {}), ...(error ? { error } : {}) };
+    // The port lets a later start or doctor tell a cloudflared left behind from another program.
+    state.tunnel = { url, ...(pid ? { pid } : {}), ...(port ? { port } : {}), ...(error ? { error } : {}) };
     if (config.writeState) writeStateFile(config.home, state);
     return url && ctx.team ? `${url}/?view=${ctx.team.view}` : null;
   };
 }
 
 /**
- * The tunnel's port (ADR 0018): only cloudflared connects here, from this computer, so it is plain
+ * The tunnel's port (ADR 0019): only cloudflared connects here, from this computer, so it is plain
  * HTTP on loopback, and every request on it is marked as from the internet.
  * @param {TownContext} ctx
  * @param {import('node:net').Server} town  closed again if the tunnel's port cannot be had

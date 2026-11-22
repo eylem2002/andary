@@ -1,4 +1,4 @@
-# 0018 — A team town on the internet through a Cloudflare Quick Tunnel
+# 0019 — A team town on the internet through a Cloudflare Quick Tunnel
 
 Status: Accepted
 
@@ -20,11 +20,23 @@ loopback: "where the connection came from" can no longer tell this computer from
 
 ## Decision
 
-- `andary start --team --tunnel` runs the `cloudflared` found on the PATH as a child (Andary never
-  downloads or installs it; when it is missing the start fails with how to install it). It reads
-  the address from cloudflared's output (30 s limit, then a clear error with cloudflared's last
-  lines), records it in `server.json` (`tunnel: { url, pid }`), and stops cloudflared before the
-  server. The address is not kept: a restart gets a new one, and the CLI says so.
+- `andary start --team --tunnel` runs the `cloudflared` found on the PATH (absolute PATH entries
+  only; `cloudflared.exe` on Windows). Andary never downloads or installs it; when it is missing
+  the start fails with how to install it. cloudflared gets Andary's environment without
+  `ANDARY_*` and `TUNNEL_*` variables, and the start refuses while a `config.yml`/`config.yaml`
+  is in any folder cloudflared reads one from. Andary reads the address from cloudflared's
+  output (30 s limit, then a clear error with cloudflared's last lines), records it in
+  `server.json` (`tunnel: { url, pid, port }`), and stops cloudflared before the server. The
+  address is not kept: a restart gets a new one, and the CLI says so.
+- **No tunnel outlives its town.** cloudflared runs under a small watchdog
+  (`server/tunnel-watchdog.mjs`, a Node process) whose stdin the town holds open. However the
+  town ends, `kill -9` included, the operating system closes that pipe, and the watchdog stops
+  cloudflared (SIGTERM, then SIGKILL). Otherwise the old public name would keep pointing at a
+  port that is now free, and whatever took it next would be on the internet. As a second line of
+  defence, `andary start` and `andary doctor` check a `server.json` whose town is gone. If its
+  `tunnel.pid` is alive and its command line (from `/proc`, `ps`, or CIM on Windows) is
+  cloudflared for that `tunnel.port`, they stop it and say so. If that cannot be confirmed, they
+  warn with the pid and leave it alone.
 - **A port of its own.** The tunnel points at a second, plain-HTTP listener on `127.0.0.1` with a
   random port, opened only for it. Every request on it is marked as tunnelled whatever its socket
   says. On any port, a request carrying Cloudflare's edge headers (`Cf-Connecting-IP`, `Cf-Ray`,
@@ -32,13 +44,14 @@ loopback: "where the connection came from" can no longer tell this computer from
   tunnelled too, in case a tunnel is pointed at the town's own port.
 - **A tunnelled request is never the owner.** The UI token is ignored (`browserRole`), the
   sign-in link answers 403, `/api/proof`, `/api/hook` and `/api/limits` answer 403 whatever they
-  carry, and `/api/hello` hides the owner's approval and notification settings. What remains is
+  carry, and `/api/hello` hides the owner's approval and notification settings, and also the version
+  and approval timeout unless the request carries the view token or a member key. What remains is
   what a teammate on the network can do: watch with the view token, post events with a member
   key (`/api/team`, its rate limits unchanged), the static app (public code, the same as the
   hosted demo) and `/api/health`.
 - **Host and Origin stay strict.** A tunnelled request must name the tunnel's exact host (no
-  port, or 443) as `Host`, and as `Origin` for a WebSocket; before the address is known nothing
-  is accepted. `/api/team` keeps its exception from the Host check on the network only.
+  port, or 443) as `Host`; a tunnelled WebSocket must send `Origin: https://<that host>` (none,
+  or `http://`, is refused). Before the address is known nothing is accepted. `/api/team` keeps its exception from the Host check on the network only.
 - With `--tunnel` the town itself listens on `127.0.0.1` (not every interface) unless `--host`
   says otherwise: teammates come through the tunnel. The CLI warns that the town is on the
   internet, protected by the links, and that `andary team reset` revokes them.

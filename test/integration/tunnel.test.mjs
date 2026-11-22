@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { ROOT_DIR } from '../../server/config.mjs';
-import { isProcessAlive, readStateFile } from '../../server/state-file.mjs';
+import { isProcessAlive, readStateFile, writeStateFile } from '../../server/state-file.mjs';
 import { createTeamRelay, memberKey, teamSecret, viewToken } from '../../server/team.mjs';
 import { connectWebSocket } from '../../server/ws-client.mjs';
 import { closeBrowser, hookPayload, rawRequest, startTown, waitForMessage } from './helpers.mjs';
@@ -130,7 +130,8 @@ describe('Team town on the internet (--tunnel)', { skip: process.platform === 'w
     assert.notEqual(tunnelPort, town.port);
     assert.deepEqual(launched.andaryEnv, [], "Andary's settings and secrets stay out of cloudflared's environment");
     const state = readStateFile(town.home);
-    assert.deepEqual(state?.tunnel, { url: TUNNEL, pid: launched.pid });
+    // cloudflared's own pid (not the watchdog's), and the port it forwards to.
+    assert.deepEqual(state?.tunnel, { url: TUNNEL, pid: launched.pid, port: tunnelPort });
     // The town itself stays on this computer: teammates come through the tunnel.
     assert.equal(state?.host, '127.0.0.1');
     const output = town.output();
@@ -160,6 +161,16 @@ describe('Team town on the internet (--tunnel)', { skip: process.platform === 'w
     assert.equal(hello.authenticated, false);
     assert.equal(hello.settings.remoteApprovals, false);
     assert.equal(hello.settings.notify, false);
+    // Without a view token or key, not even the version or the approval timeout.
+    assert.equal(hello.app, 'andary');
+    assert.equal(hello.version, undefined);
+    assert.equal(hello.settings.approvalTimeoutMs, undefined);
+    const known = JSON.parse((await viaTunnel(tunnelPort, { path: '/api/hello', headers: { 'x-andary-view': viewToken(secret) } })).text);
+    assert.equal(known.authenticated, true);
+    assert.equal(typeof known.version, 'string');
+    assert.equal(typeof known.settings.approvalTimeoutMs, 'number');
+    const member = JSON.parse((await viaTunnel(tunnelPort, { path: '/api/hello', headers: { 'x-andary-team': memberKey(secret, 'Lina') } })).text);
+    assert.equal(typeof member.version, 'string');
     // The owner's WebSocket sign-in.
     await assert.rejects(socketViaTunnel(tunnelPort, `andary, andary.token.${town.uiToken}`), /401/);
   });
@@ -185,6 +196,12 @@ describe('Team town on the internet (--tunnel)', { skip: process.platform === 'w
     assert.equal((await viaTunnel(tunnelPort, { path: '/', headers: { host: `${TUNNEL_HOST}:443` } })).status, 200);
     await assert.rejects(socketViaTunnel(tunnelPort, `andary, andary.view.${viewToken(secret)}`, { Origin: 'https://evil.example' }), /403/);
     await assert.rejects(socketViaTunnel(tunnelPort, `andary, andary.view.${viewToken(secret)}`, { Origin: town.baseUrl }), /403/);
+    // Only https://<the tunnel>, and never none.
+    await assert.rejects(socketViaTunnel(tunnelPort, `andary, andary.view.${viewToken(secret)}`, { Origin: `http://${TUNNEL_HOST}` }), /403/);
+    await assert.rejects(
+      connectWebSocket(`ws://127.0.0.1:${tunnelPort}/ws`, { headers: { ...FROM_CLOUDFLARE, 'Sec-WebSocket-Protocol': `andary, andary.view.${viewToken(secret)}` } }),
+      /403/,
+    );
     // Even the team's route, which skips the Host check on the network, names the tunnel here.
     const batch = JSON.stringify({ v: 1, events: [{ ts: Date.now(), event: hookPayload('Stop') }] });
     const team = { method: 'POST', path: '/api/team', body: batch, headers: { 'x-andary-team': memberKey(secret, 'Omar'), 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(batch)) } };
@@ -241,6 +258,86 @@ describe('Team town on the internet (--tunnel)', { skip: process.platform === 'w
     await town.stop();
     for (let waited = 0; waited < 3000 && isProcessAlive(launched.pid); waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
     assert.ok(!isProcessAlive(launched.pid), 'cloudflared is gone');
+  });
+});
+
+/**
+ * Waits until a process is gone.
+ * @param {number} pid
+ * @param {number} [timeoutMs]
+ */
+async function waitGone(pid, timeoutMs = 8000) {
+  for (let waited = 0; waited < timeoutMs && isProcessAlive(pid); waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
+  return !isProcessAlive(pid);
+}
+
+/** The pid of a process that has just ended. */
+async function deadPid() {
+  const child = spawn(process.execPath, ['-e', '']);
+  await new Promise((resolve) => child.once('exit', resolve));
+  return /** @type {number} */ (child.pid);
+}
+
+describe('No tunnel outlives its town', { skip: process.platform === 'win32' ? 'the fake cloudflared is a script with a shebang' : false }, () => {
+  it('stops cloudflared when the town is killed with SIGKILL', async () => {
+    const env = tunnelEnv('killed');
+    const town = await startTown({ args: ['--team', '--tunnel'], env });
+    try {
+      const { pid } = JSON.parse(readFileSync(env.FAKE_LOG, 'utf8'));
+      assert.ok(isProcessAlive(pid));
+      process.kill(town.pid, 'SIGKILL');
+      assert.ok(await waitGone(pid), 'the watchdog stopped cloudflared once the town was gone');
+    } finally {
+      await town.stop();
+    }
+  });
+
+  /**
+   * A cloudflared (or another program) left running with a server.json that names it, as a
+   * town killed together with its watchdog would leave them.
+   * @param {string} name
+   * @param {boolean} cloudflared  false: some other program with that pid
+   */
+  async function leftBehind(name, cloudflared) {
+    const env = tunnelEnv(name);
+    const home = join(scratch, name, 'andary-home');
+    const port = 45_000 + Math.floor(Math.random() * 1000);
+    const args = cloudflared ? [join(fakeBin, 'cloudflared'), 'tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${port}`] : ['-e', 'setInterval(() => {}, 1000)', `http://127.0.0.1:${port}`];
+    const child = spawn(cloudflared ? args[0] : process.execPath, cloudflared ? args.slice(1) : args, { env: { ...process.env, ...env, FAKE_LOG: '' }, stdio: 'ignore' });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const pid = /** @type {number} */ (child.pid);
+    writeStateFile(home, /** @type {any} */ ({ pid: await deadPid(), port: 1, host: '127.0.0.1', secret: 's', uiToken: 't', version: '0', startedAt: 0, approvalTimeoutMs: 1, team: true, tunnel: { url: TUNNEL, pid, port } }));
+    return { env: { ...env, ANDARY_HOME: home }, pid, kill: () => child.kill('SIGKILL') };
+  }
+
+  it('andary doctor stops a cloudflared left behind, even with no town running', async () => {
+    const orphan = await leftBehind('orphan-doctor', true);
+    const doctor = await runCli(['doctor'], orphan.env);
+    assert.match(doctor.output, new RegExp(`Stopped a cloudflared \\(pid ${orphan.pid}\\) left behind`));
+    assert.ok(await waitGone(orphan.pid));
+  });
+
+  it('andary start stops one too, and leaves alone a pid it cannot confirm is cloudflared', async () => {
+    const orphan = await leftBehind('orphan-start', true);
+    const start = spawn(process.execPath, [CLI, 'start', '--no-open', '--port', '0'], { env: { ...process.env, ...orphan.env, CLAUDE_CONFIG_DIR: join(scratch, 'orphan-start', 'claude') } });
+    let output = '';
+    start.stdout.on('data', (chunk) => (output += chunk));
+    try {
+      for (let waited = 0; waited < 15_000 && !/is running on/.test(output); waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.match(output, new RegExp(`Stopped a cloudflared \\(pid ${orphan.pid}\\)[\\s\\S]*is running on`));
+      assert.ok(await waitGone(orphan.pid));
+    } finally {
+      start.kill('SIGTERM');
+      await new Promise((resolve) => start.once('exit', resolve));
+    }
+    const other = await leftBehind('orphan-other', false);
+    try {
+      const doctor = await runCli(['doctor'], other.env);
+      assert.match(doctor.output, new RegExp(`Process ${other.pid} was an earlier town's cloudflared .* left alone`));
+      assert.ok(isProcessAlive(other.pid), 'never killed');
+    } finally {
+      other.kill();
+    }
   });
 });
 

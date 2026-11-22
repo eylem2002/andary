@@ -8,7 +8,7 @@ import { HOOK_SOURCE, resolveHome } from '../config.mjs';
 import { runHookScript } from '../hook-runner.mjs';
 import { forwarderPath, inspectInstallations } from '../installer.mjs';
 import { isProcessAlive, probeServer, readStateFile, serverOrigin } from '../state-file.mjs';
-import { findCloudflared } from '../tunnel.mjs';
+import { describeOrphan, findCloudflared, stopOrphanTunnel } from '../tunnel.mjs';
 import { connectWebSocket, waitForMessage } from '../ws-client.mjs';
 import { describeScope } from './status.mjs';
 import { cliInvocation, tildify } from './io.mjs';
@@ -43,6 +43,9 @@ export async function runDoctor(_values, _positionals, io) {
   const state = await checkServer(report, home);
   const tunnel = state ? tunnelCheck(state, { cloudflared: findCloudflared(io.env), alive: isProcessAlive }) : null;
   if (tunnel) report(tunnel.status, tunnel.title, tunnel.detail);
+  // No town, but maybe the cloudflared of one that was killed: it still publishes the old port.
+  const orphan = state ? null : describeOrphan(await stopOrphanTunnel(readStateFile(home), { alive: isProcessAlive }));
+  if (orphan) report(orphan.status, `Internet tunnel: ${orphan.text}`);
   if (state) {
     const hello = await checkRoundTrip(report, home, io);
     const limits = hello ? limitsCheck(hello.limits, installs.limitsMod, Date.now(), Boolean(io.env.ANDARY_HOME)) : null;
@@ -187,7 +190,7 @@ async function checkRoundTrip(report, home, io) {
 }
 
 /**
- * What the doctor says about a team town's internet tunnel (--tunnel, ADR 0018): its address
+ * What the doctor says about a team town's internet tunnel (--tunnel, ADR 0019): its address
  * while cloudflared runs, a failure once it stopped, or (off) whether cloudflared is installed.
  * Nothing for a town that does not host a team. It never connects to the address itself.
  * @param {import('../state-file.mjs').ServerState} state

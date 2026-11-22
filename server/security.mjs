@@ -177,6 +177,18 @@ export function isAllowedHost(hostHeader, allowed) {
 }
 
 /**
+ * A WebSocket's Origin through the tunnel (ADR 0019): present, and exactly https://<the tunnel>.
+ * @param {string|undefined} originHeader
+ * @param {Set<string>} tunnelHosts from tunnelHostHeaders
+ * @returns {boolean}
+ */
+export function isTunnelOrigin(originHeader, tunnelHosts) {
+  if (typeof originHeader !== 'string') return false;
+  const match = /^https:\/\/([^/:]+)$/i.exec(originHeader.trim());
+  return match !== null && tunnelHosts.has(match[1].toLowerCase());
+}
+
+/**
  * Cross-site WebSocket hijacking defence. Browsers always send Origin on WebSocket handshakes, so
  * a foreign page is refused; non-browser clients (the doctor, tests) may leave it out.
  * @param {string|undefined} originHeader

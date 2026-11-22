@@ -46,7 +46,7 @@ describe('request checks', () => {
     assert.equal(browserRole(req({ cookie: 'andary_ui=tok' }), 'tok', null), null, 'an old cookie no longer signs in');
   });
 
-  it("treats a request through a Cloudflare tunnel as from the internet, whatever its socket says (ADR 0018)", () => {
+  it("treats a request through a Cloudflare tunnel as from the internet, whatever its socket says (ADR 0019)", () => {
     const loopback = { remoteAddress: '127.0.0.1', localAddress: '127.0.0.1' };
     assert.equal(isTunnelled(/** @type {any} */ ({ headers: {}, socket: loopback })), false);
     for (const headers of [{ 'cf-connecting-ip': '203.0.113.9' }, { 'cf-ray': '8f0e-AMS' }, { 'cf-visitor': '{"scheme":"https"}' }, { 'cdn-loop': 'cloudflare; loops=1' }]) {

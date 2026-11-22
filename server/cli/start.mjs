@@ -8,9 +8,9 @@ import { applyHooksChange, inspectInstallations, planHooksChange, refreshForward
 import { openBrowser } from '../open-browser.mjs';
 import { hostWithPort, isLoopbackHost, isWildcardHost } from '../security.mjs';
 import { lanAddresses } from '../team.mjs';
-import { TUNNEL_TIMEOUT_MS, blockingConfig, findCloudflared, installHelp, parseAllowedMail, startQuickTunnel, supportsAllowedMail } from '../tunnel.mjs';
+import { TUNNEL_TIMEOUT_MS, blockingConfig, describeOrphan, stopOrphanTunnel, findCloudflared, installHelp, parseAllowedMail, startQuickTunnel, supportsAllowedMail } from '../tunnel.mjs';
 import { savedTopicUrl } from '../notify.mjs';
-import { ensureHome, findRunningServer, loginUrl, probeServer, readStateFile, removeStateFileIfOwned } from '../state-file.mjs';
+import { ensureHome, findRunningServer, isProcessAlive, loginUrl, probeServer, readStateFile, removeStateFileIfOwned } from '../state-file.mjs';
 import { cliInvocation, sleep, tildify } from './io.mjs';
 import { UsageError, parseApprovalTimeout, parseNotifyUrl, parsePort, parseShareTo, parseTeamHosts, parseTls } from './options.mjs';
 
@@ -123,6 +123,9 @@ export async function runStart(values, _positionals, io, { demo = false } = {}) 
   const home = resolveHome(io.env);
   const running = await findRunningServer(home);
   if (running) return reportRunning(running, settings, io, Object.keys(values).some((name) => SERVER_SHAPING.has(name)));
+  // A town killed with its tunnel still up left cloudflared publishing its old port.
+  const orphan = describeOrphan(await stopOrphanTunnel(readStateFile(home), { alive: isProcessAlive }));
+  if (orphan) (orphan.status === 'ok' ? io.out : io.err)(orphan.text);
   const cloudflared = settings.tunnel ? tunnelPreflight(settings, io) : null;
   if (settings.tunnel && !cloudflared) return 1;
   if (settings.detach) return startDetached(settings, home, io);

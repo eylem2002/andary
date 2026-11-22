@@ -362,7 +362,10 @@ and watches with the view link at the same address.
 - **For trying things, not for always-on:** Quick Tunnels have no uptime guarantee and a limit of
   200 requests at a time, and the address changes every time Andary starts (send new invites).
   `andary doctor` says whether the tunnel is up. They do not start while
-  `~/.cloudflared/config.yml` exists (rename it for the session).
+  `~/.cloudflared/config.yml` exists (rename it for the session; Andary also refuses one in
+  `/etc/cloudflared` or `/usr/local/etc/cloudflared`). cloudflared stops with the town, even if
+  the town is killed; one left over from a crash is stopped by the next `andary start` or
+  `andary doctor`.
 - **Only some people:** `--tunnel-allowed-mail you@example.com,lina@example.com` (or
   `*@example.com`) makes Cloudflare ask for an emailed code before the page opens
   (cloudflared 2026.9.3 or newer). That sign-in needs a browser, so teammates can then watch but
@@ -398,7 +401,7 @@ Andary sees what your agents see, so it is locked down:
   the `Host` header (DNS rebinding) and the WebSocket `Origin` (cross-site hijacking);
 - through a tunnel (`--tunnel`) only the team's keys and view link work: a request that came
   through Cloudflare is never treated as you, even though it reaches the server from your own
-  computer (ADR 0018);
+  computer (ADR 0019);
 - browsers sign in with a random per-start token that the page keeps for its own address only
   and sends with each request; there is no cookie, which would also reach every other local
   server on `127.0.0.1` (ADR 0015); hooks use a separate secret; both live in

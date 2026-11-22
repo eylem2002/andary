@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { after, describe, it } from 'node:test';
-import { blockingConfig, findCloudflared, installHelp, parseAllowedMail, parseTunnelUrl, startQuickTunnel, supportsAllowedMail, tunnelArgs } from '../../../server/tunnel.mjs';
+import { blockingConfig, commandLineOf, describeOrphan, findCloudflared, installHelp, isTunnelCommand, parseAllowedMail, parseTunnelUrl, startQuickTunnel, stopOrphanTunnel, supportsAllowedMail, tunnelArgs, tunnelEnv } from '../../../server/tunnel.mjs';
 
 // What cloudflared 2026.11.1 printed (on stderr) when it got a Quick Tunnel, and when it could not.
 const CREATED = `2026-11-22T19:11:16Z INF Thank you for trying Cloudflare Tunnel. Doing so, without a Cloudflare account, is a quick way to experiment and try it out. However, be aware that these account-less Tunnels have no uptime guarantee, are subject to the Cloudflare Online Services Terms of Use (https://www.cloudflare.com/website-terms/), and Cloudflare reserves the right to investigate your use of Tunnels for violations of such terms. If you intend to use Tunnels in production you should use a pre-created named tunnel by following: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps
@@ -59,12 +59,26 @@ describe('findCloudflared', () => {
     assert.equal(findCloudflared({}, 'linux'), null);
   });
 
-  it('tries the PATHEXT extensions on Windows', () => {
+  it('skips relative PATH entries', () => {
+    const cwd = process.cwd();
+    process.chdir(scratch);
+    try {
+      assert.equal(findCloudflared({ PATH: 'bin' }, 'linux'), null);
+      assert.equal(findCloudflared({ PATH: `bin:${join(scratch, 'bin')}` }, 'linux'), join(scratch, 'bin', 'cloudflared'));
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it('takes only cloudflared.exe on Windows, never a script', () => {
     const dir = join(scratch, 'win');
     mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'cloudflared.cmd'), '');
+    assert.equal(findCloudflared({ Path: dir, PATHEXT: '.CMD;.EXE' }, 'win32'), null);
     writeFileSync(join(dir, 'cloudflared.exe'), '');
-    assert.equal(findCloudflared({ Path: dir, PATHEXT: '.COM;.EXE' }, 'win32'), join(dir, 'cloudflared.exe'));
-    assert.equal(findCloudflared({ Path: dir, PATHEXT: '.COM' }, 'win32'), null);
+    // join() writes this system's separators; on Windows a drive path is absolute.
+    if (process.platform !== 'win32') return;
+    assert.equal(findCloudflared({ Path: dir }, 'win32'), join(dir, 'cloudflared.exe'));
   });
 });
 
@@ -80,12 +94,16 @@ describe('installHelp', () => {
 });
 
 describe('blockingConfig', () => {
-  it('names ~/.cloudflared/config.yml or config.yaml, which stop Quick Tunnels', () => {
+  it('names a config.yml or config.yaml where cloudflared looks for one', () => {
     const home = join(scratch, 'home');
+    const etc = join(scratch, 'etc-cloudflared');
     mkdirSync(join(home, '.cloudflared'), { recursive: true });
-    assert.equal(blockingConfig(home), null);
+    mkdirSync(etc, { recursive: true });
+    assert.equal(blockingConfig(home, [etc]), null);
+    writeFileSync(join(etc, 'config.yml'), 'tunnel: x\n');
+    assert.equal(blockingConfig(home, [etc]), join(etc, 'config.yml'));
     writeFileSync(join(home, '.cloudflared', 'config.yaml'), 'tunnel: x\n');
-    assert.equal(blockingConfig(home), join(home, '.cloudflared', 'config.yaml'));
+    assert.equal(blockingConfig(home, [etc]), join(home, '.cloudflared', 'config.yaml'));
   });
 });
 
@@ -113,9 +131,12 @@ describe('parseAllowedMail and tunnelArgs', () => {
 /** A child process that prints what a test tells it to. */
 function fakeChild() {
   const child = /** @type {any} */ (new EventEmitter());
+  child.stdin = new PassThrough();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
-  child.pid = 4242;
+  child.pid = 4141;
+  // The watchdog stops cloudflared and ends when its stdin closes.
+  child.stdin.on('finish', () => setImmediate(() => child.emit('exit', 0, null)));
   child.signals = [];
   child.kill = (/** @type {string} */ signal) => {
     child.signals.push(signal);
@@ -134,26 +155,31 @@ describe('startQuickTunnel', () => {
       calls.push(args);
       return child;
     });
-    const started = startQuickTunnel({ bin: '/usr/bin/cloudflared', port: 5123, env: { PATH: '/usr/bin', ANDARY_TEAM_KEY: 'Lina.secret', HOME: '/home/me' }, spawnImpl });
+    const started = startQuickTunnel({ bin: '/usr/bin/cloudflared', port: 5123, env: { PATH: '/usr/bin', ANDARY_TEAM_KEY: 'Lina.secret', TUNNEL_ORIGIN_CERT: '/x', HOME: '/home/me' }, spawnImpl });
+    child.stderr.write('andary-tunnel-pid 4242\n');
     const half = CREATED.indexOf('seasonal-deck');
     child.stderr.write(CREATED.slice(0, half));
     child.stderr.write(CREATED.slice(half));
     const tunnel = await started;
     assert.equal(tunnel.url, 'https://seasonal-deck-organisms-sf.trycloudflare.com');
     assert.equal(tunnel.pid, 4242);
-    assert.equal(calls[0][0], '/usr/bin/cloudflared');
-    assert.deepEqual(calls[0][1], tunnelArgs(5123));
+    // Through the watchdog, which stops cloudflared when this process ends.
+    assert.equal(calls[0][0], process.execPath);
+    assert.match(calls[0][1][0], /tunnel-watchdog\.mjs$/);
+    assert.deepEqual(calls[0][1].slice(1), ['/usr/bin/cloudflared', ...tunnelArgs(5123)]);
     assert.equal(calls[0][2].env.ANDARY_TEAM_KEY, undefined, "Andary's secrets stay out of cloudflared's environment");
+    assert.equal(calls[0][2].env.TUNNEL_ORIGIN_CERT, undefined, "so do cloudflared's own settings");
     assert.equal(calls[0][2].env.HOME, '/home/me');
-    assert.deepEqual(child.signals, []);
+    assert.equal(child.stdin.writableEnded, false);
     await tunnel.stop();
-    assert.deepEqual(child.signals, ['SIGTERM']);
+    assert.equal(child.stdin.writableEnded, true, 'stopping closes the watchdog pipe');
+    assert.deepEqual(child.signals, []);
   });
 
   it('tells when cloudflared ends after the address was printed', async () => {
     const child = fakeChild();
     const started = startQuickTunnel({ bin: 'cloudflared', port: 1, spawnImpl: /** @type {any} */ (() => child) });
-    child.stdout.write('|  https://a-b-c-d.trycloudflare.com  |\n');
+    child.stdout.write('andary-tunnel-pid 7\n|  https://a-b-c-d.trycloudflare.com  |\n');
     const tunnel = await started;
     const ended = new Promise((resolve) => tunnel.onExit((code) => resolve(code)));
     child.emit('exit', 1, null);
@@ -177,13 +203,75 @@ describe('startQuickTunnel', () => {
     const started = startQuickTunnel({ bin: 'cloudflared', port: 1, timeoutMs: 50, spawnImpl: /** @type {any} */ (() => child) });
     child.stderr.write('2026-11-22T19:11:16Z INF Requesting new quick Tunnel on trycloudflare.com...\n');
     await assert.rejects(started, /printed no trycloudflare\.com address within 1 s[\s\S]*Requesting new quick Tunnel/);
-    assert.deepEqual(child.signals, ['SIGTERM']);
+    assert.equal(child.stdin.writableEnded, true, 'cloudflared was stopped');
   });
 
   it('fails clearly when the program cannot run', async () => {
     const child = fakeChild();
     const started = startQuickTunnel({ bin: '/missing/cloudflared', port: 1, spawnImpl: /** @type {any} */ (() => child) });
-    child.emit('error', Object.assign(new Error('spawn /missing/cloudflared ENOENT'), { code: 'ENOENT' }));
+    // What the watchdog says when it cannot start cloudflared.
+    child.stderr.write('andary-tunnel-error ENOENT\n');
     await assert.rejects(started, /Could not run cloudflared \(ENOENT\)/);
+  });
+});
+
+describe('tunnelEnv', () => {
+  it("leaves out Andary's and cloudflared's own settings", () => {
+    assert.deepEqual(tunnelEnv({ PATH: '/bin', ANDARY_HOME: '/h', TUNNEL_TOKEN: 't', tunnel_metrics: 'x', HOME: '/home/me' }), { PATH: '/bin', HOME: '/home/me' });
+  });
+});
+
+describe('a cloudflared left behind', () => {
+  const line = '/usr/local/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:5123';
+  const state = /** @type {any} */ ({ pid: 100, port: 4747, secret: 's', uiToken: 't', tunnel: { url: 'https://a.trycloudflare.com', pid: 200, port: 5123 } });
+
+  it('is recognised by its command line: cloudflared, for that port', () => {
+    assert.ok(isTunnelCommand(line, 5123));
+    assert.ok(isTunnelCommand('"C:\\Program Files\\cloudflared\\cloudflared.exe" tunnel --url http://127.0.0.1:5123', 5123));
+    assert.ok(isTunnelCommand('/usr/bin/node /tmp/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:5123', 5123));
+    assert.ok(!isTunnelCommand(line, 5124));
+    assert.ok(!isTunnelCommand(line.replace('5123', '51234'), 5123));
+    assert.ok(!isTunnelCommand('/usr/bin/vim notes-about-cloudflared.txt http://127.0.0.1:5123', 5123));
+    assert.ok(!isTunnelCommand(null, 5123));
+  });
+
+  it('reads a command line from /proc, ps or CIM', () => {
+    assert.equal(commandLineOf(5, { platform: 'linux', readFile: () => Buffer.from('cloudflared\0tunnel\0--url\0http://127.0.0.1:1\0') }), 'cloudflared tunnel --url http://127.0.0.1:1');
+    /** @type {any[]} */
+    const runs = [];
+    const run = /** @type {any} */ ((/** @type {any[]} */ ...args) => {
+      runs.push(args);
+      return { status: 0, stdout: `${line}\n` };
+    });
+    assert.equal(commandLineOf(5, { platform: 'darwin', run }), line);
+    assert.deepEqual(runs[0].slice(0, 2), ['ps', ['-o', 'args=', '-p', '5']]);
+    assert.equal(commandLineOf(5, { platform: 'win32', run }), line);
+    assert.match(runs[1][1].join(' '), /Get-CimInstance Win32_Process -Filter "ProcessId=5"/);
+    assert.equal(commandLineOf(5, { platform: 'linux', readFile: () => { throw new Error('gone'); } }), null);
+    assert.equal(commandLineOf(-1), null);
+  });
+
+  it('is stopped (SIGTERM, then SIGKILL) only when the town is gone and it is really cloudflared', async () => {
+    /** @type {string[]} */
+    const sent = [];
+    let running = true;
+    const alive = (/** @type {unknown} */ pid) => pid === 200 && running;
+    const kill = (/** @type {number} */ _pid, /** @type {string} */ signal) => {
+      sent.push(signal);
+      if (signal === 'SIGKILL') running = false;
+    };
+    assert.deepEqual(await stopOrphanTunnel(state, { alive, commandLine: () => line, kill, waitMs: 100 }), { status: 'stopped', pid: 200 });
+    assert.deepEqual(sent, ['SIGTERM', 'SIGKILL'], 'SIGKILL when SIGTERM was not enough');
+    running = true;
+    sent.length = 0;
+    assert.deepEqual(await stopOrphanTunnel(state, { alive, commandLine: () => '/usr/bin/sleep 1000', kill }), { status: 'unverified', pid: 200 });
+    assert.deepEqual(await stopOrphanTunnel(state, { alive, commandLine: () => null, kill }), { status: 'unverified', pid: 200 });
+    assert.deepEqual(sent, [], 'an unverified process is never signalled');
+    assert.deepEqual(await stopOrphanTunnel(state, { alive: () => true, commandLine: () => line, kill }), { status: 'none' }, 'the town still runs: its tunnel is its own');
+    assert.deepEqual(await stopOrphanTunnel({ ...state, tunnel: undefined }, { alive, kill }), { status: 'none' });
+    assert.deepEqual(await stopOrphanTunnel(null, { alive, kill }), { status: 'none' });
+    assert.equal(describeOrphan({ status: 'none' }), null);
+    assert.match(String(describeOrphan({ status: 'unverified', pid: 200 })?.text), /Process 200 .* left alone/);
+    assert.equal(describeOrphan({ status: 'stopped', pid: 200 })?.status, 'ok');
   });
 });

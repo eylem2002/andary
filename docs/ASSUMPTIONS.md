@@ -1067,7 +1067,7 @@ section.
 185. **A team viewer is not told to install the mod.** Limits are the host's and never reach a
      viewer; their Usage dialog says only the host sees them.
 
-## Team town on the internet (`--tunnel`, ADR 0018)
+## Team town on the internet (`--tunnel`, ADR 0019)
 
 186. **cloudflared keeps the visitor's Host.** A Quick Tunnel forwards requests with
      `Host: <words>.trycloudflare.com` (cloudflared's default when no `httpHostHeader` is set),
@@ -1102,3 +1102,16 @@ section.
 194. **The doctor does not connect to the tunnel.** It reads `server.json` and checks that
      cloudflared's pid is alive: reaching the public address would be a network call from the
      doctor to Cloudflare, and a failure there says little about the town.
+195. **The watchdog is a Node process, not a signal trick.** Linux's "die with the parent" needs a
+     native call Node does not offer, and macOS and Windows have none. A pipe the town holds
+     closes on any death, `kill -9` included, so the watchdog that reads it stops cloudflared the
+     same way everywhere. If the watchdog itself is killed with SIGKILL, the next start or doctor
+     catches the cloudflared left behind.
+196. **A cloudflared left behind is stopped only after its command line is checked.** It must name
+     `cloudflared` and `http://127.0.0.1:<the recorded port>`, and the town in `server.json` must
+     be gone. A pid that may have been reused by another program, or a command line that cannot
+     be read, gets a warning naming the pid, never a signal.
+197. **Other cloudflared configuration folders are refused, not overridden.** Pointing `--config`
+     at an empty file might also stop a Quick Tunnel, which was not tested live. Refusing a
+     `config.yml` in any folder cloudflared reads (and `TUNNEL_*` variables, which it reads as
+     flags) keeps the tunnel to the flags Andary passes.

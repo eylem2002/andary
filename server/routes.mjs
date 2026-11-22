@@ -29,7 +29,7 @@ export async function handleRequest(ctx, req, res) {
   for (const [name, value] of Object.entries(ctx.headers)) res.setHeader(name, value);
   // A teammate's relay may reach the host by any name (a LAN address, a VPN name); its key, not
   // the Host header, is what authenticates it, and no browser can send that header cross-site.
-  // Through the tunnel (ADR 0018) every request, the team's too, must name the tunnel exactly.
+  // Through the tunnel (ADR 0019) every request, the team's too, must name the tunnel exactly.
   const tunnelled = isTunnelled(req);
   const teamPost = Boolean(ctx.team) && !tunnelled && req.method === 'POST' && req.url === '/api/team';
   if (!teamPost && !isAllowedHost(req.headers.host, allowedHostsFor(req, ctx))) {
@@ -143,17 +143,7 @@ function redirectWithFragment(res, url, param, fragment) {
 /** @type {Record<string, { methods: string[], handle: (ctx: TownContext, req: Request, res: Response) => void|Promise<void> }>} */
 const API_ROUTES = {
   '/api/health': { methods: ['GET', 'HEAD'], handle: (_ctx, _req, res) => sendJson(res, 200, { ok: true }) },
-  '/api/hello': {
-    methods: ['GET', 'HEAD'],
-    handle: (ctx, req, res) =>
-      sendJson(res, 200, {
-        app: APP_ID,
-        version: ctx.version,
-        authenticated: browserRole(req, ctx.uiToken, ctx.team?.view ?? null) !== null,
-        // The internet does not learn whether the owner answers prompts or gets phone notes.
-        settings: isTunnelled(req) ? { ...publicSettings(ctx), remoteApprovals: false, notify: false, notifyLimits: false } : publicSettings(ctx),
-      }),
-  },
+  '/api/hello': { methods: ['GET', 'HEAD'], handle: handleHello },
   '/api/proof': { methods: ['GET'], handle: handleProof },
   '/api/hook': { methods: ['POST'], handle: handleHook },
   '/api/limits': { methods: ['POST'], handle: handleLimits },
@@ -161,7 +151,27 @@ const API_ROUTES = {
 };
 
 /**
- * The only routes the tunnel reaches (ADR 0018): the forwarder's (proof, hook) and the limits
+ * GET /api/hello: whether this is Andary, and whether the request's credentials sign it in.
+ * Through the tunnel (ADR 0019) the internet does not learn whether the owner answers prompts or
+ * gets phone notes, and without a view token or member key not even the version or the timeout.
+ * @param {TownContext} ctx
+ * @param {Request} req
+ * @param {Response} res
+ */
+function handleHello(ctx, req, res) {
+  const authenticated = browserRole(req, ctx.uiToken, ctx.team?.view ?? null) !== null;
+  if (!isTunnelled(req)) {
+    sendJson(res, 200, { app: APP_ID, version: ctx.version, authenticated, settings: publicSettings(ctx) });
+    return;
+  }
+  const known = authenticated || Boolean(ctx.team && verifyMemberKey(ctx.team.secret, req.headers[TEAM_HEADER]));
+  const { approvalTimeoutMs } = publicSettings(ctx);
+  const settings = { remoteApprovals: false, notify: false, notifyLimits: false, ...(known ? { approvalTimeoutMs } : {}) };
+  sendJson(res, 200, { app: APP_ID, ...(known ? { version: ctx.version } : {}), authenticated, settings });
+}
+
+/**
+ * The only routes the tunnel reaches (ADR 0019): the forwarder's (proof, hook) and the limits
  * mod's belong to this computer, and answer 403 through it whatever they carry.
  */
 const TUNNEL_ROUTES = new Set(['/api/health', '/api/hello', '/api/team']);
