@@ -239,8 +239,9 @@ shows up as a crew of its own.
    signed as in step 5 and has `notes`, an array of 1 to 4 strings, each of which is still non-empty
    and at most 2,000 characters once cleaned as `noteText()` in `public/js/core/notes.js` cleans
    it, prints `{"hookSpecificOutput":{"hookEventName":<this hook's name>,"additionalContext":<text>}}`,
-   where `<text>` is, for each note, `Note from <user> via Andary (sent from the Andary town while
-   you work, not typed in the terminal):\n<note>`, joined by a blank line. `<user>` is the user
+   where `<text>` is, for each note, `The user (<user>) sent you this message from Andary while you
+   work:\n<note>` (`noteHeader()`: factual words, as text framed as a system command can trip
+   Claude's prompt-injection defences), joined by a blank line. `<user>` is the user
    the forwarder runs as (letters, digits, `.`, `_`, `-`, at most 40; else `the owner`). If any note
    fails, nothing is printed. The reply's own `output` is never printed for these hooks. Nothing
    else is ever printed.
@@ -306,6 +307,7 @@ Server → browser:
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
 { t: 'note', n: Note }                  // §4.15, owners only: on queue and on every status change
+{ t: 'note-reply', ref: string|null, ok: boolean, id?: string /* the queued note */, error?: string }   // §4.15, to the sender of a note only
 { t: 'settings', settings: {...} }
 { t: 'usage', u: UsageRecord, days: UsageDay[] }   // §4.8, when an agent's totals change
 { t: 'progress', p: { points, days: string[] } }   // §4.9, when a point or a busy day is added
@@ -328,7 +330,7 @@ Browser → server:
 
 ```js
 { t: 'decide', id, decision: 'allow'|'deny', message?: string /* ≤ 500 chars */, always?: number /* allow only: a suggestion's index */, stop?: true /* deny only: "Deny and stop" */ }
-{ t: 'note', sessionId, agentId?: string /* a helper; absent for the lead */, text: string /* ≤ 2,000 chars once cleaned */ }   // §4.15
+{ t: 'note', ref?: string /* the sender's own id, [\w-]{1,64}, echoed in note-reply */, sessionId, agentId?: string /* a helper; absent for the lead */, text: string /* ≤ 2,000 chars once cleaned */ }   // §4.15
 { t: 'settings', settings: { remoteApprovals: boolean } }
 { t: 'notify-test' }   // sends a test phone notification (rate limits apply)
 { t: 'digest', since: number }   // §4.13: what each crew did since then (ms, the server's clock; 0: all kept)
@@ -973,10 +975,13 @@ Note = { id, status: 'queued'|'delivered'|'expired', sessionId, agentId: string|
   (never one from `/api/team`, whatever its id), whose latest body declared `notes` in `caps`
   ("… older version … andary install …" otherwise), that has not ended (`SessionEnd`), and for a
   helper whose hooks came with that `agent_id` and that has not finished (`SubagentStop`). The
-  server remembers at most 500 sessions and 100 helpers each. Refusals answer
-  `{t:'error', message: 'The note was not sent: <why>.'}`.
-- **Text.** `noteText()`: CR LF and lone CR become LF, a tab a space, other control and format
-  characters and lone surrogates are removed, trailing spaces of each line and more than one blank
+  server remembers at most 500 sessions and 100 helpers each. The sender gets
+  `{t:'note-reply', ref, ok: true, id}` once the note is queued, or
+  `{t:'note-reply', ref, ok: false, error: 'The note was not sent: <why>.'}`, with the `ref` it
+  sent (`null` for none or a malformed one).
+- **Text.** `noteText()`: CR LF, a lone CR, U+2028 and U+2029 become LF, a tab a space, other
+  control and format characters, variation selectors, the Hangul fillers (U+115F, U+1160, U+3164,
+  U+FFA0) and lone surrogates are removed, trailing spaces of each line and more than one blank
   line in a row go, then the ends are trimmed. Empty is refused; longer than 2,000 characters is
   refused, never cut.
 - **Bounds.** At most 5 queued per agent and 100 in all; 12 notes a minute with bursts of 5, from
@@ -985,9 +990,14 @@ Note = { id, status: 'queued'|'delivered'|'expired', sessionId, agentId: string|
   normalised), oldest first, at most 4, when its body declares `notes` and its hook (as the agent
   named it) is one of `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`
   (Claude Code) or `PreToolUse`, `PostToolUse`, `UserPromptSubmit` (Codex) (`carriesNotes()`).
-  They are marked `delivered` with that `hook` as the reply is written; the forwarder prints them
-  (§4.3 step 5a). The hooks run in the background, so the agent reads them at its next step: its
-  next model call, or with your next prompt when it is idle.
+  They leave the queue while the reply is on its way, and are marked `delivered` with that `hook`
+  once the reply is written out ("sent with its <hook> hook": nothing confirms the agent read
+  them); the forwarder prints them (§4.3 step 5a). They go back in the queue, oldest first, when
+  the forwarder is gone: its socket ended or closed once the server has polled it after the request,
+  or the response closes before it finishes (or they expire, if their agent can no longer get one).
+  The hooks run in the background, so the agent reads them at its next step: its next model call,
+  or with your next prompt when it is idle. Codex adds a background hook's output at its next safe
+  point, or with the next turn when none is active, and drops it when the session ends.
 - **Expiry.** A note expires after 30 minutes (checked every 15 s and when a hook comes), when its
   session ends ("the session ended"), when its helper finishes ("the helper finished"), when the
   session's forwarder stops declaring `notes`, or when the server forgets the session. The server
@@ -997,9 +1007,12 @@ Note = { id, status: 'queued'|'delivered'|'expired', sessionId, agentId: string|
   note's text. The director shows an envelope on the agent's name badge while notes wait (`✉`,
   `✉2` …, before a combo chip). The inspector's "Send a note" section (`ui/agent-note.js`) shows in
   a live town for the owner, not for a teammate's crew (it says why) or a finished agent, with the
-  explanation "It arrives at the agent's next step …, not in your terminal", a caution for a helper
-  or a Codex agent (delivery not confirmed), and the agent's last 3 notes with their state.
-  Ctrl/Cmd+Enter sends. The demo has no notes.
+  explanation "It arrives at the agent's next step …, not in your terminal" (and that Ctrl/Cmd+Enter
+  sends), a line for a Codex agent (when Codex takes it) or a helper (delivery not confirmed), and
+  the agent's last 3 notes with their state. A sent note stays in the field, read-only, until its
+  `note-reply`: queued empties it ("Queued: it reaches the agent at its next step"), refused keeps
+  it with the reason (`[data-testid="send-note-status"]`), and no answer within 10 s gives it back.
+  The demo has no notes.
 
 ## 5. Browser: events, store, director
 
@@ -1562,7 +1575,7 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="demo-button"]` | starts the simulation (shown when there is nothing live to watch) |
 | `[data-testid="crew-list"]` | crews panel; children `[data-testid="crew"][data-session-id]` |
 | `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects; `data-need` is the level of what it needs you for; a lead's row holds its context in use in `[data-testid="crew-context"]` (hidden without one, §4.8); `[data-testid="agent-note"]` inside it, a note (an edit of a file another agent changed) |
-| `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn, stop, stuck alert or conflict aside; `[data-testid="agent-context"]` holds the exact context in use (§4.8); `[data-testid="inspector-note"]`, its newest note; `[data-testid="send-note-input"]` and `[data-testid="send-note"]` send a note to the agent (§4.15), `[data-testid="send-note-why"]` says why it cannot, `[data-testid="send-note-caution"]` that delivery is not confirmed, and `[data-testid="sent-notes"]` lists its notes, `[data-testid="sent-note"][data-status]` |
+| `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn, stop, stuck alert or conflict aside; `[data-testid="agent-context"]` holds the exact context in use (§4.8); `[data-testid="inspector-note"]`, its newest note; `[data-testid="send-note-input"]` and `[data-testid="send-note"]` send a note to the agent (§4.15), `[data-testid="send-note-why"]` says why it cannot, `[data-testid="send-note-status"]` that it is being sent or why it was refused, `[data-testid="send-note-caution"]` that delivery is not confirmed, and `[data-testid="sent-notes"]` lists its notes, `[data-testid="sent-note"][data-status]` |
 | `[data-testid="waiting-for-you"]` | the masthead's "N need you" button (`data-level` is the most urgent level); click goes to the next item |
 | `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn, a stop, a stuck alert or a conflict aside |
 | `[data-testid="catch-up-button"]` | the masthead's "Catch me up", offered after time away (`W` opens the dialog any time) |

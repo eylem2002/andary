@@ -204,15 +204,19 @@ You can steer an agent from the town without going back to its terminal.
 
 - **Send a note.** Open an agent's details (click it, or its row) and type in **Send a note**. The
   note waits in Andary and reaches the agent at its **next step**: its next tool call, or your
-  next prompt. It never appears in your terminal; Claude Code (or Codex) gives it to the agent as
-  context headed "Note from <you> via Andary". An agent that is idle reads it only once you type
-  your next prompt. The activity log and the agent's details follow each note: queued, handed to
-  the agent (with the hook that carried it), or expired; the agent carries a small envelope until
-  then. A note is at most 2,000 characters and waits at most 30 minutes; at most five wait for one
+  next prompt (Ctrl+Enter, or ⌘+Enter on a Mac, sends it). It never appears in your terminal;
+  Claude Code (or Codex) gives it to the agent as context that starts "The user (<you>) sent you
+  this message from Andary while you work". An agent that is idle reads it only once you type your
+  next prompt. An agent may treat a message that did not come through its terminal with care and
+  ask you to confirm it there before acting on it. Your text stays in the field until Andary has
+  queued the note; a refused note keeps it, with the reason. The activity log and the agent's
+  details follow each note: queued, sent with the hook that carried it (nothing confirms the agent
+  read it), or expired; the agent carries a small envelope until then. A note is at most 2,000 characters and waits at most 30 minutes; at most five wait for one
   agent. Only you, signed in to your own town, can send one, and only to agents on this computer:
-  never through a team town's view link, and never to a teammate's crew. Notes to a helper or to
-  Codex are sent the same way, but Andary has not confirmed yet that they read them, and the
-  details say so. An agent whose hook comes from an older Andary gets none until you run
+  never through a team town's view link, and never to a teammate's crew. Codex takes a note at its
+  next safe point, or with the next turn, and drops one still waiting when its session ends. Notes
+  to a helper are sent the same way, but Andary has not confirmed yet that helpers read them, and
+  the details say so. An agent whose hook comes from an older Andary gets none until you run
   `andary install` (or update the plugin) and restart its session; the town says so when you try.
 - **Deny and stop.** With remote approvals on, a Claude Code request's card also offers **Deny and
   stop**: it denies the request and stops the agent's turn, so it waits for you in the terminal.

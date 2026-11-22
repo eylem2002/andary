@@ -206,9 +206,22 @@ test('a note from the agent details reaches the agent at its next step, and the 
   const result = await town.sendHook(hook('UserPromptSubmit', { prompt: 'Carry on' }));
   const context = JSON.parse(result.stdout).hookSpecificOutput;
   expect(context.hookEventName).toBe('UserPromptSubmit');
-  expect(context.additionalContext).toMatch(/^Note from .+ via Andary \(sent from the Andary town while you work, not typed in the terminal\):\nUse the staging database, not prod\.$/);
-  await expect(note).toContainText('Note handed to the agent with its UserPromptSubmit hook');
-  await expect(page.getByTestId('log-entry').filter({ hasText: 'Note handed to the agent with its UserPromptSubmit hook' })).toHaveCount(1);
+  expect(context.additionalContext).toMatch(/^The user \(.+\) sent you this message from Andary while you work:\nUse the staging database, not prod\.$/);
+  await expect(note).toContainText('Note sent with its UserPromptSubmit hook');
+  await expect(page.getByTestId('log-entry').filter({ hasText: 'Note sent with its UserPromptSubmit hook' })).toHaveCount(1);
+
+  // A refused note keeps its text, with the reason (here: five already wait, or too many at once).
+  const input = inspector.getByTestId('send-note-input');
+  const status = inspector.getByTestId('send-note-status');
+  for (let i = 1; i <= 7; i++) {
+    await input.fill(`Note number ${i}`);
+    await inspector.getByTestId('send-note').click();
+    await expect(input).not.toHaveAttribute('readonly');
+    if (await status.isVisible()) break;
+    await expect(input).toHaveValue('');
+  }
+  await expect(status).toContainText(/^The note was not sent: (This agent already has 5 notes waiting|Too many notes at once).*Your text is kept\.$/);
+  await expect(input).toHaveValue(/^Note number \d$/);
 });
 
 test('a file change is shown in full before it is approved, and a denial can say why', async ({ page }) => {

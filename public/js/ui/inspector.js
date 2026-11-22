@@ -174,7 +174,7 @@ export function createInspector(ctx) {
     }
   }
 
-  return { el, open, hide, render, tick, get agentKey() { return agentKey; } };
+  return { el, open, hide, render, tick, noteReply: toAgent.reply, get agentKey() { return agentKey; } };
 }
 
 /**

@@ -850,7 +850,7 @@ describe('store: notes to agents', () => {
     const lines = state().log.filter((entry) => entry.kind === 'note');
     assert.deepEqual(lines.map((entry) => [entry.agentKey, entry.text, entry.level]), [
       [MAIN, "Note queued for the agent's next step — “Use the staging db”", 'info'],
-      [MAIN, 'Note handed to the agent with its PostToolUse hook — “Use the staging db”', 'info'],
+      [MAIN, 'Note sent with its PostToolUse hook — “Use the staging db”', 'info'],
       [MAIN, 'Note expired: the session ended — “Use the staging db”', 'warn'],
     ]);
     assert.equal(changes.filter((c) => c.type === 'note').length, 3);

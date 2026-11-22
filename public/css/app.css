@@ -2015,6 +2015,11 @@ body {
   line-height: 1.4;
 }
 
+.hud-note-status.is-error {
+  color: var(--error);
+  font-weight: 700;
+}
+
 .hud-note-list {
   display: grid;
   gap: 6px;

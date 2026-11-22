@@ -297,7 +297,38 @@ async function handleHook(ctx, req, res) {
     return;
   }
   // A hook that can carry notes takes those waiting for its agent (CONTRACTS §4.15).
-  sendHookReply(ctx, req, res, null, res.destroyed ? [] : ctx.notes.take(body));
+  const notes = ctx.notes.take(body);
+  if (notes.texts.length && !(await forwarderWaits(req, res))) {
+    notes.sent(false);
+    return;
+  }
+  if (notes.texts.length) settleNotes(res, notes);
+  sendHookReply(ctx, req, res, null, notes.texts);
+}
+
+/**
+ * Whether the forwarder still waits for this reply. It never closes its side of the connection
+ * before the answer, so a socket whose other end has ended or closed belongs to a forwarder that
+ * gave up (it waits 1.5 s): writing to it still "finishes", and notes sent there would be lost.
+ * Asked once the event loop has polled the socket again (two turns: the check phase comes before
+ * the next poll), so an end that came with the request, or while the server was busy, is known.
+ * @param {Request} req
+ * @param {Response} res
+ */
+async function forwarderWaits(req, res) {
+  for (let turn = 0; turn < 2; turn++) await new Promise((resolve) => setImmediate(resolve));
+  return !res.destroyed && !req.socket.destroyed && !req.socket.readableEnded;
+}
+
+/**
+ * Marks the notes a reply carries as sent once the reply is written out, and puts them back in
+ * the queue when the connection closes first: the forwarder had gone, so they went nowhere.
+ * @param {Response} res
+ * @param {{ sent: (ok: boolean) => void }} notes
+ */
+function settleNotes(res, notes) {
+  res.once('finish', () => notes.sent(true));
+  res.once('close', () => notes.sent(res.writableFinished));
 }
 
 /**

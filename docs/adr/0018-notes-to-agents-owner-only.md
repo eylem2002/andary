@@ -28,7 +28,9 @@ to it; neither must gain a way to steer anyone's agent.
   hooks whose output the agent reads as context. The forwarder checks the signature, the hook,
   the number of notes (at most 4) and each note again (a string of at most 2,000 characters after
   removing control and format characters), drops all of them if one fails, and builds the
-  `additionalContext` text itself, with its own header naming the user it runs as. A reply's own
+  `additionalContext` text itself, with its own factual header naming the user it runs as ("The
+  user (<name>) sent you this message from Andary while you work:"), never words that pose as a
+  system command. A reply's own
   `hookSpecificOutput` is never passed on for these hooks.
 - **Stopping is not a note.** "Deny and stop" is a permission decision (`interrupt: true` on a
   deny), from a held approval only, so remote approvals must be on (ADR 0005). The forwarder passes

@@ -15,6 +15,8 @@ import { agentKeyOf } from '../core/ids.js';
 /** @typedef {import('../core/notes.js').Note} Note */
 
 const NOTES_SHOWN = 3;
+/** How long a sent note waits for the server's answer before the field is given back. */
+const REPLY_TIMEOUT_MS = 10_000;
 
 /**
  * Whether the inspector offers a note to this agent, and if not, why (null: say nothing).
@@ -31,40 +33,67 @@ export function noteOffer(view, agent, session) {
 }
 
 /**
- * A caution for agents whose hooks have not been seen to deliver a note yet ('' for none).
+ * What to know about a note to this agent ('' for nothing): when Codex takes it (its docs), or
+ * that a helper's delivery is not confirmed.
  * @param {AgentState} agent
  * @param {import('./types.js').Session|undefined} session
  */
 export function noteCaution(agent, session) {
-  const helper = agent.agentId !== null;
-  const codex = session?.source === 'codex';
-  if (!helper && !codex) return '';
-  return `${codex ? 'Codex' : 'A helper'} may not read notes yet: Andary has not confirmed that ${codex ? 'its' : 'a helper’s'} background hooks pass them on.`;
+  if (session?.source === 'codex') return 'Codex adds a note at its next safe point, or with the next turn when it is idle; a note still waiting when the session ends is dropped.';
+  if (agent.agentId !== null) return 'A helper may not read notes yet: Andary has not confirmed that a helper’s background hooks pass them on.';
+  return '';
 }
 
 /** @param {HudContext} ctx */
 export function createNoteSection(ctx) {
   const id = 'hud-agent-note';
   const field = /** @type {HTMLTextAreaElement} */ (h('textarea', { class: 'hud-input hud-note-field', id, rows: '3', maxlength: String(MAX_NOTE_CHARS), spellcheck: 'true', 'aria-describedby': `${id}-help`, 'data-testid': 'send-note-input' }));
-  const help = h('p', { class: 'hud-note-help', id: `${id}-help`, text: 'It arrives at the agent’s next step (its next tool call or your next prompt), not in your terminal. Andary keeps it for 30 minutes.' });
+  const help = h('p', { class: 'hud-note-help', id: `${id}-help`, text: 'It arrives at the agent’s next step (its next tool call or your next prompt), not in your terminal. Andary keeps it for 30 minutes. Ctrl+Enter (⌘+Enter on a Mac) sends it.' });
   const caution = h('p', { class: 'hud-note-help', 'data-testid': 'send-note-caution', hidden: true });
-  const send = h('button', { type: 'button', class: 'hud-btn hud-btn--small', 'data-testid': 'send-note' }, icon('mail', { size: 16 }), 'Send note');
+  const send = /** @type {HTMLButtonElement} */ (h('button', { type: 'button', class: 'hud-btn hud-btn--small', 'data-testid': 'send-note' }, icon('mail', { size: 16 }), 'Send note'));
   const why = h('p', { class: 'hud-note-help', 'data-testid': 'send-note-why', hidden: true });
+  // While a note waits for the server's answer, and why it was refused: the text stays until it is queued.
+  const status = h('p', { class: 'hud-note-help hud-note-status', 'data-testid': 'send-note-status', hidden: true });
   const list = h('ul', { class: 'hud-note-list', 'data-testid': 'sent-notes' });
-  const form = h('div', { class: 'hud-note-form' }, h('label', { for: id, text: 'Note for this agent' }), field, help, caution, send);
+  const form = h('div', { class: 'hud-note-form' }, h('label', { for: id, text: 'Note for this agent' }), field, help, caution, send, status);
   const el = h('div', {}, form, why, list);
   /** @type {{ sessionId: string, agentId: string|null }|null} */
   let target = null;
+  /** The note waiting for the server's answer. @type {{ ref: string, timer: ReturnType<typeof setTimeout> }|null} */
+  let pending = null;
+  let sent = 0;
+
+  /** @param {string} text @param {boolean} [error] */
+  function showStatus(text, error = false) {
+    setText(status, text);
+    status.classList.toggle('is-error', error);
+    setHidden(status, !text);
+  }
+
+  /** Ends the wait: the field can be edited and sent again. */
+  function settle() {
+    if (pending) clearTimeout(pending.timer);
+    pending = null;
+    field.readOnly = false;
+    send.disabled = false;
+  }
 
   function submit() {
     const text = field.value.trim();
-    if (!target || !text) return;
-    if (!ctx.controls.sendNote(target.sessionId, target.agentId, text)) {
-      ctx.toasts.show({ tone: 'error', icon: 'warning', title: 'Not connected to Andary', body: 'The note was not sent.' });
+    if (!target || !text || pending) return;
+    sent += 1;
+    const ref = `note-${Date.now().toString(36)}-${sent}`;
+    if (!ctx.controls.sendNote(target.sessionId, target.agentId, text, ref)) {
+      showStatus('Not connected to Andary: the note was not sent. Your text is kept.', true);
       return;
     }
-    field.value = '';
-    ctx.announcer.polite('Note sent. It reaches the agent at its next step.');
+    field.readOnly = true;
+    send.disabled = true;
+    showStatus('Sending…');
+    pending = { ref, timer: setTimeout(() => {
+      settle();
+      showStatus('Andary did not answer: the note may not have been sent. Your text is kept.', true);
+    }, REPLY_TIMEOUT_MS) };
   }
   send.addEventListener('click', submit);
   // Ctrl or Cmd + Enter sends; Enter alone is a new line.
@@ -77,6 +106,24 @@ export function createNoteSection(ctx) {
 
   return {
     el,
+    /**
+     * The server's answer to the note being sent: queued (the field empties) or refused (the
+     * text stays, with the reason). Answers to other notes are ignored.
+     * @param {{ ref: string|null, ok: boolean, error?: string }} answer
+     */
+    reply(answer) {
+      if (!pending || answer.ref !== pending.ref) return;
+      settle();
+      if (answer.ok) {
+        field.value = '';
+        showStatus('');
+        ctx.announcer.polite('Queued: it reaches the agent at its next step.');
+        return;
+      }
+      const why = answer.error ?? 'The note was not sent.';
+      showStatus(`${why} Your text is kept.`, true);
+      ctx.announcer.polite(why);
+    },
     /**
      * @param {StoreState} state @param {AgentState} agent @param {import('./types.js').Session|undefined} session
      * @returns {boolean} whether the section shows anything

@@ -1074,20 +1074,25 @@ section.
      next conversation turn", as context the terminal does not show (hooks reference, "How async
      hooks execute"). In practice that is the next model call after the hook that carried it
      finished: after the agent's next tool call, or with your next prompt. An idle session reads it
-     only once you type. The town says "handed to the agent with its <hook> hook", never "read".
+     only once you type. The town says "sent with its <hook> hook", never "read".
 187. **The hooks that carry notes** are PreToolUse, PostToolUse, PostToolUseFailure and
      UserPromptSubmit for Claude Code, and PreToolUse, PostToolUse and UserPromptSubmit for Codex
      (whose docs list `additionalContext` for those). Not SessionStart (Claude Code skips repeated
      async SessionStart text), not Stop or SubagentStop (their context keeps a turn going), not
      PermissionRequest (a decision only). Claude Code honoured this from an async hook in 2.1.330.
-188. **Codex and helpers: delivery is not verified.** Codex documents `additionalContext` but
-     says background hooks "can't control the operation that triggered them"; whether a background
-     hook's context reaches the model was not tested. A note for a helper (subagent) is handed to
-     that helper's own hooks; whether Claude Code gives a subagent's async hook output to that
-     subagent, or to the lead, was not tested either. The inspector says so for both.
-189. **"Delivered" means sent in the reply.** The server marks a note delivered when it writes the
-     reply that carries it. If the forwarder gave up first (1.5 s) or Claude Code dropped the async
-     output (a `-p` run ending), the note is lost; the owner can send it again.
+188. **Codex documents it; helpers are not verified.** Codex's hooks docs say a background hook's
+     output is added at the next safe point, waits for the next turn when none is active, and is
+     dropped when the session ends; the inspector says that for a Codex agent. It was not tried
+     with a live Codex here. A note for a helper (subagent) is sent with that helper's own hooks;
+     whether Claude Code gives a subagent's async hook output to that subagent, or to the lead,
+     was not tested. The inspector says so.
+189. **"Delivered" means sent in the reply** ("sent with its <hook> hook" in the town): nothing
+     confirms the agent read it. The server takes notes out of the queue for a reply and puts them
+     back when the forwarder is gone: its socket ended or closed by the time the server has polled
+     it once more after the request (two event-loop turns), or the response closed before it
+     finished. A forwarder that gives up after that point, in the instant the reply is written,
+     still loses its notes, as does a `-p` run that ends before Claude Code delivers async output;
+     the owner can send it again.
 190. **The sender's name is the forwarder's user name** (`os.userInfo().username`, letters, digits,
      `.`, `_`, `-`, at most 40; otherwise "the owner"). Only the owner can send notes, and only to
      agents of this computer, so the user running the forwarder is the person who wrote the note.
@@ -1096,8 +1101,9 @@ section.
      all, 4 per hook reply, 30 minutes before a note expires (checked every 15 s and when a hook
      comes), notes expire when the session ends or the helper finishes (SubagentStop). 12 notes a
      minute with bursts of 5, counted only for notes that would be queued.
-192. **Line breaks are kept** in a note (it is the owner's own text), while controls, format
-     characters (bidirectional overrides, zero-width characters) and lone surrogates are removed
+192. **Line breaks are kept** in a note (it is the owner's own text; U+2028 and U+2029 become line
+     breaks), while controls, format characters (bidirectional overrides, zero-width characters),
+     variation selectors, the Hangul fillers and lone surrogates are removed
      and blank lines collapsed. The server and the forwarder clean a note the same way
      (`noteText`, one table through both).
 193. **Notes are not shown in the demo**: the simulation has no agent to reach. The note field is
@@ -1115,3 +1121,15 @@ section.
      `CLAUDE_CODE_MESSAGING_SOCKET` (cross-session messaging), which could put a note between tool
      calls or start a turn in an idle session. Its message format was not tested, so it is not
      built; a later change can deliver notes through it when it is known, falling back to hooks.
+197. **The note's header is factual.** The Claude Code hooks docs warn that context framed as an
+     out-of-band system command can trigger Claude's prompt-injection defences: Claude then shows
+     it to the user instead of acting on it. The header says plainly what the text is: "The user
+     (<name>) sent you this message from Andary while you work:". Whether Claude acts on a note,
+     or asks in the terminal first, was not tested with a live Claude Code here; the README says an
+     agent may ask you to confirm.
+198. **The browser keeps a note's text until the server answers.** Each note carries a `ref` of the
+     browser's own; the server answers only that browser with `note-reply` (queued or refused, with
+     the reason), so a refused note is never lost. Without an answer in 10 s the field is given
+     back and says the note may not have been sent.
+199. **Four notes always fit.** Claude Code keeps at most 10,000 characters of `additionalContext`;
+     four notes of 2,000 characters with their headers (a 40-character name) come to about 8,400.

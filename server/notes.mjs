@@ -69,7 +69,8 @@ export function createNoteDesk({ onChange = () => {}, now = Date.now, ttlMs = NO
    * @param {Partial<Note>} patch
    */
   function settle(note, patch) {
-    queued.splice(queued.indexOf(note), 1);
+    const index = queued.indexOf(note);
+    if (index >= 0) queued.splice(index, 1);
     Object.assign(note, patch);
     settled.push(note);
     if (settled.length > MAX_SETTLED) settled.splice(0, settled.length - MAX_SETTLED);
@@ -176,19 +177,39 @@ export function createNoteDesk({ onChange = () => {}, now = Date.now, ttlMs = NO
     },
 
     /**
-     * The notes the reply to this hook carries (oldest first, at most MAX_NOTES_PER_HOOK), marked
-     * delivered with the hook's name; [] when it can carry none (its hook, or its forwarder).
+     * The notes the reply to this hook carries (oldest first, at most MAX_NOTES_PER_HOOK); none
+     * when it can carry none (its hook, or its forwarder). They leave the queue, so no other hook
+     * takes them, until `sent` says whether the reply went out: true marks them delivered (sent
+     * with this hook; nothing confirms the agent read them), false puts them back in the queue
+     * (the forwarder had gone), or expires them if their agent can no longer get one.
      * @param {{ source: 'claude'|'codex', caps: string[], event: Record<string, any> }} body
-     * @returns {string[]} their texts
+     * @returns {{ texts: string[], sent: (ok: boolean) => void }}
      */
     take(body) {
       const hook = text(body.event.hook_event_name);
-      if (!body.caps.includes(NOTES_CAP) || !carriesNotes(body.source, hook)) return [];
+      if (!body.caps.includes(NOTES_CAP) || !carriesNotes(body.source, hook)) return { texts: [], sent: () => {} };
       this.sweep();
       const due = queued.filter(forAgent(text(body.event.session_id), normalizeAgentId(body.event.agent_id))).slice(0, MAX_NOTES_PER_HOOK);
-      const at = now();
-      for (const note of due) settle(note, { status: 'delivered', deliveredAt: at, hook });
-      return due.map((note) => note.text);
+      for (const note of due) queued.splice(queued.indexOf(note), 1);
+      let done = false;
+      return {
+        texts: due.map((note) => note.text),
+        sent(ok) {
+          if (done) return;
+          done = true;
+          const at = now();
+          if (ok) {
+            for (const note of due) settle(note, { status: 'delivered', deliveredAt: at, hook });
+            return;
+          }
+          queued.push(...due);
+          queued.sort((a, b) => a.createdAt - b.createdAt);
+          for (const note of due) {
+            const why = refusal(sessions.get(note.sessionId), note.agentId);
+            if (why) settle(note, { status: 'expired', reason: why });
+          }
+        },
+      };
     },
 
     /** Expires the notes that waited too long. */

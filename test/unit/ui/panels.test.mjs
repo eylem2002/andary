@@ -113,10 +113,10 @@ describe('send a note', () => {
     assert.match(String(noteOffer(live, agent({ status: 'done' }), undefined).why), /has finished/);
   });
 
-  test('says when delivery is not confirmed: helpers and Codex', () => {
+  test('says when Codex takes a note, and that a helper\'s delivery is not confirmed', () => {
     assert.equal(noteCaution(agent({}), fixture({ source: 'claude' })), '');
     assert.match(noteCaution(agent({ agentId: 'h1' }), undefined), /^A helper may not read notes yet/);
-    assert.match(noteCaution(agent({}), fixture({ source: 'codex' })), /^Codex may not read notes yet/);
+    assert.match(noteCaution(agent({}), fixture({ source: 'codex' })), /^Codex adds a note at its next safe point, or with the next turn when it is idle; a note still waiting when the session ends is dropped\.$/);
   });
 });
 

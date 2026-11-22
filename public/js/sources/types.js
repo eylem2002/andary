@@ -9,8 +9,8 @@
  * @property {(id: string, decision: 'allow'|'deny', message?: string, always?: number, stop?: boolean) => boolean} decide  answer a held
  *   permission request: a denial may say why, and stop the agent too (`stop`, "Deny and stop"); an allow may save one
  *   of its suggestions (`always`, its index, CONTRACTS §4.5)
- * @property {(sessionId: string, agentId: string|null, text: string) => boolean} [sendNote]  live: a note for one agent's
- *   next step (§4.15); the demo has none
+ * @property {(sessionId: string, agentId: string|null, text: string, ref: string) => boolean} [sendNote]  live: a note for
+ *   one agent's next step (§4.15), answered with its `ref`; the demo has none
  * @property {(since: number) => boolean} requestDigest  ask what each crew did since a time; the answer comes as the source's onDigest
  * @property {(on: boolean) => unknown} [setRemoteApprovals]  live: the server's switch
  * @property {() => boolean} [notifyTest]                    live: a test phone notification

@@ -47,7 +47,7 @@ async function boot() {
     prefs,
     controls: {
       decide: (id, decision, message, always, stop) => source?.decide(id, decision, message, always, stop) ?? false,
-      sendNote: (sessionId, agentId, text) => source?.sendNote?.(sessionId, agentId, text) ?? false,
+      sendNote: (sessionId, agentId, text, ref) => source?.sendNote?.(sessionId, agentId, text, ref) ?? false,
       setRemoteApprovals: (on) => source?.setRemoteApprovals?.(on),
       startDemo: () => switchToDemo(),
       leaveDemo: () => location.assign(withoutParam('demo')),
@@ -112,6 +112,7 @@ async function boot() {
       onNotifyTest: (ok) => hud.notify(ok ? { icon: 'bell', title: 'Test notification sent', body: 'Check the ntfy app on your phone.' } : { tone: 'error', icon: 'warning', title: 'The test notification was not sent', body: 'The server could not reach ntfy, or sent one a moment ago.' }),
       onDigest: (digest) => hud.setDigest(digest),
       onAway: (away, offset) => hud.setAway(away, offset),
+      onNoteReply: (reply) => hud.noteReply(reply),
     });
   }
 

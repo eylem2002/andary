@@ -423,10 +423,10 @@ function decisionFrom(state, nonce, reply, event) {
 function noteText(raw) {
   if (typeof raw !== 'string') return null;
   const text = raw
-    .replace(/\r\n?/g, '\n')
+    .replace(/\r\n?|[\u2028\u2029]/g, '\n')
     .replace(/\t/g, ' ')
     // eslint-disable-next-line no-control-regex -- removing control characters is the point
-    .replace(/[\u0000-\u0009\u000B-\u001F\u007F-\u009F]|\p{Cf}|\p{Cs}/gu, '')
+    .replace(/[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u115F\u1160\u3164\uFFA0]|\p{Cf}|\p{Cs}|\p{Variation_Selector}/gu, '')
     .replace(/[^\S\n]+$/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -469,8 +469,10 @@ function notesFrom(state, nonce, reply, hook) {
   if (!Array.isArray(notes) || notes.length === 0 || notes.length > MAX_NOTES) return '';
   const texts = notes.map(noteText);
   if (texts.some((text) => text === null)) return '';
-  const from = senderName();
-  const additionalContext = texts.map((text) => `Note from ${from} via Andary (sent from the Andary town while you work, not typed in the terminal):\n${text}`).join('\n\n');
+  // Factual words, as noteHeader() in public/js/core/notes.js: text framed as a system command can
+  // trip Claude's prompt-injection defences.
+  const header = `The user (${senderName()}) sent you this message from Andary while you work:\n`;
+  const additionalContext = texts.map((text) => `${header}${text}`).join('\n\n');
   return JSON.stringify({ hookSpecificOutput: { hookEventName: hook, additionalContext } });
 }
 

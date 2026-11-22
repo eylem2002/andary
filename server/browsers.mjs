@@ -311,17 +311,20 @@ function sendDigest(ctx, connection, since) {
 }
 
 /**
- * Answers `{ t: 'note', sessionId, agentId?, text }` (CONTRACTS §4.15): the owner's note for one
- * of this computer's agents, queued for its next step. Viewers never get this far; a teammate's
- * agent is refused (server/notes.mjs). Notes that would be queued have a budget of their own,
- * besides the socket's.
+ * Answers `{ t: 'note', ref?, sessionId, agentId?, text }` (CONTRACTS §4.15): the owner's note for
+ * one of this computer's agents, queued for its next step. Viewers never get this far; a
+ * teammate's agent is refused (server/notes.mjs). Notes that would be queued have a budget of
+ * their own, besides the socket's. The browser that sent it gets `{ t: 'note-reply', ref, ok,
+ * error? }` with its own `ref`, so it keeps the text until the note is queued, and keeps it with
+ * the reason when it is refused.
  * @param {import('./app.mjs').TownContext} ctx
  * @param {import('./websocket.mjs').WsConnection} connection
  * @param {Record<string, unknown>} message
  */
 function sendNote(ctx, connection, message) {
   const result = ctx.notes.send(message, () => ctx.noteLimiter.take());
-  if ('error' in result) sendError(ctx, connection, `The note was not sent: ${result.error}.`);
+  const ref = typeof message.ref === 'string' && /^[\w-]{1,64}$/.test(message.ref) ? message.ref : null;
+  ctx.hub.send(connection, 'error' in result ? { t: 'note-reply', ref, ok: false, error: `The note was not sent: ${result.error}.` } : { t: 'note-reply', ref, ok: true, id: result.note.id });
 }
 
 /**
