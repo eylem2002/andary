@@ -41,17 +41,20 @@ function teammateName(words) {
 }
 
 /**
- * The base address teammates reach the town at.
+ * The address the invite names: --url, else the town's Quick Tunnel (--tunnel), else its network
+ * address (the name on its certificate with HTTPS).
  * @param {Record<string, any>} values
  * @param {import('../state-file.mjs').ServerState|null} state
+ * @returns {{ base: string, viaTunnel: boolean, lan: string|undefined }}
  */
-function baseAddress(values, state) {
-  const port = state?.port ?? DEFAULT_PORT;
+function inviteAddress(values, state) {
   const lan = lanAddresses()[0];
+  if (values.url) return { base: parseTeamUrl(values.url, '--url'), viaTunnel: false, lan };
+  if (state?.tunnel?.url) return { base: state.tunnel.url, viaTunnel: true, lan };
   // With a certificate, the address must be the name on it (the first --team-host).
   const scheme = state?.tls ? 'https' : 'http';
   const address = state?.tls ? (state.teamHosts?.[0] ?? lan) : lan;
-  return { base: values.url ? parseTeamUrl(values.url, '--url') : `${scheme}://${address ?? '127.0.0.1'}:${port}`, lan };
+  return { base: `${scheme}://${address ?? '127.0.0.1'}:${state?.port ?? DEFAULT_PORT}`, viaTunnel: false, lan };
 }
 
 /**
@@ -68,7 +71,7 @@ function invite(name, values, home, io) {
   const { nonce } = roster.people[name];
   const secret = /** @type {string} */ (teamSecret(home));
   const state = readStateFile(home);
-  const { base, lan } = baseAddress(values, state);
+  const { base, viaTunnel, lan } = inviteAddress(values, state);
   // The key goes in the environment: as an argument it would sit in ps and the shell history.
   const command = `ANDARY_TEAM_KEY=${memberKey(secret, name, nonce)} andary start --share-to ${base}`;
   io.out(`Invite for ${name}. Send them these two lines privately: the key lets anyone add sessions to your town as ${name},`);
@@ -81,15 +84,35 @@ function invite(name, values, home, io) {
   io.out(`    ${base}/?me=${encodeURIComponent(personToken(secret, name, nonce))}`);
   io.out('');
   io.out('Whoever has a personal link or the view link sees every crew\'s prompts, commands, file paths');
-  io.out('and edits, yours included, over plain HTTP: share them only with the team, on a network you trust.');
+  if (viaTunnel) {
+    io.out('and edits, yours included. This address is on the internet (a Cloudflare Quick Tunnel): the key');
+    io.out('and the links are all that protect it, and it changes when the town restarts (then send a new invite).');
+  } else if (base.startsWith('https:')) {
+    io.out('and edits, yours included: share them only with the team.');
+  } else {
+    io.out('and edits, yours included, over plain HTTP: share them only with the team, on a network you trust.');
+  }
   io.out(`${Object.keys(roster.people).length} of 6 homes taken. The view-only link for anyone else: ${cliInvocation()} team view-link`);
-  if (!values.url && !lan) io.out('No network address found: pass the address teammates use with --url http://<address>:<port>.');
+  inviteNotes(values, state, base, lan, io);
+  io.out(`Revoke ${name}'s key and link with: ${cliInvocation()} team remove ${name}; everyone's with: ${cliInvocation()} team reset`);
+  return 0;
+}
+
+/**
+ * What may still stop the invite from working.
+ * @param {Record<string, any>} values
+ * @param {import('../state-file.mjs').ServerState|null} state
+ * @param {string} base
+ * @param {string|undefined} lan
+ * @param {import('./io.mjs').CliIo} io
+ */
+function inviteNotes(values, state, base, lan, io) {
+  if (state?.tunnel && !state.tunnel.url) io.out(`The town's tunnel is down (${state.tunnel.error ?? 'cloudflared stopped'}): restart it with ${cliInvocation()} start --team --tunnel`);
+  if (!values.url && !state?.tunnel?.url && !lan) io.out('No network address found: pass the address teammates use with --url http://<address>:<port>.');
   if (!state) io.out(`The team town is not running: start it with ${cliInvocation()} start --team`);
   else if (!state.team) io.out(`The running town is not a team host: restart it with ${cliInvocation()} start --team`);
   const host = new URL(base).hostname;
-  if (values.url && !/^[\d.]+$/.test(host)) io.out(`For the view link to work at ${host}, start the team town with --team-host ${host}`);
-  io.out(`Revoke ${name}'s key and link with: ${cliInvocation()} team remove ${name}; everyone's with: ${cliInvocation()} team reset`);
-  return 0;
+  if (values.url && !/^[\d.]+$/.test(host) && !host.endsWith('.trycloudflare.com')) io.out(`For the view link to work at ${host}, start the team town with --team-host ${host}`);
 }
 
 /**
@@ -111,7 +134,7 @@ function remove(name, home, io) {
  */
 function viewLink(values, home, io) {
   const secret = /** @type {string} */ (teamSecret(home));
-  const { base } = baseAddress(values, readStateFile(home));
+  const { base } = inviteAddress(values, readStateFile(home));
   io.out('The team town\'s view-only link (no character, no home):');
   io.out(`  ${base}/?view=${viewToken(secret)}`);
   io.out('Whoever has it sees every crew\'s prompts, commands, file paths and edits: share it only with the team.');

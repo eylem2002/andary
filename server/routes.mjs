@@ -1,6 +1,6 @@
 // HTTP routes (CONTRACTS §4.4). Every response carries the security headers; every request must
 // name one of our own hosts.
-import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, PROOF_HEADER, browserRole, hasHookSecret, proveServer, safeEqual, signHookReply } from './auth.mjs';
+import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, PROOF_HEADER, allowedHostsFor, browserRole, hasHookSecret, isTunnelled, proveServer, safeEqual, signHookReply } from './auth.mjs';
 import { TEAM_HEADER } from './team.mjs';
 import { offeredSuggestions } from './approvals.mjs';
 import { sourceOf } from './adapters/index.mjs';
@@ -8,7 +8,7 @@ import { ingestHook, ingestTeam } from './ingest.mjs';
 import { LIMITS_BODY_BYTES, parseLimitsReport } from './limits.mjs';
 import { APP_ID, LIMITS } from './config.mjs';
 import { publicSettings } from './browsers.mjs';
-import { BAD_TOKEN_PAGE, HttpError, readBody, sendHtml, sendJson, sendText } from './http-util.mjs';
+import { BAD_TOKEN_PAGE, HttpError, LOCAL_SIGN_IN_PAGE, readBody, sendHtml, sendJson, sendText } from './http-util.mjs';
 import { isAllowedHost } from './security.mjs';
 import { cardShowsAll } from '../public/js/core/card-fields.js';
 import { isObject } from '../public/js/core/text.js';
@@ -29,8 +29,10 @@ export async function handleRequest(ctx, req, res) {
   for (const [name, value] of Object.entries(ctx.headers)) res.setHeader(name, value);
   // A teammate's relay may reach the host by any name (a LAN address, a VPN name); its key, not
   // the Host header, is what authenticates it, and no browser can send that header cross-site.
-  const teamPost = Boolean(ctx.team) && req.method === 'POST' && req.url === '/api/team';
-  if (!teamPost && !isAllowedHost(req.headers.host, ctx.allowedHosts)) {
+  // Through the tunnel (ADR 0019) every request, the team's too, must name the tunnel exactly.
+  const tunnelled = isTunnelled(req);
+  const teamPost = Boolean(ctx.team) && !tunnelled && req.method === 'POST' && req.url === '/api/team';
+  if (!teamPost && !isAllowedHost(req.headers.host, allowedHostsFor(req, ctx))) {
     req.resume();
     sendText(res, 403, 'Forbidden: Andary does not answer to this host name. Open it at 127.0.0.1 or localhost (a team town also answers to its network address and to --team-host names).\n');
     return;
@@ -53,18 +55,7 @@ export async function handleRequest(ctx, req, res) {
     sendText(res, 405, 'Method not allowed\n', { Allow: 'GET, HEAD' });
     return;
   }
-  if (req.method === 'GET' && url.searchParams.has('token') && isPagePath(url.pathname)) {
-    handleLogin(ctx, res, url);
-    return;
-  }
-  if (req.method === 'GET' && url.searchParams.has('view') && isPagePath(url.pathname)) {
-    handleViewLogin(ctx, res, url);
-    return;
-  }
-  if (req.method === 'GET' && url.searchParams.has('me') && isPagePath(url.pathname)) {
-    handlePersonLogin(ctx, res, url);
-    return;
-  }
+  if (req.method === 'GET' && isPagePath(url.pathname) && signIn(ctx, res, url, tunnelled)) return;
   await ctx.serveStatic(req, res, url.pathname);
 }
 
@@ -87,6 +78,25 @@ function parseUrl(raw) {
  */
 function isPagePath(pathname) {
   return pathname === '/' || /^\/[\w-]+\.html$/.test(pathname);
+}
+
+/**
+ * A page asked with a sign-in link (?token=, ?view= or ?me=): answers it and returns true.
+ * @param {TownContext} ctx
+ * @param {Response} res
+ * @param {URL} url
+ * @param {boolean} tunnelled
+ */
+function signIn(ctx, res, url, tunnelled) {
+  const has = (/** @type {string} */ name) => url.searchParams.has(name);
+  // The owner signs in on this computer only: never through the tunnel, even with the token.
+  if (has('token')) {
+    if (tunnelled) sendHtml(res, 403, LOCAL_SIGN_IN_PAGE);
+    else handleLogin(ctx, res, url);
+  } else if (has('view')) handleViewLogin(ctx, res, url);
+  else if (has('me')) handlePersonLogin(ctx, res, url);
+  else return false;
+  return true;
 }
 
 /**
@@ -158,21 +168,38 @@ function redirectWithFragment(res, url, param, fragment) {
 /** @type {Record<string, { methods: string[], handle: (ctx: TownContext, req: Request, res: Response) => void|Promise<void> }>} */
 const API_ROUTES = {
   '/api/health': { methods: ['GET', 'HEAD'], handle: (_ctx, _req, res) => sendJson(res, 200, { ok: true }) },
-  '/api/hello': {
-    methods: ['GET', 'HEAD'],
-    handle: (ctx, req, res) =>
-      sendJson(res, 200, {
-        app: APP_ID,
-        version: ctx.version,
-        authenticated: browserRole(req, ctx.uiToken, ctx.team) !== null,
-        settings: publicSettings(ctx),
-      }),
-  },
+  '/api/hello': { methods: ['GET', 'HEAD'], handle: handleHello },
   '/api/proof': { methods: ['GET'], handle: handleProof },
   '/api/hook': { methods: ['POST'], handle: handleHook },
   '/api/limits': { methods: ['POST'], handle: handleLimits },
   '/api/team': { methods: ['POST'], handle: handleTeam },
 };
+
+/**
+ * GET /api/hello: whether this is Andary, and whether the request's credentials sign it in.
+ * Through the tunnel (ADR 0019) the internet does not learn whether the owner answers prompts or
+ * gets phone notes, and without a view token or member key not even the version or the timeout.
+ * @param {TownContext} ctx
+ * @param {Request} req
+ * @param {Response} res
+ */
+function handleHello(ctx, req, res) {
+  const authenticated = browserRole(req, ctx.uiToken, ctx.team) !== null;
+  if (!isTunnelled(req)) {
+    sendJson(res, 200, { app: APP_ID, version: ctx.version, authenticated, settings: publicSettings(ctx) });
+    return;
+  }
+  const known = authenticated || Boolean(ctx.team?.memberOf(req.headers[TEAM_HEADER]));
+  const { approvalTimeoutMs } = publicSettings(ctx);
+  const settings = { remoteApprovals: false, notify: false, notifyLimits: false, ...(known ? { approvalTimeoutMs } : {}) };
+  sendJson(res, 200, { app: APP_ID, ...(known ? { version: ctx.version } : {}), authenticated, settings });
+}
+
+/**
+ * The only routes the tunnel reaches (ADR 0019): the forwarder's (proof, hook) and the limits
+ * mod's belong to this computer, and answer 403 through it whatever they carry.
+ */
+const TUNNEL_ROUTES = new Set(['/api/health', '/api/hello', '/api/team']);
 
 /** Most events one teammate may send in one request. */
 const TEAM_BATCH = 200;
@@ -255,6 +282,11 @@ async function handleApi(ctx, req, res, pathname) {
     sendJson(res, 404, { error: 'Not found' });
     return;
   }
+  if (isTunnelled(req) && !TUNNEL_ROUTES.has(pathname)) {
+    req.resume();
+    sendJson(res, 403, { error: 'Not available through the tunnel' });
+    return;
+  }
   if (!route.methods.includes(req.method ?? '')) {
     req.resume();
     sendJson(res, 405, { error: 'Method not allowed' }, { Allow: route.methods.join(', ') });
@@ -308,12 +340,46 @@ async function handleHook(ctx, req, res) {
     sendJson(res, error.status, { error: error.message }, error.status === 413 ? { Connection: 'close' } : {});
     return;
   }
+  // Who on this computer can get a note now (server/notes.mjs): only hooks from this route count.
+  ctx.notes.heard(body);
   const request = ingestHook(ctx, body).find((envelope) => envelope.event.hook_event_name === 'PermissionRequest');
   if (request) {
     await answerPermissionRequest(ctx, req, res, request.event, { ...body, at: request.ts });
     return;
   }
-  sendHookReply(ctx, req, res, null);
+  // A hook that can carry notes takes those waiting for its agent (CONTRACTS §4.15).
+  const notes = ctx.notes.take(body);
+  if (notes.texts.length && !(await forwarderWaits(req, res))) {
+    notes.sent(false);
+    return;
+  }
+  if (notes.texts.length) settleNotes(res, notes);
+  sendHookReply(ctx, req, res, null, notes.texts);
+}
+
+/**
+ * Whether the forwarder still waits for this reply. It never closes its side of the connection
+ * before the answer, so a socket whose other end has ended or closed belongs to a forwarder that
+ * gave up (it waits 1.5 s): writing to it still "finishes", and notes sent there would be lost.
+ * Asked once the event loop has polled the socket again (two turns: the check phase comes before
+ * the next poll), so an end that came with the request, or while the server was busy, is known.
+ * @param {Request} req
+ * @param {Response} res
+ */
+async function forwarderWaits(req, res) {
+  for (let turn = 0; turn < 2; turn++) await new Promise((resolve) => setImmediate(resolve));
+  return !res.destroyed && !req.socket.destroyed && !req.socket.readableEnded;
+}
+
+/**
+ * Marks the notes a reply carries as sent once the reply is written out, and puts them back in
+ * the queue when the connection closes first: the forwarder had gone, so they went nowhere.
+ * @param {Response} res
+ * @param {{ sent: (ok: boolean) => void }} notes
+ */
+function settleNotes(res, notes) {
+  res.once('finish', () => notes.sent(true));
+  res.once('close', () => notes.sent(res.writableFinished));
 }
 
 /**
@@ -351,15 +417,17 @@ async function handleLimits(ctx, req, res) {
 
 /**
  * Answers the forwarder, signed with the response key so it can tell our answer from one made up
- * by whatever listens on a stale port (CONTRACTS §4.3).
+ * by whatever listens on a stale port (CONTRACTS §4.3). Notes for the agent, if any, go with it
+ * (§4.15): the forwarder turns them into additionalContext.
  * @param {TownContext} ctx
  * @param {Request} req
  * @param {Response} res
  * @param {object|null} output
+ * @param {string[]} [notes]
  */
-function sendHookReply(ctx, req, res, output) {
+function sendHookReply(ctx, req, res, output, notes = []) {
   if (res.headersSent || res.destroyed) return;
-  const text = JSON.stringify({ output });
+  const text = JSON.stringify(notes.length ? { output, notes } : { output });
   const signature = signHookReply(ctx.responseKey, req.headers[HOOK_NONCE_HEADER], text);
   res.writeHead(200, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -438,6 +506,23 @@ function whyNotHeld(current, exact) {
 
 /** The capability a forwarder declares when it can pass a saved rule on (CONTRACTS §4.3). */
 const SAVES_RULES = 'updatedPermissions';
+/** The capability a forwarder declares when it can pass a deny's `interrupt` on ("Deny and stop"). */
+const STOPS = 'interrupt';
+/** Why a held card offers Deny only (Approval.stopNote). */
+const CODEX_CANNOT_STOP = 'Codex cannot be stopped from a hook yet (it refuses a deny that asks to stop), so Deny only refuses this request';
+const OLD_FORWARDER_CANNOT_STOP = "This agent's Andary hook is from an older version, which cannot stop it: run andary install (or update the plugin) for Deny and stop";
+
+/**
+ * Whether "Deny and stop" can stop this agent, and if not, why: Claude Code takes `interrupt` on
+ * a deny; Codex fails closed on it today; an older forwarder would drop it.
+ * @param {Record<string, any>} event  the sanitized request
+ * @param {string[]} caps
+ * @returns {{ canStop: boolean, stopNote?: string }}
+ */
+function stopOffer(event, caps) {
+  if (event.andary_source === 'codex') return { canStop: false, stopNote: CODEX_CANNOT_STOP };
+  return caps.includes(STOPS) ? { canStop: true } : { canStop: false, stopNote: OLD_FORWARDER_CANNOT_STOP };
+}
 
 /**
  * Holds the response for the town to decide when remote approvals are on and someone is
@@ -463,7 +548,7 @@ async function answerPermissionRequest(ctx, req, res, event, body) {
   // No rule is offered for a plan or a question (answered in the terminal), nor through a
   // forwarder that would drop it: the card would claim a rule was saved when it was not.
   const offers = terminalOnly || !body.caps.includes(SAVES_RULES) ? [] : offeredSuggestions(raw, event);
-  const { approval, response } = ctx.broker.create(event, { hold, message: why, at: body.at, offers });
+  const { approval, response } = ctx.broker.create(event, { hold, message: why, at: body.at, offers, ...stopOffer(event, body.caps) });
   if (hold) {
     // The forwarder went away (Claude Code cancelled the hook): Claude asks in the terminal now.
     res.on('close', () => {

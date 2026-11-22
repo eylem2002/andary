@@ -24,6 +24,14 @@ const START_HELP = `Options:
                             (listens on your network unless --host says otherwise)
       --name <name>         With --team: your own name in the team town (default "Host")
       --team-host <name>    Another name teammates reach this town by, e.g. a Tailscale name
+      --tunnel              With --team: a public https:// address through a Cloudflare Quick
+                            Tunnel (no account, domain or VPN; needs cloudflared on the PATH;
+                            the address changes on every start). Puts the town on the internet,
+                            protected by the invite keys and view link
+      --tunnel-allowed-mail <emails>
+                            Only these people (comma-separated, or *@domain) may open the
+                            tunnel, after an email code in their browser (cloudflared 2026.9.3+;
+                            teammates can then watch but not share)
       --share-to <address>  Share your sessions with a team town (or ANDARY_SHARE_TO)
       --team-key <key>      Your key from "andary team invite" on the host (better: put it in
                             ANDARY_TEAM_KEY, so it stays out of ps and your shell history)

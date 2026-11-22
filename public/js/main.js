@@ -48,7 +48,8 @@ async function boot() {
     store,
     prefs,
     controls: {
-      decide: (id, decision, message, always) => source?.decide(id, decision, message, always) ?? false,
+      decide: (id, decision, message, always, stop) => source?.decide(id, decision, message, always, stop) ?? false,
+      sendNote: (sessionId, agentId, text, ref) => source?.sendNote?.(sessionId, agentId, text, ref) ?? false,
       setRemoteApprovals: (on) => source?.setRemoteApprovals?.(on),
       startDemo: () => switchToDemo(),
       leaveDemo: () => location.assign(withoutParam('demo')),
@@ -134,6 +135,7 @@ async function boot() {
       onPresence: (people) => hud.setPresence(people),
       onSaid: (said) => hud.said(said),
       onLookAsk: (ask) => hud.lookAsked(ask),
+      onNoteReply: (reply) => hud.noteReply(reply),
     });
   }
 

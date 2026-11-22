@@ -1066,72 +1066,248 @@ section.
      to set it in the shell profile.
 185. **A team viewer is not told to install the mod.** Limits are the host's and never reach a
      viewer; their Usage dialog says only the host sees them.
-186. **The town grew south by six rows (26 × 26 → 26 × 32 tiles, +23 %), not west.** The owner asked
+
+## Notes to agents and Deny and stop (feat/agent-notes)
+
+186. **A note arrives at the agent's next step, not at once.** Andary's hooks run in the
+     background (`async: true`); Claude Code delivers an async hook's `additionalContext` "on the
+     next conversation turn", as context the terminal does not show (hooks reference, "How async
+     hooks execute"). In practice that is the next model call after the hook that carried it
+     finished: after the agent's next tool call, or with your next prompt. An idle session reads it
+     only once you type. The town says "sent with its <hook> hook", never "read".
+187. **The hooks that carry notes** are PreToolUse, PostToolUse, PostToolUseFailure and
+     UserPromptSubmit for Claude Code, and PreToolUse, PostToolUse and UserPromptSubmit for Codex
+     (whose docs list `additionalContext` for those). Not SessionStart (Claude Code skips repeated
+     async SessionStart text), not Stop or SubagentStop (their context keeps a turn going), not
+     PermissionRequest (a decision only). Claude Code honoured this from an async hook in 2.1.330.
+188. **Codex documents it; helpers are not verified.** Codex's hooks docs say a background hook's
+     output is added at the next safe point, waits for the next turn when none is active, and is
+     dropped when the session ends; the inspector says that for a Codex agent. It was not tried
+     with a live Codex here. A note for a helper (subagent) is sent with that helper's own hooks;
+     whether Claude Code gives a subagent's async hook output to that subagent, or to the lead,
+     was not tested. The inspector says so.
+189. **"Delivered" means sent in the reply** ("sent with its <hook> hook" in the town): nothing
+     confirms the agent read it. The server takes notes out of the queue for a reply and puts them
+     back when the forwarder is gone: its socket ended or closed by the time the server has polled
+     it once more after the request (two event-loop turns), or the response closed before it
+     finished. A forwarder that gives up after that point, in the instant the reply is written,
+     still loses its notes, as does a `-p` run that ends before Claude Code delivers async output;
+     the owner can send it again.
+190. **The sender's name is the forwarder's user name** (`os.userInfo().username`, letters, digits,
+     `.`, `_`, `-`, at most 40; otherwise "the owner"). Only the owner can send notes, and only to
+     agents of this computer, so the user running the forwarder is the person who wrote the note.
+     The server sends no name, so a reply cannot claim another sender.
+191. **Bounds.** 2,000 characters a note (refused, never cut), 5 waiting per agent, 100 waiting in
+     all, 4 per hook reply, 30 minutes before a note expires (checked every 15 s and when a hook
+     comes), notes expire when the session ends or the helper finishes (SubagentStop). 12 notes a
+     minute with bursts of 5, counted only for notes that would be queued.
+192. **Line breaks are kept** in a note (it is the owner's own text; U+2028 and U+2029 become line
+     breaks), while controls, format characters (bidirectional overrides, zero-width characters),
+     variation selectors, the Hangul fillers and lone surrogates are removed
+     and blank lines collapsed. The server and the forwarder clean a note the same way
+     (`noteText`, one table through both).
+193. **Notes are not shown in the demo**: the simulation has no agent to reach. The note field is
+     hidden there.
+194. **Deny and stop is Claude Code only.** Claude Code's PermissionRequest deny takes
+     `interrupt: true` ("stops Claude"); Codex reserves `interrupt` and "fails closed today", so a
+     Codex card offers Deny only and says why, the server refuses a stop for it, and the forwarder
+     never prints the flag when run as Codex. A forwarder that does not declare `interrupt` (an
+     older copy) would drop the flag, so its cards say to update instead.
+195. **Deny and stop needs no confirmation.** It is labelled and explained on the card, placed on
+     its own row under Deny with its line first (a tap that falls short of Deny lands on words),
+     and waits out the card's one-second click delay like Allow and Deny. Stopping is not
+     destructive: the agent waits for you in the terminal.
+196. **Follow-up: the cross-session inbox socket.** Claude Code 2.1.224 and later expose
+     `CLAUDE_CODE_MESSAGING_SOCKET` (cross-session messaging), which could put a note between tool
+     calls or start a turn in an idle session. Its message format was not tested, so it is not
+     built; a later change can deliver notes through it when it is known, falling back to hooks.
+197. **The note's header is factual.** The Claude Code hooks docs warn that context framed as an
+     out-of-band system command can trigger Claude's prompt-injection defences: Claude then shows
+     it to the user instead of acting on it. The header says plainly what the text is: "The user
+     (<name>) sent you this message from Andary while you work:". Whether Claude acts on a note,
+     or asks in the terminal first, was not tested with a live Claude Code here; the README says an
+     agent may ask you to confirm.
+198. **The browser keeps a note's text until the server answers.** Each note carries a `ref` of the
+     browser's own; the server answers only that browser with `note-reply` (queued or refused, with
+     the reason), so a refused note is never lost. Without an answer in 10 s the field is given
+     back and says the note may not have been sent.
+199. **Four notes always fit.** Claude Code keeps at most 10,000 characters of `additionalContext`;
+     four notes of 2,000 characters with their headers (a 40-character name) come to about 8,400.
+## Turn receipts (2026-11-22)
+
+200. **A turn's work is the crew's.** Helpers' files, failures and tests count for their lead's turn
+     (they work for it); agent-team teammates have turns of their own and are left out.
+201. **An edit is a file tool's change or a shell command that may change files.** "Tests not
+## Team town on the internet (`--tunnel`, ADR 0019)
+
+202. **cloudflared keeps the visitor's Host.** A Quick Tunnel forwards requests with
+     `Host: <words>.trycloudflare.com` (cloudflared's default when no `httpHostHeader` is set),
+     and browsers send `Origin: https://<words>.trycloudflare.com`. The tunnel port accepts only
+     that name (bare or `:443`). Not checked against the live service: the sandbox could not
+     reach Cloudflare (see the PR notes); the address parsing was checked against the output of
+     cloudflared 2026.11.1.
+203. **Cloudflare's headers mark the internet.** Cloudflare's edge adds `Cf-Connecting-IP` and
+     `Cf-Ray` to every request it forwards, and a client cannot remove them. Any request with
+     them (or `Cf-Visitor`, `Cf-IPCountry`, `CDN-Loop: cloudflare`) is tunnelled on every port.
+     `X-Forwarded-For` is not a marker: other local proxies add it, and a request with it but
+     none of Cloudflare's headers is not Cloudflare's.
+204. **The static app stays open through the tunnel.** It is the public code (the same as the
+     hosted demo) and holds no data; everything with data needs the view token or a member key.
+     Requiring a token for the page itself would need a cookie, which ADR 0015 ruled out.
+205. **Rate limits are the network's.** Member keys keep their token bucket and the 4-upload cap,
+     viewers their connection cap and message limit; tokens are 256-bit (view and keys 192-bit),
+     so there is no guessing to slow down, and Cloudflare allows 200 requests in flight.
+206. **The town binds 127.0.0.1 with `--tunnel`.** Teammates come through the tunnel, so the
+     town is not also put on the LAN; `--host 0.0.0.0` puts it back for people nearby.
+207. **cloudflared runs with Andary's environment minus `ANDARY_*`,** so a team key or an ntfy
+     topic in the environment stays with Andary; `--no-autoupdate` keeps it from restarting
+     itself under the town.
+208. **The 30 s limit for the address** covers a slow edge; past it the town stops and the start
+     fails (exit 1), rather than run with no address. A tunnel that ends later is logged, marked
+     down in `server.json`, and reported by the doctor; it is not restarted (a restart is a new
+     address, which the invitees would not know).
+209. **`--tunnel-allowed-mail` is checked against `cloudflared tunnel --help`,** which lists
+     `--allowed-mail` from 2026.9.3 on, instead of parsing version numbers. Cloudflare's guide
+     says email sign-in needs an interactive browser, so a teammate's Andary cannot pass it; the
+     CLI says that with this flag teammates can watch, not share.
+210. **The doctor does not connect to the tunnel.** It reads `server.json` and checks that
+     cloudflared's pid is alive: reaching the public address would be a network call from the
+     doctor to Cloudflare, and a failure there says little about the town.
+211. **The watchdog is a Node process, not a signal trick.** Linux's "die with the parent" needs a
+     native call Node does not offer, and macOS and Windows have none. A pipe the town holds
+     closes on any death, `kill -9` included, so the watchdog that reads it stops cloudflared the
+     same way everywhere. If the watchdog itself is killed with SIGKILL, the next start or doctor
+     catches the cloudflared left behind.
+212. **A cloudflared left behind is stopped only after its command line is checked.** It must name
+     `cloudflared` and `http://127.0.0.1:<the recorded port>`, and the town in `server.json` must
+     be gone. A pid that may have been reused by another program, or a command line that cannot
+     be read, gets a warning naming the pid, never a signal.
+213. **Other cloudflared configuration folders are refused, not overridden.** Pointing `--config`
+     at an empty file might also stop a Quick Tunnel, which was not tested live. Refusing a
+     `config.yml` in any folder cloudflared reads (and `TUNNEL_*` variables, which it reads as
+     flags) keeps the tunnel to the flags Andary passes.
+## Turn receipts (2026-11-22)
+
+214. **A turn's work is the crew's.** Helpers' files, failures and tests count for their lead's turn
+     (they work for it); agent-team teammates have turns of their own and are left out.
+215. **An edit is a file tool's change or a shell command that may change files.** "Tests not
+     re-run since the last edit" compares the last test run's start with the last Edit, MultiEdit,
+     Write, NotebookEdit, Codex patch, or shell command that `changesFiles` (the stuck rules' reader)
+     says may change files: `sed -i`, heredocs, formatters, installs. git's bookkeeping, test runs and
+     builds are not edits (a commit or a report file changes no source). The town cannot tell which
+     files a shell edit touched, so the receipt says "may have changed" and names none.
+216. **Lines from the hook's own text.** Added and removed lines per hunk are what is left once the
+     lines both texts start and end with are set aside: exact for a typical Edit, approximate for a
+     hunk that moves lines around. Text longer than the town keeps marks the counts "≥". A Write
+     over an existing file has no "removed": the hook does not carry the old content.
+217. **A build** is a package's `build`/`build:…` script, `tsc`, a `build` subcommand of the common
+     tools, `make` with no target (or `all`/`build`) and `python -m build`, in `core/shell.js` beside
+     `isTestRun`. `runsNoTests` moved there from the digest, so both read tests the same way.
+218. **A turn's cost is a difference of running totals.** Usage arrives after the hooks, so the
+     receipt of a crew's latest turn takes new usage until your next prompt; usage that arrives
+     later counts for the next turn. With no reading from before the turn (and no fresh session
+     start seen), the cost is left out rather than guessed.
+219. **A Stop hook that keeps the turn going is the same turn.** Work between a Stop and a Stop with
+     `stop_hook_active` joins the receipt of the turn before; a Stop without it after work with no
+     prompt is a new turn that started before the town saw it ("at least").
+220. **A receipt's log line is written again when a Stop hook updates it**, with the newer words;
+     the inspector shows the latest.
+221. **Another crew's edits are judged by folder.** An edit by another crew inside this crew's
+     session folder while its turn is open is reported, naming no file: the receipt cannot prove
+     which of its files it touched. A teammate's crew in a team town works on another computer and
+     is left out.
+222. **A test run "selects" tests** when a name filter or a test file or folder is on its line; a pass
+223. **Lines from the hook's own text.** Added and removed lines per hunk are what is left once the
+     lines both texts start and end with are set aside: exact for a typical Edit, approximate for a
+     hunk that moves lines around. Text longer than the town keeps marks the counts "≥". A Write
+     over an existing file has no "removed": the hook does not carry the old content.
+224. **A build** is a package's `build`/`build:…` script, `tsc`, a `build` subcommand of the common
+     tools, `make` with no target (or `all`/`build`) and `python -m build`, in `core/shell.js` beside
+     `isTestRun`. `runsNoTests` moved there from the digest, so both read tests the same way.
+225. **A turn's cost is a difference of running totals.** Usage arrives after the hooks, so the
+     receipt of a crew's latest turn takes new usage until your next prompt; usage that arrives
+     later counts for the next turn. With no reading from before the turn (and no fresh session
+     start seen), the cost is left out rather than guessed.
+226. **A Stop hook that keeps the turn going is the same turn.** Work between a Stop and a Stop with
+     `stop_hook_active` joins the receipt of the turn before; a Stop without it after work with no
+     prompt is a new turn that started before the town saw it ("at least").
+227. **A receipt's log line is written again when a Stop hook updates it**, with the newer words;
+     the inspector shows the latest.
+228. **Another crew's edits are judged by folder.** An edit by another crew inside this crew's
+     session folder while its turn is open is reported, naming no file: the receipt cannot prove
+     which of its files it touched. A teammate's crew in a team town works on another computer and
+     is left out.
+229. **A test run "selects" tests** when a name filter or a test file or folder is on its line; a pass
+     then reads "selected tests passed", as the rest may not have run.
+
+## People of a team town and walking (feat/org-people, feat/org-walk)
+
+230. **The town grew south by six rows (26 × 26 → 26 × 32 tiles, +23 %), not west.** The owner asked
      for a modestly bigger, livelier town; the org-town design had squeezed the six homes onto the
      west strip, facing east. A quarter of their own south of the ring road keeps every door facing
      south (the default camera sees them all, as before, so no east-facing exception is needed) and
      sits nearest the camera. Tile (13, 13)'s corner stays the world's origin, so every older
      building, route, lamp and vehicle path keeps its coordinates; the plinth, the shadow box and the
      camera's framing (depth 66 → 78, home 1.5 m further south) grew to fit.
-187. **The quarter's plan:** six 2 × 2 home plots (`h`) on row 24–25 with a garden column (`g`)
+231. **The quarter's plan:** six 2 × 2 home plots (`h`) on row 24–25 with a garden column (`g`)
      between neighbours, Home Street on row 26 joined to the west and east ring roads, and a park
      (`k` lawns, a paved `P` square, an `f` fountain) on rows 27–30, with a row of trees at the
      front edge. Each home's door tile is the west half of its plot's street frontage.
-188. **Park life is cheap and quiet:** a dog trotting round the square, five pigeons pecking by the
+232. **Park life is cheap and quiet:** a dog trotting round the square, five pigeons pecking by the
      fountain, two kites over the east lawn only in clear or rainbow weather by day, and balloons
      tied to the food cart (static). Three small meshes, nothing allocated per frame; reduced motion
      sits the dog down and holds the pigeons and kites still. The gardens, mailboxes, benches, cart,
      lamps and fountain stone are in the town batch.
-189. **An unowned home is a plain cottage in the town's own look**, door in wood, no flag, no name
+233. **An unowned home is a plain cottage in the town's own look**, door in wood, no flag, no name
      plate and dark windows, so a town without a team still looks lived in. All six homes are one
      mesh, rebuilt when one changes.
-190. **A member key now needs its name on the roster (`people.json`).** The design asks for
+234. **A member key now needs its name on the roster (`people.json`).** The design asks for
      `team remove` to revoke one person; that needs both checks to look the name up. A team that
      invited people before this change runs `andary team invite <name>` once more for each: the key
      printed is the same, so their relays keep working with no change on their side.
-191. **The host is named "Host" until `--name` says otherwise**, never the computer's user name (it
+235. **The host is named "Host" until `--name` says otherwise**, never the computer's user name (it
      shows on a name plate to everyone). A later `--name` renames the host's entry and keeps its home,
      colour and profile; a name a teammate already has is refused at start.
-192. **The roster file is shared by the CLI and the running host under a lock.** `team invite`,
+236. **The roster file is shared by the CLI and the running host under a lock.** `team invite`,
      `team remove` and the host's profile saves each read, change and write people.json while
      holding `people.lock` (an exclusive create, retried every 20 ms for up to 2 s; a lock older
      than 5 s is taken to be left by a process that died). The host also re-reads the file every 2 s
      and before every key or link check, and announces any change it sees once (a microtask), so a
      key check that notices a removal first still closes the removed person's town.
-193. **A teammate never takes the host's home.** Before the host has started once, five invites fill
+237. **A teammate never takes the host's home.** Before the host has started once, five invites fill
      the roster; the sixth place is the host's.
-194. **Every profile key is required, not only known ones.** "Unknown keys rejected" is read as an
+238. **Every profile key is required, not only known ones.** "Unknown keys rejected" is read as an
      exact key set: a profile missing a field is as malformed as one with an extra, and the browser
      always sends whole profiles.
-195. **A colour asked for and taken goes to the next free one in order, wrapping round,** and a
+239. **A colour asked for and taken goes to the next free one in order, wrapping round,** and a
      person's own colour counts as free to them. The browser greys out colours others hold in the
      "You" dialog (with whose they are), so this mostly happens when two people save at once.
-196. **The palettes are fixed in `core/profile.js`:** 8 skin tones, 9 hair colours (black to teal),
+240. **The palettes are fixed in `core/profile.js`:** 8 skin tones, 9 hair colours (black to teal),
      10 cloth colours, each named for screen readers; `'theme'` tops wear the person's colour.
      Indices, not hex, cross the wire, so a later palette tweak changes everyone's look the same way.
-197. **The preview in the "You" dialog is a flat SVG drawing, not the 3D figure.** The HUD may not
+241. **The preview in the "You" dialog is a flat SVG drawing, not the 3D figure.** The HUD may not
      reach into the 3D world (layer rules), a second WebGL renderer would cost a phone its frame
      budget, and SVG works where WebGL does not. It is drawn from the same profile and palettes.
-198. **In PR 1 a person stands on their porch while online and is not drawn while offline**; the
+242. **In PR 1 a person stands on their porch while online and is not drawn while offline**; the
      60 s porch and 10 min inside timers, walking, and lights from a relay that posted in the last
      2 min come with presence (PR 2). Lights are on while any browser plays the person (the owner's
      browser plays the host).
-199. **The owner may save the host's profile too** (`{t:'profile'}` from the owner's browser), since
+243. **The owner may save the host's profile too** (`{t:'profile'}` from the owner's browser), since
      the host is a person of the town like the others.
-200. **A person counts as view-only in the HUD** (no Needs you for others' prompts, no plan limits,
+244. **A person counts as view-only in the HUD** (no Needs you for others' prompts, no plan limits,
      no catch-up, no remote approvals or phone settings), exactly like a viewer, besides their own
      character.
-201. **Each person may hold 2 connections, and people may use the 4 connections kept for the
+245. **Each person may hold 2 connections, and people may use the 4 connections kept for the
      owner**; viewers still cannot. The design lists this under PR 2's abuse cover; it is a few
      lines and closes a way for one link to fill the town, so it came now.
-202. **The demo is a small team town:** "You" (the host, slot 0, cobalt, the coast cottage) and Lina
+246. **The demo is a small team town:** "You" (the host, slot 0, cobalt, the coast cottage) and Lina
      (slot 1, raspberry, a desert house: curly hair, round eyes, glasses, a hoodie, headphones), both
      online, so it shows two lit homes and two people. The "You" dialog works in the demo and keeps
      your look in this browser; a saved look asking for Lina's colour starts on the next free one.
      Every local crew is yours, so the demo's own crews now share your colour, told apart by number.
-203. **A home's door tile is the west half of its plot's frontage**, and a person stands on the
+247. **A home's door tile is the west half of its plot's frontage**, and a person stands on the
      street side of it, facing south. Home Street has no traffic, so nobody stands in a lane.
-204. **The frame budget is checked with `world-lab.html?scenario=people&quality=low` at 390 × 844**:
+248. **The frame budget is checked with `world-lab.html?scenario=people&quality=low` at 390 × 844**:
      six people at home plus 24 helpers walking about (30 figures), every home lived in. This
      container renders with SwiftShader on the CPU, so its frames per second say nothing about a
      phone; what it does show is that the quarter adds 6 to 7 draw calls to the same 20-figure crowd
@@ -1139,37 +1315,37 @@ section.
      props are in the town batch) and the same frame rate as `main` there, so the 30 fps target on a
      phone is as near as it was. A person costs one figure geometry and one draw call like any
      helper.
-205. **A nonce per person makes a removal final.** Keys and links are HMACs of the name and a
+249. **A nonce per person makes a removal final.** Keys and links are HMACs of the name and a
      random 16-character nonce kept in people.json; inviting someone already on the roster keeps
      it (the same lines print again), inviting them after a removal makes a new one. People from
      before nonces have an empty one, which signs exactly as before.
-206. **The host is told which old keys it refuses**, once per name, and a member's relay words a 401
+250. **The host is told which old keys it refuses**, once per name, and a member's relay words a 401
      as "key refused by the host", so a team upgrading from a town without rosters is not left
      guessing (README "Upgrading").
-207. **With no `--name` and a teammate called "Host", the host becomes "Host 2"** (then 3…), with a
+251. **With no `--name` and a teammate called "Host", the host becomes "Host 2"** (then 3…), with a
      line in the log, rather than refusing to start.
-208. **The creator has no dropdowns.** Every choice is a radio group of picture tiles (the option
+252. **The creator has no dropdowns.** Every choice is a radio group of picture tiles (the option
      drawn on the character and cropped to the part it changes; colours as round chips), with a
      legend that names the current choice, in six tabbed sections (Body, Hair, Face, Clothes,
      Accessories, Home and names). Only the open section's tiles are drawn, so a change redraws at
      most a few dozen small SVGs. The two names are text fields, the only typed input.
-209. **Profile v1 grew in place** (nothing was released): 25 look fields, the two names, and a cap
+253. **Profile v1 grew in place** (nothing was released): 25 look fields, the two names, and a cap
      of 1,152 bytes (was 512): the longest look takes 526 bytes, and two names of 20 four-byte
      letters with two three-byte marks each take 400 more (926 measured, test-checked). The
      palettes grew to 12 skins, 12 hair colours and 12 cloth colours; `face` became `facialHair`,
      `glasses` and `cheeks`. Each tile, the preview and the 3D figure use the same palettes and the
      same shading (`mix` towards white or black), so a cap or a beanie's pompom looks alike in both.
-210. **"Detailed" is modelled, not textured.** Patterns, seams, collars, hoods and glasses are small
+254. **"Detailed" is modelled, not textured.** Patterns, seams, collars, hoods and glasses are small
      shapes in the person's one figure geometry, coloured per vertex: no texture or atlas, nothing
      new to load, still one draw call per person. A pet walks at the person's heel on the body
      bone (it moves with them, it does not wander), a bird sits on the shoulder.
-211. **Undo goes back through the last 30 changes of this opening of the dialog**; outfits replace
+255. **Undo goes back through the last 30 changes of this opening of the dialog**; outfits replace
      only clothes and accessories, keeping the person's body, hair and face.
-212. **The agents' name numbers a crew's helpers in the order they joined**, in each crew
+256. **The agents' name numbers a crew's helpers in the order they joined**, in each crew
      separately ("Pixel 1" may be in two crews, told apart by crew number), and a lead takes the
      name alone until PR 3 lets the person's character play their lead. Teammates of an agent team
      take it too. Log lines written before a rename keep the name they had.
-213. **A name that could pass for another person's is refused by the host**, for both the
+257. **A name that could pass for another person's is refused by the host**, for both the
      character's name and the agents' name: equal to another person's roster, character or agents'
      name after NFKC, case folding, dropping marks and separators, and folding Cyrillic and Greek
      look-alikes (a small fixed table, not the whole Unicode confusables list), or to one of those
@@ -1177,39 +1353,39 @@ section.
      Andary) with or without a number. The demo applies the same rule. Up to two combining marks
      per letter are kept (Vietnamese, Devanagari), more are dropped; marks do not count towards 20.
 
-214. **A new walk carries on from where the figure is.** Mid-step it first finishes the step it is
+258. **A new walk carries on from where the figure is.** Mid-step it first finishes the step it is
      on and the walk's start time is set back by the part already walked, so every screen sees
      the figure turn rather than jump back to the tile it was leaving. Keys step from the tile
      being entered, so a held key never walks back.
-215. **A held key repeats at most four times a second; a different key goes at once.** The walk
+259. **A held key repeats at most four times a second; a different key goes at once.** The walk
      itself moves 2.2 tiles a second, so a held key keeps a step ahead of the figure rather than
      piling up walks; the host's own 250 ms limit (latest wins) is the backstop.
-216. **Walk mode zooms the camera in (2.2×) and follows your character**; under reduced motion
+260. **Walk mode zooms the camera in (2.2×) and follows your character**; under reduced motion
      the follow cuts instead of easing. Turning walk mode off stops the follow and leaves the
      view where it is. Each walk asks the director camera to stand back, as a pan does.
-217. **The "Walk to…" list offers teammates who are out, by where they are going**, not a live
+261. **The "Walk to…" list offers teammates who are out, by where they are going**, not a live
      follow (following or teleporting to a teammate stays out, as the design says). Homes are
      listed by whose they are; empty plots are not offered.
-218. **The live region speaks once per walk**: "Walking to …" for a walk longer than one step and
+262. **The live region speaks once per walk**: "Walking to …" for a walk longer than one step and
      "You are at …" on arrival (a door, a home, or "the street"), not every tile. A teammate's
      emote or phrase is read out by name ("Lina: Wave").
-219. **On a phone the step pad shows in walk mode** (Settings can hide it), the emotes fold into
+263. **On a phone the step pad shows in walk mode** (Settings can hide it), the emotes fold into
      the phrases' disclosure so the panel leaves the town in view, and walk mode folds the board's
      sheet away.
-220. **"Come look" asks about the current selection** (an agent or a building), from the Walk
+264. **"Come look" asks about the current selection** (an agent or a building), from the Walk
      panel; the note's Go selects it (and so moves the camera), Not now and the close button only
      dismiss it. Notes can be turned off in Settings; asks are still rate limited on the host.
      In the demo the ask is accepted but Lina does not answer.
-221. **"Show me as away" and walking up to an agent to open it** (design §2 and §6) are not in this
+265. **"Show me as away" and walking up to an agent to open it** (design §2 and §6) are not in this
      pull request: online status follows connections only, and an agent opens by click or from the
      crews board as before.
-222. **Only notifications that need the person block their walking**: `permission_prompt`,
+266. **Only notifications that need the person block their walking**: `permission_prompt`,
      `elicitation_dialog` (and a question). Claude Code's `idle_prompt`, a minute after Stop, is
      not a reason to keep a character at work. A duty lapses to free after 10 minutes with no
      event from that person (their relay going quiet counts), so a lost Stop cannot pin them.
-223. **"Come look" at an agent names one the host has seen**: the host remembers the newest 2,000
+267. **"Come look" at an agent names one the host has seen**: the host remembers the newest 2,000
      agent keys from the town's events, so a look never carries an invented key to a teammate.
-224. **Six detailed people on a phone, measured**: world-lab `?scenario=people&quality=low` at
+268. **Six detailed people on a phone, measured**: world-lab `?scenario=people&quality=low` at
      390×844 (×3) draws six people in their most detailed looks (pet, hat, glasses, striped top,
      backpack, cup, beard, earrings) plus 24 helpers in 55–57 draw calls, one per figure as
      before. Frame rate is not meaningful under the software renderer here; on a phone it is

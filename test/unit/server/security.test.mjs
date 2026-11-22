@@ -17,6 +17,7 @@ import {
   isAllowedOrigin,
   isLoopbackHost,
   securityHeaders,
+  tunnelHostHeaders,
 } from '../../../server/security.mjs';
 
 const MAP = '{"imports":{"three":"./vendor/three/three.module.js","three/addons/":"./vendor/three/addons/"}}';
@@ -85,6 +86,15 @@ describe('Host and Origin checks', () => {
 
   it('accepts the default port without a number', () => {
     assert.ok(isAllowedHost('localhost', allowedHostHeaders(80)));
+  });
+
+  it("accepts a tunnel's exact name, as Host and https Origin, and nothing before it has one", () => {
+    const tunnel = tunnelHostHeaders('https://Seasonal-Deck.trycloudflare.com');
+    for (const host of ['seasonal-deck.trycloudflare.com', 'seasonal-deck.trycloudflare.com:443']) assert.ok(isAllowedHost(host, tunnel), host);
+    for (const host of ['127.0.0.1:4747', 'other.trycloudflare.com', 'seasonal-deck.trycloudflare.com:4747']) assert.ok(!isAllowedHost(host, tunnel), host);
+    assert.ok(isAllowedOrigin('https://seasonal-deck.trycloudflare.com', tunnel));
+    assert.ok(!isAllowedOrigin('https://evil.example', tunnel));
+    assert.equal(tunnelHostHeaders(null).size, 0);
   });
 
   it('accepts our own origins and a missing Origin, nothing else', () => {

@@ -154,6 +154,18 @@ export function allowedHostHeaders(port, boundHost, extra = []) {
 }
 
 /**
+ * Host header values for requests through a Quick Tunnel: its name exactly, as browsers send it
+ * for https (no port, or 443). Empty until the tunnel has an address.
+ * @param {string|null} url  https://<words>.trycloudflare.com
+ * @returns {Set<string>}
+ */
+export function tunnelHostHeaders(url) {
+  if (!url) return new Set();
+  const name = new URL(url).hostname.toLowerCase();
+  return new Set([name, `${name}:443`]);
+}
+
+/**
  * DNS-rebinding defence: a page on evil.example that rebinds its name to 127.0.0.1 still sends
  * "Host: evil.example", so only our own names are accepted.
  * @param {string|undefined} hostHeader
@@ -162,6 +174,18 @@ export function allowedHostHeaders(port, boundHost, extra = []) {
  */
 export function isAllowedHost(hostHeader, allowed) {
   return typeof hostHeader === 'string' && allowed.has(hostHeader.trim().toLowerCase());
+}
+
+/**
+ * A WebSocket's Origin through the tunnel (ADR 0019): present, and exactly https://<the tunnel>.
+ * @param {string|undefined} originHeader
+ * @param {Set<string>} tunnelHosts from tunnelHostHeaders
+ * @returns {boolean}
+ */
+export function isTunnelOrigin(originHeader, tunnelHosts) {
+  if (typeof originHeader !== 'string') return false;
+  const match = /^https:\/\/([^/:]+)$/i.exec(originHeader.trim());
+  return match !== null && tunnelHosts.has(match[1].toLowerCase());
 }
 
 /**

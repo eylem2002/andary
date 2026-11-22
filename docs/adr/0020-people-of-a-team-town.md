@@ -1,4 +1,4 @@
-# 0018 — People of a team town: a roster, personal links and enumerated profiles
+# 0020 — People of a team town: a roster, personal links and enumerated profiles
 
 Status: Accepted
 
@@ -35,7 +35,7 @@ Options considered:
   every key is required, unknown keys and anything over 512 bytes reject the whole profile. The
   same pure module (`core/profile.js`) checks it on the host and draws it in every browser.
 - The homes are a residential quarter of their own, south of the ring road, doors facing south
-  like every other door (assumption 186), rather than squeezed onto the west strip facing east.
+  like every other door (assumption 230), rather than squeezed onto the west strip facing east.
 
 ## Consequences
 

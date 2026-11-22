@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { browserCredentials, browserRole, generateToken, hasHookSecret, offersAndaryProtocol, proveServer, safeEqual, signHookReply } from '../../../server/auth.mjs';
+import { allowedHostsFor, browserCredentials, browserRole, generateToken, hasHookSecret, isTunnelled, markTunnelled, offersAndaryProtocol, proveServer, safeEqual, signHookReply } from '../../../server/auth.mjs';
 
 describe('generateToken', () => {
   it('returns 32 random bytes as base64url', () => {
@@ -50,6 +50,34 @@ describe('request checks', () => {
     assert.equal(browserRole(req({ 'x-andary-person': 'Lina.good' }), 'tok', null), null, 'no person off a team host');
     assert.equal(browserRole(req({ 'x-andary-token': 'nope' }), 'tok', null), null);
     assert.equal(browserRole(req({ cookie: 'andary_ui=tok' }), 'tok', null), null, 'an old cookie no longer signs in');
+  });
+
+  it("treats a request through a Cloudflare tunnel as from the internet, whatever its socket says (ADR 0019)", () => {
+    const loopback = { remoteAddress: '127.0.0.1', localAddress: '127.0.0.1' };
+    assert.equal(isTunnelled(/** @type {any} */ ({ headers: {}, socket: loopback })), false);
+    for (const headers of [{ 'cf-connecting-ip': '203.0.113.9' }, { 'cf-ray': '8f0e-AMS' }, { 'cf-visitor': '{"scheme":"https"}' }, { 'cdn-loop': 'cloudflare; loops=1' }]) {
+      assert.equal(isTunnelled(/** @type {any} */ ({ headers, socket: loopback })), true, JSON.stringify(headers));
+    }
+    const onTunnelPort = req({});
+    markTunnelled(onTunnelPort);
+    assert.equal(isTunnelled(onTunnelPort), true, 'every request on the tunnel port, Cloudflare headers or not');
+    assert.equal(isTunnelled(req({ 'cdn-loop': 'other-cdn' })), false);
+  });
+
+  it("never takes the owner's token through the tunnel, but still a viewer's", () => {
+    const owner = { 'x-andary-token': 'tok', 'cf-connecting-ip': '203.0.113.9' };
+    const team = { view: 'v', personOf: () => null };
+    assert.equal(browserRole(req(owner), 'tok', team), null);
+    assert.deepEqual(browserRole(req({ ...owner, 'sec-websocket-protocol': 'andary, andary.token.tok, andary.view.v' }), 'tok', team), { role: 'viewer', person: null });
+    const marked = req({ 'sec-websocket-protocol': 'andary, andary.token.tok' });
+    markTunnelled(marked);
+    assert.equal(browserRole(marked, 'tok', team), null, 'even from 127.0.0.1 with no Cloudflare header');
+  });
+
+  it("allows a tunnelled request only the tunnel's own Host names", () => {
+    const hosts = { allowedHosts: new Set(['127.0.0.1:4747']), tunnelHosts: new Set(['words.trycloudflare.com']) };
+    assert.equal(allowedHostsFor(req({}), hosts), hosts.allowedHosts);
+    assert.equal(allowedHostsFor(req({ 'cf-ray': 'x' }), hosts), hosts.tunnelHosts);
   });
 
   it('confirms the andary subprotocol only when it was offered', () => {
