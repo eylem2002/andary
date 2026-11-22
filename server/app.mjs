@@ -9,7 +9,8 @@ import { createNotifier } from './notify.mjs';
 import { createWorkTrees } from './work-trees.mjs';
 import { createTownDigest } from './digest.mjs';
 import { createLimitsTracker } from './limits.mjs';
-import { announceTeam, createHub, handleUpgrade } from './browsers.mjs';
+import { announcePeople, announceTeam, createHub, dropRemovedPeople, handleUpgrade } from './browsers.mjs';
+import { createPeople } from './people.mjs';
 import { createTeamHost, createTeamRelay, lanAddresses, teamSecret } from './team.mjs';
 import { DEFAULT_APPROVAL_TIMEOUT_MS, DEFAULT_HOST, DEFAULT_PORT, LIMITS, PUBLIC_DIR, readVersion, resolveClaudeConfigDir, resolveHome } from './config.mjs';
 import { createHistory, createRecorder, recordingPath } from './history.mjs';
@@ -35,6 +36,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {number} [awayMs]             how long without you counts as away (AWAY_MS); for tests, no CLI flag
  * @property {string} [claudeDir]          Claude Code's config folder, for reading token usage from transcripts
  * @property {boolean} [team]              host a team town: teammates' Andarys may send their events here
+ * @property {string|null} [teamName]       the host's own name in a team town (--name), already cleaned
  * @property {string[]} [teamHosts]        names teammates reach a team host by (a VPN name), besides its addresses
  * @property {{ url: string, key: string }|null} [shareTo]  send this town's events to a team host
  * @property {number} [approvalTimeoutMs]
@@ -71,6 +73,7 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {{ events: number }} counts
  * @property {NodeJS.Timeout|null} graceTimer
  * @property {NodeJS.Timeout|null} [hostTimer]  a team host's refresh of its network names
+ * @property {NodeJS.Timeout|null} [peopleTimer]  a team host's look at people.json (the CLI edits it)
  */
 
 /**
@@ -88,6 +91,9 @@ import { CLOSE_CODE } from './ws-frame.mjs';
  * @property {() => number} browserCount
  * @property {() => Promise<void>} stop
  */
+
+/** How often a team host looks whether `andary team invite` or `remove` changed people.json. */
+const PEOPLE_POLL_MS = 2000;
 
 /**
  * Starts a server and writes server.json. Rejects if the port cannot be bound (EADDRINUSE…).
@@ -113,6 +119,9 @@ export async function startTownServer(options = {}) {
       ctx.allowedHosts = allowedHostHeaders(port, config.host, hostNames());
     }, 30_000);
     ctx.hostTimer.unref();
+    const people = ctx.team.people;
+    ctx.peopleTimer = setInterval(() => people.poll(), PEOPLE_POLL_MS);
+    ctx.peopleTimer.unref();
   }
 
   const state = {
@@ -224,6 +233,14 @@ function createContext(config, options) {
     team: options.team
       ? createTeamHost({
           secret: /** @type {string} */ (teamSecret(config.home)),
+          people: createPeople({
+            home: config.home,
+            host: options.teamName ?? null,
+            onChange: () => {
+              dropRemovedPeople(ctx);
+              announcePeople(ctx);
+            },
+          }),
           onMember: (members) => {
             config.log(`Team town: ${members.at(-1)} is sharing now (${members.length} teammate${members.length === 1 ? '' : 's'})`);
             announceTeam(ctx);
@@ -285,6 +302,7 @@ function listen(server, port, host) {
 async function stopServer(ctx, listener, config) {
   if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
   if (ctx.hostTimer) clearInterval(ctx.hostTimer);
+  if (ctx.peopleTimer) clearInterval(ctx.peopleTimer);
   // First, so no phone note goes out while the server stops: whoever stops it is at the computer.
   ctx.notifier.dispose();
   ctx.digest.dispose();

@@ -22,6 +22,7 @@ const START_HELP = `Options:
                             90%, once per window; needs the andary-limits mod
       --team                Host a team town: teammates' Andarys can share their sessions here
                             (listens on your network unless --host says otherwise)
+      --name <name>         With --team: your own name in the team town (default "Host")
       --team-host <name>    Another name teammates reach this town by, e.g. a Tailscale name
       --share-to <address>  Share your sessions with a team town (or ANDARY_SHARE_TO)
       --team-key <key>      Your key from "andary team invite" on the host (better: put it in
@@ -94,8 +95,8 @@ const COMMANDS = {
     run: runUninstall,
   },
   team: {
-    usage: 'team invite <name> | team reset',
-    summary: 'On a team host: print a teammate\'s key and the view link, or revoke them all',
+    usage: 'team invite <name> | team remove <name> | team view-link | team reset',
+    summary: 'On a team host: invite a teammate (up to 5) or remove one, print the view link, or revoke them all',
     help: 'Options:\n      --url <address>       The address teammates reach this computer at (default: its\n                            network address and the running port), e.g. a Tailscale name',
     options: TEAM_OPTIONS,
     positionals: true,

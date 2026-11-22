@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
-import { memberKey, teamSecret, viewToken } from '../../server/team.mjs';
+import { memberKey, personToken, teamSecret, viewToken } from '../../server/team.mjs';
+import { defaultProfile } from '../../public/js/core/profile.js';
 import { closeBrowser, connectBrowser, hookPayload, postHook, rawRequest, startTown, waitForMessage } from './helpers.mjs';
 
 /**
@@ -13,6 +14,13 @@ import { closeBrowser, connectBrowser, hookPayload, postHook, rawRequest, startT
 function postTeam(port, body, headers = {}) {
   const text = JSON.stringify(body);
   return rawRequest(port, { method: 'POST', path: '/api/team', headers: { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(text)), ...headers }, body: text });
+}
+
+const cli = fileURLToPath(new URL('../../cli/andary.mjs', import.meta.url));
+
+/** @param {string} home @param {string[]} args */
+function team(home, args) {
+  return spawnSync(process.execPath, [cli, 'team', ...args], { env: { ...process.env, ANDARY_HOME: home }, encoding: 'utf8' });
 }
 
 describe('Team town', () => {
@@ -26,8 +34,9 @@ describe('Team town', () => {
   before(async () => {
     // --host keeps the test off the network; a real host leaves it out and listens on the LAN.
     // A short wait for an absence (tests only), so the host's absences can be seen.
-    host = await startTown({ args: ['--team', '--host', '127.0.0.1', '--team-host', 'andary-host.tailnet.example'], env: { ANDARY_AWAY_MS: '300' } });
+    host = await startTown({ args: ['--team', '--name', 'Sam', '--host', '127.0.0.1', '--team-host', 'andary-host.tailnet.example'], env: { ANDARY_AWAY_MS: '300' } });
     secret = /** @type {string} */ (teamSecret(host.home, { create: false }));
+    for (const name of ['Lina', 'Omar']) assert.equal(team(host.home, ['invite', name]).status, 0);
     // The key by environment, as the invite prints it.
     member = await startTown({ args: ['--share-to', host.baseUrl], env: { ANDARY_TEAM_KEY: memberKey(secret, 'Lina') } });
   });
@@ -59,6 +68,7 @@ describe('Team town', () => {
     assert.equal((await postTeam(host.port, batch, { 'x-andary-team': `${memberKey('another-secret-another-secret-123', 'Lina')}` })).status, 401);
     assert.equal((await postTeam(host.port, batch, { 'x-andary-team': memberKey(secret, 'Omar'), host: 'andary-host.tailnet.example:4747' })).status, 200);
     assert.equal((await postTeam(host.port, { v: 2 }, { 'x-andary-team': memberKey(secret, 'Omar') })).status, 400);
+    assert.equal((await postTeam(host.port, batch, { 'x-andary-team': memberKey(secret, 'Mallory') })).status, 401, 'a valid key for a name not on the roster');
     // Only the team endpoint skips the Host check: the rest of the town still refuses other names.
     assert.equal((await rawRequest(host.port, { path: '/', headers: { host: `evil.example:${host.port}` } })).status, 403);
     // A town that does not host a team has no team endpoint.
@@ -151,17 +161,88 @@ describe('Team town', () => {
     await Promise.all([owner, viewer, ownerAgain, viewerAgain].map(closeBrowser));
   });
 
-  it('invites print the key for the environment, the view link, and what the link shows', () => {
-    const cli = fileURLToPath(new URL('../../cli/andary.mjs', import.meta.url));
-    const run = spawnSync(process.execPath, [cli, 'team', 'invite', 'Omar', '--url', 'http://box.tailnet.example:4747'], { env: { ...process.env, ANDARY_HOME: host.home }, encoding: 'utf8' });
+  it('invites print the key for the environment, the personal link, and what the links show', () => {
+    const run = team(host.home, ['invite', 'Omar', '--url', 'http://box.tailnet.example:4747']);
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /ANDARY_TEAM_KEY=Omar\.[\w-]{32} andary start --share-to http:\/\/box\.tailnet\.example:4747/);
     assert.ok(!run.stdout.includes('--team-key'), 'the key is not an argument');
-    assert.match(run.stdout, /\?view=[\w-]{32}/);
+    assert.ok(run.stdout.includes(`http://box.tailnet.example:4747/?me=${encodeURIComponent(personToken(secret, 'Omar'))}`));
+    assert.doesNotMatch(run.stdout, /\?view=/, 'the view link has its own command');
     assert.match(run.stdout, /sees every crew's prompts/);
+    assert.match(run.stdout, /3 of 6 homes taken/);
     assert.match(run.stdout, /--team-host box\.tailnet\.example/);
     assert.doesNotMatch(run.stdout, /not a team host/);
-    const plain = spawnSync(process.execPath, [cli, 'team', 'invite', 'Omar'], { env: { ...process.env, ANDARY_HOME: member.home }, encoding: 'utf8' });
+    const link = team(host.home, ['view-link', '--url', 'http://box.tailnet.example:4747']);
+    assert.ok(link.stdout.includes(`http://box.tailnet.example:4747/?view=${viewToken(secret)}`));
+    const plain = team(member.home, ['invite', 'Omar']);
     assert.match(plain.stdout, /The running town is not a team host/);
+  });
+
+  it('refuses a seventh person, and never removes the host', () => {
+    for (const name of ['Rui', 'Ana', 'Kai']) assert.equal(team(host.home, ['invite', name]).status, 0);
+    const seventh = team(host.home, ['invite', 'Zed']);
+    assert.notEqual(seventh.status, 0);
+    assert.match(seventh.stderr, /room for 6 people/);
+    assert.match(team(host.home, ['remove', 'Sam']).stderr, /hosts the town/);
+    for (const name of ['Rui', 'Ana', 'Kai']) assert.equal(team(host.home, ['remove', name]).status, 0);
+  });
+
+  it('signs a teammate in with their personal link: their character, nothing of the host\'s', async () => {
+    const token = personToken(secret, 'Lina');
+    assert.equal((await rawRequest(host.port, { path: `/?me=${encodeURIComponent(personToken(secret, 'Mallory'))}` })).status, 403);
+    const login = await rawRequest(host.port, { path: `/?me=${encodeURIComponent(token)}` });
+    assert.equal(login.status, 302);
+    assert.equal(new URLSearchParams(String(login.headers.location).split('#')[1]).get('me'), token);
+    const hello = JSON.parse((await rawRequest(host.port, { path: '/api/hello', headers: { 'x-andary-person': token } })).text);
+    assert.equal(hello.authenticated, true);
+
+    const viewer = await connectBrowser(host, { protocols: `andary, andary.view.${viewToken(secret)}` });
+    const owner = await connectBrowser(host);
+    const ownerHello = await waitForMessage(owner, (m) => m?.t === 'hello');
+    assert.equal(ownerHello.me, 'Sam');
+    assert.equal((await waitForMessage(viewer, (m) => m?.t === 'hello')).me, null);
+    const lina = await connectBrowser(host, { protocols: `andary, andary.person.${token}` });
+    const greeting = await waitForMessage(lina, (m) => m?.t === 'hello');
+    assert.equal(greeting.me, 'Lina');
+    assert.equal(greeting.settings.team.role, 'person');
+    assert.equal(greeting.settings.remoteApprovals, false);
+    assert.equal(greeting.notifyUrl, null);
+    assert.deepEqual(greeting.approvals, []);
+    assert.deepEqual(greeting.people.map((/** @type {any} */ p) => [p.name, p.slot, p.host, p.online]), [['Sam', 0, true, true], ['Lina', 1, false, true], ['Omar', 2, false, false]]);
+    // Everyone hears that Lina came online.
+    await waitForMessage(viewer, (m) => m?.t === 'people' && m.people.find((/** @type {any} */ p) => p.name === 'Lina').online);
+
+    for (const message of [{ t: 'decide', id: 'x', decision: 'allow' }, { t: 'settings', settings: { remoteApprovals: true } }, { t: 'digest', since: 0 }, { t: 'notify-test' }]) {
+      lina.send(JSON.stringify(message));
+    }
+    await waitForMessage(lina, () => lina.messages.filter((m) => m?.t === 'error').length === 4);
+    for (const error of lina.messages.filter((m) => m?.t === 'error')) assert.match(error.message, /change their own character only/);
+
+    // A profile: checked, saved, and broadcast to everyone, viewers included.
+    lina.send(JSON.stringify({ t: 'profile', p: { ...defaultProfile(0), extra: 'cape' } }));
+    assert.match((await waitForMessage(lina, (m) => m?.t === 'error' && /Profile not saved/.test(m.message))).message, /exactly v, color, house and look/);
+    lina.send(JSON.stringify({ t: 'profile', p: { ...defaultProfile(2), look: { ...defaultProfile(2).look, extra: 'cape' } } }));
+    const saved = await waitForMessage(lina, (m) => m?.t === 'profile');
+    assert.deepEqual([saved.ok, saved.asked, saved.color], [true, 2, 3], 'Omar has pine: the next free colour');
+    const broadcast = await waitForMessage(viewer, (m) => m?.t === 'people' && m.people.find((/** @type {any} */ p) => p.name === 'Lina').profile);
+    assert.equal(broadcast.people.find((/** @type {any} */ p) => p.name === 'Lina').profile.look.extra, 'cape');
+    lina.send(JSON.stringify({ t: 'profile', p: defaultProfile(5) }));
+    assert.match((await waitForMessage(lina, (m) => m?.t === 'error' && /Wait/.test(m.message))).message, /Wait a few seconds/);
+    // The viewer may not have a profile at all.
+    viewer.send(JSON.stringify({ t: 'profile', p: defaultProfile(5) }));
+    assert.match((await waitForMessage(viewer, (m) => m?.t === 'error')).message, /Viewers can only watch/);
+    await Promise.all([owner, viewer, lina].map(closeBrowser));
+  });
+
+  it('team remove revokes one person at once: their open town, their link and their key', async () => {
+    const lina = await connectBrowser(host, { protocols: `andary, andary.person.${personToken(secret, 'Omar')}` });
+    await waitForMessage(lina, (m) => m?.t === 'hello');
+    const closed = new Promise((resolve) => lina.once('close', resolve));
+    assert.equal(team(host.home, ['remove', 'Omar']).status, 0);
+    assert.equal(/** @type {any} */ (await closed).reason, 'Removed from the team');
+    assert.equal((await rawRequest(host.port, { path: `/?me=${encodeURIComponent(personToken(secret, 'Omar'))}` })).status, 403);
+    const batch = { v: 1, events: [{ ts: Date.now(), event: hookPayload('Stop') }] };
+    assert.equal((await postTeam(host.port, batch, { 'x-andary-team': memberKey(secret, 'Omar') })).status, 401);
+    assert.equal((await postTeam(host.port, batch, { 'x-andary-team': memberKey(secret, 'Lina') })).status, 200, 'the others still work');
   });
 });

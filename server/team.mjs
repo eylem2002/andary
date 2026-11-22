@@ -1,9 +1,12 @@
 // The team town (CONTRACTS §4.11). One person hosts (`andary start --team`); each teammate's own
 // Andary relays its sanitized hook events there (`--share-to <url> --team-key <key>`), so the
-// host's town shows everyone's crews, each marked with its member's name. Teammates can watch
-// the shared town with a view-only link: they never get the host's sign-in, so they cannot answer
-// permission prompts or change settings. Keys are HMACs of one team secret kept in
-// <ANDARY_HOME>/team.json; `andary team reset` makes a new secret, which revokes every key and link.
+// host's town shows everyone's crews, each marked with its member's name. Each teammate also has
+// a personal link: it signs their browser in as themselves (their character and their home, never
+// the host's sign-in, so they cannot answer permission prompts or change settings). Anyone else
+// may watch with the view-only link. Keys and links are HMACs of one team secret kept in
+// <ANDARY_HOME>/team.json; a key or link works only while its name is on the roster
+// (people.mjs). `andary team remove` revokes one person; `andary team reset` makes a new secret,
+// which revokes every key and link.
 import { createHmac, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
@@ -57,33 +60,70 @@ function mac(secret, purpose) {
 }
 
 /**
- * A teammate's key: their name, a dot, and an HMAC of the name. Names are percent-encoded so a
- * dot in a name cannot be confused with the separator.
+ * A name, a dot, and an HMAC of the name for one purpose. Names are percent-encoded so a dot in
+ * a name cannot be confused with the separator.
+ * @param {string} secret @param {'member'|'person'} purpose @param {string} name  already cleaned
+ */
+function signName(secret, purpose, name) {
+  return `${encodeURIComponent(name)}.${mac(secret, `${purpose}:${name}`)}`;
+}
+
+/**
+ * The name a signed value belongs to, or null.
+ * @param {string} secret @param {'member'|'person'} purpose @param {unknown} value
+ * @returns {string|null}
+ */
+function verifyName(secret, purpose, value) {
+  if (typeof value !== 'string' || value.length > 200) return null;
+  const dot = value.lastIndexOf('.');
+  if (dot <= 0) return null;
+  let name;
+  try {
+    name = decodeURIComponent(value.slice(0, dot));
+  } catch {
+    return null;
+  }
+  if (cleanMemberName(name) !== name) return null;
+  return safeEqual(value.slice(dot + 1), mac(secret, `${purpose}:${name}`)) ? name : null;
+}
+
+/**
+ * A teammate's key, for their relay: it may add sessions to the town as them.
  * @param {string} secret
  * @param {string} name  already cleaned
  */
 export function memberKey(secret, name) {
-  return `${encodeURIComponent(name)}.${mac(secret, `member:${name}`)}`;
+  return signName(secret, 'member', name);
 }
 
 /**
- * The member a key belongs to, or null.
+ * The member a key belongs to, or null. The caller also checks the roster.
  * @param {string} secret
  * @param {unknown} key
  * @returns {string|null}
  */
 export function verifyMemberKey(secret, key) {
-  if (typeof key !== 'string' || key.length > 200) return null;
-  const dot = key.lastIndexOf('.');
-  if (dot <= 0) return null;
-  let name;
-  try {
-    name = decodeURIComponent(key.slice(0, dot));
-  } catch {
-    return null;
-  }
-  if (cleanMemberName(name) !== name) return null;
-  return safeEqual(key.slice(dot + 1), mac(secret, `member:${name}`)) ? name : null;
+  return verifyName(secret, 'member', key);
+}
+
+/**
+ * A teammate's personal link token, for their browser: it drives their character. Separate from
+ * the key, so a leaked link cannot post events and a leaked key cannot drive a character.
+ * @param {string} secret
+ * @param {string} name  already cleaned
+ */
+export function personToken(secret, name) {
+  return signName(secret, 'person', name);
+}
+
+/**
+ * The person a personal link token belongs to, or null. The caller also checks the roster.
+ * @param {string} secret
+ * @param {unknown} token
+ * @returns {string|null}
+ */
+export function verifyPersonToken(secret, token) {
+  return verifyName(secret, 'person', token);
 }
 
 /**
@@ -131,11 +171,11 @@ export function lanAddresses(interfaces = networkInterfaces()) {
 const MAX_MEMBERS = 50;
 
 /**
- * The host side of a team town: the secret, the view token, a rate limit per member and the list
- * of members seen since the server started.
- * @param {{ secret: string, onMember?: (members: string[]) => void, ratePerSecond?: number, burst?: number }} options
+ * The host side of a team town: the secret, the view token, the people (people.mjs), a rate limit
+ * per member and the list of members seen since the server started.
+ * @param {{ secret: string, people: import('./people.mjs').People, onMember?: (members: string[]) => void, ratePerSecond?: number, burst?: number }} options
  */
-export function createTeamHost({ secret, onMember = () => {}, ratePerSecond = 300, burst = 600 }) {
+export function createTeamHost({ secret, people, onMember = () => {}, ratePerSecond = 300, burst = 600 }) {
   /** @type {Map<string, import('./rate-limit.mjs').TokenBucket>} */
   const buckets = new Map();
   const overflow = createTokenBucket({ ratePerSecond, burst });
@@ -144,6 +184,17 @@ export function createTeamHost({ secret, onMember = () => {}, ratePerSecond = 30
   return {
     secret,
     view: viewToken(secret),
+    people,
+    /** The roster name a relay's key belongs to, or null. @param {unknown} key */
+    memberOf(key) {
+      const name = verifyMemberKey(secret, key);
+      return name && people.has(name) ? name : null;
+    },
+    /** The roster name a personal link belongs to, or null. @param {unknown} token */
+    personOf(token) {
+      const name = verifyPersonToken(secret, token);
+      return name && people.has(name) ? name : null;
+    },
     /** Team requests whose body is being read now (routes.mjs keeps it below a few). */
     uploads: 0,
     /** @param {string} member */

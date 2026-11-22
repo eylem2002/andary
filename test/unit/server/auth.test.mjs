@@ -32,16 +32,22 @@ describe('request checks', () => {
   const req = (/** @type {Record<string, string>} */ headers) => /** @type {any} */ ({ headers });
 
   it('reads the sign-in from headers (pages) or subprotocols (WebSockets), never from a cookie', () => {
-    assert.deepEqual(browserCredentials(req({ 'x-andary-token': 'tok', 'x-andary-view': 'v' })), { token: 'tok', view: 'v' });
-    assert.deepEqual(browserCredentials(req({ 'sec-websocket-protocol': 'andary, andary.token.tok, andary.view.v' })), { token: 'tok', view: 'v' });
-    assert.deepEqual(browserCredentials(req({ cookie: 'andary_ui=tok; andary_view=v' })), { token: null, view: null });
-    assert.deepEqual(browserCredentials(req({ 'sec-websocket-protocol': 'andary.token.' })), { token: null, view: null });
+    assert.deepEqual(browserCredentials(req({ 'x-andary-token': 'tok', 'x-andary-view': 'v', 'x-andary-person': 'Lina.m' })), { token: 'tok', view: 'v', person: 'Lina.m' });
+    assert.deepEqual(browserCredentials(req({ 'sec-websocket-protocol': 'andary, andary.token.tok, andary.view.v, andary.person.Lina.m' })), { token: 'tok', view: 'v', person: 'Lina.m' });
+    assert.deepEqual(browserCredentials(req({ cookie: 'andary_ui=tok; andary_view=v' })), { token: null, view: null, person: null });
+    assert.deepEqual(browserCredentials(req({ 'sec-websocket-protocol': 'andary.token.' })), { token: null, view: null, person: null });
   });
 
-  it('knows the owner, a viewer, and nobody', () => {
-    assert.equal(browserRole(req({ 'x-andary-token': 'tok' }), 'tok', 'v'), 'owner');
-    assert.equal(browserRole(req({ 'sec-websocket-protocol': 'andary, andary.view.v' }), 'tok', 'v'), 'viewer');
+  it('knows the owner, a person, a viewer, and nobody', () => {
+    const team = { view: 'v', personOf: (/** @type {string|null} */ token) => (token === 'Lina.good' ? 'Lina' : null) };
+    assert.deepEqual(browserRole(req({ 'x-andary-token': 'tok' }), 'tok', team), { role: 'owner', person: null });
+    assert.deepEqual(browserRole(req({ 'x-andary-token': 'tok', 'x-andary-person': 'Lina.good' }), 'tok', team), { role: 'owner', person: null }, 'the owner wins');
+    assert.deepEqual(browserRole(req({ 'x-andary-person': 'Lina.good', 'x-andary-view': 'v' }), 'tok', team), { role: 'person', person: 'Lina' });
+    assert.deepEqual(browserRole(req({ 'x-andary-person': 'Lina.bad', 'x-andary-view': 'v' }), 'tok', team), { role: 'viewer', person: null });
+    assert.equal(browserRole(req({ 'x-andary-person': 'Lina.bad' }), 'tok', team), null);
+    assert.deepEqual(browserRole(req({ 'sec-websocket-protocol': 'andary, andary.view.v' }), 'tok', team), { role: 'viewer', person: null });
     assert.equal(browserRole(req({ 'sec-websocket-protocol': 'andary, andary.view.v' }), 'tok', null), null, 'no view role off a team host');
+    assert.equal(browserRole(req({ 'x-andary-person': 'Lina.good' }), 'tok', null), null, 'no person off a team host');
     assert.equal(browserRole(req({ 'x-andary-token': 'nope' }), 'tok', null), null);
     assert.equal(browserRole(req({ cookie: 'andary_ui=tok' }), 'tok', null), null, 'an old cookie no longer signs in');
   });

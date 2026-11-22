@@ -7,7 +7,7 @@ import { CLI_PATH, DEFAULT_HOST, readVersion, resolveHome } from '../config.mjs'
 import { applyHooksChange, inspectInstallations, planHooksChange, refreshForwarder, settingsPathFor } from '../installer.mjs';
 import { openBrowser } from '../open-browser.mjs';
 import { hostWithPort, isLoopbackHost, isWildcardHost } from '../security.mjs';
-import { lanAddresses } from '../team.mjs';
+import { cleanMemberName, lanAddresses } from '../team.mjs';
 import { savedTopicUrl } from '../notify.mjs';
 import { ensureHome, findRunningServer, loginUrl, probeServer, readStateFile, removeStateFileIfOwned } from '../state-file.mjs';
 import { cliInvocation, sleep, tildify } from './io.mjs';
@@ -23,6 +23,7 @@ export const START_OPTIONS = Object.freeze({
   'notify-url': { type: 'string' },
   'notify-limits': { type: 'boolean' },
   team: { type: 'boolean' },
+  name: { type: 'string' },
   'team-host': { type: 'string', multiple: true },
   'share-to': { type: 'string' },
   'team-key': { type: 'string' },
@@ -43,6 +44,7 @@ export const START_OPTIONS = Object.freeze({
  * @property {string|null} notifyUrl   --notify-url or ANDARY_NOTIFY_URL
  * @property {boolean} notifyLimits    --notify-limits: a phone note when a plan limit reaches 90%
  * @property {boolean} team            --team: host a team town
+ * @property {string|null} teamName    --name: the host's own name in the team town
  * @property {string[]} teamHosts      --team-host: other names teammates reach it by
  * @property {{ url: string, key: string, member: string }|null} shareTo  --share-to and --team-key
  * @property {number|undefined} approvalTimeoutMs
@@ -63,6 +65,9 @@ function startSettings(values, io, demo) {
   const shareTo = parseShareTo(values['share-to'] ?? io.env.ANDARY_SHARE_TO, values['team-key'] ?? io.env.ANDARY_TEAM_KEY);
   if (team && shareTo) throw new UsageError('A town either hosts the team (--team) or shares with one (--share-to), not both.');
   if (values['team-host'] && !team) throw new UsageError('--team-host only matters with --team.');
+  if (values.name !== undefined && !team) throw new UsageError('--name only matters with --team: it is your name in the team town.');
+  const teamName = values.name === undefined ? null : cleanMemberName(values.name);
+  if (values.name !== undefined && !teamName) throw new UsageError('--name takes letters, digits, spaces, dots, dashes or underscores (at most 24).');
   const notifyUrl = parseNotifyUrl(values['notify-url'] ?? io.env.ANDARY_NOTIFY_URL);
   if (values['notify-limits'] && !values.notify && !notifyUrl) throw new UsageError('--notify-limits sends phone notes: add --notify (or --notify-url).');
   return {
@@ -70,6 +75,7 @@ function startSettings(values, io, demo) {
     // Teammates must be able to reach a team host, so --team listens on the network unless --host says where.
     host: values.host ?? (team ? '0.0.0.0' : DEFAULT_HOST),
     team,
+    teamName,
     teamHosts: parseTeamHosts(values['team-host']),
     shareTo,
     open: !values['no-open'],
@@ -148,6 +154,7 @@ async function runForeground(settings, home, io) {
       notifyUrl: settings.notifyUrl ?? (settings.notify ? savedTopicUrl(home) : null),
       notifyLimits: settings.notifyLimits,
       team: settings.team,
+      teamName: settings.teamName,
       teamHosts: settings.teamHosts,
       shareTo: settings.shareTo,
       approvalTimeoutMs: settings.approvalTimeoutMs,
@@ -255,8 +262,8 @@ function printBanner(server, settings, io) {
   io.out(notifyUrl ? `  Phone notifications: on. In the free ntfy app, subscribe to ${notifyUrl}` : '  Phone notifications: off (start with --notify to get them in the free ntfy app)');
   if (notifyUrl && settings.notifyLimits) io.out('  Also when a Claude plan limit reaches 90% (with the andary-limits mod).');
   if (server.viewUrl) {
-    io.out(`  Team town: on. Invite a teammate with: ${cliInvocation()} team invite <name>`);
-    io.out(`  Teammates watch (view only) at ${server.viewUrl}`);
+    io.out(`  Team town: on. Invite a teammate (a home, a character and a personal link) with: ${cliInvocation()} team invite <name>`);
+    io.out(`  Anyone else may watch (view only) at ${server.viewUrl}`);
   }
   if (settings.shareTo) {
     io.out(`  Sharing your sessions with the team town at ${settings.shareTo.url} as ${settings.shareTo.member}.`);
@@ -372,6 +379,7 @@ function forwardedFlags(settings) {
   if (settings.notify) flags.push('--notify');
   if (settings.notifyLimits) flags.push('--notify-limits');
   if (settings.team) flags.push('--team');
+  if (settings.teamName) flags.push('--name', settings.teamName);
   for (const name of settings.teamHosts) flags.push('--team-host', name);
   if (settings.approvalTimeoutMs !== undefined) flags.push('--approval-timeout', String(settings.approvalTimeoutMs / 1000));
   // Paths only: the background server reads the files itself.

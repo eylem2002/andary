@@ -1,7 +1,7 @@
 // HTTP routes (CONTRACTS §4.4). Every response carries the security headers; every request must
 // name one of our own hosts.
 import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, PROOF_HEADER, browserRole, hasHookSecret, proveServer, safeEqual, signHookReply } from './auth.mjs';
-import { TEAM_HEADER, verifyMemberKey } from './team.mjs';
+import { TEAM_HEADER } from './team.mjs';
 import { offeredSuggestions } from './approvals.mjs';
 import { sourceOf } from './adapters/index.mjs';
 import { ingestHook, ingestTeam } from './ingest.mjs';
@@ -61,6 +61,10 @@ export async function handleRequest(ctx, req, res) {
     handleViewLogin(ctx, res, url);
     return;
   }
+  if (req.method === 'GET' && url.searchParams.has('me') && isPagePath(url.pathname)) {
+    handlePersonLogin(ctx, res, url);
+    return;
+  }
   await ctx.serveStatic(req, res, url.pathname);
 }
 
@@ -117,6 +121,21 @@ function handleViewLogin(ctx, res, url) {
 }
 
 /**
+ * GET /?me=… (a teammate's personal link): the same, with `#me=…`, while the name is on the roster.
+ * @param {TownContext} ctx
+ * @param {Response} res
+ * @param {URL} url
+ */
+function handlePersonLogin(ctx, res, url) {
+  const token = url.searchParams.get('me');
+  if (!ctx.team?.personOf(token)) {
+    sendHtml(res, 403, BAD_TOKEN_PAGE);
+    return;
+  }
+  redirectWithFragment(res, url, 'me', `me=${encodeURIComponent(/** @type {string} */ (token))}`);
+}
+
+/**
  * Only the app reads a sign-in from the fragment; other pages (the lab pages) just lose the token,
  * so it never stays in their address.
  * @param {Response} res
@@ -145,7 +164,7 @@ const API_ROUTES = {
       sendJson(res, 200, {
         app: APP_ID,
         version: ctx.version,
-        authenticated: browserRole(req, ctx.uiToken, ctx.team?.view ?? null) !== null,
+        authenticated: browserRole(req, ctx.uiToken, ctx.team) !== null,
         settings: publicSettings(ctx),
       }),
   },
@@ -169,7 +188,7 @@ const TEAM_UPLOADS = 4;
  * @param {Response} res
  */
 async function handleTeam(ctx, req, res) {
-  const member = ctx.team ? verifyMemberKey(ctx.team.secret, req.headers[TEAM_HEADER]) : null;
+  const member = ctx.team ? ctx.team.memberOf(req.headers[TEAM_HEADER]) : null;
   if (!member) {
     req.resume();
     sendJson(res, ctx.team ? 401 : 404, { error: ctx.team ? 'Missing or wrong team key' : 'Not found' });
