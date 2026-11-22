@@ -1066,3 +1066,52 @@ section.
      to set it in the shell profile.
 185. **A team viewer is not told to install the mod.** Limits are the host's and never reach a
      viewer; their Usage dialog says only the host sees them.
+
+## Notes to agents and Deny and stop (feat/agent-notes)
+
+186. **A note arrives at the agent's next step, not at once.** Andary's hooks run in the
+     background (`async: true`); Claude Code delivers an async hook's `additionalContext` "on the
+     next conversation turn", as context the terminal does not show (hooks reference, "How async
+     hooks execute"). In practice that is the next model call after the hook that carried it
+     finished: after the agent's next tool call, or with your next prompt. An idle session reads it
+     only once you type. The town says "handed to the agent with its <hook> hook", never "read".
+187. **The hooks that carry notes** are PreToolUse, PostToolUse, PostToolUseFailure and
+     UserPromptSubmit for Claude Code, and PreToolUse, PostToolUse and UserPromptSubmit for Codex
+     (whose docs list `additionalContext` for those). Not SessionStart (Claude Code skips repeated
+     async SessionStart text), not Stop or SubagentStop (their context keeps a turn going), not
+     PermissionRequest (a decision only). Claude Code honoured this from an async hook in 2.1.330.
+188. **Codex and helpers: delivery is not verified.** Codex documents `additionalContext` but
+     says background hooks "can't control the operation that triggered them"; whether a background
+     hook's context reaches the model was not tested. A note for a helper (subagent) is handed to
+     that helper's own hooks; whether Claude Code gives a subagent's async hook output to that
+     subagent, or to the lead, was not tested either. The inspector says so for both.
+189. **"Delivered" means sent in the reply.** The server marks a note delivered when it writes the
+     reply that carries it. If the forwarder gave up first (1.5 s) or Claude Code dropped the async
+     output (a `-p` run ending), the note is lost; the owner can send it again.
+190. **The sender's name is the forwarder's user name** (`os.userInfo().username`, letters, digits,
+     `.`, `_`, `-`, at most 40; otherwise "the owner"). Only the owner can send notes, and only to
+     agents of this computer, so the user running the forwarder is the person who wrote the note.
+     The server sends no name, so a reply cannot claim another sender.
+191. **Bounds.** 2,000 characters a note (refused, never cut), 5 waiting per agent, 100 waiting in
+     all, 4 per hook reply, 30 minutes before a note expires (checked every 15 s and when a hook
+     comes), notes expire when the session ends or the helper finishes (SubagentStop). 12 notes a
+     minute with bursts of 5, counted only for notes that would be queued.
+192. **Line breaks are kept** in a note (it is the owner's own text), while controls, format
+     characters (bidirectional overrides, zero-width characters) and lone surrogates are removed
+     and blank lines collapsed. The server and the forwarder clean a note the same way
+     (`noteText`, one table through both).
+193. **Notes are not shown in the demo**: the simulation has no agent to reach. The note field is
+     hidden there.
+194. **Deny and stop is Claude Code only.** Claude Code's PermissionRequest deny takes
+     `interrupt: true` ("stops Claude"); Codex reserves `interrupt` and "fails closed today", so a
+     Codex card offers Deny only and says why, the server refuses a stop for it, and the forwarder
+     never prints the flag when run as Codex. A forwarder that does not declare `interrupt` (an
+     older copy) would drop the flag, so its cards say to update instead.
+195. **Deny and stop needs no confirmation.** It is labelled and explained on the card, placed on
+     its own row under Deny with its line first (a tap that falls short of Deny lands on words),
+     and waits out the card's one-second click delay like Allow and Deny. Stopping is not
+     destructive: the agent waits for you in the terminal.
+196. **Follow-up: the cross-session inbox socket.** Claude Code 2.1.224 and later expose
+     `CLAUDE_CODE_MESSAGING_SOCKET` (cross-session messaging), which could put a note between tool
+     calls or start a turn in an idle session. Its message format was not tested, so it is not
+     built; a later change can deliver notes through it when it is known, falling back to hooks.

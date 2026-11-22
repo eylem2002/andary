@@ -198,6 +198,26 @@ running a command outside the sandbox) is never held there and goes straight to 
 does one from an older copy of Andary's hook (the card says how to update it). Codex does not say
 whether a command asks to leave its sandbox, so a Codex command's card says that allowing it may.
 
+### Talk to your agents
+
+You can steer an agent from the town without going back to its terminal.
+
+- **Send a note.** Open an agent's details (click it, or its row) and type in **Send a note**. The
+  note waits in Andary and reaches the agent at its **next step**: its next tool call, or your
+  next prompt. It never appears in your terminal; Claude Code (or Codex) gives it to the agent as
+  context headed "Note from <you> via Andary". An agent that is idle reads it only once you type
+  your next prompt. The activity log and the agent's details follow each note: queued, handed to
+  the agent (with the hook that carried it), or expired; the agent carries a small envelope until
+  then. A note is at most 2,000 characters and waits at most 30 minutes; at most five wait for one
+  agent. Only you, signed in to your own town, can send one, and only to agents on this computer:
+  never through a team town's view link, and never to a teammate's crew. Notes to a helper or to
+  Codex are sent the same way, but Andary has not confirmed yet that they read them, and the
+  details say so. An agent whose hook comes from an older Andary gets none until you run
+  `andary install` (or update the plugin) and restart its session; the town says so when you try.
+- **Deny and stop.** With remote approvals on, a Claude Code request's card also offers **Deny and
+  stop**: it denies the request and stops the agent's turn, so it waits for you in the terminal.
+  Codex refuses a stop from a hook today, so a Codex card offers Deny only and says why.
+
 ### See what needs you
 
 When an agent stops for you (a permission request, a question, a plan to approve, a turn that
@@ -371,6 +391,8 @@ Andary sees what your agents see, so it is locked down:
 - the hook forwarder only talks to a live server of yours that first proves it holds a key that
   never leaves `~/.andary`, and only obeys replies signed with it, so a stale state file cannot
   hand your prompts, the hook secret or control of your agent to whoever takes the old port;
+- notes to your agents come only from you, signed in to your own town, and go only to agents on
+  this computer: a team town's viewers and teammates can never send one (ADR 0018);
 - secrets that look like API keys, tokens or passwords are redacted before anything is kept or
   sent; prompts and commands are never written to disk unless you pass `--record` (small state
   files in `~/.andary` keep usage totals with the transcript paths they came from, and the
