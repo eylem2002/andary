@@ -175,6 +175,7 @@ building to see who is inside.
 | `U` · `L` | Usage (tokens and estimated cost) · Leaderboard |
 | `I` | Go to what needs you, most urgent first (again for the next) |
 | `W` | Catch me up: what your crews did since you last looked |
+| `T` | Timeline under the town: what each agent did, lane by lane |
 | `A` | Go to approvals |
 | `1`–`9` | Jump to crew 1 to 9 |
 | `?` | All shortcuts |
@@ -240,6 +241,19 @@ deny in the town ends its alert. An edit of such a
 file is only a note under both rows, as an edit must match what is in the file. It lasts half an
 hour, or until the agents finish. Andary compares paths as written: a symbolic link, or a disk that
 ignores case, can hide one.
+
+### The timeline
+
+A strip under the town (`T` or the toolbar's Timeline button; on phones it starts
+hidden, and Settings has a **Timeline** button) has one lane per agent, for one crew or every crew
+grouped: each tool call in its building's colour, a failed call as a red tick, the stretches an
+agent waited for you hatched (a permission, a question, a plan, a stopped turn, a stuck alert),
+your prompts as pins and each turn's end as a cap, up to a "now" edge that moves with the clock.
+Zoom to the last 15 minutes, the last hour or today. Point at or focus a moment to see what it
+was; click it (or press Enter) to select the agent, point the camera at it and see the command,
+the file or the error in its details, or the diff when the town has it. The arrow keys move
+between moments (Up and Down between lanes), and **List** shows the same moments as a plain list.
+It keeps the whole day: older stretches are merged into coarser ones rather than dropped.
 
 ### Catch up
 

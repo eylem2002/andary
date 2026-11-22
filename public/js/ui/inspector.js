@@ -1,10 +1,10 @@
 // The agent inspector: everything known about the selected agent — role, crew, status, what it is
 // doing (or waiting for you on, or why it seems stuck, and since when; and a note when another
-// agent changed a file it edits), its brief, its context in use and what it cost, which tools it
-// used how often, recent files and activity, its last message.
+// agent changed a file it edits), the moment picked on the timeline, its brief, its context in use
+// and what it cost, which tools it used how often, recent files and activity, its last message.
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
-import { doingText, formatAgo, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
+import { doingText, formatAgo, formatClock, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
 import { changeSummary } from './changes.js';
 import { contextSentence, hasCounted, liveContext, usageSentence } from './usage.js';
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
@@ -48,8 +48,10 @@ export function createInspector(ctx) {
   const recent = h('ol', { class: 'hud-recent' });
   const message = h('p', { class: 'hud-inspector__message' });
   const usage = createUsageLines();
+  const moment = createMoment(ctx);
   const sections = {
     now: section('Now', h('div', {}, now, need.el, note)),
+    moment: section('On the timeline', moment.el),
     brief: section('Brief', brief),
     usage: section('Usage', usage.el),
     tools: section('Tools used', tools),
@@ -73,8 +75,7 @@ export function createInspector(ctx) {
   let opener = null;
 
   const dismiss = () => ctx.select(null);
-  close.addEventListener('click', dismiss);
-  closeText.addEventListener('click', dismiss);
+  for (const button of [close, closeText]) button.addEventListener('click', dismiss);
   follow.addEventListener('click', () => ctx.setFollow(!ctx.view.follow));
 
   /**
@@ -124,6 +125,7 @@ export function createInspector(ctx) {
     setText(note, newest?.text ?? '');
     setHidden(note, !newest);
     renderSections(agent, session?.cwd, asking);
+    setHidden(sections.moment, !moment.update(ctx.view.moment?.agentKey === agent.key ? ctx.view.moment.item : null));
     setHidden(sections.usage, !usage.update(state, agent.key, Date.now()));
     setAttr(follow, 'aria-pressed', String(ctx.view.follow));
     tick(Date.now());
@@ -172,6 +174,38 @@ export function createInspector(ctx) {
   }
 
   return { el, open, hide, render, tick, get agentKey() { return agentKey; } };
+}
+
+/**
+ * The moment picked on the timeline: what it was, when, and what it ran or touched; an edit the
+ * town has the diff of gets a button to it.
+ * @param {HudContext} ctx
+ */
+function createMoment(ctx) {
+  const what = h('p', { class: 'hud-inspector__moment', 'data-testid': 'inspector-moment' });
+  const when = h('p', { class: 'hud-inspector__when' });
+  const detail = h('pre', { class: 'hud-inspector__detail hud-mono', hidden: true });
+  const diff = h('button', { type: 'button', class: 'hud-btn hud-btn--small', hidden: true }, 'Show the diff');
+  /** @type {import('../core/timeline.js').TimelineItem|null} */
+  let item = null;
+  diff.addEventListener('click', () => {
+    if (item?.changeId) ctx.showDiff(item.laneKey, item.changeId);
+  });
+  return {
+    el: h('div', {}, what, when, detail, diff),
+    /** @param {import('../core/timeline.js').TimelineItem|null} next @returns {boolean} whether there is one */
+    update(next) {
+      item = next;
+      if (!item) return false;
+      setText(what, item.label);
+      const took = item.type === 'tool' || item.type === 'wait' ? ` for ${formatDuration(item.end - item.start)}${item.open ? ' so far' : ''}` : '';
+      setText(when, `At ${formatClock(item.start)}${took}`);
+      setText(detail, item.detail && item.detail !== item.label ? item.detail : '');
+      setHidden(detail, !detail.textContent);
+      setHidden(diff, !item.changeId);
+      return true;
+    },
+  };
 }
 
 /**

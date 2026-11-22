@@ -26,6 +26,7 @@ import { PLACE_NAMES } from '../core/place-names.js';
  * @property {boolean} ambient       waves, gulls, city hum and soft music while sound is on
  * @property {'coast'|'snow'|'neon'|'desert'|'amman'} townLook  the town's look (core/looks.js, read by page.js); changing it reloads
  * @property {'auto'|'always'|'off'} placeNames  labels on the buildings: names where they fit, always, or none (core/place-names.js)
+ * @property {'auto'|'shown'|'hidden'} timeline  the timeline strip under the town; auto shows it except on phones
  */
 
 /** @type {Readonly<Prefs>} */
@@ -49,6 +50,7 @@ export const DEFAULT_PREFS = Object.freeze({
   ambient: true,
   townLook: 'coast',
   placeNames: 'auto',
+  timeline: 'auto',
 });
 
 export const STORAGE_KEY = PREFS_STORAGE_KEY;
@@ -65,6 +67,7 @@ const CHOICES = {
   directorCam: ['auto', 'on', 'off'],
   townLook: ['coast', 'snow', 'neon', 'desert', 'amman'],
   placeNames: PLACE_NAMES,
+  timeline: ['auto', 'shown', 'hidden'],
 };
 
 /**

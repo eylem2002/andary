@@ -1066,3 +1066,22 @@ section.
      to set it in the shell profile.
 185. **A team viewer is not told to install the mod.** Limits are the host's and never reach a
      viewer; their Usage dialog says only the host sees them.
+
+## Timeline (2026-11-22)
+
+186. **The timeline lives in the store.** Its waits come from what the store already knows (open
+     dialogs, a stopped turn, a stuck alert), so the store feeds it after every event and approval
+     change rather than the HUD rebuilding it; agents' names are kept on each lane, so a crew that
+     left still reads right for the rest of the day.
+187. **A day per lane, merged rather than dropped.** 400 spans, 120 waits and 200 marks a lane; over
+     that the older half merges in pairs (a busy morning shows as fewer, coarser spans that still
+     count every call and failure). Only what ended more than 24 hours before the lane's newest
+     moment goes, and the oldest only when nothing more can merge. 120 lanes; the quietest goes.
+188. **A finished turn's "finished" wait is not hatched.** Waits are what blocks the agent on you
+     (permission, question, plan, an MCP form or notice as "input", a stop, a stuck alert); an idle
+     lead after its turn shows as the cap and the empty lane after it.
+189. **The timeline is shown by default on desktop, hidden on phones, and hidden with the boards.**
+     `T` (free until now) toggles it; showing it from the full-screen town brings the boards back. On
+     phones it is reached from Settings, as the toolbar has no room.
+190. **Calls narrower than 4 pixels merge in the view**, so "today" stays a few dozen buttons per
+     lane; the merged item reads "N calls (M failed)" and goes to its agent without a detail.

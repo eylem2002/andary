@@ -2196,7 +2196,7 @@ body {
 
 .hud-place {
   position: fixed;
-  bottom: calc(var(--gap) + var(--tools-h, var(--toolbar-h)) + 12px);
+  bottom: calc(var(--gap) + var(--tools-h, var(--toolbar-h)) + var(--timeline-h, 0px) + 12px);
   left: 50%;
   z-index: 26;
   width: min(340px, calc(100vw - 24px));
@@ -2278,7 +2278,7 @@ body {
 .hud-cinema {
   --crew: #5D6874;
   position: fixed;
-  bottom: calc(var(--gap) + var(--tools-h, var(--toolbar-h)) + 12px);
+  bottom: calc(var(--gap) + var(--tools-h, var(--toolbar-h)) + var(--timeline-h, 0px) + 12px);
   left: 50%;
   z-index: 24;
   display: flex;
@@ -3435,7 +3435,7 @@ body {
   }
 
   .hud-cinema {
-    bottom: calc(var(--sheet-h) + var(--tools-h, var(--toolbar-h)) + 16px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(var(--sheet-h) + var(--tools-h, var(--toolbar-h)) + var(--timeline-h, 0px) + 16px + env(safe-area-inset-bottom, 0px));
     min-width: 0;
     width: calc(100vw - 16px);
   }
@@ -3492,4 +3492,348 @@ body {
   animation: none !important;
   transition: none !important;
   scroll-behavior: auto !important;
+}
+
+/* ---- timeline: a lane per agent under the town (ui/timeline.js) --------------------------- */
+
+/* Between the crews and the board, above the toolbar; past the inspector where it opens beside the
+   crews. Each call takes its building's colour, waits for you are hatched, a failed call ends in a
+   red tick, a prompt is a pin and the turn's end a cap. */
+.hud-timeline {
+  --b-hall: #8A5CC2;
+  --b-library: #2F7FC1;
+  --b-workshop: #D9822B;
+  --b-terminal: #3F4A5A;
+  --b-detective: #1C9A8A;
+  --b-web: #5B6CD6;
+  --b-board: #B8A12A;
+  --b-post: #C0392B;
+  --b-harbor: #1F6E8C;
+  --b-permits: #E0A21B;
+  --b-spa: #C2577D;
+  --b-academy: #6B8E23;
+  --b-cafe: #8D6E63;
+  --b-grove: #2E8B57;
+  --b-station: #7F8C8D;
+  position: fixed;
+  right: calc(var(--gap) * 2 + var(--right-w));
+  bottom: calc(var(--gap) + var(--tools-h, var(--toolbar-h)) + 12px);
+  left: calc(var(--gap) * 2 + var(--left-w));
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  max-height: min(42vh, 300px);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  box-shadow: var(--shadow);
+}
+
+@media (min-width: 1440px) {
+  html[data-inspector="open"] .hud-timeline {
+    left: calc(var(--gap) * 2 + var(--left-w) + var(--insp-w) + 12px);
+  }
+}
+
+.hud-panels-hidden .hud-timeline {
+  display: none;
+}
+
+.hud-timeline__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.hud-timeline__title {
+  flex: 1;
+  margin: 0;
+  font: 800 14px/1 var(--font-ui);
+}
+
+.hud-timeline__crews {
+  flex: 0 1 180px;
+  min-width: 96px;
+}
+
+.hud-timeline__zooms {
+  display: flex;
+  gap: 2px;
+}
+
+.hud-timeline .hud-btn[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.hud-timeline__body {
+  position: relative;
+  min-height: 0;
+  padding: 2px 10px 8px;
+  overflow: auto;
+}
+
+.hud-timeline__axis {
+  display: flex;
+  justify-content: space-between;
+  margin-left: 92px;
+  color: var(--ink-3);
+  font: 600 11px/1.6 var(--font-ui);
+}
+
+.hud-timeline__now {
+  color: var(--ink-2);
+}
+
+.hud-timeline__crew {
+  --crew: #5D6874;
+  padding-top: 2px;
+}
+
+.hud-timeline__crewname {
+  margin: 4px 0 1px;
+  padding-left: 6px;
+  border-left: 4px solid var(--crew);
+  color: var(--ink-2);
+  font: 700 12px/1.3 var(--font-ui);
+}
+
+.hud-timeline__lane {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+}
+
+.hud-timeline__name {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The track ends at "now": its right edge, drawn as a line. */
+.hud-timeline__track {
+  position: relative;
+  height: 20px;
+  border-right: 2px solid var(--working);
+  background: linear-gradient(var(--hairline), var(--hairline)) center / 100% 1px no-repeat;
+}
+
+.hud-timeline__item {
+  position: absolute;
+  top: 4px;
+  height: 12px;
+  min-width: 3px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: var(--b-workshop);
+  cursor: pointer;
+}
+
+.hud-timeline__item:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  z-index: 3;
+}
+
+.hud-timeline__item[data-type="tool"] { z-index: 1; }
+.hud-timeline__item[data-building="hall"] { background: var(--b-hall); }
+.hud-timeline__item[data-building="library"] { background: var(--b-library); }
+.hud-timeline__item[data-building="workshop"] { background: var(--b-workshop); }
+.hud-timeline__item[data-building="terminal"] { background: var(--b-terminal); }
+.hud-timeline__item[data-building="detective"] { background: var(--b-detective); }
+.hud-timeline__item[data-building="web"] { background: var(--b-web); }
+.hud-timeline__item[data-building="board"] { background: var(--b-board); }
+.hud-timeline__item[data-building="post"] { background: var(--b-post); }
+.hud-timeline__item[data-building="harbor"] { background: var(--b-harbor); }
+.hud-timeline__item[data-building="permits"] { background: var(--b-permits); }
+.hud-timeline__item[data-building="spa"] { background: var(--b-spa); }
+.hud-timeline__item[data-building="academy"] { background: var(--b-academy); }
+.hud-timeline__item[data-building="cafe"] { background: var(--b-cafe); }
+.hud-timeline__item[data-building="grove"] { background: var(--b-grove); }
+.hud-timeline__item[data-building="station"] { background: var(--b-station); }
+
+.hud-timeline__item.is-open {
+  border-radius: 2px 0 0 2px;
+  opacity: 0.8;
+}
+
+/* A failed call ends in a red tick that rises above the lane. */
+.hud-timeline__item.is-failed::after {
+  position: absolute;
+  top: -4px;
+  right: -1px;
+  width: 3px;
+  height: 20px;
+  border-radius: 1px;
+  background: var(--error);
+  content: "";
+}
+
+.hud-timeline__item[data-type="wait"] {
+  top: 1px;
+  height: 18px;
+  z-index: 0;
+  border: 1px solid var(--waiting);
+  background: repeating-linear-gradient(135deg, var(--waiting) 0 3px, transparent 3px 7px);
+}
+
+.hud-timeline__item[data-wait="stopped"],
+.hud-timeline__item[data-wait="stuck"] {
+  border-color: var(--error);
+  background: repeating-linear-gradient(135deg, var(--error) 0 3px, transparent 3px 7px);
+}
+
+/* A prompt: a pin with a head; the turn's end: a cap like a closing bracket. */
+.hud-timeline__item[data-type="prompt"],
+.hud-timeline__item[data-type="end"] {
+  top: 0;
+  width: 3px;
+  height: 20px;
+  min-width: 0;
+  z-index: 2;
+  transform: translateX(-1px);
+}
+
+.hud-timeline__item[data-type="prompt"] {
+  background: var(--ink);
+}
+
+.hud-timeline__item[data-type="prompt"]::before {
+  position: absolute;
+  top: -2px;
+  left: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ink);
+  content: "";
+}
+
+.hud-timeline__item[data-type="end"] {
+  border-top: 3px solid var(--done);
+  border-bottom: 3px solid var(--done);
+  border-right: 3px solid var(--done);
+  width: 7px;
+  background: transparent;
+  transform: translateX(-6px);
+}
+
+.hud-timeline__item[data-ended="error"] {
+  border-color: var(--error);
+}
+
+.hud-timeline__item[data-ended="interrupted"] {
+  border-color: var(--idle);
+}
+
+.hud-timeline__list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hud-timeline__row {
+  display: block;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hud-timeline__row:hover {
+  background: var(--paper-2);
+}
+
+.hud-timeline__row.is-failed {
+  color: var(--error);
+}
+
+.hud-timeline__empty {
+  margin: 8px 2px;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.hud-timeline__tip {
+  position: absolute;
+  z-index: 5;
+  max-width: 280px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: var(--band);
+  color: var(--band-ink);
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+  transform: translateY(-100%);
+}
+
+.hud-tips-hidden .hud-timeline__tip {
+  display: none;
+}
+
+
+.hud-inspector__moment {
+  margin: 0;
+  font-weight: 600;
+}
+
+.hud-inspector__when {
+  margin: 2px 0 4px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.hud-inspector__detail {
+  max-height: 140px;
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--code-bg);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Phones: above the toolbar, the width of the screen, when asked for from Settings. */
+@media (max-width: 640px) {
+  .hud-timeline {
+    right: 8px;
+    bottom: calc(var(--sheet-h) + var(--tools-h, var(--toolbar-h)) + 14px);
+    left: 8px;
+    max-height: 34dvh;
+  }
+
+  .hud-timeline__lane {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .hud-timeline__axis {
+    margin-left: 68px;
+  }
+
+  .hud-timeline__track {
+    height: 28px;
+  }
+
+  .hud-timeline__item {
+    top: 6px;
+    height: 16px;
+  }
 }

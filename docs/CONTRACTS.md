@@ -49,7 +49,8 @@ public/js/core/              Pure logic, no DOM, no I/O: events (normalize), sto
                              "Allow always" may save), loops (when an agent seems stuck), shell
                              (shell command lines read as a shell reads them, for every rule),
                              conflicts (two agents on the same files, + git-commands, paths),
-                             digest (what each crew did, for Catch me up)
+                             digest (what each crew did, for Catch me up), timeline (each
+                             agent's day, lane by lane)
 public/js/sources/           Where events come from: live.js (WebSocket) and demo.js (simulation),
                              one TownSource shape (types.js)
 public/js/world/layout.js    Town plan (shared, pure data)
@@ -979,6 +980,7 @@ StoreState {
   achievements: Achievement[]
   usage: Record<agentKey, AgentUsage>            // §4.8
   usageDays: UsageDay[]
+  timeline: Timeline                             // each agent's day (core/timeline.js), below
 }
 AgentUsage { tokens: { input, output, cacheRead, cacheWrite }, costUsd, unpriced: boolean, model: string|null,
              context: { tokens, at } | null /* §4.8: the newest reading; null when unknown */,
@@ -1239,6 +1241,58 @@ have changed 5 files" (two names, or the first and "N others").
   commands, 16 adds for each of 200 agents, 64 pathspecs a command; a command line is read up to
   20,000 characters.
 
+**Timeline** (`core/timeline.js`, pure; the strip is `ui/timeline.js`). The store keeps
+`StoreState.timeline = { lanes: Record<agentKey, Lane>, seq }` from every event it applies
+(`recordEvent(timeline, event, { name, role })`) and, after each event and each approval change,
+from what each agent of the event's crew (and any agent whose stuck alert changed) waits for you on
+now (`recordWait(timeline, agent, { kind, text }|null, at)`): an open dialog (`permission`,
+`question`, `plan`, or `input` for an MCP form or a notice), else a turn stopped on an error
+(`stopped`), else a stuck alert (`stuck`). A new kind closes the open wait and starts another.
+
+```js
+Lane { key, sessionId, name, role, first, last /* hook times */, spans: Span[], waits: WaitSpan[], marks: Mark[] }
+Span { id, start, end: number|null /* null while it runs */, building, tool /* '' once merged across tools */,
+       summary, toolUseId, file, command /* Bash, PowerShell */, error /* a failure's first line */,
+       changeId /* the event id of the FileChange it made, when the town kept one */, calls, fails }
+WaitSpan { id, kind: 'permission'|'question'|'plan'|'input'|'stopped'|'stuck', start, end: number|null, text }
+Mark { id, kind: 'prompt'|'end', at, text, ended: 'done'|'error'|'interrupted'|null, count }
+```
+
+- `tool.start` opens a span; `tool.end`, `tool.fail` and `permission.denied` close the span with its
+  `toolUseId` (a refusal, which names none, the open one of its tool); a failure that is not an
+  interrupt sets `fails: 1` and `error` (a refusal's reason). A finished call whose start was missed
+  gets a span of its own, `durationMs` long. A `prompt` is a `prompt` mark; `turn.stop` and
+  `turn.fail` an `end` mark (a Stop with `stop_hook_active` updates the last one) and close the
+  lane's open spans and waits, as do `subagent.stop` and, for every lane of its crew, `session.end`.
+- **Bounds**: a lane keeps what ended at most `DAY_MS` (24 hours) before its newest moment; over
+  `MAX_SPANS` (400), `MAX_WAITS` (120) or `MAX_MARKS` (200) its older half merges in neighbouring
+  pairs (finished spans and waits; marks of one kind), so the day stays visible at a coarser grain
+  (`calls` and `fails` add up, `count` for marks), and only if that does not bring it under the
+  limit do the oldest go. `MAX_LANES` (120): the lane quiet the longest goes first.
+- `timelineView(timeline, { from, to, sessions?, order?, minMs? }) → TimelineGroup[]`: per crew (in
+  `order`, then the rest) the lanes with anything in the window, leads first, then by when they
+  started; `TimelineGroup { sessionId, lanes: { key, name, role, items: TimelineItem[] }[] }`, items
+  by start. `TimelineItem { id, laneKey, type: 'tool'|'wait'|'prompt'|'end', start, end /* a running
+  one: to */, open, label, building, wait, calls, fails, ended, detail /* the command, the file or the
+  error */, changeId }`. Neighbouring finished calls when one is shorter than `minMs` merge
+  ("5 calls (1 failed)").
+
+The strip (`ui/timeline.js`) sits under the town between the crews and the board, above the
+toolbar (past the inspector when that opens beside the crews), and is shown by the toolbar's
+Timeline button, `T`, and on phones Settings' **Timeline** button: `Prefs.timeline` is `'auto'`
+(shown, except on phones), `'shown'` or `'hidden'`; the full-screen town hides it with the boards,
+and showing it brings them back. Its height is `--timeline-h`, which lifts the director's caption
+and the building card. Zoom: the last 15 minutes, the last hour, or today (since local midnight, an
+hour at least); a crew picker (all crews, grouped, or one); calls narrower than 4 pixels merge. The
+strip is one tab stop: Left and Right move along a lane, Up and Down to the item nearest in time in
+the lane above or below, Home and End to a lane's ends; hover or focus shows the item's words
+(`itemWords`); a click or Enter calls `HudContext.goToMoment(item)`: its agent is selected, the
+camera points at it, and the inspector's **On the timeline** section shows the moment
+(`ViewState.moment`, forgotten when another agent or nothing is selected); an edit whose diff the
+agent still holds opens it. An agent that has left the town gets a toast instead. **List** shows
+the same items as a list of buttons, newest first (at most 300). A teammate's crews in a team town
+show too; viewers can only look.
+
 **Catch me up** (`ui/catch-up.js`, §4.13). The source asks
 (`TownSource.requestDigest(since) → boolean`: live sends `{ t: 'digest', since }`; the demo answers
 from its own `createDigest({ startedAt })`) and the answer comes back through the source's
@@ -1494,6 +1548,8 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="settings-button"]` | opens the settings dialog (holds the remote approvals switch) |
 | `[data-testid="usage-gauge"]` | the plan-limit gauge on the Usage button (`data-level`, `data-percent`); hidden without a reading |
 | `[data-testid="limit-gauge"][data-kind]` | one plan limit in the Usage dialog; `[data-testid="limits-note"]` says why there is none |
+| `[data-testid="timeline"]` | the timeline strip; `[data-testid="timeline-lanes"]` holds `.hud-timeline__item[data-item][data-lane][data-type]` buttons, `[data-testid="timeline-list"]` the list view, toggled by `[data-testid="timeline-list-toggle"]`; `[data-testid="timeline-crews"]` picks the crew; Settings' `[data-testid="settings-timeline"]` shows or hides it |
+| `[data-testid="inspector-moment"]` | in the inspector: the moment picked on the timeline |
 | `[data-testid="director-caption"]` | the director camera's caption (plain text, not a live region); shown while it has a shot, hidden while you hold the camera or an agent is selected |
 
 ### 8.2 URL options

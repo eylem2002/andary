@@ -2,7 +2,8 @@
 // own Claude Code" (setup commands to copy). Native <dialog> + showModal() gives focus trapping,
 // Escape to close and an inert background for free.
 import { BUILDINGS, BUILDING_KEYS } from '../core/catalog.js';
-import { h, setAttr, setHidden } from './dom.js';
+import { h, setAttr, setHidden, setText } from './dom.js';
+import { timelineShown } from './hud-actions.js';
 import { BUILDING_ICONS, icon } from './icons.js';
 import { kbd } from './parts.js';
 import { SHORTCUT_HELP } from './shortcuts.js';
@@ -162,6 +163,8 @@ export function createSettingsDialog(ctx) {
   const teamText = h('p', { class: 'hud-setting__help', 'data-testid': 'team-text' });
   const teamBlock = h('div', { class: 'hud-setting' }, h('p', { class: 'hud-setting__name', text: 'Team town' }), teamText);
 
+  // On phones the toolbar has no room for the timeline's button: it is here.
+  const timelineButton = h('button', { type: 'button', class: 'hud-btn', 'data-testid': 'settings-timeline' }, icon('timeline', { size: 18 }), h('span', { text: 'Timeline' }));
   const helpButton = h('button', { type: 'button', class: 'hud-btn' }, icon('help', { size: 18 }), 'Shortcuts and help');
   const setupButton = h('button', { type: 'button', class: 'hud-btn' }, icon('terminal', { size: 18 }), 'Use your own Claude Code');
   const leaveButton = h('button', { type: 'button', class: 'hud-btn' }, icon('external', { size: 18 }), 'Leave the demo');
@@ -169,7 +172,11 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [teamBlock, remoteBlock, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    body: [teamBlock, remoteBlock, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, timelineButton, helpButton, setupButton, leaveButton)],
+  });
+  timelineButton.addEventListener('click', () => {
+    dialog.close();
+    ctx.run('timeline');
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -189,6 +196,7 @@ export function createSettingsDialog(ctx) {
       return dialog.isOpen;
     },
     open() {
+      setText(/** @type {HTMLElement} */ (timelineButton.lastElementChild), timelineShown(ctx) ? 'Hide the timeline' : 'Show the timeline');
       const live = ctx.view.mode === 'live';
       const team = live ? ctx.view.serverSettings.team : null;
       const viewer = team?.role === 'viewer';
