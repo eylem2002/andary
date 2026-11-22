@@ -43,6 +43,8 @@ const KIND_ICONS = {
   stuck: 'repeat',
   // Two agents on the same files (core/conflicts.js).
   conflict: 'users',
+  // A lead's turn ended: what it did (core/receipts.js).
+  receipt: 'list',
 };
 
 /** The store marks log lines with emoji (a building's sign emoji for tool calls). */
