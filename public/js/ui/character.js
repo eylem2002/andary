@@ -44,7 +44,7 @@ export function describeLook(profile) {
   const hair = l.hair === 'bald' ? 'bald' : `${HAIR_COLORS[l.hairColor].name.toLowerCase()} ${word(l.hair).toLowerCase()} hair`;
   const face = l.face === 'none' ? '' : `, ${word(l.face).toLowerCase()}`;
   const hat = l.hat === 'none' ? '' : `, a ${word(l.hat).toLowerCase()}`;
-  const extra = l.extra === 'none' ? '' : ` and a ${word(l.extra).toLowerCase()}`;
+  const extra = l.extra === 'none' ? '' : ` and ${l.extra === 'headphones' ? '' : 'a '}${word(l.extra).toLowerCase()}`;
   return `${SKIN_TONES[l.skin].name} skin, ${hair}${face}${hat}, a ${top} ${word(l.top).toLowerCase()}, ${CLOTH_COLORS[l.bottomColor].name.toLowerCase()} ${word(l.bottom).toLowerCase()}, ${CLOTH_COLORS[l.shoesColor].name.toLowerCase()} ${word(l.shoes).toLowerCase()}${extra}.`;
 }
 
@@ -79,7 +79,7 @@ export function createCharacterDialog(ctx) {
   const caption = h('p', { class: 'hud-character__caption', 'aria-hidden': 'true' });
   const status = h('p', { class: 'hud-setting__help', role: 'status', 'data-testid': 'character-status' });
 
-  const color = swatches('hud-char-color', 'Your colour', CREW_COLORS.map((hex, i) => ({ name: PERSON_COLOR_NAMES[i], hex })), (i) => update({ color: i }));
+  const color = swatches('hud-char-color', 'Your colour', CREW_COLORS.map((hex, i) => ({ name: PERSON_COLOR_NAMES[i], hex })), (i) => update({ color: i }), { showChoice: true });
   const house = select('hud-char-house', 'Your home', LOOKS.map((look) => [look.id, `${look.name} house`]), (value) => update({ house: /** @type {any} */ (value) }));
   // The first top colour is the person's own, so its swatch follows the colour they choose.
   const topSwatches = swatches('hud-char-top-color', 'Top colour', [{ name: 'Your colour', hex: '' }, ...CLOTH_COLORS], (i) => look({ topColor: i === 0 ? 'theme' : i - 1 }));
@@ -108,13 +108,16 @@ export function createCharacterDialog(ctx) {
     show();
     status.textContent = `New look: ${describeLook(draft)}`;
   });
+  /** The profile sent and not answered yet: the dialog stays open until the town says. @type {Profile|null} */
+  let pending = null;
   save.addEventListener('click', () => {
+    if (pending) return;
+    pending = draft;
+    status.textContent = 'Saving…';
     if (!ctx.controls.saveProfile?.(draft)) {
+      pending = null;
       status.textContent = 'Not saved: the town is not connected right now. Try again in a moment.';
-      return;
     }
-    saveLocally(draft);
-    dialog.close();
   });
   cancel.addEventListener('click', () => dialog.close());
 
@@ -169,7 +172,28 @@ export function createCharacterDialog(ctx) {
     get isOpen() {
       return dialog.isOpen;
     },
+    /** Whether a save waits for the town's answer. */
+    get pending() {
+      return pending !== null;
+    },
+    /** The town saved it: kept in this browser too, and the dialog closes. */
+    saved() {
+      if (!pending) return;
+      saveLocally(pending);
+      pending = null;
+      dialog.close();
+    },
+    /** The town refused it: said in the dialog, which stays open. @param {string} message */
+    refused(message) {
+      pending = null;
+      status.textContent = message;
+    },
+    /** Someone else's colour changed while the dialog is open. */
+    peopleChanged() {
+      if (dialog.isOpen) show();
+    },
     open() {
+      pending = null;
       const people = /** @type {PersonView[]} */ (ctx.view.people ?? []);
       const mine = people.find((p) => p.name === ctx.view.me);
       draft = mine?.profile ? { ...mine.profile, color: mine.color } : (loadSavedProfile() ?? defaultProfile(mine?.color ?? 0));
@@ -199,8 +223,9 @@ function select(id, label, options, onChange) {
 /**
  * A radio group of colour swatches: arrow keys move through it, and each swatch is named.
  * @param {string} id @param {string} label @param {ReadonlyArray<Swatch>} colors @param {(index: number) => void} onChange
+ * @param {{ showChoice?: boolean }} [options]  showChoice: the chosen swatch's name beside the label
  */
-function swatches(id, label, colors, onChange) {
+function swatches(id, label, colors, onChange, { showChoice = false } = {}) {
   const inputs = colors.map((_color, i) => {
     const input = /** @type {HTMLInputElement} */ (h('input', { type: 'radio', name: id, id: `${id}-${i}`, value: String(i), class: 'hud-swatch__input' }));
     input.addEventListener('change', () => {
@@ -214,14 +239,16 @@ function swatches(id, label, colors, onChange) {
     return chip;
   });
   const names = colors.map((color, i) => h('span', { class: 'hud-sr', id: `${id}-${i}-name`, text: color.name }));
+  const choice = showChoice ? h('span', { class: 'hud-swatches__choice', 'aria-hidden': 'true' }) : null;
   const el = h('fieldset', { class: 'hud-setting hud-swatches', id },
-    h('legend', { class: 'hud-setting__name', text: label }),
+    h('legend', { class: 'hud-setting__name' }, label, choice ? ': ' : null, choice),
     h('div', { class: 'hud-swatches__list' }, ...colors.map((color, i) => h('label', { class: 'hud-swatch', for: `${id}-${i}` }, inputs[i], chips[i], names[i]))));
   return {
     el,
     /** @param {number} index */
     set(index) {
       inputs.forEach((input, i) => (input.checked = i === index));
+      if (choice) choice.textContent = colors[index]?.name ?? '';
     },
     /** Swatches others hold, with who holds them; they cannot be chosen. @param {Map<number, string>} taken */
     disable(taken) {

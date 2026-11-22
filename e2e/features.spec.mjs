@@ -209,8 +209,8 @@ test('you choose your character in the "You" dialog: keyboard, preview, Random a
 
   await dialog.getByTestId('character-random').click();
   await expect(dialog.getByTestId('character-status')).toContainText('New look:');
-  await dialog.getByLabel('Hat').selectOption('beanie');
-  await dialog.getByLabel('Extra').selectOption('cape');
+  await dialog.getByLabel('Hat', { exact: true }).selectOption('beanie');
+  await dialog.getByLabel('Extra', { exact: true }).selectOption('cape');
   await dialog.getByTestId('character-save').click();
   await expect(dialog).toBeHidden();
   const look = await page.evaluate(() => {

@@ -175,7 +175,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       view.hosted = hosted;
       ctx.refresh();
     },
-    ...peopleApi(ctx, townPeople),
+    ...peopleApi(hud, townPeople),
     /** @param {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'character'} name */
     openDialog: (name) => openDialog(hud, name),
     /** Points a first-time visitor to the setup steps, unless they have seen them already. */
@@ -204,10 +204,11 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
 
 /**
  * The HUD's side of a team town's people (§4.11), or the demo's.
- * @param {HudContext} ctx
+ * @param {{ ctx: HudContext, ui: ReturnType<typeof createParts> }} hud
  * @param {ReturnType<typeof createTownPeople>} townPeople
  */
-function peopleApi(ctx, townPeople) {
+function peopleApi(hud, townPeople) {
+  const { ctx } = hud;
   /** A profile this browser kept is offered to the host once per page, if the host forgot it (`team reset`). */
   let restored = false;
   return {
@@ -220,6 +221,7 @@ function peopleApi(ctx, townPeople) {
       ctx.view.people = /** @type {import('./town-people.js').PersonView[]} */ (people.filter((p) => p && typeof p === 'object'));
       ctx.view.me = typeof me === 'string' ? me : null;
       townPeople.sync(ctx.view.people);
+      hud.ui.dialogs.character.peopleChanged();
       const mine = ctx.view.people.find((p) => p.name === ctx.view.me);
       if (mine && !mine.profile && !restored) {
         restored = true;
@@ -232,7 +234,13 @@ function peopleApi(ctx, townPeople) {
      * The host saved this person's profile; another person may hold the colour they asked for.
      * @param {{ color: number, asked: number }} saved
      */
+    /** An error from the server: in the "You" dialog when it waits for a save, else a toast. @param {string} message */
+    serverError(message) {
+      if (hud.ui.dialogs.character.pending) hud.ui.dialogs.character.refused(message);
+      else ctx.toasts.show({ tone: 'error', icon: 'warning', title: message });
+    },
     profileSaved({ color, asked }) {
+      hud.ui.dialogs.character.saved();
       if (color === asked) return;
       ctx.toasts.show({ icon: 'info', title: `${PERSON_COLOR_NAMES[asked] ?? 'That colour'} is taken`, body: `You are ${PERSON_COLOR_NAMES[color] ?? 'another colour'} instead.` });
     },

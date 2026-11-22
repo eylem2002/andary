@@ -15,7 +15,7 @@ const ACCEL = 14; // units/s², so walkers ease into their stride
 const TAU = Math.PI * 2;
 
 /** How far above the head bone each hat reaches (figure units), for pills and icons. */
-const HAT_TOP = { hardhat: 0.38, cap: 0.35, crown: 0.43, beret: 0.35, sunhat: 0.35, wizard: 0.66, none: 0.33 };
+const HAT_TOP = { hardhat: 0.38, cap: 0.35, crown: 0.43, beret: 0.35, sunhat: 0.35, wizard: 0.66, beanie: 0.4, none: 0.33 };
 
 /**
  * Appear/disappear animations. Each maps progress u (0..1) to scale, lift and extra spin.

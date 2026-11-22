@@ -118,7 +118,7 @@ async function boot() {
       authenticated: info.authenticated,
       onStatus: (status) => hud.setConnection(status),
       onSettings: (settings) => hud.setServerSettings(settings),
-      onError: (message) => hud.notify({ tone: 'error', icon: 'warning', title: message }),
+      onError: (message) => hud.serverError(message),
       onProgress: (progress) => hud.setProgress(progress),
       onLimits: (limits) => hud.setLimits(limits),
       onNotifyTest: (ok) => hud.notify(ok ? { icon: 'bell', title: 'Test notification sent', body: 'Check the ntfy app on your phone.' } : { tone: 'error', icon: 'warning', title: 'The test notification was not sent', body: 'The server could not reach ntfy, or sent one a moment ago.' }),
