@@ -1115,3 +1115,35 @@ section.
      at an empty file might also stop a Quick Tunnel, which was not tested live. Refusing a
      `config.yml` in any folder cloudflared reads (and `TUNNEL_*` variables, which it reads as
      flags) keeps the tunnel to the flags Andary passes.
+## Turn receipts (2026-11-22)
+
+198. **A turn's work is the crew's.** Helpers' files, failures and tests count for their lead's turn
+     (they work for it); agent-team teammates have turns of their own and are left out.
+199. **An edit is a file tool's change or a shell command that may change files.** "Tests not
+     re-run since the last edit" compares the last test run's start with the last Edit, MultiEdit,
+     Write, NotebookEdit, Codex patch, or shell command that `changesFiles` (the stuck rules' reader)
+     says may change files: `sed -i`, heredocs, formatters, installs. git's bookkeeping, test runs and
+     builds are not edits (a commit or a report file changes no source). The town cannot tell which
+     files a shell edit touched, so the receipt says "may have changed" and names none.
+200. **Lines from the hook's own text.** Added and removed lines per hunk are what is left once the
+     lines both texts start and end with are set aside: exact for a typical Edit, approximate for a
+     hunk that moves lines around. Text longer than the town keeps marks the counts "≥". A Write
+     over an existing file has no "removed": the hook does not carry the old content.
+201. **A build** is a package's `build`/`build:…` script, `tsc`, a `build` subcommand of the common
+     tools, `make` with no target (or `all`/`build`) and `python -m build`, in `core/shell.js` beside
+     `isTestRun`. `runsNoTests` moved there from the digest, so both read tests the same way.
+202. **A turn's cost is a difference of running totals.** Usage arrives after the hooks, so the
+     receipt of a crew's latest turn takes new usage until your next prompt; usage that arrives
+     later counts for the next turn. With no reading from before the turn (and no fresh session
+     start seen), the cost is left out rather than guessed.
+203. **A Stop hook that keeps the turn going is the same turn.** Work between a Stop and a Stop with
+     `stop_hook_active` joins the receipt of the turn before; a Stop without it after work with no
+     prompt is a new turn that started before the town saw it ("at least").
+204. **A receipt's log line is written again when a Stop hook updates it**, with the newer words;
+     the inspector shows the latest.
+205. **Another crew's edits are judged by folder.** An edit by another crew inside this crew's
+     session folder while its turn is open is reported, naming no file: the receipt cannot prove
+     which of its files it touched. A teammate's crew in a team town works on another computer and
+     is left out.
+206. **A test run "selects" tests** when a name filter or a test file or folder is on its line; a pass
+     then reads "selected tests passed", as the rest may not have run.

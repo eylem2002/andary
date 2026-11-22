@@ -1,7 +1,7 @@
 // The agent inspector: everything known about the selected agent — role, crew, status, what it is
 // doing (or waiting for you on, or why it seems stuck, and since when; and a note when another
-// agent changed a file it edits), its brief, its context in use and what it cost, which tools it
-// used how often, recent files and activity, its last message.
+// agent changed a file it edits), the receipt of a lead's last turn, its brief, its context in use
+// and what it cost, which tools it used how often, recent files and activity, its last message.
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { doingText, formatAgo, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
@@ -9,6 +9,7 @@ import { changeSummary } from './changes.js';
 import { contextSentence, hasCounted, liveContext, usageSentence } from './usage.js';
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 import { isNote, waitedText } from './needs-you.js';
+import { receiptRows } from '../core/receipts.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -50,6 +51,7 @@ export function createInspector(ctx) {
   const usage = createUsageLines();
   const sections = {
     now: section('Now', h('div', {}, now, need.el, note)),
+    receipt: section('Last turn', h('dl', { class: 'hud-receipt', 'data-testid': 'agent-receipt' })),
     brief: section('Brief', brief),
     usage: section('Usage', usage.el),
     tools: section('Tools used', tools),
@@ -124,6 +126,7 @@ export function createInspector(ctx) {
     setText(note, newest?.text ?? '');
     setHidden(note, !newest);
     renderSections(agent, session?.cwd, asking);
+    setHidden(sections.receipt, !renderReceipt(/** @type {HTMLElement} */ (sections.receipt.lastElementChild), state.receipts.findLast((r) => r.agentKey === agent.key)));
     setHidden(sections.usage, !usage.update(state, agent.key, Date.now()));
     setAttr(follow, 'aria-pressed', String(ctx.view.follow));
     tick(Date.now());
@@ -172,6 +175,24 @@ export function createInspector(ctx) {
   }
 
   return { el, open, hide, render, tick, get agentKey() { return agentKey; } };
+}
+
+/**
+ * The receipt of the agent's last turn, as labelled lines (core/receipts.js words); false when it
+ * has none.
+ * @param {HTMLElement} el
+ * @param {import('../core/receipts.js').Receipt|undefined} receipt
+ */
+function renderReceipt(el, receipt) {
+  if (!receipt) return false;
+  const rows = receiptRows(receipt);
+  renderList(el, rows, (row) => row.label, (row) => h('div', { class: 'hud-receipt__row' }, h('dt', { text: row.label }), h('dd', {})), (rowEl, row) => {
+    const value = /** @type {HTMLElement} */ (rowEl.lastElementChild);
+    setText(value, row.text);
+    value.classList.toggle('hud-mono', Boolean(row.mono));
+    setAttr(rowEl, 'data-tone', row.tone);
+  });
+  return true;
 }
 
 /**

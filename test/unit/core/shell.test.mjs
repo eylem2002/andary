@@ -4,7 +4,7 @@
 // write, Codex's argument lists and PowerShell included, and the kind written to fool a reader.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { MAX_MOVES, MAX_SHELL_CHARS, gitAction, isTestRun, normalizedPath, programOf, readShell, shellCommands } from '../../../public/js/core/shell.js';
+import { MAX_MOVES, MAX_SHELL_CHARS, gitAction, isBuildRun, isTestRun, normalizedPath, programOf, readShell, runsNoTests, selectsTests, shellCommands } from '../../../public/js/core/shell.js';
 
 /**
  * Each command a line runs, as "words" with S (the line succeeding proves it succeeded) and D (the
@@ -168,6 +168,7 @@ describe('a test run, a commit or a push', () => {
     /** @type {[string, boolean][]} */
     const table = [
       ['npm test', true],
+      ['npm t', true],
       ['npm run test:unit', true],
       ['yarn jest --watch=false', true],
       ['bun test', true],
@@ -187,6 +188,37 @@ describe('a test run, a commit or a push', () => {
       ['node test.js', false],
     ];
     for (const [line, expected] of table) assert.equal(shellCommands(line).some((c) => isTestRun(c.words)), expected, line);
+  });
+
+  test('a build in command position: a build script, tsc, a build subcommand, make\'s default target', () => {
+    /** @type {[string, boolean][]} */
+    const table = [
+      ['npm run build', true],
+      ['pnpm build:types', true],
+      ['cd web && yarn build', true],
+      ['npx tsc -p .', true],
+      ['cargo build --release', true],
+      ['npx vite build', true],
+      ['python -m build', true],
+      ['make', true],
+      ['make -j4 all', true],
+      ['make test', false],
+      ['npm test', false],
+      ['rg build package.json', false],
+      ['npm run rebuild', false],
+    ];
+    for (const [line, expected] of table) assert.equal(shellCommands(line).some((c) => isBuildRun(c.words)), expected, line);
+  });
+
+  test('a test run that selects some tests: a name filter, or test files named', () => {
+    const picks = (/** @type {string} */ line) => shellCommands(line).some((c) => isTestRun(c.words) && selectsTests(c.words));
+    for (const line of ['npx vitest run src/a.test.ts', 'pytest -k login', 'npx jest -t "logs in"', 'npx mocha --grep login', 'go test -run TestX ./...', 'pytest tests/unit/test_a.py', 'npm test -- --grep a']) assert.equal(picks(line), true, line);
+    for (const line of ['npm test', 'pytest', 'go test ./...', 'node --test test/', 'npx vitest run']) assert.equal(picks(line), false, line);
+  });
+
+  test('a test command that runs no tests', () => {
+    for (const line of ['cargo test --no-run', 'npx jest --listTests', 'pytest --co', 'go test -run NONE ./...']) assert.equal(shellCommands(line).some((c) => runsNoTests(c.words)), true, line);
+    for (const line of ['npm test', 'pytest -k login']) assert.equal(shellCommands(line).some((c) => runsNoTests(c.words)), false, line);
   });
 
   test('git in command position, after its own options; a dry run is neither', () => {

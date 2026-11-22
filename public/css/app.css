@@ -3493,3 +3493,37 @@ body {
   transition: none !important;
   scroll-behavior: auto !important;
 }
+
+/* ---- turn receipts: a lead's last turn, in its details (core/receipts.js) ------------------ */
+
+.hud-receipt {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+
+.hud-receipt__row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 13px;
+}
+
+.hud-receipt__row dt {
+  color: var(--ink-3);
+  font-weight: 600;
+}
+
+.hud-receipt__row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.hud-receipt__row[data-tone="ok"] dd { color: var(--done); }
+.hud-receipt__row[data-tone="warn"] dd { color: var(--ink); font-weight: 700; }
+.hud-receipt__row[data-tone="error"] dd { color: var(--error); }
+
+.hud-receipt__row[data-tone="warn"] dt::before {
+  content: "⚠ ";
+  color: var(--waiting);
+}
