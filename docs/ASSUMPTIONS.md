@@ -1067,64 +1067,35 @@ section.
 185. **A team viewer is not told to install the mod.** Limits are the host's and never reach a
      viewer; their Usage dialog says only the host sees them.
 
-## Timeline and turn receipts (2026-11-22)
+## Turn receipts (2026-11-22)
 
-186. **The timeline lives in the store.** Its waits come from what the store already knows (open
-     dialogs, a stopped turn, a stuck alert), so the store feeds it after every event and approval
-     change rather than the HUD rebuilding it; agents' names are kept on each lane, so a crew that
-     left still reads right for the rest of the day.
-187. **A day per lane, merged by age rather than dropped.** 400 spans, 120 waits and 200 marks a
-     lane; over that, what is older than an hour merges into time buckets that grow with age (a
-     minute, five, fifteen), then the last hour into 15 s to one-minute buckets, then every bucket
-     twice as wide, until the lane is at 60% of its limit. Twelve hours of a call a second keep a few
-     spans for each early hour, a dozen for the middle ones and dozens for the last two, every call
-     and failure counted. Only what ended more than 24 hours before the lane's newest moment goes,
-     and the oldest only when nothing more can merge. 120 lanes; the quietest goes.
-188. **A finished turn's "finished" wait is not hatched.** Waits are what blocks the agent on you
-     (permission, question, plan, an MCP form or notice as "input", a stop, a stuck alert); an idle
-     lead after its turn shows as the cap and the empty lane after it.
-189. **The timeline starts compact, and only where there is room.** One lane per crew's lead (about
-     three lanes' height), helpers one click away, Taller remembered; shown by default on screens
-     1280 px wide or more, hidden below that and on phones, and hidden with the boards. `T` (free
-     until now) toggles it; showing it from the full-screen town brings the boards back. On phones it
-     is reached from Settings, as the toolbar has no room.
-190. **Calls narrower than 4 pixels merge in the view**, so "today" stays a few dozen buttons per
-     lane; the merged item reads "N calls (M failed)" and goes to its agent without a detail.
-191. **A turn's work is the crew's.** Helpers' files, failures and tests count for their lead's turn
+186. **A turn's work is the crew's.** Helpers' files, failures and tests count for their lead's turn
      (they work for it); agent-team teammates have turns of their own and are left out.
-192. **An edit is a file tool's change or a shell command that may change files.** "Tests not
+187. **An edit is a file tool's change or a shell command that may change files.** "Tests not
      re-run since the last edit" compares the last test run's start with the last Edit, MultiEdit,
      Write, NotebookEdit, Codex patch, or shell command that `changesFiles` (the stuck rules' reader)
      says may change files: `sed -i`, heredocs, formatters, installs. git's bookkeeping, test runs and
      builds are not edits (a commit or a report file changes no source). The town cannot tell which
      files a shell edit touched, so the receipt says "may have changed" and names none.
-193. **Lines from the hook's own text.** Added and removed lines per hunk are what is left once the
+188. **Lines from the hook's own text.** Added and removed lines per hunk are what is left once the
      lines both texts start and end with are set aside: exact for a typical Edit, approximate for a
      hunk that moves lines around. Text longer than the town keeps marks the counts "≥". A Write
      over an existing file has no "removed": the hook does not carry the old content.
-194. **A build** is a package's `build`/`build:…` script, `tsc`, a `build` subcommand of the common
+189. **A build** is a package's `build`/`build:…` script, `tsc`, a `build` subcommand of the common
      tools, `make` with no target (or `all`/`build`) and `python -m build`, in `core/shell.js` beside
      `isTestRun`. `runsNoTests` moved there from the digest, so both read tests the same way.
-195. **A turn's cost is a difference of running totals.** Usage arrives after the hooks, so the
+190. **A turn's cost is a difference of running totals.** Usage arrives after the hooks, so the
      receipt of a crew's latest turn takes new usage until your next prompt; usage that arrives
      later counts for the next turn. With no reading from before the turn (and no fresh session
      start seen), the cost is left out rather than guessed.
-196. **A Stop hook that keeps the turn going is the same turn.** Work between a Stop and a Stop with
+191. **A Stop hook that keeps the turn going is the same turn.** Work between a Stop and a Stop with
      `stop_hook_active` joins the receipt of the turn before; a Stop without it after work with no
      prompt is a new turn that started before the town saw it ("at least").
-197. **A receipt's log line is written again when a Stop hook updates it**, with the newer words;
+192. **A receipt's log line is written again when a Stop hook updates it**, with the newer words;
      the inspector shows the latest.
-198. **Another crew's edits are judged by folder.** An edit by another crew inside this crew's
+193. **Another crew's edits are judged by folder.** An edit by another crew inside this crew's
      session folder while its turn is open is reported, naming no file: the receipt cannot prove
      which of its files it touched. A teammate's crew in a team town works on another computer and
      is left out.
-199. **A test run "selects" tests** when a name filter or a test file or folder is on its line; a pass
+194. **A test run "selects" tests** when a name filter or a test file or folder is on its line; a pass
      then reads "selected tests passed", as the rest may not have run.
-200. **The timeline's window starts at its first moment.** A town just started (or a page just
-     reloaded, which replays only the server's last 2,000 events) would otherwise draw the window's
-     first 14 minutes empty; the axis says "since HH:MM" instead. Two minutes at least.
-201. **The clock only moves the now edge.** The strip is rebuilt when the store changes or a control
-     is used, else when now passes 5% of room left ahead of it; a running call's bar grows at those
-     rebuilds, not every second.
-202. **A timeline moment's target is 24 px tall but as wide as it lasted**, often narrower than
-     24 px; the List view offers every moment as a full-width button, WCAG 2.5.8's equivalent.

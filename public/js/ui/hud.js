@@ -11,7 +11,7 @@ import { createCatchUp } from './catch-up.js';
 import { createCinema } from './cinema.js';
 import { createCrewsPanel } from './crews.js';
 import { createHelpDialog, createSettingsDialog, createSetupDialog } from './dialogs.js';
-import { goToMoment, goToNeed, handleShortcut, openDialog, panelsHidden, runAction, select, setFollow, timelineShown } from './hud-actions.js';
+import { goToNeed, handleShortcut, openDialog, panelsHidden, runAction, select, setFollow } from './hud-actions.js';
 import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
 import { createInspector } from './inspector.js';
 import { createWeatherDriver } from '../core/town-weather.js';
@@ -29,7 +29,6 @@ import { savePrefs } from './prefs.js';
 import { installShortcuts } from './shortcuts.js';
 import { createSound } from './sound.js';
 import { createTasksPanel } from './tasks.js';
-import { createTimeline } from './timeline.js';
 import { createToasts } from './toasts.js';
 import { createToolbar } from './toolbar.js';
 
@@ -40,7 +39,6 @@ import { createToolbar } from './toolbar.js';
 /** @typedef {import('./prefs.js').Prefs} Prefs */
 
 const MOBILE_QUERY = '(max-width: 640px)';
-const WIDE_QUERY = '(min-width: 1280px)';
 
 /**
  * @param {{ store: import('./types.js').Store, prefs: Prefs, controls: import('./types.js').Controls }} options
@@ -79,7 +77,6 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     // Someone watching a team town with its view link can answer nothing: nothing needs them.
     needsYou: createNeedsYou({ viewOnly: () => view.serverSettings.team?.role === 'viewer', onChange: () => ctx.refresh() }),
     goToNeed: (item) => goToNeed(hud, item),
-    goToMoment: (item) => goToMoment(hud, item),
     // The director camera and the catch-up need the finished context, so they are attached right below.
     cinema: /** @type {any} */ (null),
     catchUp: /** @type {any} */ (null),
@@ -99,7 +96,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
   const stopShortcuts = installShortcuts({ getMode: () => view.mode, handle: (action, event) => handleShortcut(hud, action, event) });
   const stopTicker = watchEnvironment(ctx, ui, shell);
   installNotifications(ctx);
-  shell.measureSheets = trackSheets(ui.board.el, [ui.inspector.el, ui.place.el], ui.toolbar.el, ui.timeline.el);
+  shell.measureSheets = trackSheets(ui.board.el, [ui.inspector.el, ui.place.el], ui.toolbar.el);
   ctx.refresh();
 
   return {
@@ -277,10 +274,8 @@ function initialView(prefs) {
     follow: false,
     paused: false,
     mobile: matchMedia(MOBILE_QUERY).matches,
-    wide: matchMedia(WIDE_QUERY).matches,
     sheetOpen: true,
     tab: prefs.tab,
-    moment: null,
   };
 }
 
@@ -300,7 +295,6 @@ function createParts(ctx) {
     inspector: createInspector(ctx),
     place: createBuildingCard(ctx),
     toolbar: createToolbar(ctx),
-    timeline: createTimeline(ctx),
     notices: createNotices(ctx),
     dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx), usage: createUsageDialog(ctx), leaderboard: createLeaderboard(ctx), catchUp: ctx.catchUp },
   };
@@ -317,7 +311,7 @@ function createParts(ctx) {
 function mount(ctx, ui) {
   const main = /** @type {HTMLElement} */ (document.getElementById('main'));
   main.before(ui.masthead.el, ui.board.leftDock, ui.inspector.el);
-  main.append(ui.notices.el, ui.place.el, ctx.cinema.el, ui.timeline.el, ui.toolbar.el, ...ctx.announcer.elements);
+  main.append(ui.notices.el, ui.place.el, ctx.cinema.el, ui.toolbar.el, ...ctx.announcer.elements);
   main.after(ui.board.el, ctx.toasts.el, ...Object.values(ui.dialogs).map((dialog) => dialog.el));
 }
 
@@ -371,8 +365,6 @@ function flush(hud, shell, effects) {
   ui.place.render(state);
   ui.toolbar.render();
   applyPanels(hud, shell.measureSheets);
-  applyTimeline(hud);
-  ui.timeline.render(state);
   ui.notices.show(noticeKind(ctx.view, state));
   ui.dialogs.settings.sync();
   ui.dialogs.usage.render();
@@ -400,18 +392,6 @@ function applyPanels({ ctx, ui }, measureSheets) {
   for (const dock of docks) dock.inert = hidden;
   if (!hidden) ui.approvals.shown();
   measureSheets();
-}
-
-/**
- * Shows or hides the timeline strip as the preferences and the layout say. Focus inside a strip
- * that goes moves to its toolbar button.
- * @param {{ ctx: HudContext, ui: Parts }} hud
- */
-function applyTimeline({ ctx, ui }) {
-  const on = timelineShown(ctx);
-  if (ui.timeline.el.hidden !== on) return;
-  if (!on && ui.timeline.el.contains(document.activeElement)) ui.toolbar.focusTool('timeline');
-  ui.timeline.setShown(on);
 }
 
 /**
@@ -463,29 +443,26 @@ function updatePrefs(ctx, patch) {
  * the board (--board-h) so the town is framed in the part of the screen you can see. The
  * inspector does not shrink the view: it comes and goes, and the camera should not jump with it.
  * A sheet put away by the full-screen view (inert) counts as no height. The toolbar's own height
- * (--tools-h; two rows on a narrow phone) places the director's caption above it, and the timeline's
- * (--timeline-h) lifts the caption and the building card above the strip.
+ * (--tools-h; two rows on a narrow phone) places the director's caption above it.
  * @param {HTMLElement} board
  * @param {HTMLElement[]} others
  * @param {HTMLElement} toolbar
- * @param {HTMLElement} timeline
  * @returns {() => void} measures again
  */
-function trackSheets(board, others, toolbar, timeline) {
+function trackSheets(board, others, toolbar) {
   const root = document.documentElement.style;
   const heightOf = (/** @type {HTMLElement} */ sheet) => (sheet.hidden || sheet.inert ? 0 : Math.round(sheet.getBoundingClientRect().height));
   const measure = () => {
     root.setProperty('--board-h', `${heightOf(board)}px`);
     root.setProperty('--sheet-h', `${Math.max(heightOf(board), ...others.map(heightOf))}px`);
     root.setProperty('--tools-h', `${heightOf(toolbar)}px`);
-    root.setProperty('--timeline-h', `${heightOf(timeline)}px`);
   };
   // Measured once right away, before the first paint: left to the observer, the first frame
   // showed the toolbar at the bottom of the screen and then moved it above the sheet, a layout
   // shift (CLS 0.13 on phones).
   measure();
   const observer = new ResizeObserver(measure);
-  for (const sheet of [board, ...others, toolbar, timeline]) observer.observe(sheet);
+  for (const sheet of [board, ...others, toolbar]) observer.observe(sheet);
   return measure;
 }
 
@@ -502,11 +479,6 @@ function watchEnvironment(ctx, ui, shell) {
   mobileQuery.addEventListener('change', () => {
     ctx.view.mobile = mobileQuery.matches;
     ui.board.setMobile(ctx.view.mobile);
-    ctx.refresh();
-  });
-  const wideQuery = matchMedia(WIDE_QUERY);
-  wideQuery.addEventListener('change', () => {
-    ctx.view.wide = wideQuery.matches;
     ctx.refresh();
   });
   matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', () => applyMotion(ctx.prefs, ctx.world()));
@@ -527,7 +499,6 @@ function watchEnvironment(ctx, ui, shell) {
     ui.crews.tick(now);
     ui.approvals.tick(now);
     ui.inspector.tick(now);
-    ui.timeline.tick();
     if (++ticks % 5 === 0) ui.activity.tick(now);
     if (ticks % 60 === 0) applyTheme(ctx.prefs, ctx.world());
     // "as of", the reset time and the pace move with the clock alone.

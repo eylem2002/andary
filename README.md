@@ -175,7 +175,6 @@ building to see who is inside.
 | `U` · `L` | Usage (tokens and estimated cost) · Leaderboard |
 | `I` | Go to what needs you, most urgent first (again for the next) |
 | `W` | Catch me up: what your crews did since you last looked |
-| `T` | Timeline under the town: what each agent did, lane by lane |
 | `A` | Go to approvals |
 | `1`–`9` | Jump to crew 1 to 9 |
 | `?` | All shortcuts |
@@ -242,24 +241,10 @@ file is only a note under both rows, as an edit must match what is in the file. 
 hour, or until the agents finish. Andary compares paths as written: a symbolic link, or a disk that
 ignores case, can hide one.
 
-### The timeline and turn receipts
+### Turn receipts
 
-**Timeline.** A strip under the town (`T` or the toolbar's Timeline button; it starts hidden on
-screens narrower than 1280 pixels and on phones, where Settings has a **Timeline** button) shows
-each crew's lead on a lane of its own; `+N` opens that crew's helpers, and **Taller** gives every
-agent a lane. Each tool call is in its building's colour, a failed call a red tick, the stretches an
-agent waited for you hatched (a permission, a question, a plan, a stopped turn, a stuck alert),
-your prompts pins and each turn's end a cap, up to a "now" edge that moves with the clock. Zoom to
-the last 15 minutes, the last hour or today; after a page reload the town remembers only the
-server's recent history (its last 2,000 events), so the axis then says "since 09:12". Point at or
-focus a moment to see what it was; click it (or press Enter) to select the agent, point the camera
-at it and see the command, the file or the error in its details, or the diff when the town has it.
-The arrow keys move between moments (Up and Down between lanes), and **List** shows the same
-moments as a plain list. It keeps the whole day: older stretches merge into coarser ones (minutes,
-then quarter hours) rather than being dropped.
-
-**Turn receipts.** When a lead's turn ends, its details (**Last turn**) and the activity log get a
-receipt: the files its crew changed with lines added and removed (from the edits' own text; a file
+When a lead's turn ends, its details (**Last turn**) and the activity log get a receipt: the files
+its crew changed with lines added and removed (from the edits' own text; a file
 written whole over an old one has no "removed"; a shell command such as `sed -i` or a formatter
 "may have changed" files, unnamed), whether another crew edited files in its folder after its last
 test, the last test run and the last build with what

@@ -4,7 +4,7 @@
 import { h, setAttr, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { directorActive } from './cinema.js';
-import { panelsHidden, timelineShown } from './hud-actions.js';
+import { panelsHidden } from './hud-actions.js';
 import { kbd } from './parts.js';
 import { meter, usageButtonWords } from './limits.js';
 
@@ -37,7 +37,6 @@ const TOOLS = [
   { id: 'toggle-sound', label: 'Sound', key: 'M', keyName: 'M', compact: true },
   { id: 'usage', label: 'Usage and cost', key: 'U', keyName: 'U', compact: true },
   { id: 'leaderboard', label: 'Leaderboard', key: 'L', keyName: 'L', compact: true },
-  { id: 'timeline', label: 'Timeline', key: 'T', keyName: 'T' },
   '|',
   { id: 'pause', label: 'Pause demo', key: 'Space', keyName: 'Space', only: 'demo', compact: true },
   { id: 'cycle-speed', label: 'Demo speed', only: 'demo', compact: true },
@@ -139,7 +138,6 @@ export function createToolbar(ctx) {
     setText(/** @type {HTMLElement} */ (tips.usage.firstElementChild), usage.tip);
     gauge.update(usage.gauge);
     setButton('leaderboard', 'trophy', 'Leaderboard', null);
-    setButton('timeline', 'timeline', 'Timeline', timelineShown(ctx));
     // Keep the toolbar's one tab stop on a button that is actually shown in this layout.
     const current = Object.values(buttons).find((b) => b.getAttribute('tabindex') === '0');
     if (!current || current.hidden || (view.mobile && current.classList.contains('hud-tool--wide-only'))) setRoving(buttons.follow);

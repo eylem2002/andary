@@ -111,18 +111,9 @@ test('catch-up dialog has no violations, and Escape gives focus back', async ({ 
 
 test('every visible control is at least 24 × 24 CSS pixels (WCAG 2.5.8)', async ({ page }) => {
   await openDemo(page, { world: 'fake' });
-  // With the timeline's moments on screen too (phones open it from Settings).
-  if ((page.viewportSize()?.width ?? 0) <= 640) {
-    await page.getByTestId('settings-button').click();
-    await page.getByTestId('settings-timeline').click();
-  }
-  await expect(page.locator('.hud-timeline__item').first()).toBeVisible({ timeout: 60_000 });
   const small = await page.evaluate(() =>
     Array.from(document.querySelectorAll('button, input, select, a[href], [role="tab"]'))
       .filter((el) => /** @type {HTMLElement} */ (el).offsetParent !== null)
-      // A moment on the timeline is as wide as it lasted: its targets are 24 px tall, and the List
-      // view offers every one as a full-width button (WCAG 2.5.8's "equivalent" exception).
-      .filter((el) => !el.classList.contains('hud-timeline__item') || el.getBoundingClientRect().height < 24)
       // A control inside its <label> is clicked through the label, so the label is the target.
       .map((el) => ({ el, box: (el.closest('label') ?? el).getBoundingClientRect() }))
       .filter(({ box }) => box.width < 24 || box.height < 24)

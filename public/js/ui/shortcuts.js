@@ -3,7 +3,7 @@
 
 /**
  * @typedef {'follow'|'escape'|'rotate-left'|'rotate-right'|'zoom-in'|'zoom-out'|'reset-view'|
- *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|'director'|'toggle-panels'|'usage'|'leaderboard'|'place-names'|'needs-you'|'catch-up'|'timeline'|`crew-${number}`} ShortcutAction
+ *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|'director'|'toggle-panels'|'usage'|'leaderboard'|'place-names'|'needs-you'|'catch-up'|`crew-${number}`} ShortcutAction
  */
 
 /**
@@ -25,7 +25,6 @@ export const SHORTCUT_HELP = Object.freeze([
   { keys: ['L'], label: 'Leaderboard: the town\'s growth, records and the busiest agents' },
   { keys: ['I'], label: 'Go to what needs you, most urgent first (again for the next one)' },
   { keys: ['W'], label: 'Catch me up: what your crews did since you last looked' },
-  { keys: ['T'], label: 'Timeline: what each agent did, lane by lane, under the town' },
   { keys: ['A'], label: 'Go to approvals' },
   { keys: ['1', '9'], label: 'Jump to crew 1 to 9' },
   { keys: ['Space'], label: 'Pause or resume the demo', demoOnly: true },
@@ -64,8 +63,6 @@ const KEY_ACTIONS = {
   I: 'needs-you',
   w: 'catch-up',
   W: 'catch-up',
-  t: 'timeline',
-  T: 'timeline',
   '?': 'help',
 };
 

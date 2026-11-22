@@ -15,7 +15,6 @@ import { nextPlaceNames } from '../core/place-names.js';
  * @property {ReturnType<typeof import('./inspector.js').createInspector>} inspector
  * @property {ReturnType<typeof import('./building-card.js').createBuildingCard>} place
  * @property {ReturnType<typeof import('./approvals.js').createApprovalsPanel>} approvals
- * @property {ReturnType<typeof import('./timeline.js').createTimeline>} timeline
  * @property {Record<DialogName, { open(): void, close(): void, isOpen: boolean }>} dialogs
  */
 
@@ -59,7 +58,6 @@ export function select({ ctx, ui }, sel, { camera = true, from = 'hud', focus = 
   if (from === 'world' && sameSelection(sel, ctx.view.selection)) return;
   const world = ctx.world();
   ctx.view.selection = sel;
-  keepMoment(ctx, sel);
   if (from !== 'world') world?.select(sel);
   if (sel?.type === 'agent') {
     ui.place.hide();
@@ -75,16 +73,6 @@ export function select({ ctx, ui }, sel, { camera = true, from = 'hud', focus = 
     if (ctx.view.follow) setFollow({ ctx, ui }, false);
   }
   ctx.refresh();
-}
-
-/**
- * A moment picked on the timeline belongs to its agent's details only: selecting anything else
- * forgets it.
- * @param {HudContext} ctx
- * @param {Selection|null} sel
- */
-function keepMoment(ctx, sel) {
-  if (sel?.type !== 'agent' || sel.id !== ctx.view.moment?.agentKey) ctx.view.moment = null;
 }
 
 /**
@@ -169,7 +157,6 @@ export function runAction(hud, action) {
     help: () => openDialog(hud, 'help'),
     usage: () => openDialog(hud, 'usage'),
     leaderboard: () => openDialog(hud, 'leaderboard'),
-    timeline: () => toggleTimeline(hud),
   };
   actions[action]?.();
 }
@@ -205,49 +192,6 @@ export function goToNeed(hud, item) {
     ui.crews.reveal(item.sessionId);
     select(hud, { type: 'agent', id: item.agentKey }, { camera: true, focus: true });
   }
-}
-
-/**
- * Whether the timeline strip is on screen: as the viewer chose it, by default on screens 1280 px
- * wide or more (not on phones), and never in the full-screen town, which puts every board away.
- * @param {HudContext} ctx
- */
-export function timelineShown(ctx) {
-  if (panelsHidden(ctx)) return false;
-  return ctx.prefs.timeline === 'shown' || (ctx.prefs.timeline === 'auto' && ctx.view.wide && !ctx.view.mobile);
-}
-
-/**
- * The timeline's button, T and the phone's menu: shows or hides it (bringing the boards back if
- * the full-screen town had put them away).
- * @param {Hud} hud
- */
-function toggleTimeline(hud) {
-  const { ctx } = hud;
-  const on = !timelineShown(ctx);
-  ctx.setPrefs({ timeline: on ? 'shown' : 'hidden', ...(on && panelsHidden(ctx) ? { panels: 'shown' } : {}) });
-  ctx.announcer.polite(on ? 'Timeline shown under the town. Arrow keys move between moments, Enter goes to one.' : 'Timeline hidden.');
-}
-
-/**
- * Goes to a moment on the timeline: selects its agent, points the camera at it and opens its
- * details, where the moment is shown (the command, the file, the error); an edit the town has the
- * diff of opens that diff. An agent that has left the town can only be told about.
- * @param {Hud} hud
- * @param {import('../core/timeline.js').TimelineItem} item
- */
-export function goToMoment(hud, item) {
-  const { ctx, ui } = hud;
-  const agent = ctx.store.getState().agents[item.laneKey];
-  if (!agent) {
-    ctx.toasts.show({ icon: 'timeline', title: 'This agent has left the town', body: item.label });
-    ctx.announcer.polite(`This agent has left the town. ${item.label}`);
-    return;
-  }
-  ctx.view.moment = { agentKey: agent.key, item };
-  ui.crews.reveal(agent.sessionId);
-  select(hud, { type: 'agent', id: agent.key }, { camera: true });
-  if (item.changeId && agent.changes.some((change) => change.id === item.changeId)) ctx.showDiff(agent.key, item.changeId);
 }
 
 /**

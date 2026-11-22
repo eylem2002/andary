@@ -8,7 +8,6 @@ import { createAchievementTracker } from './achievements.js';
 import { createConflicts } from './conflicts.js';
 import { createLoops } from './loops.js';
 import { createReceipts } from './receipts.js';
-import { createTimeline } from './timeline.js';
 
 /** @typedef {import('./store.js').BuildingKey} BuildingKey */
 /** @typedef {import('./store.js').StoreState} StoreState */
@@ -59,7 +58,7 @@ export function createModel(localHour, maxLog) {
   const model = {
     maxLog,
     /** @type {StoreState} */
-    state: { sessions: [], agents: {}, approvals: [], dialogs: [], hazards: [], log: [], stats: freshStats(), achievements: [], usage: {}, usageDays: [], timeline: createTimeline(), receipts: [] },
+    state: { sessions: [], agents: {}, approvals: [], dialogs: [], hazards: [], log: [], stats: freshStats(), achievements: [], usage: {}, usageDays: [], receipts: [] },
     /** What agents asked you and had no answer to yet (dialogs.js); state.dialogs is its list. */
     dialogs: createDialogs(),
     /** Who changed which file lately (conflicts.js); state.hazards is what it found. */

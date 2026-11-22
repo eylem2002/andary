@@ -127,7 +127,6 @@ references may cross.
 | crews, agents, the log | `public/js/core/store.js`, `crews.js` |
 | what needs you, and when an agent seems stuck | `public/js/core/dialogs.js`, `store-dialogs.js`, `waits.js`, `attention.js`, `loops.js`, `public/js/ui/needs-you.js` |
 | how a shell command line reads (segments, programs, redirections, folders) | `public/js/core/shell.js` |
-| the timeline under the town (lanes, waits, bounded memory, the window shown) | `public/js/core/timeline.js`, `public/js/ui/timeline.js` |
 | what a lead's turn did (turn receipts: files, tests after the last edit, cost) | `public/js/core/receipts.js`, `public/js/core/shell.js`, `public/js/ui/inspector.js` |
 | two agents on the same files, and the git commands that put their work at risk | `public/js/core/conflicts.js`, `git-commands.js`, `paths.js`, `server/work-trees.mjs` |
 | who walks where, and what they say | `public/js/core/director.js`, `director-queue.js`, `humor.js` |

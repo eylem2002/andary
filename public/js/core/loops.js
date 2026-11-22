@@ -250,10 +250,18 @@ export function stepKey(tool, input, folder = '') {
  * @param {boolean} [powershell]
  */
 export function changesFiles(command, powershell = false) {
+  // The stuck rules and a turn's receipt ask about the same call one after the other: the last
+  // answer is kept (the result depends on nothing else).
+  if (lastChange.command === command && lastChange.powershell === powershell) return lastChange.result;
   const { segments } = shellOf(command, '', powershell);
   const text = textOf(segments);
-  return CHANGING_COMMANDS.some((pattern) => pattern.test(text)) || segments.some((segment) => segmentWrites(segment));
+  const result = CHANGING_COMMANDS.some((pattern) => pattern.test(text)) || segments.some((segment) => segmentWrites(segment));
+  lastChange = { command, powershell, result };
+  return result;
 }
+
+/** changesFiles' last question and answer. @type {{ command: unknown, powershell: boolean, result: boolean }} */
+let lastChange = { command: undefined, powershell: false, result: false };
 
 /**
  * Whether a call waits or polls by nature, so that running it again and again is no loop.

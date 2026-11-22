@@ -70,10 +70,8 @@
  * @property {boolean} follow
  * @property {boolean} paused
  * @property {boolean} mobile
- * @property {boolean} wide              at least 1280 px wide: room for the timeline by default
  * @property {boolean} sheetOpen
  * @property {string} tab
- * @property {{ agentKey: string, item: import('../core/timeline.js').TimelineItem }|null} moment  the timeline item picked last, shown in its agent's details
  */
 
 /**
@@ -99,7 +97,6 @@
  * @property {ReturnType<typeof import('./needs-you.js').createNeedsYou>} needsYou  what needs the viewer (core/attention.js)
  * @property {(item: import('../core/attention.js').AttentionItem) => void} goToNeed  goes to one thing that needs the viewer
  * @property {ReturnType<typeof import('./catch-up.js').createCatchUp>} catchUp  Catch me up: the dialog and the masthead's offer
- * @property {(item: import('../core/timeline.js').TimelineItem) => void} goToMoment  goes to a moment on the timeline: its agent and its details
  */
 
 export {};
