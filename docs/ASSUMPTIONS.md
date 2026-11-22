@@ -1066,3 +1066,39 @@ section.
      to set it in the shell profile.
 185. **A team viewer is not told to install the mod.** Limits are the host's and never reach a
      viewer; their Usage dialog says only the host sees them.
+
+## Team town on the internet (`--tunnel`, ADR 0018)
+
+186. **cloudflared keeps the visitor's Host.** A Quick Tunnel forwards requests with
+     `Host: <words>.trycloudflare.com` (cloudflared's default when no `httpHostHeader` is set),
+     and browsers send `Origin: https://<words>.trycloudflare.com`. The tunnel port accepts only
+     that name (bare or `:443`). Not checked against the live service: the sandbox could not
+     reach Cloudflare (see the PR notes); the address parsing was checked against the output of
+     cloudflared 2026.11.1.
+187. **Cloudflare's headers mark the internet.** Cloudflare's edge adds `Cf-Connecting-IP` and
+     `Cf-Ray` to every request it forwards, and a client cannot remove them. Any request with
+     them (or `Cf-Visitor`, `Cf-IPCountry`, `CDN-Loop: cloudflare`) is tunnelled on every port.
+     `X-Forwarded-For` is not a marker: other local proxies add it, and a request with it but
+     none of Cloudflare's headers is not Cloudflare's.
+188. **The static app stays open through the tunnel.** It is the public code (the same as the
+     hosted demo) and holds no data; everything with data needs the view token or a member key.
+     Requiring a token for the page itself would need a cookie, which ADR 0015 ruled out.
+189. **Rate limits are the network's.** Member keys keep their token bucket and the 4-upload cap,
+     viewers their connection cap and message limit; tokens are 256-bit (view and keys 192-bit),
+     so there is no guessing to slow down, and Cloudflare allows 200 requests in flight.
+190. **The town binds 127.0.0.1 with `--tunnel`.** Teammates come through the tunnel, so the
+     town is not also put on the LAN; `--host 0.0.0.0` puts it back for people nearby.
+191. **cloudflared runs with Andary's environment minus `ANDARY_*`,** so a team key or an ntfy
+     topic in the environment stays with Andary; `--no-autoupdate` keeps it from restarting
+     itself under the town.
+192. **The 30 s limit for the address** covers a slow edge; past it the town stops and the start
+     fails (exit 1), rather than run with no address. A tunnel that ends later is logged, marked
+     down in `server.json`, and reported by the doctor; it is not restarted (a restart is a new
+     address, which the invitees would not know).
+193. **`--tunnel-allowed-mail` is checked against `cloudflared tunnel --help`,** which lists
+     `--allowed-mail` from 2026.9.3 on, instead of parsing version numbers. Cloudflare's guide
+     says email sign-in needs an interactive browser, so a teammate's Andary cannot pass it; the
+     CLI says that with this flag teammates can watch, not share.
+194. **The doctor does not connect to the tunnel.** It reads `server.json` and checks that
+     cloudflared's pid is alive: reaching the public address would be a network call from the
+     doctor to Cloudflare, and a failure there says little about the town.

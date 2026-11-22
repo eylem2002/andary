@@ -247,6 +247,14 @@ shows up as a crew of its own.
   nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy:
   same-origin`, `Cross-Origin-Resource-Policy: same-origin`, `Permissions-Policy` (camera, mic,
   geolocation off). The import-map hash is computed from `public/index.html` at startup.
+- Tunnelled requests (§4.11, ADR 0018): every request on a team host's tunnel port, and on any
+  port one with a `cf-connecting-ip`, `cf-ray`, `cf-visitor` or `cf-ipcountry` header or a
+  `cdn-loop` naming `cloudflare` (`auth.isTunnelled`). Their `Host` (and a WebSocket's
+  `Origin`) must be the tunnel's own host, bare or with `:443` (nothing before the tunnel has an
+  address; `/api/team` gets no Host exception). The UI token never counts for them; `GET
+  /?token=…` answers a `403` page; only `/api/health`, `/api/hello` and `/api/team` answer, every
+  other `/api/` route `403 {"error":"Not available through the tunnel"}`; their `/api/hello`
+  reports `remoteApprovals`, `notify` and `notifyLimits` as `false`.
 - Routes:
   - `GET /?token=<uiToken>[&…]` → `302` to the same URL without `token` (other query params
     kept) and with `#signin=<uiToken>`; `Cache-Control: no-store`, no cookie. Wrong token → `403`
@@ -712,6 +720,24 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
   held prompts wait only while an owner is connected. On a team host `settings.team` is
   `{ role, members }` (members: names seen since start); when a new member's first batch
   arrives every browser gets `{t:'settings', settings:{team}}`.
+- **Tunnel** (`server/tunnel.mjs`, ADR 0018): `andary start --team --tunnel
+  [--tunnel-allowed-mail <emails>]` (`--tunnel` needs `--team`; the mail list needs `--tunnel`,
+  addresses or `*@domain`, comma-separated or repeated; exit code 2 otherwise). Before anything
+  starts, exit code 1 with a message when `cloudflared` is not on the PATH (with how to install
+  it per system; nothing is downloaded), when `~/.cloudflared/config.yml` or `config.yaml`
+  exists, or when a mail list is given and `cloudflared tunnel --help` does not list
+  `--allowed-mail`. The host binds `127.0.0.1` unless `--host` is given, plus a plain-HTTP
+  listener on `127.0.0.1:<random>` for the tunnel, then runs `cloudflared tunnel
+  --no-autoupdate --url http://127.0.0.1:<tunnel port> [--allowed-mail <address>]…` with its
+  environment minus `ANDARY_*`. The first `https://<label>.trycloudflare.com` in its stdout or
+  stderr (not `api` or `www`, not followed by more of a name or a path) is the address; with
+  none within 30 s, or if cloudflared ends first, the town stops and the start exits 1 with
+  cloudflared's last lines. `server.json` gets `tunnel: {url, pid}`; if cloudflared ends later,
+  `tunnel: {url: null, error}` and the tunnel's Host names are dropped. Stopping the town stops
+  cloudflared first (SIGTERM, SIGKILL after 3 s). `team invite` uses `tunnel.url` for both
+  lines when no `--url` is given; `andary doctor` reports the tunnel as on, down, gone (its pid
+  is not alive) or off, from `server.json` only. A detached start (`--detach`) passes the flags
+  on and waits until `server.json` has `tunnel`.
 - **Browser**: `TownEvent.member` (from `andary_member`, one line, ≤ 24 characters) →
   `Session.member`; a member's lead agent is named after them, and the crews board shows a
   `crew-member` badge. Settings shows a "Team town" note for both roles and hides remote
@@ -1460,6 +1486,10 @@ decision is treated as "answered in the terminal" and the story carries on as al
 - `ANDARY_AWAY_MS` (tests only, read by `andary start`; not a setting): how long without you
   counts as away (§4.13), a whole number of milliseconds from 100 on, so a test can start an
   absence in a second.
+- `ANDARY_TUNNEL_TIMEOUT_MS` (tests only, read by `andary start`; not a setting): how long
+  cloudflared may take to print its address (§4.11), a whole number of milliseconds from 100 on.
+  `test/integration/tunnel.test.mjs` puts a fake `cloudflared` script first on the PATH; no test
+  uses the network.
 - `node scripts/shot.mjs <url> <out.png> [--wait=ms] [--size=WxH]` takes a screenshot with WebGL
   enabled, for visual checks.
 - Pages: `public/index.html` (the app), `public/world-lab.html` (full world + scripted scenario),

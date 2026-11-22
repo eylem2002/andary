@@ -38,7 +38,9 @@ How Andary is put together, and why. The exact interfaces (payloads, messages, A
 
 Everything runs on your machine. The server listens on `127.0.0.1` unless you host a team town,
 has no runtime dependencies, and keeps none of your prompts or commands on disk unless you ask it
-to record.
+to record. A team host started with `--tunnel` also runs your own `cloudflared`, which carries
+teammates' requests from a public `https://….trycloudflare.com` address to a loopback port the
+server opened only for it (ADR 0018).
 
 ## The design, part by part
 
@@ -63,7 +65,10 @@ header (DNS rebinding) and the WebSocket `Origin`, signs browsers in with a per-
 page keeps for its own origin (ADR 0015; no cookie, which every port would see), sanitizes every
 payload (secrets redacted, sizes capped) before anything is kept or sent, and never holds a
 permission request it cannot show in full. A team town adds keys that are HMACs of one secret and a
-view-only role that sees the town but cannot act.
+view-only role that sees the town but cannot act. A request that came through a tunnel reaches the
+server from this computer, so the socket proves nothing: `auth.isTunnelled` (the tunnel's own
+port, or Cloudflare's headers) makes it a request from the internet, which only the team's keys
+and view link can use; the owner's token and routes never work for it (ADR 0018).
 
 **The browser has one store and one source.** `sources/live.js` (the WebSocket link) and
 `sources/demo.js` (the simulation, which also plays the server's part for approvals, usage and
@@ -122,6 +127,7 @@ references may cross.
 | when you were away, and what your crews did meanwhile (Catch me up) | `server/digest.mjs`, `public/js/core/digest.js`, `public/js/core/shell.js`, `public/js/ui/catch-up.js` |
 | who may connect, and what they may do | `server/auth.mjs`, `server/browsers.mjs`, `server/security.mjs` |
 | the team town | `server/team.mjs`, `ingestTeam` in `server/ingest.mjs` |
+| the team town on the internet (`--tunnel`) | `server/tunnel.mjs` (cloudflared), `isTunnelled` in `server/auth.mjs`, `openTunnel` in `server/cli/start.mjs` |
 | plan limits (the andary-limits mod) | `mods/andary-limits/`, `server/limits.mjs`, `public/js/core/limits.js`, `ui/limits.js` |
 | how a hook becomes town events | `public/js/core/events.js`, `summaries.js` |
 | crews, agents, the log | `public/js/core/store.js`, `crews.js` |

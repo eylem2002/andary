@@ -320,7 +320,7 @@ What is shared and what is not:
   person answers their own permission prompts, and viewers cannot change anything.
 - **Network:** plain HTTP unless you give the host a certificate (below), so only on a network
   you trust. Across the internet, use a private network such as Tailscale and start the host
-  with `--team-host <its-vpn-name>` so the link works at that name.
+  with `--team-host <its-vpn-name>` so the link works at that name, or a tunnel (below).
 - **Encrypted (HTTPS):** start the host with a certificate for the name teammates use, for
   example one from `tailscale cert` (free on Tailscale):
 
@@ -335,6 +335,38 @@ What is shared and what is not:
   which never leaves it. A self-signed certificate works too if every teammate trusts it
   (`NODE_EXTRA_CA_CERTS=<cert> andary start --share-to …`, and in their browser).
 - **Revoke:** `andary team reset` on the host invalidates every key and the view link.
+
+### Teammates anywhere: no domain, no VPN
+
+`--tunnel` gives the team town a public `https://` address through a free
+[Cloudflare Quick Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/):
+no account, no domain, no port to open. It needs Cloudflare's `cloudflared` program on your PATH
+(Andary never installs it; `brew install cloudflared`, `winget install --id Cloudflare.cloudflared`,
+or [pkg.cloudflare.com](https://pkg.cloudflare.com/) on Linux).
+
+```sh
+andary start --team --tunnel       # prints https://<random-words>.trycloudflare.com
+andary team invite Lina            # the two lines now use that address
+```
+
+Lina shares with `ANDARY_TEAM_KEY=… andary start --share-to https://<random-words>.trycloudflare.com`
+and watches with the view link at the same address.
+
+- **The town is on the internet.** Anyone with a teammate's key or the view link can reach it
+  from anywhere: the links are what protect it, so send them privately, and `andary team reset`
+  revokes them all. Your own sign-in link works only on your computer, never through the tunnel,
+  and the tunnel cannot reach the hook, the limits mod or anything else that is yours alone.
+  With `--tunnel` the town itself stays on `127.0.0.1`: teammates come in through the tunnel.
+- **Encrypted to Cloudflare:** teammates connect over HTTPS; Cloudflare decrypts and forwards
+  the traffic to your computer, so it passes through Cloudflare's network.
+- **For trying things, not for always-on:** Quick Tunnels have no uptime guarantee and a limit of
+  200 requests at a time, and the address changes every time Andary starts (send new invites).
+  `andary doctor` says whether the tunnel is up. They do not start while
+  `~/.cloudflared/config.yml` exists (rename it for the session).
+- **Only some people:** `--tunnel-allowed-mail you@example.com,lina@example.com` (or
+  `*@example.com`) makes Cloudflare ask for an emailed code before the page opens
+  (cloudflared 2026.9.3 or newer). That sign-in needs a browser, so teammates can then watch but
+  their Andary cannot share into the town.
 
 ### A demo anyone can open
 
@@ -364,6 +396,9 @@ Andary sees what your agents see, so it is locked down:
 
 - the server listens on `127.0.0.1` only (unless you choose `--host` or host a team town), checks
   the `Host` header (DNS rebinding) and the WebSocket `Origin` (cross-site hijacking);
+- through a tunnel (`--tunnel`) only the team's keys and view link work: a request that came
+  through Cloudflare is never treated as you, even though it reaches the server from your own
+  computer (ADR 0018);
 - browsers sign in with a random per-start token that the page keeps for its own address only
   and sends with each request; there is no cookie, which would also reach every other local
   server on `127.0.0.1` (ADR 0015); hooks use a separate secret; both live in
@@ -392,7 +427,8 @@ The full model: [docs/INTEGRATION.md](docs/INTEGRATION.md).
 | "Sign in with the link…" | The server restarted with a new token: use the link `andary start` printed, or `andary status` to see it again. |
 | Port 4747 is in use | `andary start --port 5000` (or `--port 0` for any free port). |
 | Events arrive twice | The plugin and `andary install` are both active, or one agent is installed in two scopes: `andary doctor` says which; uninstall one. |
-| A teammate's view link says "Forbidden" | Start the host with `--team-host <the name in the link>`, or use the IP address the invite printed. |
+| A teammate's view link says "Forbidden" | Start the host with `--team-host <the name in the link>`, or use the IP address the invite printed. With `--tunnel`, the address changes on every start: run `andary team invite` again. |
+| `--tunnel` says cloudflared is missing, or prints no address | Install `cloudflared` (it must work as `cloudflared --version` in a new terminal); Quick Tunnels need outbound port 7844 and sometimes fail on Cloudflare's side: try again. `andary doctor` shows the tunnel's state. |
 | No plan limits on the Usage button | Install the [andary-limits mod](#plan-limits-optional), then finish a turn in a session started afterwards (Claude Code v2.1.287 or newer; an API key has no plan limits). `andary doctor` says whether it reported. |
 | Plan limits never arrive, with `ANDARY_HOME` set | The mod looks for the town in Claude Code's own `ANDARY_HOME`, else `~/.andary`. Set `ANDARY_HOME` where Claude Code inherits it too (your shell profile), and restart Claude Code. |
 | The 3D view is blank or slow | Settings → Graphics → Low power; the boards and log keep working without WebGL. |
@@ -407,6 +443,7 @@ andary [command] [options]
                         --remote-approvals, --approval-timeout <s>, --notify, --notify-url <url>,
                         --notify-limits (a phone note at 90% of a plan limit),
                         --team [--team-host <name>], --share-to <address> (key in ANDARY_TEAM_KEY),
+                        --tunnel [--tunnel-allowed-mail <emails>] (with --team: a public address),
                         --tls-cert <file> --tls-key <file> (HTTPS for other computers)
   demo                  start the town with the built-in simulation
   stop                  stop the running town
