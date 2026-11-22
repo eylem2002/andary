@@ -29,6 +29,7 @@ export const SERVER_CORE = Object.freeze([
   'public/js/core/digest.js',
   'public/js/core/limits.js',
   'public/js/core/town-map.js',
+  'public/js/core/profile.js',
 ]);
 
 /**
