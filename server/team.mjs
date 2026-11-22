@@ -180,11 +180,12 @@ export function lanAddresses(interfaces = networkInterfaces()) {
 const MAX_MEMBERS = 50;
 
 /**
- * The host side of a team town: the secret, the view token, the people (people.mjs), a rate limit
- * per member and the list of members seen since the server started.
- * @param {{ secret: string, people: import('./people.mjs').People, onMember?: (members: string[]) => void, log?: (message: string) => void, ratePerSecond?: number, burst?: number }} options
+ * The host side of a team town: the secret, the view token, the people (people.mjs) and where
+ * they are (presence.mjs), a rate limit per member and the list of members seen since the server
+ * started.
+ * @param {{ secret: string, people: import('./people.mjs').People, presence: import('./presence.mjs').Presence, onMember?: (members: string[]) => void, log?: (message: string) => void, ratePerSecond?: number, burst?: number }} options
  */
-export function createTeamHost({ secret, people, onMember = () => {}, log = () => {}, ratePerSecond = 300, burst = 600 }) {
+export function createTeamHost({ secret, people, presence, onMember = () => {}, log = () => {}, ratePerSecond = 300, burst = 600 }) {
   /** @type {Map<string, import('./rate-limit.mjs').TokenBucket>} */
   const buckets = new Map();
   const overflow = createTokenBucket({ ratePerSecond, burst });
@@ -196,6 +197,7 @@ export function createTeamHost({ secret, people, onMember = () => {}, log = () =
     secret,
     view: viewToken(secret),
     people,
+    presence,
     /**
      * The roster name a relay's key belongs to, or null. A key signed before its name was on the
      * roster (a team from before rosters) is refused with a line in the log, once per name.

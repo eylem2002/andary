@@ -30,6 +30,7 @@ export const SERVER_CORE = Object.freeze([
   'public/js/core/limits.js',
   'public/js/core/town-map.js',
   'public/js/core/profile.js',
+  'public/js/core/presence.js',
 ]);
 
 /**

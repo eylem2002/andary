@@ -6,6 +6,7 @@
 // people, but not the owner's prompts, costs, settings or topic.
 import { WS_PROTOCOL, browserRole, offersAndaryProtocol } from './auth.mjs';
 import { validateProfile } from '../public/js/core/profile.js';
+import { LOTS } from '../public/js/core/town-map.js';
 import { LIMITS } from './config.mjs';
 import { createTokenBucket } from './rate-limit.mjs';
 import { isAllowedHost, isAllowedOrigin } from './security.mjs';
@@ -129,7 +130,21 @@ export function teamSettings(ctx, role) {
  * @returns {(import('./people.mjs').PersonView & { online: boolean })[]}
  */
 export function peopleView(ctx) {
-  return ctx.team ? ctx.team.people.list().map((person) => ({ ...person, online: ctx.hub.online(person.name) })) : [];
+  const team = ctx.team;
+  return team ? team.people.list().map((person) => ({ ...person, ...team.presence.view(person.name) })) : [];
+}
+
+/**
+ * Tells every browser where some people are now (a walk, someone came or went, a duty or the
+ * lights changed); presence.mjs batches these at 10 Hz at most.
+ * @param {import('./app.mjs').TownContext} ctx
+ * @param {string[]} names
+ */
+export function announcePresence(ctx, names) {
+  const team = ctx.team;
+  if (!team) return;
+  const people = names.filter((name) => team.people.has(name)).map((name) => ({ name, ...team.presence.view(name) }));
+  if (people.length) ctx.hub.broadcast({ t: 'presence', people });
 }
 
 /**
@@ -153,6 +168,8 @@ export function dropRemovedPeople(ctx) {
     if (role === 'person' && name && !team.people.has(name)) gone.push(connection);
   });
   for (const connection of gone) connection.close(CLOSE_CODE.POLICY_VIOLATION, 'Removed from the team');
+  const names = new Set(team.people.list().map((person) => person.name));
+  team.presence.forgetAllBut(names);
 }
 
 /**
@@ -256,6 +273,8 @@ function attachBrowser(ctx, connection, role, person) {
   const owner = role === 'owner';
   if (owner) cancelRelease(ctx);
   ctx.log(`${BROWSER_LOG[role]} connected (${ctx.hub.size} open)`);
+  // Online before the hello, so it already says so.
+  if (person) ctx.team?.presence.connect(person);
   ctx.hub.send(connection, {
     t: 'hello',
     version: ctx.version,
@@ -272,7 +291,6 @@ function attachBrowser(ctx, connection, role, person) {
     people: peopleView(ctx),
     me: person,
   });
-  if (person) announcePeople(ctx);
   const limiter = createTokenBucket({ ratePerSecond: LIMITS.wsMessagesPerSecond, burst: LIMITS.wsMessageBurst });
   connection.on('message', (text) => {
     if (!limiter.take()) {
@@ -284,7 +302,7 @@ function attachBrowser(ctx, connection, role, person) {
   connection.on('close', () => {
     ctx.log(`${BROWSER_LOG[role]} disconnected (${ctx.hub.size} open)`);
     if (ctx.hub.owners === 0) scheduleRelease(ctx);
-    if (person) announcePeople(ctx);
+    if (person) ctx.team?.presence.disconnect(person);
   });
 }
 
@@ -292,7 +310,7 @@ function attachBrowser(ctx, connection, role, person) {
 const BROWSER_LOG = Object.freeze({ owner: 'Browser', person: 'Teammate', viewer: 'Team viewer' });
 
 /** What each role may send besides the owner's full set: a viewer only pings. */
-const ALLOWED = Object.freeze({ person: new Set(['profile', 'ping']), viewer: new Set(['ping']) });
+const ALLOWED = Object.freeze({ person: new Set(['profile', 'walk', 'emote', 'phrase', 'look', 'ping']), viewer: new Set(['ping']) });
 
 /**
  * @param {import('./app.mjs').TownContext} ctx
@@ -331,6 +349,12 @@ function handleBrowserMessage(ctx, connection, text) {
       return;
     case 'profile':
       applyProfile(ctx, connection, message.p);
+      return;
+    case 'walk':
+    case 'emote':
+    case 'phrase':
+    case 'look':
+      applyPresence(ctx, connection, message);
       return;
     case 'ping':
       return;
@@ -381,6 +405,72 @@ function applyProfile(ctx, connection, raw) {
   else if ('wait' in result) sendError(ctx, connection, 'Wait a few seconds before changing your character again.');
   else if ('error' in result) sendError(ctx, connection, `Profile not saved: ${result.error}.`);
   else ctx.hub.send(connection, { t: 'profile', ok: true, color: result.color, asked: check.profile.color });
+}
+
+/**
+ * `walk`, `emote`, `phrase` and `look` from the person this browser plays (never a name from the
+ * message): checked by presence.mjs, then shown to everyone, or a look only to its target.
+ * @param {import('./app.mjs').TownContext} ctx
+ * @param {import('./websocket.mjs').WsConnection} connection
+ * @param {Record<string, any>} message
+ */
+function applyPresence(ctx, connection, message) {
+  const name = ctx.hub.personOf(connection);
+  const team = ctx.team;
+  if (!team || !name) {
+    sendError(ctx, connection, 'Only the people of a team town have a character.');
+    return;
+  }
+  if (message.t === 'walk') {
+    const result = team.presence.walk(name, message.to);
+    if (!result.ok) sendError(ctx, connection, /** @type {string} */ (result.error));
+    return;
+  }
+  if (message.t === 'look') {
+    lookAsk(ctx, connection, name, message);
+    return;
+  }
+  const result = team.presence.say(name, message.t, message.id);
+  if (result.ok) ctx.hub.broadcast({ t: message.t, name, id: message.id });
+  else sendError(ctx, connection, /** @type {string} */ (result.error));
+}
+
+/**
+ * "Come look": goes only to the target person's browsers, as `look-ask`.
+ * @param {import('./app.mjs').TownContext} ctx
+ * @param {import('./websocket.mjs').WsConnection} connection
+ * @param {string} from
+ * @param {Record<string, any>} message
+ */
+function lookAsk(ctx, connection, from, message) {
+  const at = lookTarget(message.at);
+  const to = typeof message.to === 'string' ? message.to : '';
+  if (!at || !ctx.team?.people.has(to)) {
+    sendError(ctx, connection, 'look.to is a teammate, and look.at an agent or a building');
+    return;
+  }
+  const result = ctx.team.presence.look(from, to);
+  if (!result.ok) {
+    sendError(ctx, connection, /** @type {string} */ (result.error));
+    return;
+  }
+  const text = JSON.stringify({ t: 'look-ask', from, at });
+  ctx.hub.each((other) => {
+    if (ctx.hub.personOf(other) === to) other.send(text);
+  });
+}
+
+/**
+ * What a look points at: an agent key (as the town knows it) or a building.
+ * @param {unknown} at
+ * @returns {{ agent: string }|{ building: string }|null}
+ */
+function lookTarget(at) {
+  if (!at || typeof at !== 'object') return null;
+  const value = /** @type {Record<string, unknown>} */ (at);
+  if (typeof value.agent === 'string' && value.agent.length > 0 && value.agent.length <= 200 && Object.keys(value).length === 1) return { agent: value.agent };
+  if (typeof value.building === 'string' && Object.hasOwn(LOTS, value.building) && Object.keys(value).length === 1) return { building: value.building };
+  return null;
 }
 
 /**

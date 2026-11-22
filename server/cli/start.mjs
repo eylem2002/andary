@@ -161,6 +161,7 @@ async function runForeground(settings, home, io) {
       tls: settings.tls ? { cert: settings.tls.cert, key: settings.tls.key } : null,
       record: settings.record,
       awayMs: testAwayMs(io.env),
+      presenceMs: testPresenceMs(io.env),
       log: (message) => io.out(`[${new Date().toLocaleTimeString()}] ${message}`),
     });
   } catch (error) {
@@ -188,6 +189,19 @@ async function runForeground(settings, home, io) {
 function testAwayMs(env) {
   const ms = Number(env.ANDARY_AWAY_MS);
   return Number.isInteger(ms) && ms >= 100 ? ms : undefined;
+}
+
+/**
+ * The porch and inside timers of a team town (ANDARY_PORCH_MS, ANDARY_INSIDE_MS), shortened for
+ * tests; undocumented, like ANDARY_AWAY_MS.
+ * @param {NodeJS.ProcessEnv} env
+ */
+function testPresenceMs(env) {
+  const read = (/** @type {string|undefined} */ value) => {
+    const ms = Number(value);
+    return Number.isInteger(ms) && ms >= 100 ? ms : undefined;
+  };
+  return { porchMs: read(env.ANDARY_PORCH_MS), insideMs: read(env.ANDARY_INSIDE_MS) };
 }
 
 /**

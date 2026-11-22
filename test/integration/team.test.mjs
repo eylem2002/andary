@@ -212,8 +212,8 @@ describe('Team town', () => {
     assert.equal(greeting.notifyUrl, null);
     assert.deepEqual(greeting.approvals, []);
     assert.deepEqual(greeting.people.map((/** @type {any} */ p) => [p.name, p.slot, p.host, p.online]), [['Sam', 0, true, true], ['Lina', 1, false, true], ['Omar', 2, false, false]]);
-    // Everyone hears that Lina came online.
-    await waitForMessage(viewer, (m) => m?.t === 'people' && m.people.find((/** @type {any} */ p) => p.name === 'Lina').online);
+    // Everyone hears that Lina came online (a presence batch, at most ten a second).
+    await waitForMessage(viewer, (m) => m?.t === 'presence' && m.people.some((/** @type {any} */ p) => p.name === 'Lina' && p.online));
 
     for (const message of [{ t: 'decide', id: 'x', decision: 'allow' }, { t: 'settings', settings: { remoteApprovals: true } }, { t: 'digest', since: 0 }, { t: 'notify-test' }]) {
       lina.send(JSON.stringify(message));

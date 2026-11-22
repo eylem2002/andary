@@ -90,6 +90,8 @@ function admit(ctx, origin, item) {
   // Sanitized, as what it counts (a turn's last message) goes to browsers; timed by arrival, so a
   // late hook still counts in the period a browser asks about.
   if (policy.digest) ctx.digest.observe(envelope.event, envelope.rx);
+  // A team town: a person's duty (their character at work) and their relay's lights.
+  ctx.team?.presence.observe(envelope.event, origin);
   if (policy.relay) ctx.relay?.send(envelope);
   // A permission request is answered by the route (it may be held); everything else settles or
   // updates waiting approvals.
