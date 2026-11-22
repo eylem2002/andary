@@ -155,6 +155,31 @@ describe('connectLive', () => {
     assert.deepEqual(socket.sent[3], { t: 'decide', id: 'a3', decision: 'allow', always: 0 }, '"Allow always" names the suggestion by its index');
   });
 
+  test('notes and stops: a note goes out with its ref, the answer comes back with it, and a stop rides on a deny', () => {
+    /** @type {unknown[]} */
+    const replies = [];
+    const link = connectLive({ store: fakeStore(), WebSocketImpl: /** @type {any} */ (FakeSocket), url: 'ws://x/ws', onNoteReply: (reply) => replies.push(reply) });
+    const socket = FakeSocket.all[0];
+    assert.equal(link.sendNote('s1', null, 'hi', 'r1'), false, 'not before the socket is open');
+    socket.open();
+    assert.equal(link.sendNote('s1', null, 'hi', 'r1'), true);
+    assert.equal(link.sendNote('s1', 'h7', 'for the helper', 'r2'), true);
+    assert.equal(link.decide('a1', 'deny', undefined, undefined, true), true);
+    assert.deepEqual(socket.sent, [
+      { t: 'note', ref: 'r1', sessionId: 's1', text: 'hi' },
+      { t: 'note', ref: 'r2', sessionId: 's1', agentId: 'h7', text: 'for the helper' },
+      { t: 'decide', id: 'a1', decision: 'deny', stop: true },
+    ]);
+    socket.receive({ t: 'note-reply', ref: 'r1', ok: true, id: 'n1' });
+    socket.receive({ t: 'note-reply', ref: 'r2', ok: false, error: 'The note was not sent: This helper has finished.' });
+    socket.receive({ t: 'note-reply', ref: 7, ok: 'yes' });
+    assert.deepEqual(replies, [
+      { ref: 'r1', ok: true },
+      { ref: 'r2', ok: false, error: 'The note was not sent: This helper has finished.' },
+      { ref: null, ok: false },
+    ]);
+  });
+
   test('catch me up: the request goes out on an open socket; the answer and your absences come back, with the server\'s clock', () => {
     const digests = [];
     const aways = [];

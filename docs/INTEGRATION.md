@@ -8,8 +8,11 @@ town in your browser over a WebSocket.
 ```
 Claude Code ─┐
              ├─hook (stdin JSON)──▶ hook.mjs ──POST /api/hook──▶ server ──WebSocket──▶ browser
-Codex ───────┘   ◀── decision (stdout, PermissionRequest only) ──┘
+Codex ───────┘   ◀── decision or notes (stdout) ──────────────────┘
 ```
+
+The forwarder prints only a permission decision, or, for a tool or prompt hook, the owner's notes
+to the agent as `additionalContext` (CONTRACTS §4.15); nothing for any other hook.
 
 The interfaces are specified in [CONTRACTS.md §4](CONTRACTS.md#4-claude-code-or-codex--server-the-hook-pipeline).
 

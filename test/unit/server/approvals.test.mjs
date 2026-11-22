@@ -619,3 +619,23 @@ describe('allow always: the decision', () => {
     assert.deepEqual(decisionOutput('allow', '', rule()).hookSpecificOutput.decision, { behavior: 'allow', updatedPermissions: [rule()] });
   });
 });
+
+describe('deny and stop', () => {
+  it('stops only with a deny, and only an agent that can be stopped', async () => {
+    const { broker } = setup();
+    assert.deepEqual(decisionOutput('deny', '', null, true).hookSpecificOutput.decision, { behavior: 'deny', message: DENY_MESSAGE, interrupt: true });
+    assert.deepEqual(decisionOutput('allow', '', null, true).hookSpecificOutput.decision, { behavior: 'allow' }, 'an allow never stops');
+    const stoppable = broker.create(request(), { hold: true, canStop: true });
+    assert.equal(stoppable.approval.canStop, true);
+    assert.match(String(broker.decide(stoppable.approval.id, 'allow', '', undefined, true).error), /needs a deny/);
+    assert.match(String(broker.decide(stoppable.approval.id, 'deny', '', undefined, 1).error), /needs a deny and stop: true/);
+    assert.deepEqual(broker.decide(stoppable.approval.id, 'deny', 'enough', undefined, true), { ok: true });
+    assert.deepEqual(/** @type {any} */ (await stoppable.response)?.hookSpecificOutput.decision, { behavior: 'deny', message: `${DENY_MESSAGE}: enough`, interrupt: true });
+    assert.equal(broker.list().find((a) => a.id === stoppable.approval.id)?.stopped, true);
+
+    const codex = broker.create(request({ session_id: 's2' }), { hold: true, stopNote: 'Codex cannot be stopped from a hook yet' });
+    assert.deepEqual([codex.approval.canStop, codex.approval.stopNote], [false, 'Codex cannot be stopped from a hook yet']);
+    assert.deepEqual(broker.decide(codex.approval.id, 'deny', '', undefined, true), { ok: false, error: 'Codex cannot be stopped from a hook yet' });
+    assert.equal(await peek(codex.response), 'pending', 'a refused stop changes nothing');
+  });
+});

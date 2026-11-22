@@ -1,7 +1,8 @@
 // The agent inspector: everything known about the selected agent — role, crew, status, what it is
 // doing (or waiting for you on, or why it seems stuck, and since when; and a note when another
-// agent changed a file it edits), its brief, its context in use and what it cost, which tools it
-// used how often, recent files and activity, its last message.
+// agent changed a file it edits), the receipt of a lead's last turn, a note to send it
+// (agent-note.js), its brief, its context in use and what it cost, which tools it used how often,
+// recent files and activity, its last message.
 import { nameWithRoster } from './town-people.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
@@ -10,6 +11,8 @@ import { changeSummary } from './changes.js';
 import { contextSentence, hasCounted, liveContext, usageSentence } from './usage.js';
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 import { isNote, waitedText } from './needs-you.js';
+import { createNoteSection } from './agent-note.js';
+import { receiptRows } from '../core/receipts.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -49,8 +52,11 @@ export function createInspector(ctx) {
   const recent = h('ol', { class: 'hud-recent' });
   const message = h('p', { class: 'hud-inspector__message' });
   const usage = createUsageLines();
+  const toAgent = createNoteSection(ctx);
   const sections = {
     now: section('Now', h('div', {}, now, need.el, note)),
+    receipt: section('Last turn', h('dl', { class: 'hud-receipt', 'data-testid': 'agent-receipt' })),
+    note: section('Send a note', toAgent.el),
     brief: section('Brief', brief),
     usage: section('Usage', usage.el),
     tools: section('Tools used', tools),
@@ -68,14 +74,11 @@ export function createInspector(ctx) {
     h('div', { class: 'hud-inspector__body', tabindex: '0', role: 'region', 'aria-label': 'Agent details' }, ...Object.values(sections)),
     h('div', { class: 'hud-inspector__foot' }, follow, closeText));
 
-  /** @type {string|null} */
-  let agentKey = null;
+  let agentKey = /** @type {string|null} */ (null);
   /** @type {HTMLElement|null} where focus returns when the inspector closes */
   let opener = null;
 
-  const dismiss = () => ctx.select(null);
-  close.addEventListener('click', dismiss);
-  closeText.addEventListener('click', dismiss);
+  for (const button of [close, closeText]) button.addEventListener('click', () => ctx.select(null));
   follow.addEventListener('click', () => ctx.setFollow(!ctx.view.follow));
 
   /**
@@ -108,16 +111,14 @@ export function createInspector(ctx) {
     if (!agentKey) return;
     const agent = state.agents[agentKey];
     if (!agent) {
-      dismiss();
+      ctx.select(null);
       return;
     }
     const session = findSession(state, agent.sessionId);
     setCrewColor(el, session?.color ?? agent.color);
     updateRoundel(mark, crewNumber(state, agent.sessionId), session?.color ?? agent.color);
     setText(name, nameWithRole(agent));
-    // Whose crew, in a team town: the character's name and, when it differs, the name on the team.
-    const person = session?.member ? ctx.view.people.find((one) => one.name === session.member) : null;
-    setText(role, `${roleLabel(agent)}${session ? ` in ${session.project}` : ''}${person ? `, ${nameWithRoster(person)}'s crew` : ''}`);
+    setText(role, roleLine(ctx, agent, session));
     updateStatusChip(chip, agent.status);
     const asking = state.approvals.find((approval) => approval.status === 'pending' && approvalAgentKey(approval) === agent.key);
     const items = ctx.needsYou.items(state).filter((item) => item.agentKeys.includes(agent.key));
@@ -127,6 +128,8 @@ export function createInspector(ctx) {
     setText(note, newest?.text ?? '');
     setHidden(note, !newest);
     renderSections(agent, session?.cwd, asking);
+    setHidden(sections.note, !toAgent.update(state, agent, session));
+    setHidden(sections.receipt, !renderReceipt(/** @type {HTMLElement} */ (sections.receipt.lastElementChild), state.receipts.findLast((r) => r.agentKey === agent.key)));
     setHidden(sections.usage, !usage.update(state, agent.key, Date.now()));
     setAttr(follow, 'aria-pressed', String(ctx.view.follow));
     tick(Date.now());
@@ -166,15 +169,32 @@ export function createInspector(ctx) {
     if (!agent) return;
     const end = agent.status === 'done' ? agent.lastActivity : nowMs;
     setText(since, `Started ${formatAgo(agent.startedAt, nowMs)}, on the job for ${formatDuration(end - agent.startedAt)}`);
-    need.tick(nowMs);
-    usage.tick(nowMs);
+    for (const part of [need, usage, toAgent]) part.tick(nowMs);
     for (const item of recent.children) {
       const time = item.querySelector('time');
       if (time) setText(time, formatAgo(Number(/** @type {HTMLElement} */ (item).dataset.ts), nowMs, { short: true }));
     }
   }
 
-  return { el, open, hide, render, tick, get agentKey() { return agentKey; } };
+  return { el, open, hide, render, tick, noteReply: toAgent.reply, get agentKey() { return agentKey; } };
+}
+
+/**
+ * The receipt of the agent's last turn, as labelled lines (core/receipts.js words); false when it
+ * has none.
+ * @param {HTMLElement} el
+ * @param {import('../core/receipts.js').Receipt|undefined} receipt
+ */
+function renderReceipt(el, receipt) {
+  if (!receipt) return false;
+  const rows = receiptRows(receipt);
+  renderList(el, rows, (row) => row.label, (row) => h('div', { class: 'hud-receipt__row' }, h('dt', { text: row.label }), h('dd', {})), (rowEl, row) => {
+    const value = /** @type {HTMLElement} */ (rowEl.lastElementChild);
+    setText(value, row.text);
+    value.classList.toggle('hud-mono', Boolean(row.mono));
+    setAttr(rowEl, 'data-tone', row.tone);
+  });
+  return true;
 }
 
 /**
@@ -298,4 +318,16 @@ function createRecent(entry) {
 /** @param {HTMLElement} item @param {import('./types.js').LogEntry} entry */
 function updateRecent(item, entry) {
   setText(/** @type {HTMLElement} */ (item.querySelector('time')), formatAgo(entry.ts, Date.now(), { short: true }));
+}
+
+/**
+ * The agent's role and project and, for a teammate's crew in a team town, whose: the character's
+ * name with the name on the team beside it when the two differ ("Scout 1 in api, Ali (alice)'s crew").
+ * @param {HudContext} ctx
+ * @param {import('./types.js').AgentState} agent
+ * @param {import('./types.js').Session|undefined|null} session
+ */
+function roleLine(ctx, agent, session) {
+  const person = session?.member ? ctx.view.people.find((one) => one.name === session.member) : null;
+  return `${roleLabel(agent)}${session ? ` in ${session.project}` : ''}${person ? `, ${nameWithRoster(person)}'s crew` : ''}`;
 }

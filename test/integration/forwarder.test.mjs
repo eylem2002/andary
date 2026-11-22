@@ -297,7 +297,7 @@ describe('forwarder trust (another program on the recorded port)', () => {
 });
 
 describe('forwarder capabilities', () => {
-  it('declares on every body what it does: it marks one it shortened, and it can pass a rule on', async () => {
+  it('declares on every body what it does: it marks one it shortened, passes a rule and a stop on, and hands notes over', async () => {
     const fake = await impostor(() => ({}), 'caps-key');
     try {
       const env = isolatedEnv({ ANDARY_HOME: homeWith('caps', { pid: process.pid, port: fake.port, responseKey: 'caps-key' }) });
@@ -311,9 +311,9 @@ describe('forwarder capabilities', () => {
       assert.deepEqual(
         bodies.map((body) => [body.caps, body.event.truncated]),
         [
-          [['truncated', 'updatedPermissions'], undefined],
-          [['truncated', 'updatedPermissions'], true],
-          [['truncated', 'updatedPermissions'], true],
+          [['truncated', 'updatedPermissions', 'interrupt', 'notes'], undefined],
+          [['truncated', 'updatedPermissions', 'interrupt', 'notes'], true],
+          [['truncated', 'updatedPermissions', 'interrupt', 'notes'], true],
         ],
       );
     } finally {

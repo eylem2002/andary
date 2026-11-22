@@ -109,6 +109,8 @@ import { agentState, contextFor, enqueue, makeVisit, pump, release, say, scoped,
  * @property {boolean} stuck       the store says it seems stuck (AgentState.stuck): a storm over it
  * @property {string|null} status  last status sent to the world
  * @property {string|null} badge   last badge sent to the world
+ * @property {string|null} combo   the combo chip ("×3"), part of the badge
+ * @property {number} notes        the owner's notes waiting for it (§4.15): an envelope on the badge
  */
 
 const SLEEP_AFTER_MS = 120_000;
@@ -324,6 +326,8 @@ function newRuntime(agent, at) {
     stuck: false,
     status: null,
     badge: null,
+    combo: null,
+    notes: 0,
   };
 }
 
@@ -417,8 +421,20 @@ function setStatus(d, rt, status) {
   d.world.setStatus(rt.key, status);
 }
 
-/** Combo chip, sent only when it changes. @param {Director} d @param {Runtime} rt @param {string|null} badge */
-function setBadge(d, rt, badge) {
+/** Combo chip. @param {Director} d @param {Runtime} rt @param {string|null} combo */
+function setBadge(d, rt, combo) {
+  rt.combo = combo;
+  showBadge(d, rt);
+}
+
+/**
+ * The badge beside the name: an envelope while notes wait for the agent (with how many, past
+ * one), then the combo chip; sent only when it changes.
+ * @param {Director} d @param {Runtime} rt
+ */
+function showBadge(d, rt) {
+  const envelope = rt.notes > 1 ? `✉${rt.notes}` : rt.notes === 1 ? '✉' : null;
+  const badge = [envelope, rt.combo].filter(Boolean).join(' ') || null;
   if (rt.badge === badge) return;
   rt.badge = badge;
   d.world.setBadge(rt.key, badge);
@@ -1112,6 +1128,7 @@ function onReset(d) {
 /** @type {Readonly<Record<string, (d: Director, change: any) => void>>} */
 const CHANGE_SHOWS = Object.freeze({
   event: (d, change) => onEvent(d, change.event),
+  note: (d) => syncEnvelopes(d),
   approval: (d, change) => onApproval(d, change.approval, change.previous ?? null),
   achievement: (d, change) => onAchievement(d, change.achievement),
   people: (d) => onPeople(d),
@@ -1143,8 +1160,29 @@ function syncFromStore(d) {
     d.world.setActivity(agent.key, agent.activity || 'idle');
   }
   syncStuck(d);
+  syncEnvelopes(d);
   refreshBoard(d, null);
   d.historic = false;
+}
+
+/**
+ * An envelope over each agent with notes waiting for it, until they are delivered or expire.
+ * @param {Director} d
+ */
+function syncEnvelopes(d) {
+  /** @type {Map<string, number>} */
+  const waiting = new Map();
+  for (const note of d.store.getState().notes ?? []) {
+    if (note.status !== 'queued') continue;
+    const key = agentKeyOf(note.sessionId, note.agentId);
+    waiting.set(key, (waiting.get(key) ?? 0) + 1);
+  }
+  for (const rt of d.crew.values()) {
+    const notes = waiting.get(rt.key) ?? 0;
+    if (notes === rt.notes) continue;
+    rt.notes = notes;
+    showBadge(d, rt);
+  }
 }
 
 /**

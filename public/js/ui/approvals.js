@@ -7,6 +7,8 @@
 // suggested a rule this project or session may keep, "Allow always" also asks it to save the
 // rule. The card names that rule first, literally and with what it allows, between Allow / Deny
 // and the button, so a tap that misses Allow lands on words; the button has no key of its own.
+// Beside Deny, "Deny and stop" also stops a Claude Code agent (`interrupt`); it has no key of its
+// own either, and a card that cannot stop its agent (Codex, an older hook) says why instead.
 import { h, renderList, setAttr, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { approvalChange, describeApproval, formatCountdown } from './format.js';
@@ -59,10 +61,10 @@ function armCard(p, index) {
  */
 function restartDelay(p) {
   p.armedAt = performance.now();
-  for (const button of [p.allow, p.always, p.deny]) setAttr(button, 'aria-disabled', 'true');
+  for (const button of [p.allow, p.always, p.deny, p.stop]) setAttr(button, 'aria-disabled', 'true');
   clearTimeout(p.armTimer);
   p.armTimer = setTimeout(() => {
-    for (const button of [p.allow, p.always, p.deny]) setAttr(button, 'aria-disabled', null);
+    for (const button of [p.allow, p.always, p.deny, p.stop]) setAttr(button, 'aria-disabled', null);
   }, ANSWER_DELAY_MS);
 }
 
@@ -138,8 +140,10 @@ export function resultText(approval, mode) {
       const saved = savedText(approval);
       return saved ? `Allowed; asked Claude Code to save ${saved}` : `Allowed ${where}`;
     }
-    case 'denied':
-      return approval.message ? `Denied ${where}: “${approval.message}”` : `Denied ${where}`;
+    case 'denied': {
+      const denied = approval.stopped === true ? `Denied ${where} and stopped the agent` : `Denied ${where}`;
+      return approval.message ? `${denied}: “${approval.message}”` : denied;
+    }
     case 'expired':
       return mode === 'demo' ? 'No answer in time, so the demo carried on' : 'No answer in time, so the terminal asked instead';
     case 'resolved':
@@ -178,8 +182,14 @@ function buildCard(id, approvalId) {
   const timer = h('div', { class: 'hud-approval__timer' }, h('span', { class: 'hud-approval__track', 'aria-hidden': 'true' }, bar), countdown);
   const allow = h('button', { type: 'button', class: 'hud-btn hud-btn--allow', 'data-testid': 'approve' }, icon('check', { size: 18 }), 'Allow', kbd('A'));
   const deny = h('button', { type: 'button', class: 'hud-btn hud-btn--deny', 'data-testid': 'deny' }, icon('cross', { size: 18 }), 'Deny', kbd('D'));
+  // Labelled for what it does, with no key of its own: it ends the agent's turn, not only this request.
+  const stop = h('button', { type: 'button', class: 'hud-btn hud-btn--deny hud-btn--stop', 'data-testid': 'deny-stop', 'aria-describedby': `${id}-stop` }, icon('stop', { size: 18 }), 'Deny and stop');
+  const stopNote = h('p', { class: 'hud-approval__stop-note', id: `${id}-stop`, 'data-testid': 'deny-stop-note' });
   const { alwaysRow, always, alwaysNote } = buildAlways(id);
-  const actions = h('div', { class: 'hud-approval__actions' }, allow, deny, alwaysRow);
+  // On a row of its own under Allow and Deny, its line first, as "Allow always": a tap that falls
+  // short of Deny lands on words, not on a stop.
+  const stopRow = h('div', { class: 'hud-approval__stop' }, stopNote, stop);
+  const actions = h('div', { class: 'hud-approval__actions' }, allow, deny, stopRow, alwaysRow);
   const terminal = h('p', { class: 'hud-approval__terminal' }, icon('terminal', { size: 16 }), h('span', { text: 'Answer in your terminal.' }));
   const hint = h('p', { class: 'hud-approval__hint', 'data-testid': 'approval-hint' });
   const result = h('p', { class: 'hud-approval__result' });
@@ -187,7 +197,7 @@ function buildCard(id, approvalId) {
     h('header', { class: 'hud-approval__head' }, mark, h('div', {}, who, h('p', { class: 'hud-approval__meta' }, crew, tool))),
     h('pre', { class: 'hud-approval__code' }, detail), grants, change, timer, reasonRow, actions, terminal, hint, result);
   const item = h('li', { class: 'hud-approvals__item' }, card);
-  const parts = { mark, who, crew, tool, detail, grants, change, changeNote, changeBody, changeKey: '', reason, reasonRow, timer, bar, countdown, actions, allow, deny,
+  const parts = { mark, who, crew, tool, detail, grants, change, changeNote, changeBody, changeKey: '', reason, reasonRow, timer, bar, countdown, actions, allow, deny, stop, stopNote, stopRow,
     always, alwaysRow, alwaysNote, offer: null, offerKey: '', terminal, hint, hintKey: '', result, card, index: -1, armedAt: 0, armTimer: 0 };
   return { item, parts };
 }
@@ -241,12 +251,29 @@ function showHint(p, approval, state) {
 }
 
 /**
+ * "Deny and stop" on a card that can be answered here: the button when the agent can be stopped,
+ * otherwise the line that says why not (Codex, an older hook); its description says what it does.
+ * @param {any} p the card's parts
+ * @param {Approval} approval
+ * @param {boolean} busy an answer is being sent
+ */
+function showStop(p, approval, busy) {
+  const canStop = approval.canStop === true;
+  if (!canStop && document.activeElement === p.stop) p.card.focus();
+  setHidden(p.stopRow, !canStop && !approval.stopNote);
+  setHidden(p.stop, !canStop);
+  p.stop.disabled = busy;
+  setText(p.stopNote, canStop ? 'Deny and stop also ends the agent’s turn: it stops and waits for you in the terminal.' : (approval.stopNote ? `${approval.stopNote}.` : ''));
+}
+
+/**
  * What the announcer says once an answer is on its way.
  * @param {'allow'|'deny'} decision
  * @param {number|undefined} always
+ * @param {boolean} [stop]
  */
-function sentWords(decision, always) {
-  if (decision === 'deny') return 'Denied.';
+function sentWords(decision, always, stop = false) {
+  if (decision === 'deny') return stop ? 'Denied, and asked the agent to stop.' : 'Denied.';
   return always === undefined ? 'Allowed.' : 'Allowed, and asked to save the rule.';
 }
 
@@ -309,16 +336,17 @@ export function createApprovalsPanel(ctx) {
    * @param {'allow'|'deny'} decision
    * @param {string} [reason] sent with a denial only
    * @param {number} [always] with an allow: the index of the suggestion to save
+   * @param {boolean} [stop] with a denial: stop the agent too
    */
-  function decide(approval, decision, reason = '', always = undefined) {
-    if (sending.has(approval.id) || approval.status !== 'pending' || !approval.held) return;
+  function decide(approval, decision, reason = '', always = undefined, stop = false) {
+    if (sending.has(approval.id) || approval.status !== 'pending' || !approval.held || (stop && approval.canStop !== true)) return;
     const message = decision === 'deny' ? reason.trim().slice(0, MAX_REASON_CHARS) : '';
-    if (!ctx.controls.decide(approval.id, decision, message || undefined, always)) {
+    if (!ctx.controls.decide(approval.id, decision, message || undefined, always, stop || undefined)) {
       ctx.toasts.show({ tone: 'error', icon: 'warning', title: 'Not connected to Andary', body: 'Answer this request in your terminal.' });
       return;
     }
     sending.set(approval.id, decision);
-    ctx.announcer.polite(sentWords(decision, always));
+    ctx.announcer.polite(sentWords(decision, always, stop));
     ctx.refresh();
   }
 
@@ -332,6 +360,7 @@ export function createApprovalsPanel(ctx) {
     p.allow.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'allow'));
     p.always.addEventListener('click', (event) => clickCounts(event, p) && p.offer && decide(p.approval, 'allow', '', p.offer.index));
     p.deny.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'deny', p.reason.value));
+    p.stop.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'deny', p.reason.value, undefined, true));
     // Enter in the reason field denies with that reason; typing there never answers by itself.
     p.reason.addEventListener('keydown', (event) => {
       event.stopPropagation();
@@ -361,6 +390,7 @@ export function createApprovalsPanel(ctx) {
     describeRequest(p, approval, state);
     showAnswerState(p, approval);
     showOffer(p, approval, sending.has(approval.id));
+    showStop(p, approval, sending.has(approval.id));
     showHint(p, approval, state);
     tickCard(item, Date.now());
   }

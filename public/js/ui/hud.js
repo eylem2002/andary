@@ -141,6 +141,11 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
      * @param {unknown} digest
      */
     setDigest: (digest) => ctx.catchUp.showDigest(digest),
+    /**
+     * The server's answer to a note sent from the agent's details (§4.15).
+     * @param {{ ref: string|null, ok: boolean, error?: string }} reply
+     */
+    noteReply: (reply) => ui.inspector.noteReply(reply),
     /** @param {import('./types.js').ConnectionStatus} status */
     setConnection(status) {
       view.connection = status;
@@ -160,21 +165,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     },
     /** Plan limits (§4.14), from the server or the demo: every account's, as a whole. @param {unknown} limits */
     setLimits: (limits) => showLimits(ctx, limits),
-    /** @param {boolean} available */
-    setServerAvailable(available) {
-      view.serverAvailable = available;
-      ctx.refresh();
-    },
-    /** @param {boolean} forced the demo was asked for in the URL (?demo=1) */
-    setDemoForced(forced) {
-      view.demoForced = forced;
-      ctx.refresh();
-    },
-    /** @param {boolean} hosted a demo on a static host: the town fills the screen by default */
-    setHosted(hosted) {
-      view.hosted = hosted;
-      ctx.refresh();
-    },
+    ...modeFlags(ctx),
     ...peopleApi(hud, townPeople),
     /** @param {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'character'} name */
     openDialog: (name) => openDialog(hud, name),
@@ -199,6 +190,25 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       shell.weather?.dispose();
       shell.weather = null;
     },
+  };
+}
+
+/**
+ * Facts about how the page runs, from main.js.
+ * @param {HudContext} ctx
+ */
+function modeFlags(ctx) {
+  const set = (/** @type {'serverAvailable'|'demoForced'|'hosted'} */ key, /** @type {boolean} */ on) => {
+    ctx.view[key] = on;
+    ctx.refresh();
+  };
+  return {
+    /** @param {boolean} available an Andary server answered */
+    setServerAvailable: (available) => set('serverAvailable', available),
+    /** @param {boolean} forced the demo was asked for in the URL (?demo=1) */
+    setDemoForced: (forced) => set('demoForced', forced),
+    /** @param {boolean} hosted a demo on a static host: the town fills the screen by default */
+    setHosted: (hosted) => set('hosted', hosted),
   };
 }
 

@@ -259,3 +259,19 @@ test('the "You" dialog fits a phone, with 44 px tiles', async ({ page }, testInf
   await dialog.getByTestId('character-save').click();
   await expect(dialog).toBeHidden();
 });
+
+test('a lead\'s turn ends with a receipt in its details and in the activity log', async ({ page }) => {
+  await openDemo(page);
+  const key = await expect
+    .poll(() => page.evaluate(() => /** @type {any} */ (window).__andary.store.getState().receipts.at(-1)?.agentKey ?? null), { timeout: 90_000 })
+    .not.toBeNull()
+    .then(() => page.evaluate(() => /** @type {any} */ (window).__andary.store.getState().receipts.at(-1).agentKey));
+  expect(await page.evaluate(() => /** @type {any} */ (window).__andary.store.getState().log.some((/** @type {any} */ entry) => entry.kind === 'receipt'))).toBe(true);
+  await page.locator(`[data-agent-key="${key}"]`).first().click();
+  const receipt = page.getByTestId('agent-receipt');
+  await expect(receipt).toBeVisible();
+  await expect(receipt).toContainText('Took');
+  await expect(receipt).toContainText('Files');
+  const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
+  expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([]);
+});

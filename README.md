@@ -198,6 +198,30 @@ running a command outside the sandbox) is never held there and goes straight to 
 does one from an older copy of Andary's hook (the card says how to update it). Codex does not say
 whether a command asks to leave its sandbox, so a Codex command's card says that allowing it may.
 
+### Talk to your agents
+
+You can steer an agent from the town without going back to its terminal.
+
+- **Send a note.** Open an agent's details (click it, or its row) and type in **Send a note**. The
+  note waits in Andary and reaches the agent at its **next step**: its next tool call, or your
+  next prompt (Ctrl+Enter, or ⌘+Enter on a Mac, sends it). It never appears in your terminal;
+  Claude Code (or Codex) gives it to the agent as context that starts "The user (<you>) sent you
+  this message from Andary while you work". An agent that is idle reads it only once you type your
+  next prompt. An agent may treat a message that did not come through its terminal with care and
+  ask you to confirm it there before acting on it. Your text stays in the field until Andary has
+  queued the note; a refused note keeps it, with the reason. The activity log and the agent's
+  details follow each note: queued, sent with the hook that carried it (nothing confirms the agent
+  read it), or expired; the agent carries a small envelope until then. A note is at most 2,000 characters and waits at most 30 minutes; at most five wait for one
+  agent. Only you, signed in to your own town, can send one, and only to agents on this computer:
+  never through a team town's view link, and never to a teammate's crew. Codex takes a note at its
+  next safe point, or with the next turn, and drops one still waiting when its session ends. Notes
+  to a helper are sent the same way, but Andary has not confirmed yet that helpers read them, and
+  the details say so. An agent whose hook comes from an older Andary gets none until you run
+  `andary install` (or update the plugin) and restart its session; the town says so when you try.
+- **Deny and stop.** With remote approvals on, a Claude Code request's card also offers **Deny and
+  stop**: it denies the request and stops the agent's turn, so it waits for you in the terminal.
+  Codex refuses a stop from a hook today, so a Codex card offers Deny only and says why.
+
 ### See what needs you
 
 When an agent stops for you (a permission request, a question, a plan to approve, a turn that
@@ -240,6 +264,21 @@ deny in the town ends its alert. An edit of such a
 file is only a note under both rows, as an edit must match what is in the file. It lasts half an
 hour, or until the agents finish. Andary compares paths as written: a symbolic link, or a disk that
 ignores case, can hide one.
+
+### Turn receipts
+
+When a lead's turn ends, its details (**Last turn**) and the activity log get a receipt: the files
+its crew changed with lines added and removed (from the edits' own text; a file
+written whole over an old one has no "removed"; a shell command such as `sed -i` or a formatter
+"may have changed" files, unnamed), whether another crew edited files in its folder after its last
+test, the last test run and the last build with what
+their exit status proves (`npm test | tail` proves nothing: the status is tail's; a Codex command
+only with its exit code), the calls that failed, the helpers it used, how long it took, and for
+Claude Code what it cost (an estimate, once the transcript catches up). When files changed and no
+test ran after the last of them, it says so: "Said done, but tests were not re-run since the last
+edit". A filtered run (`pytest -k`, one test file) passes only "selected tests", and a helper's run
+says who ran it. A turn the town joined midway says "at least" and "since the town joined", and has
+no cost.
 
 ### Catch up
 
@@ -331,7 +370,7 @@ What is shared and what is not:
   and viewers cannot change anything.
 - **Network:** plain HTTP unless you give the host a certificate (below), so only on a network
   you trust. Across the internet, use a private network such as Tailscale and start the host
-  with `--team-host <its-vpn-name>` so the link works at that name.
+  with `--team-host <its-vpn-name>` so the link works at that name, or a tunnel (below).
 - **Encrypted (HTTPS):** start the host with a certificate for the name teammates use, for
   example one from `tailscale cert` (free on Tailscale):
 
@@ -352,6 +391,41 @@ What is shared and what is not:
   `andary team invite <name>` once for each teammate (at most five) and send them the new lines;
   until then the host's log names each refused key. A team of more than six people cannot all
   have a place.
+
+### Teammates anywhere: no domain, no VPN
+
+`--tunnel` gives the team town a public `https://` address through a free
+[Cloudflare Quick Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/):
+no account, no domain, no port to open. It needs Cloudflare's `cloudflared` program on your PATH
+(Andary never installs it; `brew install cloudflared`, `winget install --id Cloudflare.cloudflared`,
+or [pkg.cloudflare.com](https://pkg.cloudflare.com/) on Linux).
+
+```sh
+andary start --team --tunnel       # prints https://<random-words>.trycloudflare.com
+andary team invite Lina            # the two lines now use that address
+```
+
+Lina shares with `ANDARY_TEAM_KEY=… andary start --share-to https://<random-words>.trycloudflare.com`
+and opens her personal link at the same address.
+
+- **The town is on the internet.** Anyone with a teammate's key, personal link or the view link can reach it
+  from anywhere: the links are what protect it, so send them privately, and `andary team reset`
+  revokes them all. Your own sign-in link works only on your computer, never through the tunnel,
+  and the tunnel cannot reach the hook, the limits mod or anything else that is yours alone.
+  With `--tunnel` the town itself stays on `127.0.0.1`: teammates come in through the tunnel.
+- **Encrypted to Cloudflare:** teammates connect over HTTPS; Cloudflare decrypts and forwards
+  the traffic to your computer, so it passes through Cloudflare's network.
+- **For trying things, not for always-on:** Quick Tunnels have no uptime guarantee and a limit of
+  200 requests at a time, and the address changes every time Andary starts (send new invites).
+  `andary doctor` says whether the tunnel is up. They do not start while
+  `~/.cloudflared/config.yml` exists (rename it for the session; Andary also refuses one in
+  `/etc/cloudflared` or `/usr/local/etc/cloudflared`). cloudflared stops with the town, even if
+  the town is killed; one left over from a crash is stopped by the next `andary start` or
+  `andary doctor`.
+- **Only some people:** `--tunnel-allowed-mail you@example.com,lina@example.com` (or
+  `*@example.com`) makes Cloudflare ask for an emailed code before the page opens
+  (cloudflared 2026.9.3 or newer). That sign-in needs a browser, so teammates can then watch but
+  their Andary cannot share into the town.
 
 ### A demo anyone can open
 
@@ -381,6 +455,9 @@ Andary sees what your agents see, so it is locked down:
 
 - the server listens on `127.0.0.1` only (unless you choose `--host` or host a team town), checks
   the `Host` header (DNS rebinding) and the WebSocket `Origin` (cross-site hijacking);
+- through a tunnel (`--tunnel`) only the team's keys, personal links and view link work: a request that came
+  through Cloudflare is never treated as you, even though it reaches the server from your own
+  computer (ADR 0019);
 - browsers sign in with a random per-start token that the page keeps for its own address only
   and sends with each request; there is no cookie, which would also reach every other local
   server on `127.0.0.1` (ADR 0015); hooks use a separate secret; both live in
@@ -388,6 +465,8 @@ Andary sees what your agents see, so it is locked down:
 - the hook forwarder only talks to a live server of yours that first proves it holds a key that
   never leaves `~/.andary`, and only obeys replies signed with it, so a stale state file cannot
   hand your prompts, the hook secret or control of your agent to whoever takes the old port;
+- notes to your agents come only from you, signed in to your own town, and go only to agents on
+  this computer: a team town's viewers and teammates can never send one (ADR 0018);
 - secrets that look like API keys, tokens or passwords are redacted before anything is kept or
   sent; prompts and commands are never written to disk unless you pass `--record` (small state
   files in `~/.andary` keep usage totals with the transcript paths they came from, and the
@@ -409,7 +488,8 @@ The full model: [docs/INTEGRATION.md](docs/INTEGRATION.md).
 | "Sign in with the link…" | The server restarted with a new token: use the link `andary start` printed, or `andary status` to see it again. |
 | Port 4747 is in use | `andary start --port 5000` (or `--port 0` for any free port). |
 | Events arrive twice | The plugin and `andary install` are both active, or one agent is installed in two scopes: `andary doctor` says which; uninstall one. |
-| A teammate's personal or view link says "Forbidden" | Start the host with `--team-host <the name in the link>`, or use the IP address the invite printed. A personal link also stops working after `team remove` or `team reset`. |
+| A teammate's personal or view link says "Forbidden" | Start the host with `--team-host <the name in the link>`, or use the IP address the invite printed. With `--tunnel`, the address changes on every start: run `andary team invite` again. A personal link also stops working after `team remove` or `team reset`. |
+| `--tunnel` says cloudflared is missing, or prints no address | Install `cloudflared` (it must work as `cloudflared --version` in a new terminal); Quick Tunnels need outbound port 7844 and sometimes fail on Cloudflare's side: try again. `andary doctor` shows the tunnel's state. |
 | No plan limits on the Usage button | Install the [andary-limits mod](#plan-limits-optional), then finish a turn in a session started afterwards (Claude Code v2.1.287 or newer; an API key has no plan limits). `andary doctor` says whether it reported. |
 | Plan limits never arrive, with `ANDARY_HOME` set | The mod looks for the town in Claude Code's own `ANDARY_HOME`, else `~/.andary`. Set `ANDARY_HOME` where Claude Code inherits it too (your shell profile), and restart Claude Code. |
 | The 3D view is blank or slow | Settings → Graphics → Low power; the boards and log keep working without WebGL. |
@@ -424,6 +504,7 @@ andary [command] [options]
                         --remote-approvals, --approval-timeout <s>, --notify, --notify-url <url>,
                         --notify-limits (a phone note at 90% of a plan limit),
                         --team [--name <you>] [--team-host <name>], --share-to <address> (key in ANDARY_TEAM_KEY),
+                        --tunnel [--tunnel-allowed-mail <emails>] (with --team: a public address),
                         --tls-cert <file> --tls-key <file> (HTTPS for other computers)
   demo                  start the town with the built-in simulation
   stop                  stop the running town

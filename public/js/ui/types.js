@@ -43,8 +43,11 @@
 /**
  * What the HUD asks of the app shell (main.js).
  * @typedef {object} Controls
- * @property {(id: string, decision: 'allow'|'deny', message?: string, always?: number) => boolean} decide  `message`: why,
- *   for a denial; `always`: with an allow, the index of the suggestion to save ("Allow always")
+ * @property {(id: string, decision: 'allow'|'deny', message?: string, always?: number, stop?: boolean) => boolean} decide  `message`: why,
+ *   for a denial; `always`: with an allow, the index of the suggestion to save ("Allow always"); `stop`: with a
+ *   denial, stop the agent too ("Deny and stop")
+ * @property {(sessionId: string, agentId: string|null, text: string, ref: string) => boolean} sendNote  a note for one
+ *   agent's next step (§4.15), answered with `ref` (Hud.noteReply); false when it cannot be sent (not connected, or the demo)
  * @property {(on: boolean) => void} setRemoteApprovals
  * @property {() => void} startDemo
  * @property {() => void} leaveDemo
