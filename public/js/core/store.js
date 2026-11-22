@@ -3,8 +3,9 @@
 // stats; works out who each event belongs to (subagent labels, teammate names); keeps what each
 // agent has asked you (store-dialogs.js) or waits for you on (waits.js), whether it seems stuck
 // (loops.js), and where two agents work on the same files (conflicts.js); keeps each agent's day
-// on the timeline (timeline.js); and unlocks achievements. The town may open mid-session, so
-// every session or agent an event mentions is created on first sight.
+// on the timeline (timeline.js) and a receipt of each lead's turn (receipts.js); and unlocks
+// achievements. The town may open mid-session, so every session or agent an event mentions is
+// created on first sight.
 
 import { ACHIEVEMENTS, achievementFor } from './achievements.js';
 import { BUILDINGS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
@@ -16,6 +17,7 @@ import { NO_SESSION, normalize } from './events.js';
 import { gitAddsOf, gitCommitsOf, gitHazardOf } from './git-commands.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { rulesText } from './permission-rules.js';
+import { receiptLine } from './receipts.js';
 import { recordEvent, recordWait } from './timeline.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
@@ -66,10 +68,11 @@ export { ACHIEVEMENTS };
  * @property {string} agentKey
  * @property {string} agentName
  * @property {string} color
- * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict'
+ * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict' / 'receipt'
  * @property {string} icon
  * @property {string} text
  * @property {'info'|'success'|'warn'|'error'} level
+ * @property {string} [receiptId]  a 'receipt' line: the receipt it stands for (StoreState.receipts)
  */
 
 /**
@@ -146,6 +149,7 @@ export { ACHIEVEMENTS };
  * @property {Record<string, AgentUsage>} usage   agentKey → tokens and estimated cost (§4.8)
  * @property {UsageDay[]} usageDays             the last 30 days, oldest first
  * @property {import('./timeline.js').Timeline} timeline  each agent's day, for timelineView()
+ * @property {readonly import('./receipts.js').Receipt[]} receipts  a receipt per lead's turn that ended, newest last
  */
 
 /**
@@ -604,6 +608,7 @@ function apply(m, input) {
   if (draft) pushLog(m, e, s, a, draft);
   for (const change of loopChanges) if (change.started && m.state.agents[change.agent]) logStuck(m, e, s, change);
   for (const hazard of hazards) logHazard(m, e, s, hazard);
+  if (a) followTurn(m, e, s, a);
   return e;
 }
 
@@ -644,6 +649,23 @@ function syncWaits(m, keys, at) {
     const agent = m.state.agents[key];
     if (agent) recordWait(m.state.timeline, agent, waitNow(m.state, agent), at);
   }
+}
+
+/**
+ * Keeps the lead's turn (receipts.js); when it ends, its receipt gets a line in the activity log,
+ * after the line of the turn's end: a warning when it has something to check.
+ * @param {Model} m
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {AgentState} a
+ */
+function followTurn(m, e, s, a) {
+  const receipt = m.receipts.record(e, a, { costs: m.state.usage, cwd: s.cwd });
+  if (!receipt) return;
+  m.state.receipts = m.receipts.list();
+  const level = receipt.flag || receipt.test?.result === 'failed' ? 'warn' : 'info';
+  const entry = pushLog(m, { ...e, kind: 'receipt' }, s, a, { icon: '🧾', text: receiptLine(receipt), level });
+  entry.receiptId = receipt.id;
 }
 
 /**
@@ -1073,6 +1095,8 @@ export function createStore(options = {}) {
       const usage = readUsage(record);
       if (usage) {
         m.state.usage[usage.key] = usage.value;
+        // The turn that ended last gets its cost as the transcript catches up.
+        m.receipts.priced(usage.sessionId, m.state.usage);
         emit({ type: 'usage', agentKey: usage.key });
       }
       if (Array.isArray(days)) m.state.usageDays = readDays(days);
@@ -1099,13 +1123,14 @@ function amount(n) {
 /**
  * A usage record from the server or the demo, read defensively (it crosses the network).
  * @param {unknown} raw
- * @returns {{ key: string, value: AgentUsage }|null}
+ * @returns {{ key: string, sessionId: string, value: AgentUsage }|null}
  */
 function readUsage(raw) {
   if (!isObject(raw) || typeof raw.sessionId !== 'string' || !raw.sessionId) return null;
   const tokens = isObject(raw.tokens) ? raw.tokens : {};
   return {
     key: agentKeyOf(raw.sessionId, normalizeAgentId(typeof raw.agentId === 'string' ? raw.agentId : null)),
+    sessionId: raw.sessionId,
     value: {
       tokens: { input: amount(tokens.input), output: amount(tokens.output), cacheRead: amount(tokens.cacheRead), cacheWrite: amount(tokens.cacheWrite) },
       costUsd: amount(raw.costUsd),

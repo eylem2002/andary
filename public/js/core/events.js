@@ -173,7 +173,13 @@ const DATA = Object.freeze({
   'session.end': (p) => ({ reason: str(p.reason) || 'other' }),
   prompt: (p) => ({ prompt: str(p.prompt).trim(), title: oneLine(p.session_title) || null }),
   'tool.start': (p, cwd) => toolData(p, cwd),
-  'tool.end': (p, cwd) => ({ ...toolData(p, cwd), response: p.tool_response ?? null, durationMs: finite(p.duration_ms) }),
+  'tool.end': (p, cwd) => ({
+    ...toolData(p, cwd),
+    response: p.tool_response ?? null,
+    durationMs: finite(p.duration_ms),
+    // A Codex command proves it succeeded only when its adapter found the exit code (§4.12).
+    exitKnown: p.andary_exit_known === true,
+  }),
   'tool.fail': (p, cwd) => failData(p, cwd),
   'permission.request': (p, cwd) => ({
     ...toolData(p, cwd),

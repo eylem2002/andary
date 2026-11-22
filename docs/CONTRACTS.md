@@ -50,7 +50,7 @@ public/js/core/              Pure logic, no DOM, no I/O: events (normalize), sto
                              (shell command lines read as a shell reads them, for every rule),
                              conflicts (two agents on the same files, + git-commands, paths),
                              digest (what each crew did, for Catch me up), timeline (each
-                             agent's day, lane by lane)
+                             agent's day, lane by lane), receipts (what each lead's turn did)
 public/js/sources/           Where events come from: live.js (WebSocket) and demo.js (simulation),
                              one TownSource shape (types.js)
 public/js/world/layout.js    Town plan (shared, pure data)
@@ -938,7 +938,9 @@ human string ("Read src/auth/login.ts", "$ npm test", "grep \"TODO\" in src"), `
 server's key for the call's input (`andary_key`, §4.6), or null, and `root` the top of the hook
 folder's work tree as the server found it (`andary_root`, §4.6), or null. `tool.fail` adds
 `error` (its first line) and `errorText` (every line, up to 2,000 characters, for the stuck
-rules). `turn.stop` carries `interrupted` (Codex's interrupt).
+rules). `tool.end` adds `response`, `durationMs` and `exitKnown` (a Codex command's adapter found
+its exit code, `andary_exit_known`, §4.12: only then does its success prove anything). `turn.stop`
+carries `interrupted` (Codex's interrupt).
 
 `store.js` keeps sessions (crews), agents, tasks/todos, approvals, the activity log (ring buffer)
 and stats, and emits change notifications. `director.js` turns TownEvents into world calls and
@@ -981,6 +983,7 @@ StoreState {
   usage: Record<agentKey, AgentUsage>            // §4.8
   usageDays: UsageDay[]
   timeline: Timeline                             // each agent's day (core/timeline.js), below
+  receipts: Receipt[]                            // a receipt per lead's turn that ended, newest last, ≤ 60
 }
 AgentUsage { tokens: { input, output, cacheRead, cacheWrite }, costUsd, unpriced: boolean, model: string|null,
              context: { tokens, at } | null /* §4.8: the newest reading; null when unknown */,
@@ -1022,7 +1025,8 @@ Hazard { id /* one per episode: kind:agentKey:at, and for a file the other's key
          command: string|null /* git: "git stash", "git add -A && git commit" */,
          toolUseId: string|null, callKey: string|null /* git: the call's ids, to end it when refused */ }
 LogEntry { id, ts, sessionId, agentKey, agentName, color, kind /* a TownEvent kind, 'approval',
-           'achievement', 'stuck' or 'conflict' */, icon, text, level: 'info'|'success'|'warn'|'error' }
+           'achievement', 'stuck', 'conflict' or 'receipt' */, icon, text, level: 'info'|'success'|'warn'|'error',
+           receiptId? /* a 'receipt' line: its Receipt's id */ }
 Achievement { id, title, description, icon, unlockedAt }
 FileChange { id, path /* relative to the crew's folder */, tool, ts, whole: boolean /* Write */,
              hunks: { before: string, after: string }[] /* from tool_input, ≤ 4,000 characters each */ }
@@ -1297,6 +1301,60 @@ camera points at it, and the inspector's **On the timeline** section shows the m
 agent still holds opens it. An agent that has left the town gets a toast instead. **List** shows
 the same items as a list of buttons, newest first (at most 300). A teammate's crews in a team town
 show too; viewers can only look.
+
+**Turn receipts** (`core/receipts.js`, pure). The store runs `createReceipts().record(event, who,
+{ costs: state.usage, cwd })` after each event and keeps its receipts on `StoreState.receipts`,
+with a `receipt` log line (level `warn` when it has a `flag` or the last test failed, else `info`)
+when one is made or updated.
+
+```js
+Receipt { id, sessionId, agentKey /* the lead's */, source: 'claude'|'codex', start, end,
+          sawStart /* the town saw the prompt */, ended: 'done'|'error'|'interrupted', said /* last message, ≤ 200 */,
+          files: { path, added, removed: number|null /* a file written whole over an old one */,
+                   approx /* an edit's text was cut */, deleted, edits }[] /* newest first, ≤ 12 */, moreFiles,
+          test: ReceiptRun|null, build: ReceiptRun|null, lastEditAt: number|null,
+          testedAfterEdit: boolean|null /* null: no edit */, flag: string|null,
+          failures, failed: string[] /* ≤ 3 */, helpers: string[], costUsd: number|null /* an estimate */ }
+ReceiptRun { kind: 'test'|'build', command, at /* its PreToolUse, else its end */,
+             result: 'passed'|'failed'|'unproven'|'started'|'interrupted', why: string|null }
+```
+
+- **A turn** of a crew starts at its lead's `prompt`; work with no turn open (the town joined midway,
+  or work after a turn ended with no prompt seen) starts one with `sawStart: false`. It ends at the
+  lead's `turn.stop` or `turn.fail` (`ended`: `error` for a StopFailure, `interrupted` for an
+  interrupted Stop); a Stop with `stop_hook_active` ends the same turn again and updates its
+  receipt, with what came since. Helpers' events count for their lead's turn; teammates' are left
+  out. A session's end forgets its turn.
+- **Files**: each successful Edit, MultiEdit, Write, NotebookEdit (Codex patches arrive as these) by
+  its path relative to the crew's folder, with lines from the hook's own text (`changeHunks`): per
+  hunk, the lines left once those both texts start and end with are set aside (`lineDelta`). A Write
+  that made the file (`tool_response.type: 'create'`, or a Codex patch adding it) removed nothing; one
+  over an old file, or a notebook cell, removed what the hook does not show (`removed: null`). A Codex
+  patch deleting a file is `deleted`. Each is an edit for `lastEditAt` (its PostToolUse time).
+- **Test and build runs**: a Bash or PowerShell call (finished or failed) whose line runs tests
+  (`isTestRun` and not `runsNoTests`) or a build (`isBuildRun`), read by `shellCommands`, as the
+  catch-up reads it: `passed` when every such command must have succeeded for the line to (a Codex
+  command only with `exitKnown`, else `unproven`: "Codex did not report the exit code"); `failed`
+  when the line's failure can only be one of them (`decides`; `why` is the failure's line that says
+  something, `errorSignature`); `unproven` otherwise ("the exit status shown is another
+  command's", "the line failed, maybe not here"); `started` for one sent to the background;
+  `interrupted`. The latest of each kind, by when it started.
+- **Flag**: with edits, "No test ran this turn after the edits", "Tests were not re-run since the
+  last edit" (the last test started before the last edit), "The last test run after the edits
+  failed", each after "Said done, but " when the turn ended normally; "The test run after the last
+  edit proves nothing: …" for a result that is not `passed`. None without edits.
+- **Failures**: `tool.fail` that is not an interrupt; the first three in words. **Helpers**: the
+  names of the helpers with events in the turn (≤ 12).
+- **Cost** (`costUsd`, Claude Code's transcripts, §4.8): the sum, over the lead and the helpers that
+  worked in the turn, of their cost now less their cost when the turn started (a helper that started
+  in it: 0; a lead whose session the town saw start, `startup` or `clear`, with no usage yet: 0).
+  Null when that cannot be told: a turn joined midway, an agent whose earlier cost is unknown, an
+  unpriced model, a Codex crew (no usage), a teammate's crew (costs stay on each computer), or
+  nothing counted yet. `priced(sessionId, costs)`, run by `setUsage`, updates the receipt of the
+  crew's latest turn until your next prompt starts another.
+- Words (`receiptLine` for the log: "Turn receipt: 3 files changed (+40 −12), tests passed, 1
+  helper, 4m 10s. Said done, but …"; `receiptRows` for the inspector's **Last turn** section of a
+  lead: Took, Files, Last test, Last build, Check, Failed, Helpers, and Cost as "$0.42 (estimate)").
 
 **Catch me up** (`ui/catch-up.js`, §4.13). The source asks
 (`TownSource.requestDigest(since) → boolean`: live sends `{ t: 'digest', since }`; the demo answers

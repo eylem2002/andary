@@ -1067,7 +1067,7 @@ section.
 185. **A team viewer is not told to install the mod.** Limits are the host's and never reach a
      viewer; their Usage dialog says only the host sees them.
 
-## Timeline (2026-11-22)
+## Timeline and turn receipts (2026-11-22)
 
 186. **The timeline lives in the store.** Its waits come from what the store already knows (open
      dialogs, a stopped turn, a stuck alert), so the store feeds it after every event and approval
@@ -1085,3 +1085,25 @@ section.
      phones it is reached from Settings, as the toolbar has no room.
 190. **Calls narrower than 4 pixels merge in the view**, so "today" stays a few dozen buttons per
      lane; the merged item reads "N calls (M failed)" and goes to its agent without a detail.
+191. **A turn's work is the crew's.** Helpers' files, failures and tests count for their lead's turn
+     (they work for it); agent-team teammates have turns of their own and are left out.
+192. **An edit is a file tool's change.** "Tests not re-run since the last edit" compares the last
+     test run's start with the last Edit, MultiEdit, Write, NotebookEdit or Codex patch; a `sed -i`
+     or a formatter run through the shell is not counted (the town has no diff of it, and a
+     commit or an install is no edit either).
+193. **Lines from the hook's own text.** Added and removed lines per hunk are what is left once the
+     lines both texts start and end with are set aside: exact for a typical Edit, approximate for a
+     hunk that moves lines around. Text longer than the town keeps marks the counts "≥". A Write
+     over an existing file has no "removed": the hook does not carry the old content.
+194. **A build** is a package's `build`/`build:…` script, `tsc`, a `build` subcommand of the common
+     tools, `make` with no target (or `all`/`build`) and `python -m build`, in `core/shell.js` beside
+     `isTestRun`. `runsNoTests` moved there from the digest, so both read tests the same way.
+195. **A turn's cost is a difference of running totals.** Usage arrives after the hooks, so the
+     receipt of a crew's latest turn takes new usage until your next prompt; usage that arrives
+     later counts for the next turn. With no reading from before the turn (and no fresh session
+     start seen), the cost is left out rather than guessed.
+196. **A Stop hook that keeps the turn going is the same turn.** Work between a Stop and a Stop with
+     `stop_hook_active` joins the receipt of the turn before; a Stop without it after work with no
+     prompt is a new turn that started before the town saw it ("at least").
+197. **A receipt's log line is written again when a Stop hook updates it**, with the newer words;
+     the inspector shows the latest.
