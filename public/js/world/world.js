@@ -628,6 +628,15 @@ class World {
   }
 
   /**
+   * The grid step for a screen direction under the current camera (the phone pad's buttons).
+   * @param {-1|0|1} right @param {-1|0|1} up
+   * @returns {[number, number]} [dc, dr]
+   */
+  screenStep(right, up) {
+    return stepToTile(right, up, this.view.faceYaw);
+  }
+
+  /**
    * Where a person is: walking a tile path that started at `at` (ms on this browser's clock), or
    * standing on a tile; dim while they are away on their porch.
    * @param {string} id

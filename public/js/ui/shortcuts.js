@@ -3,7 +3,7 @@
 
 /**
  * @typedef {'follow'|'escape'|'rotate-left'|'rotate-right'|'zoom-in'|'zoom-out'|'reset-view'|
- *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|'director'|'toggle-panels'|'usage'|'leaderboard'|'place-names'|'needs-you'|'catch-up'|`crew-${number}`} ShortcutAction
+ *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|'director'|'toggle-panels'|'usage'|'leaderboard'|'place-names'|'needs-you'|'catch-up'|'walk-mode'|`crew-${number}`} ShortcutAction
  */
 
 /**
@@ -14,6 +14,7 @@ export const SHORTCUT_HELP = Object.freeze([
   { keys: ['C'], label: 'Director camera: follow the action by itself' },
   { keys: ['H'], label: 'Full-screen town: put the side boards away or bring them back' },
   { keys: ['F'], label: 'Follow the selected agent (or the busiest one)' },
+  { keys: ['G'], label: 'Walk mode: walk your character (a team town, or the demo); on the town, arrows or W A S D take a step' },
   { keys: ['Esc'], label: 'Close the open panel, stop following' },
   { keys: ['[', ']'], label: 'Rotate the view' },
   { keys: ['+', '−'], label: 'Zoom in and out' },
@@ -35,6 +36,8 @@ export const SHORTCUT_HELP = Object.freeze([
 const KEY_ACTIONS = {
   f: 'follow',
   F: 'follow',
+  g: 'walk-mode',
+  G: 'walk-mode',
   Escape: 'escape',
   '[': 'rotate-left',
   ']': 'rotate-right',

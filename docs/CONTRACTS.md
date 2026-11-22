@@ -299,8 +299,14 @@ Server → browser:
 { t: 'digest', d: Digest }                         // §4.13, the answer to a digest request
 { t: 'people', people: Person[] }                  // §4.11, everyone: someone came online or left, saved a profile, was invited or removed
 { t: 'profile', ok: true, color: number, asked: number }  // §4.11, to the sender: the colour they got (another may hold the one asked)
+{ t: 'presence', people: ({ name } & Presence)[] }  // §4.11, everyone: where some people are now (at most 10 a second)
+{ t: 'emote', name, id: 0–7 }                      // §4.11, everyone: one of the set emotes (core/presence.js EMOTES)
+{ t: 'phrase', name, id: 0–9 }                     // §4.11, everyone: one of the set phrases (PHRASES)
+{ t: 'look-ask', from, at: { agent: string }|{ building: BuildingKey } }  // §4.11, to the asked person's browsers only
 { t: 'error', message }
-// Person = { name, slot: 0–5 /* their home */, color: 0–7 /* CREW_COLORS index */, host: boolean, online: boolean, profile: Profile|null /* core/profile.js */ }
+// Person = { name, slot: 0–5 /* their home */, color: 0–7 /* CREW_COLORS index */, host: boolean, profile: Profile|null /* core/profile.js */ } & Presence
+// Presence = { tile: [col, row], walk: { path: [col, row][], at: number /* server ms */ }|null, online: boolean,
+//              away: null|'porch'|'inside', duty: 'free'|'work'|'needs', lights: boolean }
 // Envelope = { id: number /* server sequence */, ts: number /* hook start, ms, never after rx nor more than an hour before it (a teammate's: §7) */, rx: number /* server receive */, event: object /* sanitized payload */ }
 // Approval = { id, status: 'pending'|'allowed'|'denied'|'expired'|'resolved', held: boolean, sessionId, agentId: string|null,
 //              toolName, toolInput, callKey: string|null /* the request's andary_key, §4.6 */, source: 'claude'|'codex',
@@ -317,6 +323,9 @@ Browser → server:
 { t: 'notify-test' }   // sends a test phone notification (rate limits apply)
 { t: 'digest', since: number }   // §4.13: what each crew did since then (ms, the server's clock; 0: all kept)
 { t: 'profile', p: Profile }     // §4.11: the sender's own profile (a person, or the owner as the host); at most one per 10 s
+{ t: 'walk', to: [col, row] }    // §4.11: the sender's character walks there (person or owner)
+{ t: 'emote', id } / { t: 'phrase', id }   // §4.11: a set emote (one per 2 s) or phrase (one per 5 s)
+{ t: 'look', to: string, at: { agent }|{ building } }   // §4.11: asks a teammate to come look (one per 30 s per pair)
 { t: 'ping' }
 ```
 
@@ -736,6 +745,40 @@ prints the view link; `andary team reset` makes a new secret, which revokes ever
   order is given and the browser says so. The browser keeps its own profile in its storage
   (`andary:profile`) once the host saved it, and sends it again when the host has none for it
   (after a fresh `people.json`); the demo starts with it too.
+- **Presence** (`server/presence.mjs`, `public/js/core/presence.js`; never stored or recorded:
+  after a restart everyone starts at their door). Every `Person` carries where they are: `tile`,
+  their last `walk` (`path` from tile to tile on the town plan's walking grid, `at` on the
+  host's clock), `online` (a connection plays them), `away` (no connection: `porch` after 60 s,
+  dimmed on their porch and back at their door; `inside` after 10 min, not shown),
+  `duty` (from their own events: a prompt `work`; a permission request, a notification or a
+  failed turn `needs`; Stop or SessionEnd `free`) and `lights` (online, or their relay posted in
+  the last 2 min). Changes go out as `{t:'presence'}` at most ten times a second.
+  `{t:'walk', to}` comes from a person or the owner, for the character the connection plays
+  (never a name from the message): the tile must be walkable and reachable in at most 60 steps,
+  it is refused while `duty` is not `free` ("Your character is at work"), and a walk asked less
+  than 250 ms after the last waits for its turn (the latest wins). A new walk carries on from
+  where the figure is (`continueWalk`: mid-step it finishes the step first, `at` set back by the
+  part walked), so it never jumps. Every browser places the figure with `positionAt(path, at,
+  now + offset)` at 2.2 tiles a second (offset: `hello.serverTime` against its own clock).
+  `emote` and `phrase` are indices into fixed lists (no free text reaches another screen), at
+  most one emote per 2 s and one phrase per 5 s per person, broadcast with the sender's name.
+  `look` names a teammate and an agent key or a building; at most one per 30 s per pair, sent
+  as `look-ask` to that person's browsers only. A viewer's walk, emote, phrase or look gets the
+  viewer error. `ANDARY_PORCH_MS` and `ANDARY_INSIDE_MS` shorten the away times (tests).
+- **Walking in the browser** (`ui/walk.js`): walk mode is the toolbar's Walk button or **G**
+  (shown to whoever plays a person, and to you in the demo). While it is on the camera follows
+  your character (it cuts instead of easing under reduced motion), a click or tap on the ground
+  walks to the nearest walkable tile (agents and buildings are still picked first), and on the
+  focused town the arrows or WASD take one step a press, from the tile being entered (a held
+  key repeats four times a second) while Shift+arrows pan; W and A are not Catch me up and
+  Approvals then. The Walk panel above the toolbar has a "Walk to…" list (every building door,
+  every home, the teammates who are out), a status line that is a polite live region ("Walking
+  to the Library door…", "You are at the Library door."), the eight emotes and ten phrases (on
+  a phone the emotes fold away with the phrases), "Ask to come look" (at the selected agent or
+  building), and on phones a four-button step pad with 44 px targets (Settings can hide it). A
+  `look-ask` is a note with **Go** (selects it; only then does the camera move) and **Not
+  now**; Settings → "Come look" notes turns them off. On a phone, walk mode folds the board's
+  sheet away. The demo does the same with you and Lina (who strolls and waves now and then).
 - **Agents' names**: with `agents` set ("Pixel"), every crew of that person names its lead
   "Pixel" and its helpers "Pixel 1", "Pixel 2"… in the order they joined (`core/crews.js`
   `nameCrew`), in the crews board, the log, the inspector, notifications and the town; the role
@@ -782,8 +825,8 @@ prints the view link; `andary team reset` makes a new secret, which revokes ever
 - **Browsers** are `owner` (the UI token; on a team host the host's own person), `person` (a
   personal link on the roster) or `viewer` (the view token), the last two on team hosts only; the
   owner's sign-in wins over the others. `/api/hello` reports `authenticated: true` for all three.
-  A person is treated like a viewer below, except that it may also send `{t:'profile'}` for
-  itself; its `decide`, `settings`, `digest` and `notify-test` get
+  A person is treated like a viewer below, except that it may also send `{t:'profile'}`,
+  `walk`, `emote`, `phrase` and `look` for itself; its `decide`, `settings`, `digest` and `notify-test` get
   `{t:'error', message:'Teammates can change their own character only…'}`. Each person may hold
   2 connections, and people may use the connections kept for the owner. Every browser gets
   `hello.people` and `{t:'people'}` (a person is `online` while any connection plays them); `me` is
@@ -801,8 +844,9 @@ prints the view link; `andary team reset` makes a new secret, which revokes ever
   `hello.people` before its history and from `{t:'people'}`; a member's crews are theirs, local
   ones the host's; crews of anyone else take turns as before), and changes with it. Each person's
   home in the residential quarter shows their house style, their colour on the door and flag, a
-  name plate, and lit windows while they are online; while online they stand on their porch
-  (`ui/town-people.js`, World `setHome` and an `AgentSpec` with `role: 'person'`). Settings shows
+  name plate, and lit windows while `lights`; their figure stands where they are, walks their
+  walks, sits dimmed on their porch while `away` is `porch` and is gone while `inside`
+  (`ui/town-people.js`, World `setHome`, `placePerson` and an `AgentSpec` with `role: 'person'`). Settings shows
   a "Team town" note for every role, a "You" block with **Your character** for whoever plays a
   person (the "You" dialog, `ui/character.js`), and hides remote approvals and phone
   notifications from viewers and people. Notifications on this computer skip
@@ -1443,7 +1487,14 @@ World {
   sendMessage(fromId: string, to: {agent: string}|{building: BuildingKey}): Promise<void>  // paper plane
   vehicle(kind: 'mailtruck'|'boat'|'bus', action?: 'arrive'|'depart'|'trip'): void
 
+  placePerson(id, where: { tile?: [col, row], walk?: { path: [col, row][], at: number /* this browser's ms */ }|null, dim?: boolean }): void
+    // a person (§4.11): follows a timed walk (core/presence.js positionAt), or stands on a tile
+    // (on their porch when it is their door); dim while they are away
+  setWalkMode(on: boolean): void                   // walk mode: a ground click emits 'ground', arrows/WASD on the town emit 'step'
+  screenStep(right: -1|0|1, up: -1|0|1): [dc, dr]   // the grid step for a screen direction under the current camera
   on(event: 'select'|'hover', cb: (sel: {type:'agent', id}|{type:'building', key}|null) => void): () => void
+  on(event: 'ground', cb: (tile: [col, row]) => void): () => void   // walk mode: the walkable tile nearest a click on the ground
+  on(event: 'step', cb: (step: [dc, dr]) => void): () => void       // walk mode: an arrow or WASD key, turned onto the grid
   select(sel: {type:'agent', id}|{type:'building', key}|null): void
   getScreenPosition(id): { x: number, y: number, visible: boolean } | null
   stats(): { fps: number, agents: number, drawCalls: number }
@@ -1461,7 +1512,8 @@ EffectKind = 'sparks'|'smoke'|'confetti'|'fireworks'|'books'|'magnify'|'signal'|
 Character models face +z at yaw 0 (yaw π faces north, toward building doors). The facade owns the
 renderer, the frame loop, the DOM overlay for name pills / bubbles / emotes (`aria-hidden="true"`)
 and pointer picking. The canvas container is focusable (`tabindex="0"`, `role="application"`,
-`aria-label`); arrow keys pan, `+`/`-` zoom, `Q`/`E` rotate.
+`aria-label`); arrow keys pan, `+`/`-` zoom, `Q`/`E` rotate; in walk mode arrows and WASD take a
+step and Shift+arrows pan.
 
 ### 6.1 Environment (`public/js/world/env/environment.js`), used only by the facade
 
@@ -1580,8 +1632,8 @@ decision is treated as "answered in the terminal" and the story carries on as al
   `css/app.css`; each is owned by the module that renders those elements.
 - Demo mode: `/?demo=1` forces the simulation even when a server is running. The app picks live
   mode when `GET ./api/hello` answers `{"app":"andary"}`; otherwise demo mode.
-- The app exposes `window.__andary = { mode, store, world }` for tests and debugging (it holds no
-  secrets).
+- The app exposes `window.__andary = { mode, store, world, hud }` for tests and debugging (it
+  holds no secrets; `hud` lets a test hand the HUD what a server would, such as a `look-ask`).
 
 ### 8.1 Stable test ids (the HUD renders these; e2e suites rely on them)
 
@@ -1603,6 +1655,9 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]`, and, when a rule can be saved, `[data-testid="approve-always"]` with the rule in `[data-testid="approve-always-rule"]`; a hint in `[data-testid="approval-hint"]` |
 | `[data-testid="remote-approvals-toggle"]` | checkbox/switch for remote approvals (live mode) |
 | `[data-testid="settings-button"]` | opens the settings dialog (holds the remote approvals switch) |
+| `[data-testid="walk-panel"]` | the Walk panel, shown in walk mode (§4.11) |
+| `[data-testid="walk-to"]` | its "Walk to…" list |
+| `[data-testid="walk-where"]` | its status line (a polite live region): where your character is going or is |
 | `[data-testid="open-character"]` | Settings' **Your character** button, shown when this browser plays a person (§4.11; the demo's "You") |
 | `[data-testid="character-dialog"]` | the "You" dialog; `[data-testid="character-random"]`, `[data-testid="character-save"]`, `[data-testid="character-status"]` (a live status line) |
 | `[data-testid="usage-gauge"]` | the plan-limit gauge on the Usage button (`data-level`, `data-percent`); hidden without a reading |

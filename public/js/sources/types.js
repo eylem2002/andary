@@ -11,6 +11,9 @@
  * @property {(since: number) => boolean} requestDigest  ask what each crew did since a time; the answer comes as the source's onDigest
  * @property {(on: boolean) => unknown} [setRemoteApprovals]  live: the server's switch
  * @property {(profile: import('../core/profile.js').Profile) => boolean} [saveProfile]  this person's profile: live, on the team host (§4.11); demo, in the demo's people
+ * @property {(to: [number, number]) => boolean} [walk]      this person's character walks to a tile (§4.11)
+ * @property {(kind: 'emote'|'phrase', id: number) => boolean} [say]  one of the set emotes or phrases over their character
+ * @property {(to: string, at: { agent: string }|{ building: string }) => boolean} [lookAsk]  asks a teammate to come look
  * @property {() => boolean} [notifyTest]                    live: a test phone notification
  * @property {(paused: boolean) => void} [setPaused]         demo: pause the story
  * @property {(speed: number) => void} [setSpeed]            demo: 1×, 2×, 4×

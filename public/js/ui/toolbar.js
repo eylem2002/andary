@@ -25,6 +25,7 @@ const TOOLS = [
   { id: 'director', label: 'Director camera', key: 'C', keyName: 'C', compact: true },
   { id: 'toggle-panels', label: 'Full-screen town', key: 'H', keyName: 'H', compact: true },
   { id: 'follow', label: 'Follow', key: 'F', keyName: 'F', compact: true },
+  { id: 'walk-mode', label: 'Walk', key: 'G', keyName: 'G', compact: true },
   '|',
   { id: 'rotate-left', label: 'Rotate left', key: '[', keyName: '[', compact: true },
   { id: 'rotate-right', label: 'Rotate right', key: ']', keyName: ']', compact: true },
@@ -111,6 +112,8 @@ export function createToolbar(ctx) {
     // Without a 3D view there is no camera to direct and no town to fill the screen with.
     setHidden(buttons.director, view.worldFailed);
     setHidden(buttons['toggle-panels'], view.worldFailed);
+    // Only someone with a character (a team town's person, or you in the demo) can walk.
+    setHidden(buttons['walk-mode'], view.worldFailed || !view.people.some((p) => p.name === view.me));
     for (const sep of el.querySelectorAll('.hud-toolbar__sep')) {
       // The separator before the demo group disappears with it.
       const next = /** @type {HTMLElement|null} */ (sep.nextElementSibling);
@@ -119,6 +122,7 @@ export function createToolbar(ctx) {
     setButton('director', 'video', 'Director camera', directorActive(ctx));
     setButton('toggle-panels', 'panels', 'Full-screen town', panelsHidden(ctx));
     setButton('follow', 'follow', 'Follow the selected agent', view.follow);
+    setButton('walk-mode', 'walk', 'Walk mode', view.walking);
     setButton('rotate-left', 'rotateLeft', 'Rotate left', null);
     setButton('rotate-right', 'rotateRight', 'Rotate right', null);
     setButton('zoom-in', 'zoomIn', 'Zoom in', null);

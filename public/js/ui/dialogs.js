@@ -162,6 +162,7 @@ export function createSettingsDialog(ctx) {
   const teamText = h('p', { class: 'hud-setting__help', 'data-testid': 'team-text' });
   const teamBlock = h('div', { class: 'hud-setting' }, h('p', { class: 'hud-setting__name', text: 'Team town' }), teamText);
   const you = youBlock(ctx, () => dialog.close());
+  const walking = walkingBlock(ctx);
 
   const helpButton = h('button', { type: 'button', class: 'hud-btn' }, icon('help', { size: 18 }), 'Shortcuts and help');
   const setupButton = h('button', { type: 'button', class: 'hud-btn' }, icon('terminal', { size: 18 }), 'Use your own Claude Code');
@@ -170,7 +171,7 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [you.el, teamBlock, remoteBlock, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    body: [you.el, walking.el, teamBlock, remoteBlock, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -196,6 +197,7 @@ export function createSettingsDialog(ctx) {
       setHidden(teamBlock, !team);
       teamText.textContent = team ? teamSentence(team) : '';
       you.sync();
+      setHidden(walking.el, !ctx.view.people.some((p) => p.name === ctx.view.me));
       setHidden(remoteBlock, !live || viewer);
       remote.checked = Boolean(ctx.view.serverSettings.remoteApprovals);
       remote.disabled = ctx.view.connection !== 'live';
@@ -312,6 +314,23 @@ function choice(id, label, options, value, onChange) {
   select.addEventListener('change', () => onChange(select.value));
   const el = h('div', { class: 'hud-setting' }, settingRow(id, label, select));
   return { el, set: (/** @type {string} */ v) => { select.value = v; }, value: () => select.value };
+}
+
+/**
+ * Walking in a team town (or the demo): "come look" notes and the phone's step pad.
+ * @param {HudContext} ctx
+ */
+function walkingBlock(ctx) {
+  const look = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-look-asks', role: 'switch', checked: ctx.prefs.lookAsks }));
+  look.addEventListener('change', () => ctx.setPrefs({ lookAsks: look.checked }));
+  const pad = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-walk-pad', role: 'switch', checked: ctx.prefs.walkPad }));
+  pad.addEventListener('change', () => ctx.setPrefs({ walkPad: pad.checked }));
+  const el = h('div', { class: 'hud-setting' },
+    settingRow('hud-set-look-asks', '"Come look" notes', look),
+    h('p', { class: 'hud-setting__help', text: 'A teammate can ask you to come look at an agent or a building: a note with Go and Not now. The camera moves only on Go.' }),
+    settingRow('hud-set-walk-pad', 'Step pad on phones', pad),
+    h('p', { class: 'hud-setting__help', text: 'In walk mode (G), four arrow buttons beside tapping the ground.' }));
+  return { el };
 }
 
 /**

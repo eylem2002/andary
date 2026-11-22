@@ -110,5 +110,5 @@ export function createBoard(ctx, contents) {
     setText(badgeCount, String(pending));
   }
 
-  return { el, leftDock, select, setMobile, setPendingApprovals, tabButton: (/** @type {string} */ id) => tabs[id] };
+  return { el, leftDock, select, setMobile, setSheetOpen, setPendingApprovals, tabButton: (/** @type {string} */ id) => tabs[id] };
 }

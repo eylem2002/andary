@@ -207,6 +207,9 @@ test.describe('keyboard', () => {
     const follow = page.locator('[data-tool="follow"]');
     await follow.focus();
     await expect(follow.locator('.hud-tip')).toBeVisible();
+    // Walk comes next (the demo is a small team town, so you have a character to walk).
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('[data-tool="walk-mode"]')).toBeFocused();
     await page.keyboard.press('ArrowRight');
     const rotate = page.locator('[data-tool="rotate-left"]');
     await expect(rotate).toBeFocused();
