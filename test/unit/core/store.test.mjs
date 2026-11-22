@@ -835,3 +835,26 @@ describe('store: Codex crews (§4.12)', () => {
   });
 });
 
+
+describe('store: notes to agents', () => {
+  it('keeps each note\'s latest state, with a log line per state, and ignores repeats and junk', () => {
+    const { store, send, state, changes } = setup();
+    send(FIXTURES.SessionStart);
+    const note = { id: 'n1', status: 'queued', sessionId: SESSION, agentId: null, text: 'Use the\nstaging db', createdAt: 1, expiresAt: 2 };
+    store.setNote(note);
+    store.setNote(note);
+    store.setNote({ ...note, status: 'delivered', deliveredAt: 3, hook: 'PostToolUse' });
+    store.setNote({ ...note, id: 'n2', status: 'expired', reason: 'the session ended' });
+    for (const junk of [null, { id: 'n3' }, { ...note, id: 'n4', status: 'lost' }, { ...note, id: 5 }]) store.setNote(junk);
+    assert.deepEqual(state().notes.map((n) => [n.id, n.status, n.hook]), [['n1', 'delivered', 'PostToolUse'], ['n2', 'expired', undefined]]);
+    const lines = state().log.filter((entry) => entry.kind === 'note');
+    assert.deepEqual(lines.map((entry) => [entry.agentKey, entry.text, entry.level]), [
+      [MAIN, "Note queued for the agent's next step — “Use the staging db”", 'info'],
+      [MAIN, 'Note sent with its PostToolUse hook — “Use the staging db”', 'info'],
+      [MAIN, 'Note expired: the session ended — “Use the staging db”', 'warn'],
+    ]);
+    assert.equal(changes.filter((c) => c.type === 'note').length, 3);
+    store.reset();
+    assert.deepEqual(state().notes, []);
+  });
+});

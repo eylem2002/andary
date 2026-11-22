@@ -106,7 +106,7 @@ export function socketUrl(pageUrl) {
 
 /**
  * @typedef {object} LiveOptions
- * @property {{ ingest: (e: any) => any, setApproval: (a: any) => void, setUsage?: (u: unknown, days?: unknown) => void, reset: () => void }} store
+ * @property {{ ingest: (e: any) => any, setApproval: (a: any) => void, setUsage?: (u: unknown, days?: unknown) => void, setNote?: (n: unknown) => void, reset: () => void }} store
  * @property {boolean} [authenticated]   false starts in "Sign in" and waits for a valid sign-in
  * @property {(status: LinkStatus) => void} [onStatus]
  * @property {(settings: object) => void} [onSettings]
@@ -115,6 +115,7 @@ export function socketUrl(pageUrl) {
  * @property {(limits: unknown) => void} [onLimits]  plan limits from the andary-limits mod, owners only (§4.14)
  * @property {(ok: boolean) => void} [onNotifyTest]  the answer to notifyTest()
  * @property {(digest: unknown) => void} [onDigest]   the answer to requestDigest(): what each crew did
+ * @property {(reply: { ref: string|null, ok: boolean, error?: string }) => void} [onNoteReply]  the server's answer to sendNote(), with its ref (§4.15)
  * @property {(away: unknown, offset: number) => void} [onAway]  the latest time you were away, from hello and as it changes, with how far the server's clock is ahead of this browser's (from hello)
  * @property {new (url: string, protocols?: string[]) => WebSocket} [WebSocketImpl]
  * @property {() => import('./credentials.js').Credentials} [credentials]
@@ -123,7 +124,7 @@ export function socketUrl(pageUrl) {
  */
 
 /**
- * @typedef {Required<Pick<LiveOptions, 'onSettings'|'onError'|'onProgress'|'onLimits'|'onNotifyTest'|'onDigest'|'onAway'>> & { store: LiveOptions['store'], ingest: (envelope: unknown) => void, clock: { offset: number } }} Sinks
+ * @typedef {Required<Pick<LiveOptions, 'onSettings'|'onError'|'onProgress'|'onLimits'|'onNotifyTest'|'onDigest'|'onAway'|'onNoteReply'>> & { store: LiveOptions['store'], ingest: (envelope: unknown) => void, clock: { offset: number } }} Sinks
  */
 
 /**
@@ -138,6 +139,7 @@ const MESSAGES = Object.freeze({
   approval: (m, to) => {
     if (m.a) to.store.setApproval(m.a);
   },
+  note: (m, to) => to.store.setNote?.(m.n),
   settings: (m, to) => to.onSettings(m.settings ?? {}),
   usage: (m, to) => to.store.setUsage?.(m.u, m.days),
   progress: (m, to) => to.onProgress(m.p),
@@ -145,8 +147,17 @@ const MESSAGES = Object.freeze({
   'notify-test': (m, to) => to.onNotifyTest(m.ok === true),
   digest: (m, to) => to.onDigest(m.d),
   away: (m, to) => to.onAway(m.away ?? null, to.clock.offset),
+  'note-reply': (m, to) => to.onNoteReply({ ref: typeof m.ref === 'string' ? m.ref : null, ok: m.ok === true, ...(typeof m.error === 'string' ? { error: m.error } : {}) }),
   error: (m, to) => to.onError(String(m.message ?? 'The server reported an error.')),
 });
+
+/**
+ * The owner's notes to agents from hello (§4.15): a viewer, and an older server, send none.
+ * @param {LiveOptions['store']} store @param {unknown} notes
+ */
+function applyNotes(store, notes) {
+  if (Array.isArray(notes)) for (const note of notes) store.setNote?.(note);
+}
 
 /**
  * Opens and keeps open the live connection.
@@ -163,6 +174,7 @@ export function connectLive({
   onNotifyTest = () => {},
   onDigest = () => {},
   onAway = () => {},
+  onNoteReply = () => {},
   WebSocketImpl = globalThis.WebSocket,
   credentials = () => readCredentials(),
   hello = () => fetchHello({ credentials }),
@@ -179,7 +191,7 @@ export function connectLive({
   /** @type {ReturnType<typeof setInterval>|null} */
   let pingTimer = null;
   /** Where the server's messages go (MESSAGES). @type {Sinks} */
-  const sinks = { store, ingest, onSettings, onError, onProgress, onLimits, onNotifyTest, onDigest, onAway, clock: { offset: 0 } };
+  const sinks = { store, ingest, onSettings, onError, onProgress, onLimits, onNotifyTest, onDigest, onAway, onNoteReply, clock: { offset: 0 } };
 
   /** @param {LinkStatus} next */
   function setStatus(next) {
@@ -238,6 +250,7 @@ export function connectLive({
     store.reset();
     for (const envelope of message.history ?? []) ingest(envelope);
     for (const approval of message.approvals ?? []) store.setApproval(approval);
+    applyNotes(store, message.notes);
     const usage = message.usage ?? {};
     for (const record of Array.isArray(usage.agents) ? usage.agents : []) store.setUsage?.(record);
     if (Array.isArray(usage.days)) store.setUsage?.(null, usage.days);
@@ -312,9 +325,21 @@ function requests(send) {
      * @param {'allow'|'deny'} decision
      * @param {string} [message]  why, for a denial
      * @param {number} [always]   with an allow: the index of the suggestion to save ("Allow always")
+     * @param {boolean} [stop]     with a denial: stop the agent too ("Deny and stop")
      */
-    decide(id, decision, message, always) {
-      return send({ t: 'decide', id, decision, ...(message ? { message: String(message).slice(0, 500) } : {}), ...(always === undefined ? {} : { always }) });
+    decide(id, decision, message, always, stop) {
+      return send({ t: 'decide', id, decision, ...(message ? { message: String(message).slice(0, 500) } : {}), ...(always === undefined ? {} : { always }), ...(stop ? { stop: true } : {}) });
+    },
+    /**
+     * Sends the owner's note to one agent, for its next step (CONTRACTS §4.15); the server
+     * answers with `ref` (onNoteReply), queued or refused.
+     * @param {string} sessionId
+     * @param {string|null} agentId  null for the crew's lead
+     * @param {string} text
+     * @param {string} ref  the sender's own id for this note
+     */
+    sendNote(sessionId, agentId, text, ref) {
+      return send({ t: 'note', ref, sessionId, ...(agentId ? { agentId } : {}), text });
     },
     /** Asks the server to send a test phone notification. */
     notifyTest() {

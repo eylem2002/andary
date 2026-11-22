@@ -2,9 +2,10 @@
 // Andary hook forwarder (CONTRACTS §4.3). Claude Code (or Codex, which runs it with the argument
 // `codex`) runs this for every registered hook event: it passes the event to the local Andary
 // server and, for PermissionRequest, prints the decision the town returned. Both agents read the
-// same decision format.
+// same decision format. For a hook that can carry them (§4.15), it prints the notes the owner sent
+// the agent from the town, as additionalContext.
 //
-// It must never get in Claude's way: it prints nothing but that decision object, it always exits
+// It must never get in Claude's way: it prints nothing but that decision or those notes, it always exits
 // 0, and when no server is running it exits at once. Before sending anything (the event, or the
 // hook secret) it asks the server to prove it holds the key from server.json, so a program that
 // took over the port of a server that is gone receives nothing. Self-contained (Node built-ins only),
@@ -20,7 +21,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { request } from 'node:http';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,9 +44,21 @@ const MAX_DENY_MESSAGE_CHARS = 1000;
  * What this forwarder does, so the server knows what to trust (CONTRACTS §4.3): `truncated`, it
  * marks a body it shortened (a server holds a request for the town only from a forwarder that
  * does); `updatedPermissions`, it can pass a saved rule on (the server offers "Allow always" only
- * then).
+ * then); `interrupt`, it passes a deny's stop on to Claude Code ("Deny and stop"); `notes`, it
+ * hands the owner's notes to the agent (the server queues none for a forwarder without it).
  */
-const CAPS = Object.freeze(['truncated', 'updatedPermissions']);
+const CAPS = Object.freeze(['truncated', 'updatedPermissions', 'interrupt', 'notes']);
+/**
+ * Hooks whose output may carry notes as additionalContext, per agent: the same lists as NOTE_HOOKS
+ * in public/js/core/notes.js (this file stands alone, so it keeps its own copy).
+ */
+const NOTE_HOOKS = Object.freeze({
+  claude: new Set(['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'UserPromptSubmit']),
+  codex: new Set(['PreToolUse', 'PostToolUse', 'UserPromptSubmit']),
+});
+/** The longest note, and the most one reply carries (as server/notes.mjs sends them). */
+const MAX_NOTE_CHARS = 2000;
+const MAX_NOTES = 4;
 /** Where an allow may save a rule: `.claude/settings.local.json` (this project, only you) or the session. */
 const LOCAL_DESTINATIONS = new Set(['localSettings', 'session']);
 /** Tools whose rule content is a command line: a rule without a wildcard is one command. */
@@ -368,10 +381,11 @@ function savedRule(updates, suggestions) {
 
 /**
  * The PermissionRequest decision from a signed reply, rebuilt from the shapes the town sends
- * (allow, allow that saves one rule, or deny with a message), as JSON; '' for anything else.
- * Fields such as updatedInput or additionalContext are never passed on: the town does not send
- * them, so their presence means the answer did not come from it. updatedPermissions passes only
- * as one of this hook's own suggestions (savedRule); any other value gives a plain allow.
+ * (allow, allow that saves one rule, deny with a message, deny that also stops Claude Code), as
+ * JSON; '' for anything else. Fields such as updatedInput or additionalContext are never passed
+ * on: the town does not send them, so their presence means the answer did not come from it.
+ * updatedPermissions passes only as one of this hook's own suggestions (savedRule); any other
+ * value gives a plain allow. `interrupt: true` passes only for Claude Code: Codex refuses it.
  * @param {State} state
  * @param {string} nonce
  * @param {{ text: string, signature: string } | null} reply
@@ -396,7 +410,70 @@ function decisionFrom(state, nonce, reply, event) {
   }
   if (decision?.behavior !== 'deny' || typeof decision.message !== 'string') return '';
   const message = decision.message.slice(0, MAX_DENY_MESSAGE_CHARS);
-  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message } } });
+  const stop = decision.interrupt === true && SOURCE !== 'codex' ? { interrupt: true } : {};
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message, ...stop } } });
+}
+
+/**
+ * A note as the agent may read it, checked again here: the same cleaning as noteText() in
+ * public/js/core/notes.js; null for anything that is not a string, holds nothing, or is too long.
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+function noteText(raw) {
+  if (typeof raw !== 'string') return null;
+  const text = raw
+    .replace(/\r\n?|[\u2028\u2029]/g, '\n')
+    .replace(/\t/g, ' ')
+    // eslint-disable-next-line no-control-regex -- removing control characters is the point
+    .replace(/[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u115F\u1160\u3164\uFFA0]|\p{Cf}|\p{Cs}|\p{Variation_Selector}/gu, '')
+    .replace(/[^\S\n]+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return text && text.length <= MAX_NOTE_CHARS ? text : null;
+}
+
+/**
+ * Who sends the notes: the user this forwarder runs as, who is the one signed in to the town
+ * (only its owner can send a note, and only to agents on this computer).
+ * @returns {string}
+ */
+function senderName() {
+  try {
+    const name = userInfo().username;
+    return /^[\w.-]{1,40}$/.test(name) ? name : 'the owner';
+  } catch {
+    return 'the owner';
+  }
+}
+
+/**
+ * The notes in a signed reply, as this hook's output: `additionalContext`, which the agent reads
+ * at its next step and the terminal does not show; '' when there are none, the hook cannot carry
+ * them, or the reply is not the server's. Every note is checked again (noteText); one that fails
+ * drops them all, as the reply did not come from the town.
+ * @param {State} state
+ * @param {string} nonce
+ * @param {{ text: string, signature: string } | null} reply
+ * @param {string} hook  this hook's own event name
+ * @returns {string}
+ */
+function notesFrom(state, nonce, reply, hook) {
+  if (!NOTE_HOOKS[SOURCE ?? 'claude'].has(hook) || !reply || !signedByServer(state, nonce, reply)) return '';
+  let notes;
+  try {
+    notes = JSON.parse(reply.text)?.notes;
+  } catch {
+    return '';
+  }
+  if (!Array.isArray(notes) || notes.length === 0 || notes.length > MAX_NOTES) return '';
+  const texts = notes.map(noteText);
+  if (texts.some((text) => text === null)) return '';
+  // Factual words, as noteHeader() in public/js/core/notes.js: text framed as a system command can
+  // trip Claude's prompt-injection defences.
+  const header = `The user (${senderName()}) sent you this message from Andary while you work:\n`;
+  const additionalContext = texts.map((text) => `${header}${text}`).join('\n\n');
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: hook, additionalContext } });
 }
 
 async function main() {
@@ -411,8 +488,8 @@ async function main() {
   if (!(await serverProves(state, EVENT_TIMEOUT_MS))) return '';
   const nonce = randomBytes(16).toString('base64url');
   const reply = await post(state, buildBody(event), nonce, timeoutMs);
-  // Only a permission prompt takes an answer from the town; other events print nothing.
-  return isPermission ? decisionFrom(state, nonce, reply, event) : '';
+  // A permission prompt takes the town's answer; a hook that can carry notes, the owner's notes.
+  return isPermission ? decisionFrom(state, nonce, reply, event) : notesFrom(state, nonce, reply, String(event.hook_event_name));
 }
 
 process.on('uncaughtException', () => finish());

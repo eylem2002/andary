@@ -9,6 +9,7 @@ import { busiestAgent, sameSelection } from '../../../public/js/ui/hud-actions.j
 import { effectFor, FRESH_MS } from '../../../public/js/ui/hud-effects.js';
 import { noticeKind } from '../../../public/js/ui/hud.js';
 import { topTools } from '../../../public/js/ui/inspector.js';
+import { noteCaution, noteOffer } from '../../../public/js/ui/agent-note.js';
 import { pageTitle, subtitleFor } from '../../../public/js/ui/masthead.js';
 
 /**
@@ -92,8 +93,30 @@ describe('approvals', () => {
     assert.equal(resultText(fixture({ status: 'allowed', decidedBy: 'town', always: { ...always, destination: 'session' } }), 'demo'), 'Allowed; asked Claude Code to save Bash(npm test:*) until this session ends');
   });
 
+  test('result wording for "Deny and stop" says the agent was stopped', () => {
+    assert.equal(resultText(fixture({ status: 'denied', decidedBy: 'town', stopped: true }), 'live'), 'Denied from the town and stopped the agent');
+    assert.equal(resultText(fixture({ status: 'denied', decidedBy: 'town', stopped: true, message: 'wrong branch' }), 'live'), 'Denied from the town and stopped the agent: “wrong branch”');
+  });
+
   test('pending count', () => {
     assert.equal(pendingCount(fixture({ approvals: [{ status: 'pending' }, { status: 'allowed' }, { status: 'pending' }] })), 2);
+  });
+});
+
+describe('send a note', () => {
+  const live = fixture({ mode: 'live', serverSettings: {} });
+  test('is offered to the owner of a live town, for agents on this computer that still work', () => {
+    assert.deepEqual(noteOffer(live, agent({}), fixture({ status: 'active' })), { ok: true, why: null });
+    assert.deepEqual(noteOffer(fixture({ mode: 'demo', serverSettings: {} }), agent({}), undefined), { ok: false, why: null }, 'the demo has no agents to reach');
+    assert.deepEqual(noteOffer(fixture({ mode: 'live', serverSettings: { team: { role: 'viewer', members: [] } } }), agent({}), undefined), { ok: false, why: null }, 'a viewer');
+    assert.deepEqual(noteOffer(live, agent({}), fixture({ member: 'Lina' })), { ok: false, why: "Notes go only to your own agents: this crew is Lina's." });
+    assert.match(String(noteOffer(live, agent({ status: 'done' }), undefined).why), /has finished/);
+  });
+
+  test('says when Codex takes a note, and that a helper\'s delivery is not confirmed', () => {
+    assert.equal(noteCaution(agent({}), fixture({ source: 'claude' })), '');
+    assert.match(noteCaution(agent({ agentId: 'h1' }), undefined), /^A helper may not read notes yet/);
+    assert.match(noteCaution(agent({}), fixture({ source: 'codex' })), /^Codex adds a note at its next safe point, or with the next turn when it is idle; a note still waiting when the session ends is dropped\.$/);
   });
 });
 

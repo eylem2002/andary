@@ -22,4 +22,5 @@ Accepted or Superseded. Add a new record (next number) instead of rewriting an a
 | [0015](0015-origin-scoped-sign-in.md) | Sign-in kept per origin (page storage), not in a cookie | Accepted |
 | [0016](0016-https-for-other-computers.md) | HTTPS for other computers, plain HTTP on loopback, one port | Accepted |
 | [0017](0017-place-labels-on-the-buildings.md) | Place labels on the buildings; agents first | Accepted |
+| [0018](0018-notes-to-agents-owner-only.md) | Notes to agents come only from the owner, never from the team | Accepted |
 | [0019](0019-team-town-on-the-internet.md) | A team town on the internet through a Cloudflare Quick Tunnel | Accepted |

@@ -315,12 +315,46 @@ async function handleHook(ctx, req, res) {
     sendJson(res, error.status, { error: error.message }, error.status === 413 ? { Connection: 'close' } : {});
     return;
   }
+  // Who on this computer can get a note now (server/notes.mjs): only hooks from this route count.
+  ctx.notes.heard(body);
   const request = ingestHook(ctx, body).find((envelope) => envelope.event.hook_event_name === 'PermissionRequest');
   if (request) {
     await answerPermissionRequest(ctx, req, res, request.event, { ...body, at: request.ts });
     return;
   }
-  sendHookReply(ctx, req, res, null);
+  // A hook that can carry notes takes those waiting for its agent (CONTRACTS §4.15).
+  const notes = ctx.notes.take(body);
+  if (notes.texts.length && !(await forwarderWaits(req, res))) {
+    notes.sent(false);
+    return;
+  }
+  if (notes.texts.length) settleNotes(res, notes);
+  sendHookReply(ctx, req, res, null, notes.texts);
+}
+
+/**
+ * Whether the forwarder still waits for this reply. It never closes its side of the connection
+ * before the answer, so a socket whose other end has ended or closed belongs to a forwarder that
+ * gave up (it waits 1.5 s): writing to it still "finishes", and notes sent there would be lost.
+ * Asked once the event loop has polled the socket again (two turns: the check phase comes before
+ * the next poll), so an end that came with the request, or while the server was busy, is known.
+ * @param {Request} req
+ * @param {Response} res
+ */
+async function forwarderWaits(req, res) {
+  for (let turn = 0; turn < 2; turn++) await new Promise((resolve) => setImmediate(resolve));
+  return !res.destroyed && !req.socket.destroyed && !req.socket.readableEnded;
+}
+
+/**
+ * Marks the notes a reply carries as sent once the reply is written out, and puts them back in
+ * the queue when the connection closes first: the forwarder had gone, so they went nowhere.
+ * @param {Response} res
+ * @param {{ sent: (ok: boolean) => void }} notes
+ */
+function settleNotes(res, notes) {
+  res.once('finish', () => notes.sent(true));
+  res.once('close', () => notes.sent(res.writableFinished));
 }
 
 /**
@@ -358,15 +392,17 @@ async function handleLimits(ctx, req, res) {
 
 /**
  * Answers the forwarder, signed with the response key so it can tell our answer from one made up
- * by whatever listens on a stale port (CONTRACTS §4.3).
+ * by whatever listens on a stale port (CONTRACTS §4.3). Notes for the agent, if any, go with it
+ * (§4.15): the forwarder turns them into additionalContext.
  * @param {TownContext} ctx
  * @param {Request} req
  * @param {Response} res
  * @param {object|null} output
+ * @param {string[]} [notes]
  */
-function sendHookReply(ctx, req, res, output) {
+function sendHookReply(ctx, req, res, output, notes = []) {
   if (res.headersSent || res.destroyed) return;
-  const text = JSON.stringify({ output });
+  const text = JSON.stringify(notes.length ? { output, notes } : { output });
   const signature = signHookReply(ctx.responseKey, req.headers[HOOK_NONCE_HEADER], text);
   res.writeHead(200, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -445,6 +481,23 @@ function whyNotHeld(current, exact) {
 
 /** The capability a forwarder declares when it can pass a saved rule on (CONTRACTS §4.3). */
 const SAVES_RULES = 'updatedPermissions';
+/** The capability a forwarder declares when it can pass a deny's `interrupt` on ("Deny and stop"). */
+const STOPS = 'interrupt';
+/** Why a held card offers Deny only (Approval.stopNote). */
+const CODEX_CANNOT_STOP = 'Codex cannot be stopped from a hook yet (it refuses a deny that asks to stop), so Deny only refuses this request';
+const OLD_FORWARDER_CANNOT_STOP = "This agent's Andary hook is from an older version, which cannot stop it: run andary install (or update the plugin) for Deny and stop";
+
+/**
+ * Whether "Deny and stop" can stop this agent, and if not, why: Claude Code takes `interrupt` on
+ * a deny; Codex fails closed on it today; an older forwarder would drop it.
+ * @param {Record<string, any>} event  the sanitized request
+ * @param {string[]} caps
+ * @returns {{ canStop: boolean, stopNote?: string }}
+ */
+function stopOffer(event, caps) {
+  if (event.andary_source === 'codex') return { canStop: false, stopNote: CODEX_CANNOT_STOP };
+  return caps.includes(STOPS) ? { canStop: true } : { canStop: false, stopNote: OLD_FORWARDER_CANNOT_STOP };
+}
 
 /**
  * Holds the response for the town to decide when remote approvals are on and someone is
@@ -470,7 +523,7 @@ async function answerPermissionRequest(ctx, req, res, event, body) {
   // No rule is offered for a plan or a question (answered in the terminal), nor through a
   // forwarder that would drop it: the card would claim a rule was saved when it was not.
   const offers = terminalOnly || !body.caps.includes(SAVES_RULES) ? [] : offeredSuggestions(raw, event);
-  const { approval, response } = ctx.broker.create(event, { hold, message: why, at: body.at, offers });
+  const { approval, response } = ctx.broker.create(event, { hold, message: why, at: body.at, offers, ...stopOffer(event, body.caps) });
   if (hold) {
     // The forwarder went away (Claude Code cancelled the hook): Claude asks in the terminal now.
     res.on('close', () => {

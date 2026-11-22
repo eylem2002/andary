@@ -32,6 +32,7 @@ server/*.mjs                 HTTP + WebSocket server, auth, approvals, sanitizin
 server/ingest.mjs            The one pipeline every event enters through, with a policy per origin
 server/adapters/             Source adapters: Claude Code (as is) and Codex → the town's event contract
 server/clients.mjs           What differs between the agents Andary connects to (hooks file, events)
+server/notes.mjs             The owner's notes waiting for their agents' next step (§4.15)
 server/cli/                  One module per CLI command, plus argument parsing
 hooks/hook.mjs               Hook forwarder copied to ~/.andary/hook.mjs by `install` (Claude Code and Codex)
 hooks/hooks.json             Hook config used when Andary is installed as a Claude Code plugin
@@ -50,7 +51,8 @@ public/js/core/              Pure logic, no DOM, no I/O: events (normalize), sto
                              (shell command lines read as a shell reads them, for every rule),
                              conflicts (two agents on the same files, + git-commands, paths),
                              digest (what each crew did, for Catch me up), receipts (what each
-                             lead's turn did)
+                             lead's turn did), notes (notes to agents: which hooks carry them,
+                             how they are cleaned)
 public/js/sources/           Where events come from: live.js (WebSocket) and demo.js (simulation),
                              one TownSource shape (types.js)
 public/js/world/layout.js    Town plan (shared, pure data)
@@ -206,10 +208,13 @@ shows up as a crew of its own.
    port someone else now holds learns neither the event nor the secret.
 4. `POST http://127.0.0.1:<port>/api/hook` with headers `x-andary-secret: <secret>` and
    `x-andary-nonce: <16 random bytes, base64url>` and body
-   `{"v":1,"ts":<ts>,"caps":["truncated","updatedPermissions"],"event":<payload>}`; run with the
-   argument `codex`, the body also has `"source":"codex"` (§4.12). `caps` says what this forwarder
-   does (strings; the server ignores any it does not know): `truncated`, it marks a body it had to
-   shorten (§4.6), and `updatedPermissions`, it can pass a saved rule on (step 5). The server
+   `{"v":1,"ts":<ts>,"caps":["truncated","updatedPermissions","interrupt","notes"],"event":<payload>}`;
+   run with the argument `codex`, the body also has `"source":"codex"` (§4.12). `caps` says what
+   this forwarder does (strings; the server ignores any it does not know): `truncated`, it marks a
+   body it had to shorten (§4.6); `updatedPermissions`, it can pass a saved rule on (step 5);
+   `interrupt`, it passes a deny's stop on to Claude Code (step 5; the server offers "Deny and
+   stop" only then); `notes`, it hands the owner's notes to the agent (step 5a; the server queues
+   none for a forwarder without it). The server
    holds a request for the town only from a forwarder that declares `truncated`, and offers "Allow
    always" only for a request whose body declares `updatedPermissions` (§4.5): an older copy, such
    as a plugin's own, prints a plain allow. `andary replay` and `andary simulate` post the same
@@ -227,8 +232,20 @@ shows up as a crew of its own.
    `behavior: 'allow'` and `destination` `localSettings` or `session` and no other field, and each
    of its rules is one the town offers (§4.5: one command, a Bash prefix, one web host or one MCP
    tool, with no other field). `s` is printed from the hook's own input, never from the reply. Any
-   other `updatedPermissions` gives a plain allow; any other field is dropped. Nothing else is
-   ever printed.
+   other `updatedPermissions` gives a plain allow. A deny whose reply has `interrupt: true` is
+   printed with `interrupt: true` ("Deny and stop"), only when run for Claude Code: run as `codex`,
+   the flag is dropped (Codex fails closed on it). Any other field is dropped.
+5a. Only for a hook that can carry notes (§4.15: `PreToolUse`, `PostToolUse`,
+   `PostToolUseFailure`, `UserPromptSubmit`; for Codex not `PostToolUseFailure`): if the reply is
+   signed as in step 5 and has `notes`, an array of 1 to 4 strings, each of which is still non-empty
+   and at most 2,000 characters once cleaned as `noteText()` in `public/js/core/notes.js` cleans
+   it, prints `{"hookSpecificOutput":{"hookEventName":<this hook's name>,"additionalContext":<text>}}`,
+   where `<text>` is, for each note, `The user (<user>) sent you this message from Andary while you
+   work:\n<note>` (`noteHeader()`: factual words, as text framed as a system command can trip
+   Claude's prompt-injection defences), joined by a blank line. `<user>` is the user
+   the forwarder runs as (letters, digits, `.`, `_`, `-`, at most 40; else `the owner`). If any note
+   fails, nothing is printed. The reply's own `output` is never printed for these hooks. Nothing
+   else is ever printed.
 6. **Always exits 0** and never prints anything else. Any error → exit 0 silently.
 
 ### 4.4 Server (`server/`)
@@ -273,7 +290,9 @@ shows up as a crew of its own.
     `x-andary-view` header signs it in).
   - `POST /api/hook` → requires `x-andary-secret` (constant-time compare), JSON ≤ 1 MiB,
     rate-limited (token bucket ~300 req/s, burst 600 → `429`). Responds `{"output": object|null}`,
-    signed in `x-andary-signature` when the request has an `x-andary-nonce` (see §4.3).
+    plus `"notes": string[]` when notes wait for the hook's agent and the hook can carry them
+    (§4.15), signed in `x-andary-signature` when the request has an `x-andary-nonce` (see §4.3).
+    `POST /api/team` never answers with notes.
   - `POST /api/limits` → the andary-limits mod's report (§4.14): the same secret and the same
     token bucket (`401` before anything else), JSON ≤ 16 KiB (`413`), `400` for a body that is
     not `{"v":1,…}`. Responds `{"ok":true}`.
@@ -296,9 +315,11 @@ shows up as a crew of its own.
 Server → browser:
 
 ```js
-{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits }, history: Envelope[], approvals: Approval[], usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null }
+{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits }, history: Envelope[], approvals: Approval[], notes: Note[] /* §4.15; [] for a viewer */, usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null }
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
+{ t: 'note', n: Note }                  // §4.15, owners only: on queue and on every status change
+{ t: 'note-reply', ref: string|null, ok: boolean, id?: string /* the queued note */, error?: string }   // §4.15, to the sender of a note only
 { t: 'settings', settings: {...} }
 { t: 'usage', u: UsageRecord, days: UsageDay[] }   // §4.8, when an agent's totals change
 { t: 'progress', p: { points, days: string[] } }   // §4.9, when a point or a busy day is added
@@ -312,13 +333,16 @@ Server → browser:
 //              toolName, toolInput, callKey: string|null /* the request's andary_key, §4.6 */, source: 'claude'|'codex',
 //              cwd, createdAt, expiresAt: number|null, decidedBy?: 'town'|'terminal'|'timeout', proof?: 'ran'|'denied'|'stopped', message?,
 //              suggestions: { index, rules: { toolName, ruleContent? }[], destination: 'localSettings'|'session' }[],
-//              always?: { rules, destination, at } /* the rule an "Allow always" asked Claude Code to save, and when (server time) */ }
+//              always?: { rules, destination, at } /* the rule an "Allow always" asked Claude Code to save, and when (server time) */,
+//              canStop: boolean /* a deny may also stop the agent ("Deny and stop") */, stopNote?: string /* why not, when not */,
+//              stopped?: true /* denied from the town with a stop */ }
 ```
 
 Browser → server:
 
 ```js
-{ t: 'decide', id, decision: 'allow'|'deny', message?: string /* ≤ 500 chars */, always?: number /* allow only: a suggestion's index */ }
+{ t: 'decide', id, decision: 'allow'|'deny', message?: string /* ≤ 500 chars */, always?: number /* allow only: a suggestion's index */, stop?: true /* deny only: "Deny and stop" */ }
+{ t: 'note', ref?: string /* the sender's own id, [\w-]{1,64}, echoed in note-reply */, sessionId, agentId?: string /* a helper; absent for the lead */, text: string /* ≤ 2,000 chars once cleaned */ }   // §4.15
 { t: 'settings', settings: { remoteApprovals: boolean } }
 { t: 'notify-test' }   // sends a test phone notification (rate limits apply)
 { t: 'digest', since: number }   // §4.13: what each crew did since then (ms, the server's clock; 0: all kept)
@@ -405,6 +429,17 @@ and none for Codex, `ExitPlanMode` or `AskUserQuestion` (`public/js/core/permiss
 `offeredSuggestions` in `server/approvals.mjs`). The suggestions themselves stay on the server.
 `decide` with `always` is accepted only for a held, pending approval, with `decision: 'allow'` and
 the `index` of one of its suggestions; anything else answers `{t:'error'}` and changes nothing.
+
+**Deny and stop.** `Approval.canStop` is true for a Claude Code request whose body declares
+`interrupt` in `caps` (§4.3). Otherwise `stopNote` says why: Codex ("Codex cannot be stopped from a
+hook yet …", as Codex fails closed on `interrupt`) or an older forwarder ("… run andary install …").
+`decide` with `stop` is accepted only as `stop: true` with `decision: 'deny'` on a held, pending
+approval whose `canStop` is true; anything else answers `{t:'error'}` (the `stopNote` when there
+is one) and changes nothing. The hook then gets `{"behavior":"deny","message":…,"interrupt":true}`
+and the approval `stopped: true`. On a card that can be answered, "Deny and stop" sits on its own
+row under Allow and Deny, after a line saying it also ends the agent's turn, has no key of its
+own, and waits out the same 1 s click delay; a card that cannot stop shows the `stopNote` line
+instead.
 The hook then gets
 `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[<that suggestion, exactly as it arrived>]}}}`,
 which the forwarder checks again against its own input (§4.3), and the approval records
@@ -960,6 +995,62 @@ add the mod (`limits-note`), except to a team viewer: "Only the town's host sees
 town started (with `ANDARY_HOME` set, that Claude Code must be started with the same one);
 otherwise how to add it (optional).
 
+### 4.15 Notes to agents
+
+The owner can send an agent a note from its details; the agent reads it at its next step, never
+in the terminal (ADR 0018). `server/notes.mjs` keeps them, `public/js/core/notes.js` holds the
+rules both sides share.
+
+```js
+Note = { id, status: 'queued'|'delivered'|'expired', sessionId, agentId: string|null /* normalised; null: the lead */,
+         text /* cleaned */, createdAt, expiresAt /* createdAt + 30 min */, deliveredAt?, hook? /* the hook whose reply carried it */,
+         reason? /* why it expired */ }
+```
+
+- **Who may send.** Only a browser signed in as the owner (a viewer gets "Viewers can only
+  watch"). A note is accepted only for a session this computer's forwarder posted to `/api/hook`
+  (never one from `/api/team`, whatever its id), whose latest body declared `notes` in `caps`
+  ("… older version … andary install …" otherwise), that has not ended (`SessionEnd`), and for a
+  helper whose hooks came with that `agent_id` and that has not finished (`SubagentStop`). The
+  server remembers at most 500 sessions and 100 helpers each. The sender gets
+  `{t:'note-reply', ref, ok: true, id}` once the note is queued, or
+  `{t:'note-reply', ref, ok: false, error: 'The note was not sent: <why>.'}`, with the `ref` it
+  sent (`null` for none or a malformed one).
+- **Text.** `noteText()`: CR LF, a lone CR, U+2028 and U+2029 become LF, a tab a space, other
+  control and format characters, variation selectors, the Hangul fillers (U+115F, U+1160, U+3164,
+  U+FFA0) and lone surrogates are removed, trailing spaces of each line and more than one blank
+  line in a row go, then the ends are trimmed. Empty is refused; longer than 2,000 characters is
+  refused, never cut.
+- **Bounds.** At most 5 queued per agent and 100 in all; 12 notes a minute with bursts of 5, from
+  all browsers together, charged only for a note that would otherwise be queued.
+- **Delivery.** A hook's reply carries the queued notes of its own session and agent (`agent_id`,
+  normalised), oldest first, at most 4, when its body declares `notes` and its hook (as the agent
+  named it) is one of `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`
+  (Claude Code) or `PreToolUse`, `PostToolUse`, `UserPromptSubmit` (Codex) (`carriesNotes()`).
+  They leave the queue while the reply is on its way, and are marked `delivered` with that `hook`
+  once the reply is written out ("sent with its <hook> hook": nothing confirms the agent read
+  them); the forwarder prints them (§4.3 step 5a). They go back in the queue, oldest first, when
+  the forwarder is gone: its socket ended or closed once the server has polled it after the request,
+  or the response closes before it finishes (or they expire, if their agent can no longer get one).
+  The hooks run in the background, so the agent reads them at its next step: its next model call,
+  or with your next prompt when it is idle. Codex adds a background hook's output at its next safe
+  point, or with the next turn when none is active, and drops it when the session ends.
+- **Expiry.** A note expires after 30 minutes (checked every 15 s and when a hook comes), when its
+  session ends ("the session ended"), when its helper finishes ("the helper finished"), when the
+  session's forwarder stops declaring `notes`, or when the server forgets the session. The server
+  keeps the last 50 settled notes for `hello`.
+- **Browser.** `store.setNote(note)` keeps each note's latest state (at most 100) in
+  `StoreState.notes`, with a log line (`kind: 'note'`) per new state: `noteStateText()` and the
+  note's text. The director shows an envelope on the agent's name badge while notes wait (`✉`,
+  `✉2` …, before a combo chip). The inspector's "Send a note" section (`ui/agent-note.js`) shows in
+  a live town for the owner, not for a teammate's crew (it says why) or a finished agent, with the
+  explanation "It arrives at the agent's next step …, not in your terminal" (and that Ctrl/Cmd+Enter
+  sends), a line for a Codex agent (when Codex takes it) or a helper (delivery not confirmed), and
+  the agent's last 3 notes with their state. A sent note stays in the field, read-only, until its
+  `note-reply`: queued empties it ("Queued: it reaches the agent at its next step"), refused keeps
+  it with the reason (`[data-testid="send-note-status"]`), and no answer within 10 s gives it back.
+  The demo has no notes.
+
 ## 5. Browser: events, store, director
 
 `public/js/core/events.js` turns an Envelope into zero or more **TownEvents**:
@@ -1000,13 +1091,14 @@ Store {
   dispatch(event: TownEvent): void               // apply one already-normalized event
   setApproval(approval: Approval): void          // from the server, or created by demo mode
   setUsage(record: UsageRecord|null, days?: UsageDay[]): void  // §4.8; null record: days only
+  setNote(note: Note): void                      // §4.15, from the server; junk and repeats are ignored
   subscribe(listener: (change: StoreChange) => void): () => void
   getState(): StoreState                         // plain objects; treat as read-only
   reset(): void
 }
 StoreChange = { type: 'event', event: TownEvent } | { type: 'approval', approval: Approval }
             | { type: 'achievement', achievement: Achievement } | { type: 'usage', agentKey: string }
-            | { type: 'reset' }
+            | { type: 'note', note: Note } | { type: 'reset' }
 StoreState {
   sessions: Session[]                            // in order first seen
   agents: Record<agentKey, AgentState>
@@ -1018,6 +1110,7 @@ StoreState {
   achievements: Achievement[]
   usage: Record<agentKey, AgentUsage>            // §4.8
   usageDays: UsageDay[]
+  notes: Note[]                                  // §4.15, oldest first
   receipts: Receipt[]                            // a receipt per lead's turn that ended, newest last, ≤ 60
 }
 AgentUsage { tokens: { input, output, cacheRead, cacheWrite }, costUsd, unpriced: boolean, model: string|null,
@@ -1604,14 +1697,14 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="demo-button"]` | starts the simulation (shown when there is nothing live to watch) |
 | `[data-testid="crew-list"]` | crews panel; children `[data-testid="crew"][data-session-id]` |
 | `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects; `data-need` is the level of what it needs you for; a lead's row holds its context in use in `[data-testid="crew-context"]` (hidden without one, §4.8); `[data-testid="agent-note"]` inside it, a note (an edit of a file another agent changed) |
-| `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn, stop, stuck alert or conflict aside; `[data-testid="agent-context"]` holds the exact context in use (§4.8); `[data-testid="inspector-note"]`, its newest note |
+| `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn, stop, stuck alert or conflict aside; `[data-testid="agent-context"]` holds the exact context in use (§4.8); `[data-testid="inspector-note"]`, its newest note; `[data-testid="send-note-input"]` and `[data-testid="send-note"]` send a note to the agent (§4.15), `[data-testid="send-note-why"]` says why it cannot, `[data-testid="send-note-status"]` that it is being sent or why it was refused, `[data-testid="send-note-caution"]` that delivery is not confirmed, and `[data-testid="sent-notes"]` lists its notes, `[data-testid="sent-note"][data-status]` |
 | `[data-testid="waiting-for-you"]` | the masthead's "N need you" button (`data-level` is the most urgent level); click goes to the next item |
 | `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn, a stop, a stuck alert or a conflict aside |
 | `[data-testid="catch-up-button"]` | the masthead's "Catch me up", offered after time away (`W` opens the dialog any time) |
 | `[data-testid="catch-up"]` | the Catch me up dialog: `[data-testid="catch-up-period"]`, one `[data-testid="catch-up-crew"][data-session-id]` per crew (with `[data-testid="catch-up-need"]` when it needs you), `[data-testid="catch-up-quiet"]` |
 | `[data-testid="activity-log"]` | log; children `[data-testid="log-entry"]` |
 | `[data-testid="tasks-panel"]` | goals/tasks; children `[data-testid="task-item"]` |
-| `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]`, and, when a rule can be saved, `[data-testid="approve-always"]` with the rule in `[data-testid="approve-always-rule"]`; a hint in `[data-testid="approval-hint"]` |
+| `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]`, and, when a rule can be saved, `[data-testid="approve-always"]` with the rule in `[data-testid="approve-always-rule"]`; `[data-testid="deny-stop"]` ("Deny and stop") with its line, or why the agent cannot be stopped, in `[data-testid="deny-stop-note"]`; a hint in `[data-testid="approval-hint"]` |
 | `[data-testid="remote-approvals-toggle"]` | checkbox/switch for remote approvals (live mode) |
 | `[data-testid="settings-button"]` | opens the settings dialog (holds the remote approvals switch) |
 | `[data-testid="usage-gauge"]` | the plan-limit gauge on the Usage button (`data-level`, `data-percent`); hidden without a reading |

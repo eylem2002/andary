@@ -167,6 +167,63 @@ for (const decision of /** @type {const} */ (['allow', 'deny'])) {
   });
 }
 
+test('Deny and stop denies and stops Claude Code; a Codex card says why it cannot', async ({ page }) => {
+  await signIn(page);
+  await enableRemoteApprovals(page);
+  const pendingHook = town.sendHook(hook('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'git push --force' } }));
+  const card = page.getByTestId('approval-card').first();
+  await expect(card).toBeAttached();
+  if (!(await card.isVisible())) await page.getByRole('tab', { name: /Approvals/ }).click();
+  await expect(card.getByTestId('deny-stop-note')).toHaveText(/also ends the agent’s turn/);
+  await card.getByTestId('deny-stop').click();
+  const output = JSON.parse((await pendingHook).stdout);
+  expect(output.hookSpecificOutput.decision).toEqual({ behavior: 'deny', message: 'Denied from Andary', interrupt: true });
+  await expect(card).toContainText('Denied from the town and stopped the agent');
+
+  const codexHook = town.sendHook(hook('PermissionRequest', { session_id: 'e2e-codex', tool_name: 'Bash', tool_input: { command: 'rm -rf build' } }), { args: ['codex'] });
+  const codexCard = page.locator('[data-testid="approval-card"][data-status="pending"]');
+  await expect(codexCard).toBeVisible();
+  await expect(codexCard.getByTestId('deny-stop')).toBeHidden();
+  await expect(codexCard.getByTestId('deny-stop-note')).toHaveText(/Codex cannot be stopped from a hook yet/);
+  await codexCard.getByTestId('deny').click();
+  expect(JSON.parse((await codexHook).stdout).hookSpecificOutput.decision).toEqual({ behavior: 'deny', message: 'Denied from Andary' });
+});
+
+test('a note from the agent details reaches the agent at its next step, and the log follows it', async ({ page }) => {
+  await signIn(page);
+  expect(await town.sendHook(hook('SessionStart', { source: 'startup' }))).toMatchObject({ code: 0, stdout: '' });
+  await page.locator('[data-testid="agent-row"][data-agent-key="e2e-session:main"]').click();
+  const inspector = page.getByTestId('agent-inspector');
+  await expect(inspector).toContainText('not in your terminal');
+  await inspector.getByTestId('send-note-input').fill('Use the staging database, not prod.');
+  await inspector.getByTestId('send-note').click();
+  await expect(inspector.getByTestId('send-note-input')).toHaveValue('');
+  const note = inspector.getByTestId('sent-note').first();
+  await expect(note).toContainText("Note queued for the agent's next step");
+  await expect(note).toContainText('Use the staging database, not prod.');
+  // Not a hook that carries notes: it still waits.
+  expect((await town.sendHook(hook('Stop', { last_assistant_message: 'Done.', stop_hook_active: false }))).stdout).toBe('');
+  const result = await town.sendHook(hook('UserPromptSubmit', { prompt: 'Carry on' }));
+  const context = JSON.parse(result.stdout).hookSpecificOutput;
+  expect(context.hookEventName).toBe('UserPromptSubmit');
+  expect(context.additionalContext).toMatch(/^The user \(.+\) sent you this message from Andary while you work:\nUse the staging database, not prod\.$/);
+  await expect(note).toContainText('Note sent with its UserPromptSubmit hook');
+  await expect(page.getByTestId('log-entry').filter({ hasText: 'Note sent with its UserPromptSubmit hook' })).toHaveCount(1);
+
+  // A refused note keeps its text, with the reason (here: five already wait, or too many at once).
+  const input = inspector.getByTestId('send-note-input');
+  const status = inspector.getByTestId('send-note-status');
+  for (let i = 1; i <= 7; i++) {
+    await input.fill(`Note number ${i}`);
+    await inspector.getByTestId('send-note').click();
+    await expect(input).not.toHaveAttribute('readonly');
+    if (await status.isVisible()) break;
+    await expect(input).toHaveValue('');
+  }
+  await expect(status).toContainText(/^The note was not sent: (This agent already has 5 notes waiting|Too many notes at once).*Your text is kept\.$/);
+  await expect(input).toHaveValue(/^Note number \d$/);
+});
+
 test('a file change is shown in full before it is approved, and a denial can say why', async ({ page }) => {
   await signIn(page);
   await enableRemoteApprovals(page);

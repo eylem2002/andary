@@ -1,7 +1,8 @@
 // The agent inspector: everything known about the selected agent — role, crew, status, what it is
 // doing (or waiting for you on, or why it seems stuck, and since when; and a note when another
-// agent changed a file it edits), the receipt of a lead's last turn, its brief, its context in use
-// and what it cost, which tools it used how often, recent files and activity, its last message.
+// agent changed a file it edits), the receipt of a lead's last turn, a note to send it
+// (agent-note.js), its brief, its context in use and what it cost, which tools it used how often,
+// recent files and activity, its last message.
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { doingText, formatAgo, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
@@ -9,6 +10,7 @@ import { changeSummary } from './changes.js';
 import { contextSentence, hasCounted, liveContext, usageSentence } from './usage.js';
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 import { isNote, waitedText } from './needs-you.js';
+import { createNoteSection } from './agent-note.js';
 import { receiptRows } from '../core/receipts.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
@@ -49,9 +51,11 @@ export function createInspector(ctx) {
   const recent = h('ol', { class: 'hud-recent' });
   const message = h('p', { class: 'hud-inspector__message' });
   const usage = createUsageLines();
+  const toAgent = createNoteSection(ctx);
   const sections = {
     now: section('Now', h('div', {}, now, need.el, note)),
     receipt: section('Last turn', h('dl', { class: 'hud-receipt', 'data-testid': 'agent-receipt' })),
+    note: section('Send a note', toAgent.el),
     brief: section('Brief', brief),
     usage: section('Usage', usage.el),
     tools: section('Tools used', tools),
@@ -69,14 +73,11 @@ export function createInspector(ctx) {
     h('div', { class: 'hud-inspector__body', tabindex: '0', role: 'region', 'aria-label': 'Agent details' }, ...Object.values(sections)),
     h('div', { class: 'hud-inspector__foot' }, follow, closeText));
 
-  /** @type {string|null} */
-  let agentKey = null;
+  let agentKey = /** @type {string|null} */ (null);
   /** @type {HTMLElement|null} where focus returns when the inspector closes */
   let opener = null;
 
-  const dismiss = () => ctx.select(null);
-  close.addEventListener('click', dismiss);
-  closeText.addEventListener('click', dismiss);
+  for (const button of [close, closeText]) button.addEventListener('click', () => ctx.select(null));
   follow.addEventListener('click', () => ctx.setFollow(!ctx.view.follow));
 
   /**
@@ -109,7 +110,7 @@ export function createInspector(ctx) {
     if (!agentKey) return;
     const agent = state.agents[agentKey];
     if (!agent) {
-      dismiss();
+      ctx.select(null);
       return;
     }
     const session = findSession(state, agent.sessionId);
@@ -126,6 +127,7 @@ export function createInspector(ctx) {
     setText(note, newest?.text ?? '');
     setHidden(note, !newest);
     renderSections(agent, session?.cwd, asking);
+    setHidden(sections.note, !toAgent.update(state, agent, session));
     setHidden(sections.receipt, !renderReceipt(/** @type {HTMLElement} */ (sections.receipt.lastElementChild), state.receipts.findLast((r) => r.agentKey === agent.key)));
     setHidden(sections.usage, !usage.update(state, agent.key, Date.now()));
     setAttr(follow, 'aria-pressed', String(ctx.view.follow));
@@ -166,15 +168,14 @@ export function createInspector(ctx) {
     if (!agent) return;
     const end = agent.status === 'done' ? agent.lastActivity : nowMs;
     setText(since, `Started ${formatAgo(agent.startedAt, nowMs)}, on the job for ${formatDuration(end - agent.startedAt)}`);
-    need.tick(nowMs);
-    usage.tick(nowMs);
+    for (const part of [need, usage, toAgent]) part.tick(nowMs);
     for (const item of recent.children) {
       const time = item.querySelector('time');
       if (time) setText(time, formatAgo(Number(/** @type {HTMLElement} */ (item).dataset.ts), nowMs, { short: true }));
     }
   }
 
-  return { el, open, hide, render, tick, get agentKey() { return agentKey; } };
+  return { el, open, hide, render, tick, noteReply: toAgent.reply, get agentKey() { return agentKey; } };
 }
 
 /**
