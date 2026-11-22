@@ -4,7 +4,7 @@ import { CREW_COLORS } from '../../../public/js/core/catalog.js';
 import { LOOKS } from '../../../public/js/core/looks.js';
 import {
   HOUSE_STYLES, LOOK_CHOICES, LOOK_FIELDS, NAME_MAX_CHARS, OUTFITS, PERSON_COLOR_COUNT, PERSON_COLOR_NAMES, PROFILE_MAX_BYTES,
-  SKIN_TONES, cleanDisplayName, defaultProfile, randomLook, randomProfile, validChoice, validateProfile,
+  SKIN_TONES, cleanDisplayName, defaultProfile, nameKey, nameProblem, randomLook, randomProfile, validChoice, validateProfile,
 } from '../../../public/js/core/profile.js';
 
 /** A seeded generator, so a failing fuzz case can be replayed. @param {number} seed */
@@ -110,4 +110,31 @@ test('fuzz: mutated profiles are either refused or come back unchanged and in bo
     for (const name of [check.profile?.name, check.profile?.agents]) assert.equal(cleanDisplayName(name), name);
   }
   assert.ok(accepted > 0, 'some mutations land on another valid value');
+});
+
+test('names keep up to two marks on a letter, and the longest names still fit the cap', () => {
+  assert.equal(cleanDisplayName('Nguyễn'), 'Nguyễn');
+  assert.equal(cleanDisplayName('x\u0301\u0302\u0303\u0304b'), 'x\u0301\u0302b', 'a third mark is dropped');
+  assert.equal(cleanDisplayName('\u0301Ali'), 'Ali', 'no mark without a letter');
+  const tall = 'क\u093F\u0902'.repeat(30);
+  assert.equal(Array.from(cleanDisplayName(tall)).filter((c) => !/\p{M}/u.test(c)).length, NAME_MAX_CHARS, 'marks do not count');
+  // The longest look, and two names of 20 four-byte letters with two three-byte marks each.
+  const longest = (/** @type {string} */ field) => [...LOOK_CHOICES[/** @type {keyof typeof LOOK_CHOICES} */ (field)], 'theme', 'none', 11, 10].filter((c) => validChoice(/** @type {any} */ (field), c)).reduce((a, b) => (JSON.stringify(b).length > JSON.stringify(a).length ? b : a));
+  const look = Object.fromEntries(LOOK_FIELDS.map((field) => [field, longest(field)]));
+  const name = '𝓐\u20D0\u20D1'.repeat(NAME_MAX_CHARS);
+  assert.equal(cleanDisplayName(name), name);
+  const worst = { v: 1, color: 7, house: 'desert', name, agents: name, look };
+  assert.ok(Buffer.byteLength(JSON.stringify(worst)) <= PROFILE_MAX_BYTES, `${Buffer.byteLength(JSON.stringify(worst))} bytes`);
+  assert.equal(validateProfile(worst).ok, true);
+});
+
+test('a name may not pass for another person\'s, nor for one the town uses', () => {
+  assert.equal(nameKey('Аli 2'), nameKey('ali2'), 'Cyrillic А folds to Latin a');
+  assert.equal(nameKey('ＡＬＩ'), 'ali', 'NFKC');
+  const others = ['alice', 'Ali', 'Pixel'];
+  assert.match(nameProblem('АLI', others) ?? '', /Another person is called/);
+  assert.match(nameProblem('pixel 2', others) ?? '', /Another person/, 'their helpers are Pixel 1, 2…');
+  assert.equal(nameProblem('Pixie', others), null);
+  for (const word of ['You', 'host', 'Foreman', 'Scout 2', 'Builder', 'Lead', 'ANDARY', 'Scоut']) assert.match(nameProblem(word, []) ?? '', /the town uses/, word);
+  assert.equal(nameProblem('', others), null);
 });

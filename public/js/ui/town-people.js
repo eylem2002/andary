@@ -22,6 +22,16 @@ export function displayName(person) {
   return person.profile?.name || person.name;
 }
 
+/**
+ * A person's name where it must be clear who they are (details, tooltips, notes): their
+ * character's name with their name on the team beside it when the two differ, "Ali (alice)".
+ * @param {PersonView} person
+ */
+export function nameWithRoster(person) {
+  const shown = displayName(person);
+  return shown.toLocaleLowerCase() === person.name.toLocaleLowerCase() ? shown : `${shown} (${person.name})`;
+}
+
 /** The world id of a person's figure. @param {string} name */
 export function personFigureId(name) {
   return `person:${name}`;

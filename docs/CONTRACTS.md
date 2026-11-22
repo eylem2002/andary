@@ -705,9 +705,16 @@ prints the view link; `andary team reset` makes a new secret, which revokes ever
   `{ v: 1, color: 0–7, house: 'coast'|'snow'|'neon'|'desert'|'amman', name, agents, look }`.
   `name` is the name the character shows (its name pill and home plate; '' for the roster name)
   and `agents` one name for all the person's agents ('' for role names): each up to 20 letters or
-  digits of any script, spaces, dots, dashes or underscores, already clean (`cleanDisplayName`:
-  NFC, single inner spaces, no control or invisible characters), shown as text only. The host
-  refuses a `name` equal (ignoring case) to another person's roster name or chosen name. `look`
+  digits of any script (each with at most 2 combining marks, which do not count), spaces, dots,
+  dashes or underscores, already clean (`cleanDisplayName`: NFC, single inner spaces, no control
+  or invisible characters), shown as text only. The host refuses a `name` or `agents` that
+  `nameProblem` refuses: one equal, compared by `nameKey` (NFKC, case-folded, without marks or
+  separators, Cyrillic and Greek look-alikes folded to Latin), to another person's roster name,
+  chosen name or agents' name (or to one of those plus a number: "Pixel 2" when someone's agents
+  are Pixel), or a word the town uses (You, Host, Foreman, Scout, Builder, Lead, Andary, with or
+  without a number). Where a chosen name differs from the roster name, details show both
+  ("Ali (alice)": the crews badge, the inspector's "…'s crew", the "You" dialog's taken colours,
+  `nameWithRoster`). `look`
   holds exactly: `skin` 0–11, `height` short|medium|tall, `build` slim|regular|broad, `hair`
   short|side|quiff|spiky|straight|wavy|ponytail|pigtails|bun|braids|afro|curly|mohawk|buzz|bald,
   `hairColor` 0–11, `hairStreak` 'none'|0–11, `eyes` dot|round|happy|sleepy|lashes|wink, `brows`
@@ -722,7 +729,7 @@ prints the view link; `andary team reset` makes a new secret, which revokes ever
   `extra` none|cape|scarf|backpack|headphones|tie|bowtie|necklace|watch|satchel|wings, `pet`
   none|cat|dog|bird, `hand` none|laptop|coffee|book. Colours are indices into fixed palettes
   (`SKIN_TONES`, `HAIR_COLORS`, `CLOTH_COLORS`; `'theme'` is the person's colour). Every key is
-  required; an unknown or missing key, a value out of range, or more than 768 bytes of JSON
+  required; an unknown or missing key, a value out of range, or more than 1,152 bytes of JSON
   rejects the whole profile. `{t:'profile', p}` is validated, saved (at most once per 10 s per
   person, else `{t:'error'}`), answered with `{t:'profile', ok, color, asked}` and broadcast as
   `{t:'people'}`. `color` asks for a colour: when another person has it, the next free one in

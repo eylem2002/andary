@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { ensureHome } from './state-file.mjs';
 import { cleanMemberName } from './team.mjs';
 import { HOME_COUNT } from '../public/js/core/town-map.js';
-import { PERSON_COLOR_COUNT, validateProfile } from '../public/js/core/profile.js';
+import { PERSON_COLOR_COUNT, nameProblem, validateProfile } from '../public/js/core/profile.js';
 
 /** The host plus five teammates: one per home. */
 export const MAX_PEOPLE = HOME_COUNT;
@@ -250,9 +250,9 @@ export function removePerson(roster, name) {
  */
 export function setProfile(roster, name, profile) {
   if (!Object.hasOwn(roster.people, name)) return null;
-  const shown = profile.name.toLocaleLowerCase();
-  const clash = shown && Object.entries(roster.people).find(([other, person]) => other !== name && (other.toLocaleLowerCase() === shown || person.profile?.name.toLocaleLowerCase() === shown));
-  if (clash) return { error: `Another person is called ${profile.name}: choose another name for your character` };
+  const others = Object.entries(roster.people).filter(([other]) => other !== name).flatMap(([other, person]) => [other, person.profile?.name ?? '', person.profile?.agents ?? '']);
+  const problem = nameProblem(profile.name, others) ?? nameProblem(profile.agents, others);
+  if (problem) return { error: problem };
   const color = nextFree(takenBy(roster, 'color', name), PERSON_COLOR_COUNT, profile.color);
   const person = { ...roster.people[name], color, profile };
   return { roster: { ...roster, people: { ...roster.people, [name]: person } }, color };

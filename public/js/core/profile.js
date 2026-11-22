@@ -9,7 +9,7 @@
 // profile. Pure: the server shares it.
 
 /** Most bytes a serialised profile may take. */
-export const PROFILE_MAX_BYTES = 768;
+export const PROFILE_MAX_BYTES = 1152;
 /** Most characters (code points) of the character's name and of the agents' name. */
 export const NAME_MAX_CHARS = 20;
 
@@ -145,16 +145,79 @@ function exactKeys(object, keys) {
   return own.length === keys.length && own.every((key) => keys.includes(key));
 }
 
+/** Combining marks kept on one letter (an accent and a tone, say); more are dropped. */
+export const NAME_MAX_MARKS = 2;
+
 /**
- * A name as people see it: letters and digits of any script, spaces, dots, dashes and
- * underscores; no control or invisible characters; single spaces; at most NAME_MAX_CHARS.
+ * A name as people see it: letters and digits of any script with up to NAME_MAX_MARKS combining
+ * marks each, spaces, dots, dashes and underscores; no control or invisible characters; single
+ * spaces; at most NAME_MAX_CHARS characters (marks ride on their letter and do not count).
  * @param {unknown} raw
  * @returns {string}  '' when nothing is left
  */
 export function cleanDisplayName(raw) {
   if (typeof raw !== 'string') return '';
-  const name = raw.normalize('NFC').replace(/[^\p{L}\p{N} ._-]/gu, '').replace(/\s+/g, ' ').trim();
-  return Array.from(name).slice(0, NAME_MAX_CHARS).join('').trim();
+  const text = raw.normalize('NFC').replace(/[^\p{L}\p{N}\p{M} ._-]/gu, '').replace(/\s+/g, ' ').trim();
+  let out = '';
+  let chars = 0;
+  let marks = 0;
+  let base = false;
+  for (const ch of text) {
+    if (/\p{M}/u.test(ch)) {
+      // A mark needs a letter or digit under it, and a letter carries at most two.
+      if (!base || marks >= NAME_MAX_MARKS) continue;
+      marks += 1;
+      out += ch;
+      continue;
+    }
+    if (chars === NAME_MAX_CHARS) break;
+    chars += 1;
+    marks = 0;
+    base = /[\p{L}\p{N}]/u.test(ch);
+    out += ch;
+  }
+  return out.trim();
+}
+
+/**
+ * Letters that look like Latin ones in another script (Cyrillic, Greek): a name written with
+ * them must not pass for another person's.
+ */
+const CONFUSABLES = Object.freeze({
+  а: 'a', в: 'b', е: 'e', ё: 'e', к: 'k', м: 'm', н: 'h', о: 'o', р: 'p', с: 'c', т: 't', у: 'y', х: 'x', і: 'i', ј: 'j', ѕ: 's', ԁ: 'd', ԛ: 'q', ԝ: 'w', ӏ: 'l',
+  α: 'a', β: 'b', ε: 'e', η: 'n', ι: 'i', κ: 'k', ν: 'v', ο: 'o', ρ: 'p', τ: 't', υ: 'u', χ: 'x', ζ: 'z', μ: 'u',
+});
+
+/**
+ * The form two names are compared in: NFKC, case-folded, without marks or separators, with
+ * look-alike letters folded to Latin ones ("Аli 2", Cyrillic А, and "ali2" are the same name).
+ * @param {string} name
+ */
+export function nameKey(name) {
+  const folded = name.normalize('NFKC').toLowerCase().normalize('NFKD').replace(/[\p{M} ._-]/gu, '');
+  return Array.from(folded, (ch) => /** @type {Record<string, string>} */ (CONFUSABLES)[ch] ?? ch).join('');
+}
+
+/** Names the town itself uses, alone or with a number. */
+const RESERVED = /^(you|host|foreman|scout|builder|lead|andary)\d*$/;
+
+/**
+ * Why a person may not use a name for their character or their agents, or null: a word the
+ * town uses ("Scout 2", "You") or a name another person already goes by.
+ * @param {string} name  already clean
+ * @param {string[]} others  every other person's roster name, character name and agents' name
+ *   ('' for none)
+ * @returns {string|null}
+ */
+export function nameProblem(name, others) {
+  if (!name) return null;
+  const key = nameKey(name);
+  const digitless = key.replace(/\d+$/, '');
+  if (RESERVED.test(key) || RESERVED.test(digitless)) return `${name} is a name the town uses: choose another`;
+  // "Pixel 2" is taken too when someone's agents are called Pixel (their helpers are Pixel 1, 2…).
+  const clash = (/** @type {string} */ other) => other && (nameKey(other) === key || (key !== digitless && nameKey(other) === digitless));
+  if (others.some(clash)) return `Another person is called ${name}: choose another name`;
+  return null;
 }
 
 /**

@@ -6,6 +6,7 @@
 // its row. A note (an edit of a file another agent changed) goes on a line of its own under what
 // the agent does. The lead's row also shows the crew's context in use, under its time, where it
 // takes no room from the crew's name.
+import { nameWithRoster } from './town-people.js';
 import { contextShort, crewUsage, liveContext, usageShort } from './usage.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from './dom.js';
 import { icon } from './icons.js';
@@ -101,7 +102,8 @@ export function createCrewsPanel(ctx) {
     setText(p.number, `Crew ${number}: `);
     setText(p.title, session.title ? truncate(session.title, 60) : session.project);
     setAttr(p.name, 'title', session.cwd);
-    setText(p.memberName, session.member ?? '');
+    const person = ctx.view.people.find((one) => one.name === session.member);
+    setText(p.memberName, person ? nameWithRoster(person) : (session.member ?? ''));
     setHidden(p.member, !session.member);
     setHidden(p.agent, session.source !== 'codex');
     setText(p.model, ended ? 'Ended' : modelLabel(session.model));

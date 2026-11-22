@@ -6,6 +6,7 @@
 // keys, screen readers (each tile is named) and phones (44 px tiles) all work. Saving sends the
 // profile (live: to the team host; demo: to the demo's people), waits for the answer, and keeps
 // a copy in this browser, sent again after a `team reset` forgets it.
+import { nameWithRoster } from './town-people.js';
 import { CREW_COLORS } from '../core/catalog.js';
 import { LOOKS } from '../core/looks.js';
 import {
@@ -231,7 +232,7 @@ export function createCharacterDialog(ctx) {
   /** Draws the preview and the open section's tiles, and sets every control from the draft. */
   function show() {
     const people = /** @type {PersonView[]} */ (ctx.view.people ?? []);
-    const taken = new Map(people.filter((p) => p.name !== ctx.view.me).map((p) => [p.color, p.profile?.name || p.name]));
+    const taken = new Map(people.filter((p) => p.name !== ctx.view.me).map((p) => [p.color, nameWithRoster(p)]));
     for (const s of SECTIONS) for (const f of s.fields) /** @type {any} */ (groups.get(f.field)).render(s.id === section, taken);
     if (section === 'clothes') outfits.render(draft, theme());
     names.set(draft);

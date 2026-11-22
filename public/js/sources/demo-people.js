@@ -2,7 +2,7 @@
 // the story has. Both are online, so the demo shows two homes lit and two characters on their
 // porches. The "You" dialog saves to here instead of a host; your look also stays in this browser
 // (ui/character.js), so the demo starts with it next time.
-import { PERSON_COLOR_COUNT, defaultProfile, validateProfile } from '../core/profile.js';
+import { PERSON_COLOR_COUNT, defaultProfile, nameProblem, validateProfile } from '../core/profile.js';
 
 /** @typedef {import('../ui/town-people.js').PersonView} PersonView */
 /** @typedef {import('../core/profile.js').Profile} Profile */
@@ -40,7 +40,9 @@ export function createDemoPeople({ onPeople, saved = null }) {
     save(profile) {
       const check = validateProfile(profile);
       if (!check.ok) return { error: `Profile not saved: ${check.error}.` };
-      if (check.profile.name.toLocaleLowerCase() === 'lina') return { error: 'Profile not saved: Another person is called Lina: choose another name for your character.' };
+      const others = ['Lina', LINA.name, LINA.agents];
+      const problem = nameProblem(check.profile.name, others) ?? nameProblem(check.profile.agents, others);
+      if (problem) return { error: `Profile not saved: ${problem}.` };
       const taken = /** @type {Set<number>} */ (new Set(people.filter((p) => p.name !== DEMO_ME).map((p) => p.color)));
       let color = check.profile.color;
       while (taken.has(color)) color = (color + 1) % PERSON_COLOR_COUNT;

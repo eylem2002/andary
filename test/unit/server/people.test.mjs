@@ -59,6 +59,11 @@ test('a colour someone else has goes to the next free one in order', () => {
   const named = /** @type {any} */ (setProfile(roster, 'Omar', { ...defaultProfile(2), name: 'Ozzy' })).roster;
   assert.match(setProfile(named, 'Lina', { ...defaultProfile(0), name: 'OZZY' })?.error ?? '', /Another person/);
   assert.equal(setProfile(named, 'Omar', { ...defaultProfile(2), name: 'Ozzy' })?.error, undefined, 'their own name is theirs');
+  // Agents' names count too, both ways, and so do look-alike letters and the town's own words.
+  const pixel = /** @type {any} */ (setProfile(named, 'Omar', { ...defaultProfile(2), name: 'Ozzy', agents: 'Pixel' })).roster;
+  assert.match(setProfile(pixel, 'Lina', { ...defaultProfile(0), name: 'Pixel 2' })?.error ?? '', /Another person/);
+  assert.match(setProfile(pixel, 'Lina', { ...defaultProfile(0), agents: 'Оzzy' })?.error ?? '', /Another person/, 'Cyrillic О');
+  assert.match(setProfile(pixel, 'Lina', { ...defaultProfile(0), agents: 'Scout' })?.error ?? '', /the town uses/);
 });
 
 test('people.json is private, and a broken or hand-edited file never breaks the town', () => {

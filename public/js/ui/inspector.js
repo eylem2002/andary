@@ -2,6 +2,7 @@
 // doing (or waiting for you on, or why it seems stuck, and since when; and a note when another
 // agent changed a file it edits), its brief, its context in use and what it cost, which tools it
 // used how often, recent files and activity, its last message.
+import { nameWithRoster } from './town-people.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { doingText, formatAgo, formatDuration, isCommandText, nameWithRole, roleLabel, shortenPath, truncate } from './format.js';
@@ -114,7 +115,9 @@ export function createInspector(ctx) {
     setCrewColor(el, session?.color ?? agent.color);
     updateRoundel(mark, crewNumber(state, agent.sessionId), session?.color ?? agent.color);
     setText(name, nameWithRole(agent));
-    setText(role, `${roleLabel(agent)}${session ? ` in ${session.project}` : ''}`);
+    // Whose crew, in a team town: the character's name and, when it differs, the name on the team.
+    const person = session?.member ? ctx.view.people.find((one) => one.name === session.member) : null;
+    setText(role, `${roleLabel(agent)}${session ? ` in ${session.project}` : ''}${person ? `, ${nameWithRoster(person)}'s crew` : ''}`);
     updateStatusChip(chip, agent.status);
     const asking = state.approvals.find((approval) => approval.status === 'pending' && approvalAgentKey(approval) === agent.key);
     const items = ctx.needsYou.items(state).filter((item) => item.agentKeys.includes(agent.key));
