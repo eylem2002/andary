@@ -1,10 +1,12 @@
 // Street furniture and greenery: trees from the town plan, lamps (with warm light pools on the
 // ground at night), benches, the plaza fountain and its string lights, the promenade, the park,
-// the kids' sandbox and the node_modules lot. Static parts go into the town batch.
+// the kids' sandbox, the node_modules lot and the residential quarter (quarter.js). Static parts
+// go into the town batch.
 import * as THREE from 'three';
-import { DECOR, MAP, tileToWorld } from '../layout.js';
+import { DECOR, MAP, ROWS, tileToWorld } from '../layout.js';
 import { PIER } from './buildings/industry.js';
 import { buildBeach } from './beach.js';
+import { PARK_FOUNTAIN, QUARTER_LAMPS, buildQuarter } from './quarter.js';
 import { bench, flowerBed, hedge } from './buildings/details.js';
 import { C, S, STYLE } from './palette.js';
 import { createRng, range } from './rand.js';
@@ -30,10 +32,11 @@ export function buildProps(kit, ctx) {
   park(kit, ctx.trees, rng);
   sandbox(kit);
   nodeModulesLot(kit);
+  buildQuarter(kit, ctx.trees, rng);
   const pools = createLampPools(lamps);
   ctx.scene.add(pools.mesh);
   const fountain = createFountainWater(ctx.town);
-  ctx.scene.add(fountain);
+  ctx.scene.add(fountain, createParkPool(ctx.town));
   const sandboxCentre = decorCentre(DECOR.sandbox);
   return {
     pierRect: { minX: PIER.x - PIER.w / 2, maxX: PIER.x + PIER.w / 2, minZ: PIER.z1, maxZ: PIER.z0 },
@@ -65,7 +68,7 @@ function placeMapTrees(trees, rng) {
       const { x, z } = tileToWorld(col, row);
       if (nearTunnel(col, row)) continue;
       if (ch === 't') {
-        const front = row >= 24 || col === 25;
+        const front = row >= ROWS - 1 || col === 25;
         if (front && (col + row) % 2 === 1) continue;
         // Mostly the look's own tree (palms on the coast), with a few broad shade trees among them.
         const kind = (col * 7 + row * 3) % 5 === 0 ? 'round' : STYLE.rimTree;
@@ -93,6 +96,7 @@ function lampPositions() {
   for (let x = -21; x <= 21; x += 6) if (Math.abs(x - PIER.x) > 1.5) out.push({ x, z: -21.55 });
   out.push({ x: -4.6, z: 2.6 }, { x: 4.6, z: 2.6 }, { x: -4.6, z: 5.6 }, { x: 4.6, z: 5.6 });
   out.push({ x: 0.6, z: 9.0 }, { x: 5.4, z: 12.9 });
+  out.push(...QUARTER_LAMPS);
   return out;
 }
 
@@ -303,4 +307,17 @@ function createFountainWater(town) {
   spout.position.set(0, 1.92, 5);
   group.add(pool, curtainLow, curtainTop, spout);
   return group;
+}
+
+/**
+ * The park fountain's basin water (the quarter's stone is in the town batch).
+ * @param {import('./town-material.js').TownUniforms} town
+ */
+function createParkPool(town) {
+  const { x, z } = PARK_FOUNTAIN;
+  const pool = new THREE.Mesh(new THREE.CircleGeometry(1.42, 32).rotateX(-Math.PI / 2), createPoolMaterial(town, x, z));
+  pool.name = 'park-pool';
+  pool.position.set(x, 0.27, z);
+  pool.receiveShadow = true;
+  return pool;
 }

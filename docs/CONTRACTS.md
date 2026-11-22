@@ -49,10 +49,11 @@ public/js/core/              Pure logic, no DOM, no I/O: events (normalize), sto
                              "Allow always" may save), loops (when an agent seems stuck), shell
                              (shell command lines read as a shell reads them, for every rule),
                              conflicts (two agents on the same files, + git-commands, paths),
-                             digest (what each crew did, for Catch me up)
+                             digest (what each crew did, for Catch me up), town-map (the town
+                             plan: tiles, lots, home plots, routes; shared with the server)
 public/js/sources/           Where events come from: live.js (WebSocket) and demo.js (simulation),
                              one TownSource shape (types.js)
-public/js/world/layout.js    Town plan (shared, pure data)
+public/js/world/layout.js    The town plan as the world uses it: core/town-map.js plus standing spots
 public/js/world/env/         Environment: terrain, water, buildings, props, vehicles, sky, post-processing, camera rig
 public/js/world/agents/      Characters, animation, walking, bubbles, effects
 public/js/world/world.js     World facade (the only world module the app imports)
@@ -1394,6 +1395,9 @@ Env {
                                                   // cars and the mail truck wait for people in their lane
   setFigures(figures: () => {x, y, feet, half}[]): void  // the crowd's screen boxes (px, last frame):
                                                   // a label with a figure in front of it fades
+  setHome(slot: 0–5, home: { name: string, color: number /* sRGB hex */, style: LookId, lights: boolean }|null): void
+                                                  // who lives in a home of the quarter: house style, door and
+                                                  // flag colour, name plate, lit windows; null: an empty cottage
   dispose(): void
 }
 ```
@@ -1422,6 +1426,11 @@ and, when it fits at the current zoom (or the mode says so), its name and stat c
   door, or walking along the road). The bus keeps its timetable, which the crowd's bus arrivals
   are timed to.
 - `world.debugPlace(id, x, z, yaw)` exists for the lab pages only.
+- The town plan (`core/town-map.js`) is 26 × 32 tiles: the original 26 × 26 town, whose centre
+  stays at the world's origin, and south of the ring road a residential quarter: six 2 × 2 home
+  plots (`HOMES`, doors south onto Home Street like every other door) with a garden and a mailbox
+  each, and a park with a fountain, benches, a food cart with balloons, a dog, pigeons, and kites
+  on clear days. Static parts are in the town batch; the homes are one mesh, the park's life three.
 - Each agent is one skinned mesh (one draw call, two on high with the shadow pass); blob shadows
   are one instanced call for everyone; each effect type costs one call while active.
 

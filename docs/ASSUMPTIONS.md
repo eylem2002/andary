@@ -1066,3 +1066,22 @@ section.
      to set it in the shell profile.
 185. **A team viewer is not told to install the mod.** Limits are the host's and never reach a
      viewer; their Usage dialog says only the host sees them.
+186. **The town grew south by six rows (26 × 26 → 26 × 32 tiles, +23 %), not west.** The owner asked
+     for a modestly bigger, livelier town; the org-town design had squeezed the six homes onto the
+     west strip, facing east. A quarter of their own south of the ring road keeps every door facing
+     south (the default camera sees them all, as before, so no east-facing exception is needed) and
+     sits nearest the camera. Tile (13, 13)'s corner stays the world's origin, so every older
+     building, route, lamp and vehicle path keeps its coordinates; the plinth, the shadow box and the
+     camera's framing (depth 66 → 78, home 1.5 m further south) grew to fit.
+187. **The quarter's plan:** six 2 × 2 home plots (`h`) on row 24–25 with a garden column (`g`)
+     between neighbours, Home Street on row 26 joined to the west and east ring roads, and a park
+     (`k` lawns, a paved `P` square, an `f` fountain) on rows 27–30, with a row of trees at the
+     front edge. Each home's door tile is the west half of its plot's street frontage.
+188. **Park life is cheap and quiet:** a dog trotting round the square, five pigeons pecking by the
+     fountain, two kites over the east lawn only in clear or rainbow weather by day, and balloons
+     tied to the food cart (static). Three small meshes, nothing allocated per frame; reduced motion
+     sits the dog down and holds the pigeons and kites still. The gardens, mailboxes, benches, cart,
+     lamps and fountain stone are in the town batch.
+189. **An unowned home is a plain cottage in the town's own look**, door in wood, no flag, no name
+     plate and dark windows, so a town without a team still looks lived in. All six homes are one
+     mesh, rebuilt when one changes.

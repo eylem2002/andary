@@ -6,7 +6,7 @@
 
 import { LOTS, TILE, tileAt, tileToWorld } from '../core/town-map.js';
 
-export { COLS, DECOR, LOTS, MAP, ROWS, TILE, cornersOnly, findTilePath, isWalkable, lotBounds, nearestWalkable, tileAt, tileToWorld, worldToTile } from '../core/town-map.js';
+export { COLS, DECOR, HOMES, HOME_COUNT, LOTS, MAP, MAP_BOUNDS, ROWS, TILE, cornersOnly, findTilePath, isWalkable, lotBounds, nearestWalkable, tileAt, tileToWorld, worldToTile } from '../core/town-map.js';
 
 /**
  * Rows of standing spots, as offsets from the door tile's centre in tiles (north is negative).

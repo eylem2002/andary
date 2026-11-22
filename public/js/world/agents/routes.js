@@ -2,10 +2,8 @@
 // (spot or queue place) into standing positions. Pure: only layout.js, no three.js.
 
 import {
-  COLS,
   LOTS,
-  ROWS,
-  TILE,
+  MAP_BOUNDS,
   cornersOnly,
   findTilePath,
   isWalkable,
@@ -35,7 +33,7 @@ export function laneOffset(seedInt) {
 /** @param {number} x @param {number} z */
 function walkableAt(x, z) {
   // worldToTile clamps to the map edge, so reject points beyond the map first.
-  const inside = Math.abs(x) < (COLS * TILE) / 2 && Math.abs(z) < (ROWS * TILE) / 2;
+  const inside = x > MAP_BOUNDS.minX && x < MAP_BOUNDS.maxX && z > MAP_BOUNDS.minZ && z < MAP_BOUNDS.maxZ;
   const [c, r] = worldToTile(x, z);
   return inside && isWalkable(c, r);
 }

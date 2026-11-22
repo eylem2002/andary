@@ -13,9 +13,13 @@ export const TILE = 2;
 // Legend
 //   ~ water     = shore promenade   # road      P plaza (walkable)
 //   t trees     . open ground       F fountain  x sandbox      n node_modules lot
+//   g garden    k park lawn         f park fountain
 //   Building lots (non-walkable):
 //   H hall  B board  L library  A academy  W web  O post  M harbor  K workshop  S detective
-//   T terminal  C cafe  Y spa  R permits  U station  G grove
+//   T terminal  C cafe  Y spa  R permits  U station  G grove   h a home (six 2x2 plots)
+//
+// The residential quarter south of the ring road (rows 24 to 31) was added to the original 26 x 26
+// town; tile (13, 13) stays at the world's origin, so every older building keeps its place.
 export const MAP = Object.freeze([
   '~~~~~~~~~~~~~~~~~~~~~~~~~~', // 0
   '~~~~~~~~~~~~~~~~~~~~~~~~~~', // 1
@@ -33,22 +37,35 @@ export const MAP = Object.freeze([
   't.#KKKSSS#PHHHHP#TTTTTn#.t', // 13
   't.#KKKSSS#PPPPPP#TTTTTn#.t', // 14
   't.#KKKSSS#PPFFPP#TTTTTn#.t', // 15
-  't.######################.t', // 16 south avenue
+  't.######################.t', // 16  south avenue
   't.#CCCYYY#RRRttt#GGGGGG#.t', // 17
   't.#CCCYYY#RRRttt#GGGGGG#.t', // 18
   't.#CCCYYY#RRRttt#GGGGGG#.t', // 19
   't.#CCCYYY#RRRUUU#GGGGGG#.t', // 20
   't.#CCCYYY#RRRUUU#GGGGGG#.t', // 21
   't.#CCCYYY#RRRUUU#GGGGGG#.t', // 22
-  't.######################.t', // 23 south ring road
-  'tttttttttttttttttttttttttt', // 24
-  'tttttttttttttttttttttttttt', // 25
+  't.######################.t', // 23  south ring road
+  't.#ghhghhghhghhghhghhgg#.t', // 24  the homes (six plots)
+  't.#ghhghhghhghhghhghhgg#.t', // 25
+  't.######################.t', // 26  Home Street
+  't.kkkkkkkPPPPPPPPkkkkkkk.t', // 27  the park
+  't.kkkkkkkPPPffPPPkkkkkkk.t', // 28
+  't.kkkkkkkPPPffPPPkkkkkkk.t', // 29
+  't.kkkkkkkPPPPPPPPkkkkkkk.t', // 30
+  'tttttttttttttttttttttttttt', // 31  front edge
 ]);
 
 export const COLS = MAP[0].length;
 export const ROWS = MAP.length;
-const HALF_W = (COLS * TILE) / 2;
-const HALF_D = (ROWS * TILE) / 2;
+/** The tile whose corner is the world's origin: the centre of the original 26 x 26 town. */
+const ORIGIN = Object.freeze({ col: 13, row: 13 });
+/** The map's extent in world units. */
+export const MAP_BOUNDS = Object.freeze({
+  minX: -ORIGIN.col * TILE,
+  maxX: (COLS - ORIGIN.col) * TILE,
+  minZ: -ORIGIN.row * TILE,
+  maxZ: (ROWS - ORIGIN.row) * TILE,
+});
 
 const WALKABLE = new Set(['#', 'P']);
 
@@ -111,7 +128,37 @@ export const DECOR = Object.freeze({
   sandbox: rectOf('x'),
   nodeModules: rectOf('n'),
   fountain: rectOf('F'),
+  park: rectOf('k'),
+  parkFountain: rectOf('f'),
 });
+
+/**
+ * @typedef {object} HomePlot
+ * @property {number} slot              0 to 5, west to east
+ * @property {[number, number, number, number]} rect  [col0,row0,col1,row1] inclusive
+ * @property {[number, number]} door    walkable tile in front of the door, on Home Street
+ */
+
+/** How many homes the town has: one per person of a team town (CONTRACTS §4.11). */
+export const HOME_COUNT = 6;
+
+/**
+ * The six home plots, read off the map: each run of `h` on the quarter's first row is a plot two
+ * tiles deep, and its door opens south onto Home Street, like every other door in town.
+ * @type {ReadonlyArray<Readonly<HomePlot>>}
+ */
+export const HOMES = Object.freeze(homePlots());
+
+function homePlots() {
+  const row = MAP.findIndex((line) => line.includes('h'));
+  /** @type {HomePlot[]} */
+  const plots = [];
+  for (let col = 0; col < COLS; col++) {
+    if (MAP[row][col] !== 'h' || MAP[row][col - 1] === 'h') continue;
+    plots.push(Object.freeze({ slot: plots.length, rect: /** @type {[number, number, number, number]} */ ([col, row, col + 1, row + 1]), door: /** @type {[number, number]} */ ([col, row + 2]) }));
+  }
+  return plots;
+}
 
 /**
  * Tile centre in world space.
@@ -119,7 +166,7 @@ export const DECOR = Object.freeze({
  * @param {number} row
  */
 export function tileToWorld(col, row) {
-  return { x: (col + 0.5) * TILE - HALF_W, z: (row + 0.5) * TILE - HALF_D };
+  return { x: (col + 0.5 - ORIGIN.col) * TILE, z: (row + 0.5 - ORIGIN.row) * TILE };
 }
 
 /**
@@ -129,8 +176,8 @@ export function tileToWorld(col, row) {
  * @returns {[number, number]}
  */
 export function worldToTile(x, z) {
-  const col = Math.min(COLS - 1, Math.max(0, Math.floor((x + HALF_W) / TILE)));
-  const row = Math.min(ROWS - 1, Math.max(0, Math.floor((z + HALF_D) / TILE)));
+  const col = Math.min(COLS - 1, Math.max(0, Math.floor(x / TILE + ORIGIN.col)));
+  const row = Math.min(ROWS - 1, Math.max(0, Math.floor(z / TILE + ORIGIN.row)));
   return [col, row];
 }
 

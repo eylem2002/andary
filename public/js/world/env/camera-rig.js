@@ -19,8 +19,8 @@ import {
 
 /** Camera distance from its target; fog distances are relative to it. */
 export const CAMERA_DISTANCE = 120;
-const HOME = Object.freeze({ x: 0, z: -4.5 });
-const BOUNDS = Object.freeze({ minX: -30, maxX: 30, minZ: -38, maxZ: 30 });
+const HOME = Object.freeze({ x: 0, z: 1.5 });
+const BOUNDS = Object.freeze({ minX: -30, maxX: 30, minZ: -38, maxZ: 42 });
 const DRAG_THRESHOLD = 6;
 const ROTATE_SECONDS = 0.7;
 

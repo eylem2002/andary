@@ -173,3 +173,26 @@ export const LOOK_PALETTES = Object.freeze({
     },
   },
 });
+
+/**
+ * @typedef {object} HousePalette
+ * @property {number} wall
+ * @property {number} trim
+ * @property {number} roof
+ * @property {'gable'|'flat'|'dome'} shape
+ * @property {number} accent   shutters, a tile band, the dome or the neon strip
+ */
+
+/**
+ * A home's style, chosen by its owner (core/profile.js `house`): one per town look, so a house can
+ * be a coast cottage in a snowy town. Fixed colours, never the town's own palette, so a house
+ * looks the same in every town look.
+ * @type {Readonly<Record<LookId, Readonly<HousePalette>>>}
+ */
+export const HOUSE_PALETTES = Object.freeze({
+  coast: Object.freeze({ wall: 0xf6c9c0, trim: 0xffffff, roof: 0xe2704f, shape: 'gable', accent: 0x16b3a7 }),
+  snow: Object.freeze({ wall: 0xb5413a, trim: 0xffffff, roof: 0xeef3f7, shape: 'gable', accent: 0x2f5d50 }),
+  neon: Object.freeze({ wall: 0x2c2645, trim: 0x423a63, roof: 0x221d36, shape: 'flat', accent: 0x52eaff }),
+  desert: Object.freeze({ wall: 0xe0b48a, trim: 0xc98f5e, roof: 0xd3a171, shape: 'flat', accent: 0x2b6b9a }),
+  amman: Object.freeze({ wall: 0xeadfc8, trim: 0xd6c7a6, roof: 0xdccfb2, shape: 'dome', accent: 0xd9a441 }),
+});

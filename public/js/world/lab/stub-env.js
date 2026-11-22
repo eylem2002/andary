@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { BUILDINGS, BUILDING_KEYS } from '../../core/catalog.js';
-import { COLS, LOTS, MAP, ROWS, TILE, lotBounds, tileToWorld } from '../layout.js';
+import { COLS, LOTS, MAP, MAP_BOUNDS, ROWS, TILE, lotBounds, tileToWorld } from '../layout.js';
 
 const TILE_COLORS = { '#': '#8F8A80', P: '#D9CDB4', '=': '#E6DAC0', '~': '#4FA3C7', F: '#7EC8E3', x: '#E9D9A6', n: '#B8A98A' };
 const HEIGHTS = { hall: 4.2, harbor: 2.2, terminal: 3.4, web: 5.2, grove: 0.6, station: 1.6, board: 2.6 };
@@ -17,7 +17,7 @@ function buildGround(scene) {
     new THREE.PlaneGeometry(COLS * TILE + 8, ROWS * TILE + 8).rotateX(-Math.PI / 2),
     new THREE.MeshStandardMaterial({ color: '#C9D9A0', roughness: 1 }),
   );
-  ground.position.y = -0.02;
+  ground.position.set(0, -0.02, (MAP_BOUNDS.minZ + MAP_BOUNDS.maxZ) / 2);
   ground.receiveShadow = true;
   scene.add(ground);
   const tile = new THREE.BoxGeometry(TILE, 0.04, TILE);

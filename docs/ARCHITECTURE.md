@@ -99,7 +99,7 @@ references may cross.
 | --- | --- |
 | `hooks/` | Node built-ins only (it is copied out and must stand alone) |
 | `mods/` | its own folder only, no packages (Claude Code copies only the plugin's folder and runs the module without Node.js) |
-| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules`, `loops`, `shell`, `summaries`, `digest`, `limits` |
+| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules`, `loops`, `shell`, `summaries`, `digest`, `limits`, `town-map` |
 | `server/cli/`, `cli/` | the server, those core modules, the simulation (for `andary simulate`) |
 | `public/js/core/` | `core/` only |
 | `public/js/sources/` | `sources/`, `core/` |
@@ -131,6 +131,8 @@ references may cross.
 | who walks where, and what they say | `public/js/core/director.js`, `director-queue.js`, `humor.js` |
 | the HUD | `public/js/ui/` (`hud.js` composes it) |
 | the town's buildings, sea, sky and looks | `public/js/world/env/`, `core/looks.js`, `page.js` |
+| the town plan: tiles, lots, the six home plots, routes | `public/js/core/town-map.js` (re-exported by `world/layout.js`) |
+| the residential quarter: homes, gardens, the park and its life | `public/js/world/env/quarter.js`, `env/buildings/homes.js`, `env/park-life.js` |
 | the people and their animations | `public/js/world/agents/` |
 | the demo's story | `public/js/sim/` |
 
