@@ -630,7 +630,7 @@ describe('deny and stop', () => {
     assert.match(String(broker.decide(stoppable.approval.id, 'allow', '', undefined, true).error), /needs a deny/);
     assert.match(String(broker.decide(stoppable.approval.id, 'deny', '', undefined, 1).error), /needs a deny and stop: true/);
     assert.deepEqual(broker.decide(stoppable.approval.id, 'deny', 'enough', undefined, true), { ok: true });
-    assert.deepEqual((await stoppable.response)?.hookSpecificOutput.decision, { behavior: 'deny', message: `${DENY_MESSAGE}: enough`, interrupt: true });
+    assert.deepEqual(/** @type {any} */ (await stoppable.response)?.hookSpecificOutput.decision, { behavior: 'deny', message: `${DENY_MESSAGE}: enough`, interrupt: true });
     assert.equal(broker.list().find((a) => a.id === stoppable.approval.id)?.stopped, true);
 
     const codex = broker.create(request({ session_id: 's2' }), { hold: true, stopNote: 'Codex cannot be stopped from a hook yet' });
