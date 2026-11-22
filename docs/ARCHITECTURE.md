@@ -38,7 +38,9 @@ How Andary is put together, and why. The exact interfaces (payloads, messages, A
 
 Everything runs on your machine. The server listens on `127.0.0.1` unless you host a team town,
 has no runtime dependencies, and keeps none of your prompts or commands on disk unless you ask it
-to record.
+to record. A team host started with `--tunnel` also runs your own `cloudflared`, which carries
+teammates' requests from a public `https://….trycloudflare.com` address to a loopback port the
+server opened only for it (ADR 0019).
 
 ## The design, part by part
 
@@ -64,8 +66,12 @@ page keeps for its own origin (ADR 0015; no cookie, which every port would see),
 payload (secrets redacted, sizes capped) before anything is kept or sent, and never holds a
 permission request it cannot show in full. Notes to agents (CONTRACTS §4.15) travel the same
 signed replies: only the signed-in owner sends one, only to agents this computer's forwarder told
-the server about, and the forwarder checks each note again before it prints it (ADR 0018). A team town adds keys that are HMACs of one secret and a
-view-only role that sees the town but cannot act.
+the server about, and the forwarder checks each note again before it prints it (ADR 0018). A team
+town adds keys that are HMACs of one secret and a view-only role that sees the town but cannot act.
+A request that came through a tunnel reaches the server from this computer, so the socket proves
+nothing: `auth.isTunnelled` (the tunnel's own port, or Cloudflare's headers) makes it a request
+from the internet, which only the team's keys and view link can use; the owner's token and routes
+never work for it (ADR 0019).
 
 **The browser has one store and one source.** `sources/live.js` (the WebSocket link) and
 `sources/demo.js` (the simulation, which also plays the server's part for approvals, usage and
@@ -126,6 +132,7 @@ references may cross.
 | who may connect, and what they may do | `server/auth.mjs`, `server/browsers.mjs`, `server/security.mjs` |
 | the team town | `server/team.mjs`, `ingestTeam` in `server/ingest.mjs` |
 | notes to agents, and Deny and stop | `server/notes.mjs`, `public/js/core/notes.js`, `hooks/hook.mjs` (`notesFrom`, `decisionFrom`), `public/js/ui/agent-note.js`, `public/js/ui/approvals.js` |
+| the team town on the internet (`--tunnel`) | `server/tunnel.mjs` (cloudflared), `server/tunnel-watchdog.mjs` (stops it with the town), `isTunnelled` in `server/auth.mjs`, `openTunnel` in `server/cli/start.mjs` |
 | plan limits (the andary-limits mod) | `mods/andary-limits/`, `server/limits.mjs`, `public/js/core/limits.js`, `ui/limits.js` |
 | how a hook becomes town events | `public/js/core/events.js`, `summaries.js` |
 | crews, agents, the log | `public/js/core/store.js`, `crews.js` |

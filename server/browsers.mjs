@@ -2,10 +2,10 @@
 // sign-in checks), sends the hello snapshot, and handles their decide/note/settings/digest/ping messages.
 // On a team host (§4.11) a browser is either the owner (signed in) or a teammate watching with
 // the view link: viewers get the town but not the owner's prompts, costs, settings or topic.
-import { WS_PROTOCOL, browserRole, offersAndaryProtocol } from './auth.mjs';
+import { WS_PROTOCOL, allowedHostsFor, browserRole, isTunnelled, offersAndaryProtocol } from './auth.mjs';
 import { LIMITS } from './config.mjs';
 import { createTokenBucket } from './rate-limit.mjs';
-import { isAllowedHost, isAllowedOrigin } from './security.mjs';
+import { isAllowedHost, isAllowedOrigin, isTunnelOrigin } from './security.mjs';
 import { acceptUpgrade, rejectUpgrade, validateUpgradeRequest } from './websocket.mjs';
 import { CLOSE_CODE } from './ws-frame.mjs';
 
@@ -172,11 +172,14 @@ function upgrade(ctx, req, socket, head) {
  * @returns {import('./websocket.mjs').UpgradeVerdict}
  */
 function checkUpgrade(ctx, req, role) {
-  if (!isAllowedHost(req.headers.host, ctx.allowedHosts)) return { ok: false, status: 403, message: 'Forbidden host' };
+  // Through the tunnel only its own name, as Host and as Origin (ADR 0019).
+  const hosts = allowedHostsFor(req, ctx);
+  if (!isAllowedHost(req.headers.host, hosts)) return { ok: false, status: 403, message: 'Forbidden host' };
   if (pathOf(req.url) !== '/ws') return { ok: false, status: 404, message: 'Not found' };
   const handshake = validateUpgradeRequest(req);
   if (!handshake.ok) return handshake;
-  if (!isAllowedOrigin(req.headers.origin, ctx.allowedHosts)) return { ok: false, status: 403, message: 'Forbidden origin' };
+  const origin = isTunnelled(req) ? isTunnelOrigin(req.headers.origin, hosts) : isAllowedOrigin(req.headers.origin, hosts);
+  if (!origin) return { ok: false, status: 403, message: 'Forbidden origin' };
   if (!role) return { ok: false, status: 401, message: 'Sign in with the link printed by andary start' };
   if (ctx.hub.full(role)) return { ok: false, status: 503, message: 'Too many browser connections' };
   return handshake;

@@ -7,7 +7,8 @@ import { TOKEN_PROTOCOL_PREFIX, WS_PROTOCOL } from '../auth.mjs';
 import { HOOK_SOURCE, resolveHome } from '../config.mjs';
 import { runHookScript } from '../hook-runner.mjs';
 import { forwarderPath, inspectInstallations } from '../installer.mjs';
-import { probeServer, readStateFile, serverOrigin } from '../state-file.mjs';
+import { isProcessAlive, probeServer, readStateFile, serverOrigin } from '../state-file.mjs';
+import { describeOrphan, findCloudflared, stopOrphanTunnel } from '../tunnel.mjs';
 import { connectWebSocket, waitForMessage } from '../ws-client.mjs';
 import { describeScope } from './status.mjs';
 import { cliInvocation, tildify } from './io.mjs';
@@ -40,6 +41,11 @@ export async function runDoctor(_values, _positionals, io) {
   const installs = checkHooks(report, home, io);
   checkForwarderCopy(report, home, installs);
   const state = await checkServer(report, home);
+  const tunnel = state ? tunnelCheck(state, { cloudflared: findCloudflared(io.env), alive: isProcessAlive }) : null;
+  if (tunnel) report(tunnel.status, tunnel.title, tunnel.detail);
+  // No town, but maybe the cloudflared of one that was killed: it still publishes the old port.
+  const orphan = state ? null : describeOrphan(await stopOrphanTunnel(readStateFile(home), { alive: isProcessAlive }));
+  if (orphan) report(orphan.status, `Internet tunnel: ${orphan.text}`);
   if (state) {
     const hello = await checkRoundTrip(report, home, io);
     const limits = hello ? limitsCheck(hello.limits, installs.limitsMod, Date.now(), Boolean(io.env.ANDARY_HOME)) : null;
@@ -181,6 +187,30 @@ async function checkRoundTrip(report, home, io) {
   } finally {
     socket?.close();
   }
+}
+
+/**
+ * What the doctor says about a team town's internet tunnel (--tunnel, ADR 0019): its address
+ * while cloudflared runs, a failure once it stopped, or (off) whether cloudflared is installed.
+ * Nothing for a town that does not host a team. It never connects to the address itself.
+ * @param {import('../state-file.mjs').ServerState} state
+ * @param {{ cloudflared: string|null, alive: (pid: unknown) => boolean }} deps
+ * @returns {{ status: 'ok'|'warn'|'fail', title: string, detail: string }|null}
+ */
+export function tunnelCheck(state, { cloudflared, alive }) {
+  if (!state.team) return null;
+  const restart = `Restart the town for a new address (it changes): ${cliInvocation()} stop, then ${cliInvocation()} start --team --tunnel, and send new invites.`;
+  if (!state.tunnel) {
+    const how = cloudflared ? `cloudflared is installed (${tildify(cloudflared)})` : 'it needs cloudflared on the PATH';
+    return { status: 'ok', title: 'Internet tunnel: off (teammates reach the town on your network)', detail: `To share it beyond your network without a domain, start with --team --tunnel; ${how}.` };
+  }
+  if (!state.tunnel.url) return { status: 'fail', title: `Internet tunnel: down (${state.tunnel.error ?? 'cloudflared stopped'})`, detail: restart };
+  if (!alive(state.tunnel.pid)) return { status: 'fail', title: `Internet tunnel: cloudflared (pid ${state.tunnel.pid}) is gone, ${state.tunnel.url} no longer works`, detail: restart };
+  return {
+    status: 'ok',
+    title: `Internet tunnel: on at ${state.tunnel.url} (cloudflared pid ${state.tunnel.pid})`,
+    detail: `Anyone with an invite key or the view link reaches the town there; your sign-in does not work through it. Revoke them all: ${cliInvocation()} team reset`,
+  };
 }
 
 /** How to add the mod, and how to take it away again (README §2). */
