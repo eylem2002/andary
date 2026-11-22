@@ -161,6 +161,7 @@ export function createSettingsDialog(ctx) {
   const notify = notifyBlocks(ctx);
   const teamText = h('p', { class: 'hud-setting__help', 'data-testid': 'team-text' });
   const teamBlock = h('div', { class: 'hud-setting' }, h('p', { class: 'hud-setting__name', text: 'Team town' }), teamText);
+  const you = youBlock(ctx, () => dialog.close());
 
   const helpButton = h('button', { type: 'button', class: 'hud-btn' }, icon('help', { size: 18 }), 'Shortcuts and help');
   const setupButton = h('button', { type: 'button', class: 'hud-btn' }, icon('terminal', { size: 18 }), 'Use your own Claude Code');
@@ -169,7 +170,7 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [teamBlock, remoteBlock, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    body: [you.el, teamBlock, remoteBlock, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -191,9 +192,10 @@ export function createSettingsDialog(ctx) {
     open() {
       const live = ctx.view.mode === 'live';
       const team = live ? ctx.view.serverSettings.team : null;
-      const viewer = team?.role === 'viewer';
+      const viewer = team?.role === 'viewer' || team?.role === 'person';
       setHidden(teamBlock, !team);
       teamText.textContent = team ? teamSentence(team) : '';
+      you.sync();
       setHidden(remoteBlock, !live || viewer);
       remote.checked = Boolean(ctx.view.serverSettings.remoteApprovals);
       remote.disabled = ctx.view.connection !== 'live';
@@ -220,12 +222,38 @@ export function createSettingsDialog(ctx) {
 }
 
 /**
- * @param {{ role: 'owner'|'viewer', members: string[] }} team
+ * The "You" block of Settings: who this browser plays in a team town (or the demo), and the way
+ * to their character.
+ * @param {HudContext} ctx
+ * @param {() => void} closeSettings
+ */
+function youBlock(ctx, closeSettings) {
+  const text = h('p', { class: 'hud-setting__help' });
+  const button = h('button', { type: 'button', class: 'hud-btn hud-btn--small', 'data-testid': 'open-character' }, icon('users', { size: 16 }), 'Your character');
+  const el = h('div', { class: 'hud-setting' }, h('p', { class: 'hud-setting__name', text: 'You' }), text, button);
+  button.addEventListener('click', () => {
+    closeSettings();
+    ctx.openDialog('character');
+  });
+  return {
+    el,
+    sync() {
+      setHidden(el, !ctx.view.me);
+      text.textContent = ctx.view.mode === 'demo'
+        ? `In the demo you are ${ctx.view.me}, with a home in the town's residential quarter. Try a look: it stays in this browser.`
+        : `You are ${ctx.view.me} in this team town. Choose your character's look, colour and home: everyone sees them.`;
+    },
+  };
+}
+
+/**
+ * @param {{ role: 'owner'|'person'|'viewer', members: string[] }} team
  * @returns {string}
  */
 export function teamSentence({ role, members }) {
   const who = members.length ? `Sharing so far: ${members.join(', ')}.` : 'No teammate has shared a session yet.';
   if (role === 'viewer') return `You are watching a team town. Only the person who hosts it can answer permission prompts or change its settings. ${who}`;
+  if (role === 'person') return `You are a teammate in this team town: your character and your home are yours to change. Only the person who hosts it can answer permission prompts or change its settings. ${who}`;
   return `This town hosts your team. ${who} Invite someone with: andary team invite <name>`;
 }
 

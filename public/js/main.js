@@ -16,6 +16,8 @@ import { readCredentials } from './sources/credentials.js';
 import { createHud } from './ui/hud.js';
 import { loadPrefs } from './ui/prefs.js';
 import { createDemo } from './sources/demo.js';
+import { createDemoPeople } from './sources/demo-people.js';
+import { loadSavedProfile } from './ui/character.js';
 import { demoLimits } from './sources/demo-limits.js';
 import { resolveReducedMotion, timeOfDayFor } from './ui/appearance.js';
 
@@ -58,8 +60,19 @@ async function boot() {
       setSpeed: (speed) => source?.setSpeed?.(speed),
       notifyTest: () => source?.notifyTest?.() ?? false,
       requestDigest: (since) => source?.requestDigest(since) ?? false,
+      saveProfile: (profile) => source?.saveProfile?.(profile) ?? false,
     },
   });
+
+  /**
+   * A team town's people (or the demo's): their crews take their colours, and the HUD shows
+   * their homes, their figures and the "You" dialog.
+   * @param {unknown[]} people @param {string|null} me
+   */
+  function setPeople(people, me) {
+    store.setPeople(people);
+    hud.setPeople(people, me);
+  }
 
   // The director starts with the world; until then it gets a record of what the store did.
   const backlog = recordChanges(store);
@@ -111,6 +124,8 @@ async function boot() {
       onNotifyTest: (ok) => hud.notify(ok ? { icon: 'bell', title: 'Test notification sent', body: 'Check the ntfy app on your phone.' } : { tone: 'error', icon: 'warning', title: 'The test notification was not sent', body: 'The server could not reach ntfy, or sent one a moment ago.' }),
       onDigest: (digest) => hud.setDigest(digest),
       onAway: (away, offset) => hud.setAway(away, offset),
+      onPeople: setPeople,
+      onProfile: (saved) => hud.profileSaved(saved),
     });
   }
 
@@ -118,7 +133,17 @@ async function boot() {
   async function startDemo({ hosted }) {
     const { createSimulation } = await import('./sim/simulation.js');
     const demo = createDemo({ store, createSimulation, speed: prefs.speed, seed: seedParam(), onProgress: (progress) => hud.setProgress(progress), onDigest: (digest) => hud.setDigest(digest) });
-    source = demo;
+    // The demo is a small team town: you, and Lina with her crew. People first, so crews take their colours.
+    const people = createDemoPeople({ onPeople: setPeople, saved: loadSavedProfile() });
+    people.start();
+    source = {
+      ...demo,
+      saveProfile: (profile) => {
+        const saved = people.save(profile);
+        if (saved) hud.profileSaved(saved);
+        return Boolean(saved);
+      },
+    };
     hud.setLimits(demoLimits(Date.now()));
     app.mode = 'demo';
     hud.setMode('demo');

@@ -1114,8 +1114,22 @@ const CHANGE_SHOWS = Object.freeze({
   event: (d, change) => onEvent(d, change.event),
   approval: (d, change) => onApproval(d, change.approval, change.previous ?? null),
   achievement: (d, change) => onAchievement(d, change.achievement),
+  people: (d) => onPeople(d),
   reset: (d) => onReset(d),
 });
+
+/**
+ * A person of a team town changed colour: their crews in the town change with them.
+ * @param {Director} d
+ */
+function onPeople(d) {
+  for (const rt of d.crew.values()) {
+    const agent = agentState(d, rt.key);
+    if (!agent || agent.color === rt.color) continue;
+    rt.color = agent.color;
+    d.world.updateAgent(rt.key, { color: agent.color });
+  }
+}
 
 /** Agents already in the store when the director starts are placed without ceremony. */
 /** @param {Director} d */

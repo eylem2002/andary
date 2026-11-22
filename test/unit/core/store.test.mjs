@@ -695,6 +695,35 @@ describe('store: team town members (§4.11)', () => {
     assert.equal(ctx.state().agents[MAIN].name, 'Foreman');
   });
 
+  it('gives every crew of a person their colour: a member\'s are theirs, local ones the host\'s', () => {
+    const ctx = setup();
+    ctx.store.setPeople([{ name: 'Sam', color: 3, host: true }, { name: 'Lina', color: 5, host: false }, { name: 'Bad', color: 99 }, null]);
+    ctx.send(hook('SessionStart', { source: 'startup', andary_member: 'Lina' }, { session: 'Lina~s1' }));
+    ctx.send(hook('SessionStart', { source: 'startup', andary_member: 'Lina' }, { session: 'Lina~s2' }));
+    ctx.send(hook('SessionStart', { source: 'startup' }));
+    ctx.send(hook('SessionStart', { source: 'startup', andary_member: 'Omar' }, { session: 'Omar~s1' }));
+    const colors = ctx.state().sessions.map((s) => s.color);
+    assert.deepEqual(colors, [CREW_COLORS[5], CREW_COLORS[5], CREW_COLORS[3], CREW_COLORS[0]], 'someone not on the roster takes turns as before');
+    assert.deepEqual(ctx.state().sessions.map((s) => s.number), [1, 2, 3, 4], 'crews stay told apart by number');
+    assert.equal(ctx.state().agents['Lina~s1:main'].color, CREW_COLORS[5]);
+  });
+
+  it('recolours a person\'s crews when they pick another colour, and keeps the people across a reset', () => {
+    const ctx = setup();
+    ctx.store.setPeople([{ name: 'Lina', color: 5, host: false }]);
+    ctx.send(hook('SessionStart', { source: 'startup', andary_member: 'Lina' }, { session: 'Lina~s1' }));
+    ctx.store.setPeople([{ name: 'Lina', color: 6, host: false }]);
+    assert.equal(ctx.changes.at(-1).type, 'people');
+    assert.equal(ctx.state().sessions[0].color, CREW_COLORS[6]);
+    assert.equal(ctx.state().agents['Lina~s1:main'].color, CREW_COLORS[6]);
+    const before = ctx.changes.length;
+    ctx.store.setPeople([{ name: 'Lina', color: 6, host: false }]);
+    assert.equal(ctx.changes.length, before, 'nothing changed, nothing said');
+    ctx.store.reset();
+    ctx.send(hook('SessionStart', { source: 'startup', andary_member: 'Lina' }, { session: 'Lina~s1' }));
+    assert.equal(ctx.state().sessions[0].color, CREW_COLORS[6]);
+  });
+
   it('keeps a member name to one short line', () => {
     const ctx = setup();
     ctx.send(hook('UserPromptSubmit', { prompt: 'hi', andary_member: `Lina\n${'x'.repeat(40)}` }, { session: 'Lina~s2' }));

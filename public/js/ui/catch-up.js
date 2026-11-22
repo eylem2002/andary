@@ -422,7 +422,7 @@ export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } =
   let offerTimer;
 
   const live = () => ctx.view.mode === 'live';
-  const viewOnly = () => ctx.view.serverSettings.team?.role === 'viewer';
+  const viewOnly = () => ['viewer', 'person'].includes(ctx.view.serverSettings.team?.role);
   const serverNow = () => now() + offset;
   const looked = createLooked(storage, () => ctx.refresh());
   const offeredNow = () => live() && !viewOnly() && catchUpOffered(away, looked.get(true), serverNow());

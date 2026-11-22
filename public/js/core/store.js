@@ -9,7 +9,7 @@
 import { ACHIEVEMENTS, achievementFor } from './achievements.js';
 import { BUILDINGS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
 import { LEAD_NAME, MAX_APPROVALS, MAX_RECENT, MAX_RETIRED, MAX_SPAWNS_PER_SESSION, boundedPush, createModel, helpersOf } from './store-model.js';
-import { agentFor, assignSpawn, attribute, dropAgent, place, pruneDoneHelpers, pruneEndedSessions, reconcileTeammate, repairGuesses, sessionFor, sessionStatus } from './crews.js';
+import { agentFor, assignSpawn, attribute, dropAgent, personColor, place, pruneDoneHelpers, pruneEndedSessions, reconcileTeammate, repairGuesses, sessionFor, sessionStatus } from './crews.js';
 import { recordChange, rememberFile } from './changes.js';
 import { hazardText } from './conflicts.js';
 import { NO_SESSION, normalize } from './events.js';
@@ -159,7 +159,7 @@ export { ACHIEVEMENTS };
 
 /** @typedef {{ date: string, tokens: number, costUsd: number }} UsageDay */
 
-/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'reset'}} StoreChange */
+/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'people'}|{type: 'reset'}} StoreChange */
 
 /**
  * @typedef {object} Store
@@ -167,6 +167,7 @@ export { ACHIEVEMENTS };
  * @property {(event: TownEvent) => void} dispatch
  * @property {(approval: Approval) => void} setApproval
  * @property {(record: unknown, days?: unknown) => void} setUsage  one agent's usage totals, and the day totals
+ * @property {(people: unknown) => void} setPeople  a team town's people ({name, color, host}[], color an index into CREW_COLORS): their crews take their colour
  * @property {(listener: (change: StoreChange) => void) => () => void} subscribe
  * @property {() => StoreState} getState
  * @property {() => void} reset
@@ -918,6 +919,8 @@ export function createStore(options = {}) {
   /** @type {Set<(change: StoreChange) => void>} */
   const listeners = new Set();
   let m = createModel(localHour, maxLog);
+  /** Kept across resets: the people do not change when the history is replayed. */
+  let people = m.people;
 
   /** @param {StoreChange} change */
   function emit(change) {
@@ -1041,11 +1044,50 @@ export function createStore(options = {}) {
     getState() {
       return m.state;
     },
+    setPeople(list) {
+      people = readPeople(list);
+      if (recolorPeople(m, people)) emit({ type: 'people' });
+    },
     reset() {
-      m = createModel(localHour, maxLog);
+      m = Object.assign(createModel(localHour, maxLog), { people });
       emit({ type: 'reset' });
     },
   };
+}
+
+/**
+ * New people for the model; a person who picked another colour takes their crews with them.
+ * True when a crew changed colour.
+ * @param {Model} m @param {Model['people']} people
+ */
+function recolorPeople(m, people) {
+  m.people = people;
+  let changed = false;
+  for (const s of m.state.sessions) {
+    const color = personColor(m, s.member ?? null);
+    if (!color || color === s.color) continue;
+    s.color = color;
+    for (const key of s.agentKeys) if (m.state.agents[key]) m.state.agents[key].color = color;
+    changed = true;
+  }
+  return changed;
+}
+
+/**
+ * A team town's people as the store keeps them: each name's colour and who hosts.
+ * @param {unknown} list
+ * @returns {{ host: string|null, colors: Map<string, string> }}
+ */
+function readPeople(list) {
+  const colors = new Map();
+  let host = null;
+  for (const person of Array.isArray(list) ? list : []) {
+    const color = isObject(person) && Number.isInteger(person.color) ? CREW_COLORS[/** @type {number} */ (person.color)] : undefined;
+    if (!isObject(person) || typeof person.name !== 'string' || !color) continue;
+    colors.set(person.name, color);
+    if (person.host === true) host = person.name;
+  }
+  return { host, colors };
 }
 
 /** @param {unknown} n */

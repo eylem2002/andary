@@ -73,6 +73,8 @@ export function createModel(localHour, maxLog) {
     /** @type {Map<string, number>} sessionId → teammate hats handed out */
     hatTurns: new Map(),
     colorTurn: 0,
+    /** A team town's people (store.setPeople): each person's colour, and who hosts (local crews are theirs). */
+    people: /** @type {{ host: string|null, colors: Map<string, string> }} */ ({ host: null, colors: new Map() }),
     logSeq: 0,
     /** @type {Map<string, {tool: string, counted: boolean}>} permission requests awaiting an answer */
     awaiting: new Map(),

@@ -32,6 +32,16 @@ function freeCrewNumber(m) {
   return n;
 }
 
+/**
+ * The colour of a person's crews in a team town: a member's crews are theirs, local ones the
+ * host's. Null when the crew belongs to nobody on the roster.
+ * @param {Model} m @param {string|null} member
+ */
+export function personColor(m, member) {
+  const owner = member ?? m.people.host;
+  return owner ? (m.people.colors.get(owner) ?? null) : null;
+}
+
 /** @param {Model} m @param {TownEvent} e */
 export function newSession(m, e) {
   /** @type {Session} */
@@ -41,7 +51,7 @@ export function newSession(m, e) {
     project: projectName(e.cwd, e.sessionId),
     cwd: e.cwd,
     title: undefined,
-    color: CREW_COLORS[m.colorTurn++ % CREW_COLORS.length],
+    color: personColor(m, e.member ?? null) ?? CREW_COLORS[m.colorTurn++ % CREW_COLORS.length],
     model: undefined,
     permissionMode: undefined,
     status: 'idle',

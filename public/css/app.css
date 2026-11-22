@@ -2769,6 +2769,127 @@ body {
   font-size: 13px;
 }
 
+/* The "You" dialog: a live preview beside the choices; stacked on a phone, preview on top. */
+.hud-character {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 8px 28px;
+  align-items: start;
+}
+
+.hud-character__stage {
+  position: sticky;
+  top: 0;
+  padding: 12px;
+  border-radius: 11px;
+  background: var(--stage);
+  text-align: center;
+}
+
+.hud-character__preview {
+  aspect-ratio: 120 / 200;
+  max-height: 46dvh;
+  margin: 0 auto;
+}
+
+.hud-character__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.hud-character__caption {
+  margin-top: 6px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.hud-character__field {
+  padding: 8px 0;
+}
+
+.hud-swatches {
+  min-width: 0;
+  margin: 0;
+  padding: 10px 0;
+  border: 0;
+}
+
+.hud-swatches > legend {
+  float: left;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.hud-swatches__list {
+  clear: both;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Each swatch is a 44 px target around a 28 px chip; the radio itself is visually hidden. */
+.hud-swatch {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.hud-swatch__input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.hud-swatch__chip {
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--paper);
+  border-radius: 50%;
+  background: var(--swatch, var(--ink-2));
+  box-shadow: 0 0 0 1px var(--edge);
+}
+
+.hud-swatch__input:checked + .hud-swatch__chip {
+  box-shadow: 0 0 0 3px var(--ink);
+}
+
+.hud-swatch__input:focus-visible + .hud-swatch__chip {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+
+.hud-swatch__input:disabled + .hud-swatch__chip {
+  opacity: 0.35;
+  background-image: linear-gradient(135deg, transparent 45%, var(--paper) 45% 55%, transparent 55%);
+}
+
+.hud-swatch:has(.hud-swatch__input:disabled) {
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .hud-character {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hud-character__stage {
+    z-index: 1;
+    padding: 8px;
+  }
+
+  .hud-character__preview {
+    max-height: 26dvh;
+  }
+}
+
 /* Usage: today's total, fourteen days of bars, the crews in town. */
 .hud-usage__total {
   margin-top: 4px;
