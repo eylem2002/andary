@@ -1,6 +1,6 @@
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { createPresence } from '../../../server/presence.mjs';
+import { DUTY_STALE_MS, createPresence, dutyOf } from '../../../server/presence.mjs';
 import { HOMES } from '../../../public/js/core/town-map.js';
 
 /** A presence on a fake clock, with Sam (host, home 0) and Lina (home 1). */
@@ -108,6 +108,39 @@ test('offline: on the porch after the porch time, inside after the inside time; 
     assert.equal(presence.view('Lina').online, true);
     presence.forgetAllBut(new Set(['Sam']));
     assert.equal(presence.view('Lina').online, false, 'forgotten: a fresh start at home');
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('duty: only a prompt that needs the person blocks walking; idle_prompt does not; it lapses after quiet', () => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 });
+  try {
+    /** @type {string[]} */
+    const refused = [];
+    const presence = createPresence({ homeOf: (name) => (name === 'Sam' ? 0 : null), hostName: () => 'Sam', onChange: () => {}, onRefused: (_name, message) => refused.push(message), now: Date.now });
+    presence.connect('Sam');
+    presence.observe({ hook_event_name: 'Stop', session_id: 's1' }, 'local');
+    presence.observe({ hook_event_name: 'Notification', notification_type: 'idle_prompt', session_id: 's1' }, 'local');
+    assert.equal(presence.view('Sam').duty, 'free', 'idle_prompt changes nothing');
+    assert.equal(presence.walk('Sam', [3, 26]).ok, true);
+    presence.observe({ hook_event_name: 'Notification', notification_type: 'permission_prompt', session_id: 's1' }, 'local');
+    assert.equal(presence.view('Sam').duty, 'needs');
+    assert.match(presence.walk('Sam', [2, 26]).error ?? '', /at work/);
+    mock.timers.tick(DUTY_STALE_MS);
+    assert.equal(presence.view('Sam').duty, 'free', 'ten quiet minutes');
+    assert.equal(presence.walk('Sam', [2, 26]).ok, true);
+    // A queued walk that can no longer start is reported to its person.
+    mock.timers.tick(10_000);
+    assert.equal(presence.walk('Sam', [3, 26]).ok, true);
+    assert.equal(presence.walk('Sam', [4, 26]).ok, true, 'queued');
+    presence.observe({ hook_event_name: 'UserPromptSubmit', session_id: 's1' }, 'local');
+    mock.timers.tick(300);
+    assert.deepEqual(refused, ['Walk dropped: Your character is at work']);
+    assert.equal(presence.knowsAgent('s1:main'), true);
+    assert.equal(presence.knowsAgent('s2:main'), false);
+    assert.equal(dutyOf({ hook_event_name: 'Notification', notification_type: 'elicitation_dialog' }), 'needs');
+    assert.equal(dutyOf({ hook_event_name: 'Notification' }), undefined);
   } finally {
     mock.timers.reset();
   }

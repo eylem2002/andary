@@ -9,6 +9,7 @@
 // recorded: after a restart everyone starts at home.
 import { HOMES } from '../public/js/core/town-map.js';
 import { EMOTES, PHRASES, continueWalk } from '../public/js/core/presence.js';
+import { agentKeyOf, normalizeAgentId } from '../public/js/core/ids.js';
 
 /** @typedef {import('../public/js/core/presence.js').Tile} Tile */
 /** @typedef {'free'|'work'|'needs'} Duty */
@@ -27,8 +28,20 @@ const PHRASE_EVERY_MS = 5000;
 /** One "come look" per 30 s from one person to another. */
 const LOOK_EVERY_MS = 30_000;
 
-/** Events that set a person's duty, by hook name. */
-const DUTY = Object.freeze({ UserPromptSubmit: 'work', PermissionRequest: 'needs', StopFailure: 'needs', Notification: 'needs', Stop: 'free', SessionEnd: 'free' });
+/** Events that set a person's duty, by hook name (a Notification: see NEEDS_NOTICES). */
+const DUTY = Object.freeze({ UserPromptSubmit: 'work', PermissionRequest: 'needs', StopFailure: 'needs', Stop: 'free', SessionEnd: 'free' });
+/** The notifications that mean a person is needed; idle_prompt (a minute after Stop) and others change nothing. */
+const NEEDS_NOTICES = new Set(['permission_prompt', 'elicitation_dialog', 'elicitation', 'question']);
+/** With no event from a person for this long (their relay went quiet too), their duty is free again. */
+export const DUTY_STALE_MS = 10 * 60_000;
+/** Agent keys remembered for "come look" (the newest; the oldest is forgotten first). */
+const MAX_AGENT_KEYS = 2000;
+
+/** The duty an event sets, if any. @param {Record<string, any>} event @returns {Duty|undefined} */
+export function dutyOf(event) {
+  if (event.hook_event_name === 'Notification') return NEEDS_NOTICES.has(event.notification_type) ? 'needs' : undefined;
+  return /** @type {Duty|undefined} */ (/** @type {Record<string, string>} */ (DUTY)[event.hook_event_name]);
+}
 
 /**
  * @typedef {object} PersonState
@@ -38,6 +51,8 @@ const DUTY = Object.freeze({ UserPromptSubmit: 'work', PermissionRequest: 'needs
  * @property {number} leftAt     when their last connection closed (ms)
  * @property {number} relayAt    when their relay last posted (ms)
  * @property {Duty} duty
+ * @property {number} eventAt   when their last event came (ms)
+ * @property {NodeJS.Timeout|null} dutyTimer  tells browsers when their duty lapses to free
  * @property {Record<string, number>} last  when they last did each rate-limited thing
  * @property {{ to: Tile, timer: NodeJS.Timeout }|null} pendingWalk
  */
@@ -49,44 +64,27 @@ const DUTY = Object.freeze({ UserPromptSubmit: 'work', PermissionRequest: 'needs
 
 /**
  * @param {{ homeOf: (name: string) => number|null, hostName: () => string|null, onChange: (names: string[]) => void,
- *   now?: () => number, porchMs?: number, insideMs?: number }} options
- *   homeOf: a person's home slot, null when not on the roster
+ *   onRefused?: (name: string, message: string) => void, now?: () => number, porchMs?: number, insideMs?: number }} options
+ *   homeOf: a person's home slot, null when not on the roster; onRefused: a queued walk was dropped
  */
-export function createPresence({ homeOf, hostName, onChange, now = Date.now, porchMs = PORCH_MS, insideMs = INSIDE_MS }) {
+export function createPresence({ homeOf, hostName, onChange, onRefused = () => {}, now = Date.now, porchMs = PORCH_MS, insideMs = INSIDE_MS }) {
   /** @type {Map<string, PersonState>} */
   const people = new Map();
-  /** @type {Set<string>} */
-  const dirty = new Set();
-  /** @type {NodeJS.Timeout|null} */
-  let flushTimer = null;
-  let lastFlush = -Infinity;
+  const { changed, stop } = batcher(onChange, now);
   /** @type {Map<string, NodeJS.Timeout[]>} the porch and inside timers of people with no connection */
   const awayTimers = new Map();
+  const agents = agentMemory();
+  const dutyNow = (/** @type {PersonState} */ person) => (now() - person.eventAt >= DUTY_STALE_MS ? 'free' : person.duty);
 
   const homeTile = (/** @type {string} */ name) => doorOf(homeOf(name));
   /** @param {string} name */
   function state(name) {
     let person = people.get(name);
     if (!person) {
-      person = { tile: homeTile(name), walk: null, connections: 0, leftAt: -Infinity, relayAt: -Infinity, duty: 'free', last: {}, pendingWalk: null };
+      person = { tile: homeTile(name), walk: null, connections: 0, leftAt: -Infinity, relayAt: -Infinity, duty: 'free', eventAt: -Infinity, dutyTimer: null, last: {}, pendingWalk: null };
       people.set(name, person);
     }
     return person;
-  }
-
-  /** Queues a person's change for the next broadcast (at most every FLUSH_MS). @param {string} name */
-  function changed(name) {
-    dirty.add(name);
-    if (flushTimer) return;
-    flushTimer = later(flush, Math.max(0, lastFlush + FLUSH_MS - now()));
-  }
-
-  function flush() {
-    flushTimer = null;
-    lastFlush = now();
-    const names = [...dirty];
-    dirty.clear();
-    if (names.length) onChange(names);
   }
 
   /** @param {string} name @param {PersonState} person @param {Tile} to */
@@ -104,8 +102,9 @@ export function createPresence({ homeOf, hostName, onChange, now = Date.now, por
   /** @param {string} name */
   function forget(name) {
     clearAwayTimers(name);
-    const pending = people.get(name)?.pendingWalk;
-    if (pending) clearTimeout(pending.timer);
+    const person = people.get(name);
+    if (person?.pendingWalk) clearTimeout(person.pendingWalk.timer);
+    if (person?.dutyTimer) clearTimeout(person.dutyTimer);
     people.delete(name);
   }
 
@@ -122,7 +121,8 @@ export function createPresence({ homeOf, hostName, onChange, now = Date.now, por
      * @returns {PresenceView}
      */
     view(name) {
-      return viewOf(state(name), now(), porchMs, insideMs);
+      const person = state(name);
+      return { ...viewOf(person, now(), porchMs, insideMs), duty: dutyNow(person) };
     },
     /** A browser playing this person connected. @param {string} name */
     connect(name) {
@@ -153,16 +153,20 @@ export function createPresence({ homeOf, hostName, onChange, now = Date.now, por
      * @param {'local'|'team'} origin
      */
     observe(event, origin) {
+      agents.remember(event);
       const name = origin === 'team' ? event.andary_member : hostName();
       if (typeof name !== 'string' || homeOf(name) === null) return;
       const person = state(name);
-      const before = this.view(name).lights;
+      const before = this.view(name);
       if (origin === 'team') person.relayAt = now();
-      const duty = /** @type {Duty|undefined} */ (/** @type {Record<string, string>} */ (DUTY)[event.hook_event_name]);
-      if ((duty && duty !== person.duty) || before !== this.view(name).lights) {
-        if (duty) person.duty = duty;
-        changed(name);
-      }
+      person.eventAt = now();
+      const duty = dutyOf(event);
+      if (duty) person.duty = duty;
+      // Quiet for DUTY_STALE_MS: browsers hear the duty is free again.
+      if (person.dutyTimer) clearTimeout(person.dutyTimer);
+      person.dutyTimer = person.duty === 'free' ? null : later(() => changed(name), DUTY_STALE_MS);
+      const after = this.view(name);
+      if (after.duty !== before.duty || after.lights !== before.lights) changed(name);
     },
     /**
      * Walks a person to a tile. Refused while they are at work; a walk asked less than 250 ms
@@ -172,7 +176,7 @@ export function createPresence({ homeOf, hostName, onChange, now = Date.now, por
      */
     walk(name, to) {
       const person = state(name);
-      if (person.duty !== 'free') return { ok: false, error: 'Your character is at work' };
+      if (dutyNow(person) !== 'free') return { ok: false, error: 'Your character is at work' };
       const plan = continueWalk(person, to, now());
       if (!plan.ok) return plan;
       const wait = (person.last.walk ?? -Infinity) + WALK_EVERY_MS - now();
@@ -181,10 +185,16 @@ export function createPresence({ homeOf, hostName, onChange, now = Date.now, por
       const timer = later(() => {
         const pending = person.pendingWalk;
         person.pendingWalk = null;
-        if (pending && person.duty === 'free') startWalk(name, person, pending.to);
+        if (!pending) return;
+        const result = dutyNow(person) === 'free' ? startWalk(name, person, pending.to) : { ok: false, error: 'Your character is at work' };
+        if (!result.ok) onRefused(name, `Walk dropped: ${result.error}`);
       }, wait);
       person.pendingWalk = { to: /** @type {Tile} */ (to), timer };
       return { ok: true };
+    },
+    /** Whether an agent key was seen in the town's events (a "come look" may point at it). @param {string} key */
+    knowsAgent(key) {
+      return agents.knows(key);
     },
     /**
      * Checks an emote or a phrase: one of the set ones, and not too often.
@@ -210,7 +220,7 @@ export function createPresence({ homeOf, hostName, onChange, now = Date.now, por
       for (const name of [...people.keys()]) if (!names.has(name)) forget(name);
     },
     dispose() {
-      if (flushTimer) clearTimeout(flushTimer);
+      stop();
       for (const name of [...people.keys()]) forget(name);
     },
   };
@@ -229,9 +239,58 @@ function viewOf(person, t, porchMs, insideMs) {
   return { tile: person.tile, walk: person.walk, online, away, duty: person.duty, lights: online || relaying };
 }
 
-/** The door of a home, where its person starts. @param {number|null} slot @returns {Tile} */
+/** The door of a home, where its person starts (the first home's for a name not on the roster). @param {number|null} slot @returns {Tile} */
 function doorOf(slot) {
-  return /** @type {Tile} */ ([...(HOMES[slot ?? 0] ?? HOMES[0]).door]);
+  const home = slot === null ? undefined : HOMES[slot];
+  if (!home) return /** @type {Tile} */ ([...HOMES[0].door]);
+  return /** @type {Tile} */ ([...home.door]);
+}
+
+/**
+ * Batches people's changes: each name at most once per broadcast, at most every FLUSH_MS.
+ * @param {(names: string[]) => void} onChange @param {() => number} now
+ */
+function batcher(onChange, now) {
+  /** @type {Set<string>} */
+  const dirty = new Set();
+  /** @type {NodeJS.Timeout|null} */
+  let timer = null;
+  let last = -Infinity;
+  function flush() {
+    timer = null;
+    last = now();
+    const names = [...dirty];
+    dirty.clear();
+    if (names.length) onChange(names);
+  }
+  return {
+    /** @param {string} name */
+    changed(name) {
+      dirty.add(name);
+      if (!timer) timer = later(flush, Math.max(0, last + FLUSH_MS - now()));
+    },
+    stop() {
+      if (timer) clearTimeout(timer);
+    },
+  };
+}
+
+/** The agent keys seen in the town's events (the newest MAX_AGENT_KEYS), for "come look". */
+function agentMemory() {
+  /** @type {Set<string>} */
+  const keys = new Set();
+  return {
+    /** @param {Record<string, any>} event */
+    remember(event) {
+      if (typeof event.session_id !== 'string') return;
+      const key = agentKeyOf(event.session_id, normalizeAgentId(event.agent_id));
+      keys.delete(key);
+      keys.add(key);
+      if (keys.size > MAX_AGENT_KEYS) keys.delete(/** @type {string} */ (keys.values().next().value));
+    },
+    /** @param {string} key */
+    knows: (key) => keys.has(key),
+  };
 }
 
 /** A timer that never keeps the process alive. @param {() => void} fn @param {number} ms */

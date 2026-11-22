@@ -9,7 +9,7 @@ import { createNotifier } from './notify.mjs';
 import { createWorkTrees } from './work-trees.mjs';
 import { createTownDigest } from './digest.mjs';
 import { createLimitsTracker } from './limits.mjs';
-import { announcePeople, announcePresence, announceTeam, createHub, dropRemovedPeople, handleUpgrade } from './browsers.mjs';
+import { announcePeople, announcePresence, tellPerson, announceTeam, createHub, dropRemovedPeople, handleUpgrade } from './browsers.mjs';
 import { createPresence } from './presence.mjs';
 import { createPeople } from './people.mjs';
 import { createTeamHost, createTeamRelay, lanAddresses, teamSecret } from './team.mjs';
@@ -282,6 +282,7 @@ function createTeam(config, options, town) {
     homeOf: (name) => people.list().find((person) => person.name === name)?.slot ?? null,
     hostName: () => people.host,
     onChange: (names) => announcePresence(town(), names),
+    onRefused: (name, message) => tellPerson(town(), name, message),
     ...options.presenceMs,
   });
   return createTeamHost({

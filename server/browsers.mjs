@@ -135,6 +135,17 @@ export function peopleView(ctx) {
 }
 
 /**
+ * An error for one person's browsers only (a queued walk that was dropped).
+ * @param {import('./app.mjs').TownContext} ctx @param {string} name @param {string} message
+ */
+export function tellPerson(ctx, name, message) {
+  const text = JSON.stringify({ t: 'error', message });
+  ctx.hub.each((connection) => {
+    if (ctx.hub.personOf(connection) === name) connection.send(text);
+  });
+}
+
+/**
  * Tells every browser where some people are now (a walk, someone came or went, a duty or the
  * lights changed); presence.mjs batches these at 10 Hz at most.
  * @param {import('./app.mjs').TownContext} ctx
@@ -445,7 +456,9 @@ function applyPresence(ctx, connection, message) {
 function lookAsk(ctx, connection, from, message) {
   const at = lookTarget(message.at);
   const to = typeof message.to === 'string' ? message.to : '';
-  if (!at || !ctx.team?.people.has(to)) {
+  // An agent must be one the town has seen: a look never carries a made-up key to a teammate.
+  const known = at && (!('agent' in at) || ctx.team?.presence.knowsAgent(at.agent));
+  if (!known || !ctx.team?.people.has(to)) {
     sendError(ctx, connection, 'look.to is a teammate, and look.at an agent or a building');
     return;
   }
