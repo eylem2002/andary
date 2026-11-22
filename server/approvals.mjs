@@ -58,6 +58,9 @@ const MAX_DIALOGS = 500;
  * @property {number} createdAt
  * @property {number|null} expiresAt  when a held approval times out; null when not held
  * @property {OfferedSuggestion[]} suggestions  rules an allow may save ("Allow always"); [] for none
+ * @property {boolean} canStop        a deny from the town may also stop the agent ("Deny and stop")
+ * @property {string} [stopNote]      why it may not, when it may not (Codex, an older forwarder)
+ * @property {boolean} [stopped]      denied from the town with a stop
  * @property {'town'|'terminal'|'timeout'} [decidedBy]
  * @property {Proof} [proof]          set when resolved: what showed the terminal answered; on an
  *   expired one, 'ran' or 'denied' when it was answered in the terminal after it expired
@@ -78,18 +81,20 @@ const MAX_DIALOGS = 500;
 
 /**
  * The hook output for a town decision (CONTRACTS §4.5). An allow may save one permission rule:
- * `saved`, one of the request's own suggestions, exactly as Claude Code sent it.
+ * `saved`, one of the request's own suggestions, exactly as Claude Code sent it. A deny may also
+ * stop the agent (`interrupt`, "Deny and stop").
  * @param {'allow'|'deny'} decision
  * @param {string} [note] optional reason typed in the town; shown to Claude on deny
  * @param {object|null} [saved] the suggestion an "Allow always" saves; ignored for a denial
- * @returns {{ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow'|'deny', message?: string, updatedPermissions?: object[] } } }}
+ * @param {boolean} [stop] with a denial: stop the agent too
+ * @returns {{ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow'|'deny', message?: string, updatedPermissions?: object[], interrupt?: true } } }}
  */
-export function decisionOutput(decision, note = '', saved = null) {
-  /** @type {{ behavior: 'allow'|'deny', message?: string, updatedPermissions?: object[] }} */
+export function decisionOutput(decision, note = '', saved = null, stop = false) {
+  /** @type {{ behavior: 'allow'|'deny', message?: string, updatedPermissions?: object[], interrupt?: true }} */
   const verdict =
     decision === 'allow'
       ? { behavior: 'allow', ...(saved ? { updatedPermissions: [saved] } : {}) }
-      : { behavior: 'deny', message: note ? `${DENY_MESSAGE}: ${note}` : DENY_MESSAGE };
+      : { behavior: 'deny', message: note ? `${DENY_MESSAGE}: ${note}` : DENY_MESSAGE, ...(stop ? { interrupt: true } : {}) };
   return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: verdict } };
 }
 
@@ -117,18 +122,20 @@ function copyRules(rules) {
 }
 
 /**
- * What a town decision changes on its approval: the answer, the note typed with it, and the rule
- * an "Allow always" asked Claude Code to save, with when.
+ * What a town decision changes on its approval: the answer, the note typed with it, the rule an
+ * "Allow always" asked Claude Code to save, with when, and whether a denial stopped the agent.
  * @param {'allow'|'deny'} decision
  * @param {string} note
  * @param {Offer|undefined} offer  the suggestion an "Allow always" chose
  * @param {number} at
+ * @param {boolean} stop
  * @returns {Partial<Approval>}
  */
-function townPatch(decision, note, offer, at) {
+function townPatch(decision, note, offer, at, stop) {
   /** @type {Partial<Approval>} */
   const patch = { status: decision === 'allow' ? 'allowed' : 'denied', decidedBy: 'town' };
   if (note) patch.message = note;
+  if (stop) patch.stopped = true;
   if (offer) patch.always = { rules: copyRules(offer.rules), destination: offer.destination, at };
   return patch;
 }
@@ -146,10 +153,11 @@ function text(value) {
  * @param {boolean} hold
  * @param {number} createdAt
  * @param {number} timeoutMs
- * @param {Offer[]} offers
+ * @param {{ offers: Offer[], canStop: boolean, stopNote?: string }} extras  the rules an allow may
+ *   save, and whether "Deny and stop" can stop the agent (if not, why)
  * @returns {Approval}
  */
-function newApproval(event, hold, createdAt, timeoutMs, offers) {
+function newApproval(event, hold, createdAt, timeoutMs, { offers, canStop, stopNote }) {
   return {
     id: randomUUID(),
     status: 'pending',
@@ -165,6 +173,8 @@ function newApproval(event, hold, createdAt, timeoutMs, offers) {
     expiresAt: hold ? createdAt + timeoutMs : null,
     // The offers without the suggestions themselves, which stay on the server.
     suggestions: offers.map(({ index, rules, destination }) => ({ index, rules: copyRules(rules), destination })),
+    canStop,
+    ...(stopNote ? { stopNote } : {}),
   };
 }
 
@@ -203,6 +213,17 @@ function newEntry(approval, offers) {
 function denyNote(message) {
   // eslint-disable-next-line no-control-regex -- removing control characters is the point
   return typeof message === 'string' ? message.replace(/[\s\u0000-\u001F\u007F]+/g, ' ').trim().slice(0, 500) : '';
+}
+
+/**
+ * Why a decision's `stop` is refused, or '' when it is not: a stop goes with a deny only, as
+ * `true`, and only to an agent that can be stopped (Approval.canStop).
+ * @param {Approval} approval @param {unknown} decision @param {unknown} stop
+ */
+function stopRefusal(approval, decision, stop) {
+  if (stop === undefined) return '';
+  if (stop !== true || decision !== 'deny') return 'Deny and stop needs a deny and stop: true';
+  return approval.canStop ? '' : (approval.stopNote ?? 'This agent cannot be stopped from the town');
 }
 
 /**
@@ -350,14 +371,15 @@ export function createApprovalBroker({
      * Registers a PermissionRequest. `response` resolves with the hook output: a decision object
      * if the town decides, otherwise null (immediately when not held).
      * @param {Record<string, any>} event sanitized PermissionRequest payload
-     * @param {{ hold: boolean, message?: string, at?: number, offers?: Offer[] }} options  message:
-     *   why it was not held; at: when the agent sent it (the forwarder's time); offers: the rules an
-     *   allow may save (offeredSuggestions)
+     * @param {{ hold: boolean, message?: string, at?: number, offers?: Offer[], canStop?: boolean, stopNote?: string }} options
+     *   message: why it was not held; at: when the agent sent it (the forwarder's time); offers:
+     *   the rules an allow may save (offeredSuggestions); canStop: a deny may stop the agent too,
+     *   or stopNote says why not
      * @returns {{ approval: Approval, response: Promise<object|null> }}
      */
-    create(event, { hold, message, at, offers = [] }) {
+    create(event, { hold, message, at, offers = [], canStop = false, stopNote }) {
       makeRoom();
-      const approval = newApproval(event, hold, now(), timeoutMs, offers);
+      const approval = newApproval(event, hold, now(), timeoutMs, { offers, canStop, stopNote });
       if (message) approval.message = message;
       // Its dialog: a new one, or the open question or plan this request belongs to. A plan the
       // agent asks for again shows its older one was answered.
@@ -379,14 +401,16 @@ export function createApprovalBroker({
      * A decision from a browser. Only held, pending approvals can be decided in the town.
      * `always` asks an allow to save one of the request's own suggestions ("Allow always"):
      * anything but an allow with the place of an offered suggestion is refused, and nothing
-     * changes.
+     * changes. `stop` asks a deny to stop the agent too ("Deny and stop"): refused with anything
+     * but a deny, and for an approval that cannot stop its agent (canStop false).
      * @param {unknown} id
      * @param {unknown} decision
      * @param {unknown} [message]
      * @param {unknown} [always]  the `index` of one of the approval's suggestions
+     * @param {unknown} [stop]    true: a deny that stops the agent
      * @returns {{ ok: boolean, error?: string }}
      */
-    decide(id, decision, message, always) {
+    decide(id, decision, message, always, stop) {
       const entry = typeof id === 'string' ? entries.get(id) : undefined;
       if (!entry) return { ok: false, error: 'Unknown approval' };
       if (entry.approval.status !== 'pending') return { ok: false, error: `This request is already ${entry.approval.status}` };
@@ -394,8 +418,10 @@ export function createApprovalBroker({
       if (decision !== 'allow' && decision !== 'deny') return { ok: false, error: 'Decision must be "allow" or "deny"' };
       const offer = decision === 'allow' && typeof always === 'number' ? entry.offers.get(always) : undefined;
       if (always !== undefined && !offer) return { ok: false, error: 'Allow always needs an allow and one of the rules this request offers' };
+      const refused = stopRefusal(entry.approval, decision, stop);
+      if (refused) return { ok: false, error: refused };
       const note = denyNote(message);
-      settle(entry, townPatch(decision, note, offer, now()), decisionOutput(decision, note, offer?.saved ?? null));
+      settle(entry, townPatch(decision, note, offer, now(), stop === true), decisionOutput(decision, note, offer?.saved ?? null, stop === true));
       dialogs.decided(entry.approval.id);
       return { ok: true };
     },

@@ -474,3 +474,56 @@ describe('a forwarder from an older version', () => {
     await closeBrowser(browser);
   });
 });
+
+describe('deny and stop', () => {
+  /** @param {any} browser @param {number} n */
+  async function nthError(browser, n) {
+    const errors = () => browser.messages.filter((/** @type {any} */ m) => m?.t === 'error');
+    await waitForMessage(browser, () => errors().length >= n);
+    return errors()[n - 1];
+  }
+
+  it('denies with interrupt: true, which the real forwarder passes on to Claude Code', async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    const payload = permissionRequest();
+    const hook = town.sendHook(payload);
+    const pending = await approvalFor(browser, payload.session_id);
+    assert.deepEqual([pending.a.held, pending.a.canStop, pending.a.stopNote], [true, true, undefined]);
+    // A stop goes with a deny only, and only as true.
+    browser.send(JSON.stringify({ t: 'decide', id: pending.a.id, decision: 'allow', stop: true }));
+    assert.match((await nthError(browser, 1)).message, /Deny and stop needs a deny/);
+    browser.send(JSON.stringify({ t: 'decide', id: pending.a.id, decision: 'deny', stop: 'yes' }));
+    assert.match((await nthError(browser, 2)).message, /Deny and stop needs a deny/);
+    browser.send(JSON.stringify({ t: 'decide', id: pending.a.id, decision: 'deny', message: 'wrong branch', stop: true }));
+    const result = await hook;
+    assert.deepEqual(JSON.parse(result.stdout), {
+      hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: 'Denied from Andary: wrong branch', interrupt: true } },
+    });
+    const decided = await approvalFor(browser, payload.session_id, (a) => a.status !== 'pending');
+    assert.deepEqual([decided.a.status, decided.a.stopped, decided.a.message], ['denied', true, 'wrong branch']);
+    await closeBrowser(browser);
+  });
+
+  it('cannot stop Codex, nor through a forwarder that would drop the stop: the card says why', async () => {
+    const browser = await connectBrowser(town);
+    await waitForMessage(browser, (m) => m?.t === 'hello');
+    /** @type {[string, (payload: any) => Promise<unknown>, RegExp][]} */
+    const cases = [
+      ['Codex', (payload) => town.sendHook(payload, { args: ['codex'] }), /Codex cannot be stopped/],
+      ['an older forwarder', (payload) => postHook(town, payload, { caps: ['truncated', 'updatedPermissions'] }), /older version.*Deny and stop/],
+    ];
+    for (const [index, [what, send, why]] of cases.entries()) {
+      const payload = permissionRequest();
+      const hook = send(payload);
+      const pending = await approvalFor(browser, payload.session_id);
+      assert.equal(pending.a.canStop, false, what);
+      assert.match(pending.a.stopNote, why, what);
+      browser.send(JSON.stringify({ t: 'decide', id: pending.a.id, decision: 'deny', stop: true }));
+      assert.match((await nthError(browser, index + 1)).message, why, what);
+      browser.send(JSON.stringify({ t: 'decide', id: pending.a.id, decision: 'deny' }));
+      await hook;
+    }
+    await closeBrowser(browser);
+  });
+});
