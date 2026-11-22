@@ -292,12 +292,14 @@ team town are theirs and left out.
 
 ### A shared team town
 
-Several people's agents in one town, live. One person hosts; everyone else shares into it.
+Several people's agents in one town, live. One person hosts; everyone else shares into it. A team
+town has room for six people, the host included: each has a home in the town's residential
+quarter and a character they dress up themselves.
 
 **On the host's computer:**
 
 ```sh
-andary start --team                # listens on your network (it warns you)
+andary start --team --name Sam     # listens on your network (it warns you); Sam is you
 andary team invite Lina            # prints two lines to send Lina, privately
 ```
 
@@ -308,16 +310,22 @@ agent as in sections 1–3, then runs):
 ANDARY_TEAM_KEY=Lina.xxxxxxxx andary start --share-to http://192.168.1.20:4747
 ```
 
-The second is a **view-only link** to watch the shared town in a browser. Lina's crews arrive in
-the host's town with her name on their Foreman and a badge on the crews board.
+The second is her **personal link** to the shared town. It opens the town as Lina: her character
+stands on the porch of her home, lit while she is online, and **Settings → You** lets her choose
+how her character looks (hair, face, clothes, shoes, hat, a cape or scarf…), her colour and her
+house's style; everyone sees the same. Lina's crews arrive in the host's town in her colour, with
+her name on their Foreman and a badge on the crews board. Anyone else can watch with the
+view-only link (`andary team view-link`). The demo is a small team town too: you and Lina.
 
 What is shared and what is not:
 
 - **Shared:** the events of her sessions (prompts, commands, file paths, edits), already
-  sanitized by her own Andary. Whoever has the view link sees every crew in the town, the
-  host's too, so keep it within the team.
+  sanitized by her own Andary, and her profile (her character's look, colour and house: a few
+  hundred bytes of fixed choices, kept in the host's `people.json`). Whoever has a personal link
+  or the view link sees every crew in the town, the host's too, so keep them within the team.
 - **Not shared:** costs (they stay on each computer), phone notifications, and control: each
-  person answers their own permission prompts, and viewers cannot change anything.
+  person answers their own permission prompts; a teammate can change only their own character,
+  and viewers cannot change anything.
 - **Network:** plain HTTP unless you give the host a certificate (below), so only on a network
   you trust. Across the internet, use a private network such as Tailscale and start the host
   with `--team-host <its-vpn-name>` so the link works at that name.
@@ -330,11 +338,12 @@ What is shared and what is not:
     --tls-cert my-laptop.tailnet.ts.net.crt --tls-key my-laptop.tailnet.ts.net.key
   ```
 
-  Other computers must then use `https://`: the invite and the view link say so, and plain
+  Other computers must then use `https://`: the invite and the links say so, and plain
   HTTP is refused from the network. Your own computer keeps using plain HTTP on `127.0.0.1`,
   which never leaves it. A self-signed certificate works too if every teammate trusts it
   (`NODE_EXTRA_CA_CERTS=<cert> andary start --share-to …`, and in their browser).
-- **Revoke:** `andary team reset` on the host invalidates every key and the view link.
+- **Revoke:** `andary team remove Lina` on the host stops Lina's key and personal link at once
+  and frees her home; `andary team reset` invalidates every key and link (profiles are kept).
 
 ### A demo anyone can open
 
@@ -392,7 +401,7 @@ The full model: [docs/INTEGRATION.md](docs/INTEGRATION.md).
 | "Sign in with the link…" | The server restarted with a new token: use the link `andary start` printed, or `andary status` to see it again. |
 | Port 4747 is in use | `andary start --port 5000` (or `--port 0` for any free port). |
 | Events arrive twice | The plugin and `andary install` are both active, or one agent is installed in two scopes: `andary doctor` says which; uninstall one. |
-| A teammate's view link says "Forbidden" | Start the host with `--team-host <the name in the link>`, or use the IP address the invite printed. |
+| A teammate's personal or view link says "Forbidden" | Start the host with `--team-host <the name in the link>`, or use the IP address the invite printed. A personal link also stops working after `team remove` or `team reset`. |
 | No plan limits on the Usage button | Install the [andary-limits mod](#plan-limits-optional), then finish a turn in a session started afterwards (Claude Code v2.1.287 or newer; an API key has no plan limits). `andary doctor` says whether it reported. |
 | Plan limits never arrive, with `ANDARY_HOME` set | The mod looks for the town in Claude Code's own `ANDARY_HOME`, else `~/.andary`. Set `ANDARY_HOME` where Claude Code inherits it too (your shell profile), and restart Claude Code. |
 | The 3D view is blank or slow | Settings → Graphics → Low power; the boards and log keep working without WebGL. |
@@ -406,15 +415,17 @@ andary [command] [options]
                         --port <n>, --host <address>, --no-open, --detach, --record,
                         --remote-approvals, --approval-timeout <s>, --notify, --notify-url <url>,
                         --notify-limits (a phone note at 90% of a plan limit),
-                        --team [--team-host <name>], --share-to <address> (key in ANDARY_TEAM_KEY),
+                        --team [--name <you>] [--team-host <name>], --share-to <address> (key in ANDARY_TEAM_KEY),
                         --tls-cert <file> --tls-key <file> (HTTPS for other computers)
   demo                  start the town with the built-in simulation
   stop                  stop the running town
   install [codex]       add the hooks for Claude Code (default) or Codex
                         --scope user|project|local, --dir <path>, --dry-run, --print
   uninstall [codex]     remove exactly the hooks Andary added
-  team invite <name>    on a team host: a teammate's key and the view link (--url <address>)
-  team reset            on a team host: revoke every key and the view link
+  team invite <name>    on a team host: a teammate's key and personal link, up to five (--url <address>)
+  team remove <name>    on a team host: revoke one teammate's key and link
+  team view-link        on a team host: the view-only link (--url <address>)
+  team reset            on a team host: revoke every key and link
   status                server, sign-in link, hooks per agent and scope
   doctor                check the whole pipeline end to end
   simulate              send simulated sessions to the running town (--speed, --seed)

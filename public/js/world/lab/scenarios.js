@@ -4,6 +4,7 @@
 import { BUILDING_ACTIVITY, BUILDING_KEYS, CREW_COLORS } from '../../core/catalog.js';
 import { ACTIVITY_NAMES } from '../agents/activities.js';
 import { EFFECT_KINDS } from '../agents/effects.js';
+import { HOUSE_STYLES, randomProfile } from '../../core/profile.js';
 
 /** Agent templates the lab can spawn: one per role and a few custom types. */
 export const TEMPLATES = Object.freeze({
@@ -232,4 +233,19 @@ function entrances(lab) {
 }
 
 /** @type {Record<string, (lab: Lab) => void>} */
-export const SCENARIOS = { lineup, activities, bubbles, effects, crowd: (lab) => chaos(lab), queue, weather, entrances };
+/**
+ * A full team town, the phone's frame budget case: six people at home, each with four helpers
+ * walking about (30 figures), every home lived in. Watch the readout with ?quality=low.
+ * @param {Lab} lab
+ */
+function people(lab) {
+  const names = ['Sam', 'Lina', 'Omar', 'Rui', 'Ana', 'Kai'];
+  names.forEach((name, slot) => {
+    const profile = randomProfile();
+    lab.world.setHome(slot, { name, color: CREW_COLORS[slot], style: HOUSE_STYLES[slot % HOUSE_STYLES.length], lights: true });
+    lab.spawn('foreman', { name, role: 'person', person: profile.look, home: slot, color: CREW_COLORS[slot], entrance: 'none' });
+  });
+  chaos(lab, 24);
+}
+
+export const SCENARIOS = { lineup, activities, bubbles, effects, crowd: (lab) => chaos(lab), queue, weather, entrances, people };

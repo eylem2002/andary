@@ -1085,3 +1085,55 @@ section.
 189. **An unowned home is a plain cottage in the town's own look**, door in wood, no flag, no name
      plate and dark windows, so a town without a team still looks lived in. All six homes are one
      mesh, rebuilt when one changes.
+190. **A member key now needs its name on the roster (`people.json`).** The design asks for
+     `team remove` to revoke one person; that needs both checks to look the name up. A team that
+     invited people before this change runs `andary team invite <name>` once more for each: the key
+     printed is the same, so their relays keep working with no change on their side.
+191. **The host is named "Host" until `--name` says otherwise**, never the computer's user name (it
+     shows on a name plate to everyone). A later `--name` renames the host's entry and keeps its home,
+     colour and profile; a name a teammate already has is refused at start.
+192. **The roster file is shared by the CLI and the running host, last write wins.** `team invite`
+     and `team remove` rewrite it atomically; the host looks at it every 2 s and before every key or
+     link check, and rewrites it when someone saves a profile. A save in the same instant as an
+     invite could undo the invite; both are rare and the invite can be repeated.
+193. **A teammate never takes the host's home.** Before the host has started once, five invites fill
+     the roster; the sixth place is the host's.
+194. **Every profile key is required, not only known ones.** "Unknown keys rejected" is read as an
+     exact key set: a profile missing a field is as malformed as one with an extra, and the browser
+     always sends whole profiles.
+195. **A colour asked for and taken goes to the next free one in order, wrapping round,** and a
+     person's own colour counts as free to them. The browser greys out colours others hold in the
+     "You" dialog (with whose they are), so this mostly happens when two people save at once.
+196. **The palettes are fixed in `core/profile.js`:** 8 skin tones, 9 hair colours (black to teal),
+     10 cloth colours, each named for screen readers; `'theme'` tops wear the person's colour.
+     Indices, not hex, cross the wire, so a later palette tweak changes everyone's look the same way.
+197. **The preview in the "You" dialog is a flat SVG drawing, not the 3D figure.** The HUD may not
+     reach into the 3D world (layer rules), a second WebGL renderer would cost a phone its frame
+     budget, and SVG works where WebGL does not. It is drawn from the same profile and palettes.
+198. **In PR 1 a person stands on their porch while online and is not drawn while offline**; the
+     60 s porch and 10 min inside timers, walking, and lights from a relay that posted in the last
+     2 min come with presence (PR 2). Lights are on while any browser plays the person (the owner's
+     browser plays the host).
+199. **The owner may save the host's profile too** (`{t:'profile'}` from the owner's browser), since
+     the host is a person of the town like the others.
+200. **A person counts as view-only in the HUD** (no Needs you for others' prompts, no plan limits,
+     no catch-up, no remote approvals or phone settings), exactly like a viewer, besides their own
+     character.
+201. **Each person may hold 2 connections, and people may use the 4 connections kept for the
+     owner**; viewers still cannot. The design lists this under PR 2's abuse cover; it is a few
+     lines and closes a way for one link to fill the town, so it came now.
+202. **The demo is a small team town:** "You" (the host, slot 0, cobalt, the coast cottage) and Lina
+     (slot 1, raspberry, a desert house: curly hair, round eyes, glasses, a hoodie, headphones), both
+     online, so it shows two lit homes and two people. The "You" dialog works in the demo and keeps
+     your look in this browser; a saved look asking for Lina's colour starts on the next free one.
+     Every local crew is yours, so the demo's own crews now share your colour, told apart by number.
+203. **A home's door tile is the west half of its plot's frontage**, and a person stands on the
+     street side of it, facing south. Home Street has no traffic, so nobody stands in a lane.
+204. **The frame budget is checked with `world-lab.html?scenario=people&quality=low` at 390 × 844**:
+     six people at home plus 24 helpers walking about (30 figures), every home lived in. This
+     container renders with SwiftShader on the CPU, so its frames per second say nothing about a
+     phone; what it does show is that the quarter adds 6 to 7 draw calls to the same 20-figure crowd
+     (44 → 49–50: the homes, the park's pool, dog, pigeons and two kites; its gardens, lamps and
+     props are in the town batch) and the same frame rate as `main` there, so the 30 fps target on a
+     phone is as near as it was. A person costs one figure geometry and one draw call like any
+     helper.

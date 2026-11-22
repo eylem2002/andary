@@ -184,3 +184,59 @@ test('a Codex crew says so on the crews board', async ({ page }) => {
   await expect(crew).toContainText('GPT-5.3 Codex');
   await expect(page.locator('[data-testid="crew"]').first().getByTestId('crew-agent')).toBeHidden();
 });
+
+test('you choose your character in the "You" dialog: keyboard, preview, Random and Save', async ({ page }) => {
+  await openDemo(page);
+  // The demo is a small team town: you and Lina, both at home.
+  await page.waitForFunction(() => /** @type {any} */ (window).__andary.world.hasAgent('person:Lina') && /** @type {any} */ (window).__andary.world.hasAgent('person:You'));
+  await page.getByTestId('settings-button').click();
+  await page.getByTestId('open-character').click();
+  const dialog = page.getByRole('dialog', { name: 'You' });
+  await expect(dialog).toBeVisible();
+  const preview = dialog.getByRole('img', { name: /^Preview of your character/ });
+  await expect(preview).toHaveAttribute('aria-label', /short hair/);
+
+  // Keyboard: a select, then a radio group of named swatches moved through with the arrow keys.
+  await dialog.getByLabel('Hair', { exact: true }).selectOption('curly');
+  await expect(preview).toHaveAttribute('aria-label', /curly hair/);
+  const skin = dialog.getByRole('radiogroup', { name: 'Skin' }).or(dialog.getByRole('group', { name: 'Skin' }));
+  await skin.getByRole('radio', { name: 'Peach' }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(skin.getByRole('radio', { name: 'Honey' })).toBeChecked();
+  await expect(preview).toHaveAttribute('aria-label', /^Preview of your character: Honey skin/);
+  // Lina's colour is hers: it cannot be chosen, and it says whose it is.
+  await expect(dialog.getByRole('radio', { name: "Raspberry (Lina's)" })).toBeDisabled();
+
+  await dialog.getByTestId('character-random').click();
+  await expect(dialog.getByTestId('character-status')).toContainText('New look:');
+  await dialog.getByLabel('Hat').selectOption('beanie');
+  await dialog.getByLabel('Extra').selectOption('cape');
+  await dialog.getByTestId('character-save').click();
+  await expect(dialog).toBeHidden();
+  const look = await page.evaluate(() => {
+    const calls = /** @type {any} */ (window).__andary.world.calls.filter((/** @type {any} */ c) => c.method === 'updateAgent' && c.args[0] === 'person:You');
+    return calls.at(-1)?.args[1].person;
+  });
+  expect(look).toMatchObject({ hat: 'beanie', extra: 'cape' });
+  // Kept in this browser, so the next visit (or the host after a reset) gets it back.
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('andary:profile') ?? 'null')?.look.extra)).toBe('cape');
+});
+
+test('the "You" dialog fits a phone, with 44 px colour swatches', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile', 'phone layout');
+  await openDemo(page);
+  await page.getByTestId('settings-button').click();
+  await page.getByTestId('open-character').click();
+  const dialog = page.getByRole('dialog', { name: 'You' });
+  await expect(dialog).toBeVisible();
+  const viewport = /** @type {{ width: number }} */ (page.viewportSize());
+  const box = /** @type {{ x: number, width: number }} */ (await dialog.boundingBox());
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  const swatch = /** @type {{ width: number, height: number }} */ (await dialog.locator('.hud-swatch').first().boundingBox());
+  expect(swatch.width).toBeGreaterThanOrEqual(44);
+  expect(swatch.height).toBeGreaterThanOrEqual(44);
+  await dialog.getByTestId('character-save').scrollIntoViewIfNeeded();
+  await dialog.getByTestId('character-save').click();
+  await expect(dialog).toBeHidden();
+});

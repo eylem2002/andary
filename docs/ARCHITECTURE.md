@@ -99,7 +99,7 @@ references may cross.
 | --- | --- |
 | `hooks/` | Node built-ins only (it is copied out and must stand alone) |
 | `mods/` | its own folder only, no packages (Claude Code copies only the plugin's folder and runs the module without Node.js) |
-| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules`, `loops`, `shell`, `summaries`, `digest`, `limits`, `town-map` |
+| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules`, `loops`, `shell`, `summaries`, `digest`, `limits`, `town-map`, `profile` |
 | `server/cli/`, `cli/` | the server, those core modules, the simulation (for `andary simulate`) |
 | `public/js/core/` | `core/` only |
 | `public/js/sources/` | `sources/`, `core/` |
@@ -122,6 +122,7 @@ references may cross.
 | when you were away, and what your crews did meanwhile (Catch me up) | `server/digest.mjs`, `public/js/core/digest.js`, `public/js/core/shell.js`, `public/js/ui/catch-up.js` |
 | who may connect, and what they may do | `server/auth.mjs`, `server/browsers.mjs`, `server/security.mjs` |
 | the team town | `server/team.mjs`, `ingestTeam` in `server/ingest.mjs` |
+| a team town's people: roster, personal links, profiles, homes, the "You" dialog | `server/people.mjs`, `public/js/core/profile.js`, `ui/character.js`, `ui/town-people.js`, `world/agents/looks.js` (with `figure-body.js`, `figure-hats.js`, `figure-person.js`) |
 | plan limits (the andary-limits mod) | `mods/andary-limits/`, `server/limits.mjs`, `public/js/core/limits.js`, `ui/limits.js` |
 | how a hook becomes town events | `public/js/core/events.js`, `summaries.js` |
 | crews, agents, the log | `public/js/core/store.js`, `crews.js` |
