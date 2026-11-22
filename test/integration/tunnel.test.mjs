@@ -13,6 +13,15 @@ import { createTeamRelay, memberKey, teamSecret, viewToken } from '../../server/
 import { connectWebSocket } from '../../server/ws-client.mjs';
 import { closeBrowser, hookPayload, rawRequest, startTown, waitForMessage } from './helpers.mjs';
 
+/**
+ * Waits (up to 10 s) until the town's output matches: some lines come after startTown returns.
+ * @param {{ output: () => string }} town
+ * @param {RegExp} pattern
+ */
+async function printed(town, pattern) {
+  for (let i = 0; i < 100 && !pattern.test(town.output()); i += 1) await new Promise((resolve) => setTimeout(resolve, 100));
+}
+
 const CLI = join(ROOT_DIR, 'cli', 'andary.mjs');
 const TUNNEL = 'https://seasonal-deck-organisms-sf.trycloudflare.com';
 const TUNNEL_HOST = 'seasonal-deck-organisms-sf.trycloudflare.com';
@@ -124,7 +133,9 @@ describe('Team town on the internet (--tunnel)', { skip: process.platform === 'w
   });
   after(() => town?.stop());
 
-  it('starts cloudflared at a loopback port of its own and records the address', () => {
+  it('starts cloudflared at a loopback port of its own and records the address', async () => {
+    // The tunnel lines are printed after the sign-in link, which is when startTown returns.
+    await printed(town, /changes when Andary restarts/);
     assert.deepEqual(launched.args.slice(0, 3), ['tunnel', '--no-autoupdate', '--url']);
     assert.match(launched.args[3], /^http:\/\/127\.0\.0\.1:\d+$/);
     assert.notEqual(tunnelPort, town.port);
@@ -389,7 +400,7 @@ describe('--tunnel refusals', { skip: process.platform === 'win32' ? 'the fake c
       const { args } = JSON.parse(readFileSync(env.FAKE_LOG, 'utf8'));
       assert.deepEqual(args.slice(4), ['--allowed-mail', 'you@x.example', '--allowed-mail', 'lina@y.example']);
       // Printed after the sign-in link, which is when startTown returns: wait for it.
-      for (let i = 0; i < 50 && !/teammates can watch, not share/.test(town.output()); i += 1) await new Promise((r) => setTimeout(r, 100));
+      await printed(town, /teammates can watch, not share/);
       assert.match(town.output(), /Only you@x\.example, lina@y\.example can open it/);
       assert.match(town.output(), /teammates can watch, not share/);
     } finally {
