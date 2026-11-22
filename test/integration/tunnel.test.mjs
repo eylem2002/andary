@@ -388,6 +388,8 @@ describe('--tunnel refusals', { skip: process.platform === 'win32' ? 'the fake c
     try {
       const { args } = JSON.parse(readFileSync(env.FAKE_LOG, 'utf8'));
       assert.deepEqual(args.slice(4), ['--allowed-mail', 'you@x.example', '--allowed-mail', 'lina@y.example']);
+      // Printed after the sign-in link, which is when startTown returns: wait for it.
+      for (let i = 0; i < 50 && !/teammates can watch, not share/.test(town.output()); i += 1) await new Promise((r) => setTimeout(r, 100));
       assert.match(town.output(), /Only you@x\.example, lina@y\.example can open it/);
       assert.match(town.output(), /teammates can watch, not share/);
     } finally {
