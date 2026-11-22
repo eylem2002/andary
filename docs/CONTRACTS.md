@@ -1273,18 +1273,24 @@ Mark { id, kind: 'prompt'|'end', at, text, ended: 'done'|'error'|'interrupted'|n
   gets a span of its own, `durationMs` long. A `prompt` is a `prompt` mark; `turn.stop` and
   `turn.fail` an `end` mark (a Stop with `stop_hook_active` updates the last one) and close the
   lane's open spans and waits, as do `subagent.stop` and, for every lane of its crew, `session.end`.
-- **Bounds**: a lane keeps what ended at most `DAY_MS` (24 hours) before its newest moment; over
-  `MAX_SPANS` (400), `MAX_WAITS` (120) or `MAX_MARKS` (200) its older half merges in neighbouring
-  pairs (finished spans and waits; marks of one kind), so the day stays visible at a coarser grain
-  (`calls` and `fails` add up, `count` for marks), and only if that does not bring it under the
-  limit do the oldest go. `MAX_LANES` (120): the lane quiet the longest goes first.
+- **Bounds**: a lane keeps what ended at most `DAY_MS` (24 hours) before its newest moment, trimmed
+  once a minute (`TRIM_EVERY_MS`) or as soon as a list is over its limit: `MAX_SPANS` (400),
+  `MAX_WAITS` (120), `MAX_MARKS` (200). Over it, neighbours (finished spans and waits; marks of one
+  kind) in the same time bucket merge, buckets as wide as their age says (`bucketWidth(age,
+  level)`): at level 0 the last hour in full, a minute up to three hours old, five minutes up to
+  eight, fifteen beyond; levels 1 to 3 put the last hour in 15 s, 30 s and one-minute buckets;
+  each level after that doubles every bucket. Levels are tried, from one finer than the lane needed
+  last time, until the list is down to 60% of its limit; only if level 10 does not do it do the
+  oldest go. A merged span counts every call and failure in it (`calls`, `fails`) and reads "N calls,
+  mostly Terminal Works" (the building of the longer of each pair); marks add up their `count`.
+  `MAX_LANES` (120): the lane quiet the longest goes first.
 - `timelineView(timeline, { from, to, sessions?, order?, minMs? }) → TimelineGroup[]`: per crew (in
   `order`, then the rest) the lanes with anything in the window, leads first, then by when they
   started; `TimelineGroup { sessionId, lanes: { key, name, role, items: TimelineItem[] }[] }`, items
   by start. `TimelineItem { id, laneKey, type: 'tool'|'wait'|'prompt'|'end', start, end /* a running
   one: to */, open, label, building, wait, calls, fails, ended, detail /* the command, the file or the
   error */, changeId }`. Neighbouring finished calls when one is shorter than `minMs` merge
-  ("5 calls (1 failed)").
+  ("5 calls, mostly Terminal Works (1 failed)").
 
 The strip (`ui/timeline.js`) sits under the town between the crews and the board, above the
 toolbar (past the inspector when that opens beside the crews), and is shown by the toolbar's

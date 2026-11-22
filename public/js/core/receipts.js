@@ -15,7 +15,7 @@
 import { changeHunks } from './changes.js';
 import { changesFiles, errorSignature } from './loops.js';
 import { isInside, normalizePath } from './paths.js';
-import { gitAction, isBuildRun, isTestRun, readShell, runsNoTests, selectsTests, shellCommands } from './shell.js';
+import { gitAction, isBuildRun, isTestRun, readShell, runsNoTests, selectsTests } from './shell.js';
 import { clip, oneLine, relativePath, str } from './text.js';
 
 /** @typedef {import('./events.js').TownEvent} TownEvent */
@@ -143,7 +143,9 @@ export function createReceipts() {
    * @returns {Receipt|null}
    */
   function record(e, who, { costs, cwd, member = false }) {
-    if (!member) othersEdited(e, cwd);
+    // A shell command is read once for both: other crews' turns, and this one.
+    const shellEdit = isShellEdit(e);
+    if (!member) othersEdited(turns, e, cwd, shellEdit);
     if (e.kind === 'session.end') {
       turns.delete(e.sessionId);
       fresh.delete(e.sessionId);
@@ -166,23 +168,11 @@ export function createReceipts() {
     // turn going on after a Stop hook (its next Stop says which).
     if (!turn || (turn.receipt && !ending && countsFor(e))) turn = continueAfter(e, turn, costs, member ? '' : normalizePath(cwd));
     if (!ending) {
-      addWork(turn, e, who, cwd);
+      addWork(turn, e, who, cwd, shellEdit);
       return null;
     }
     turn.agents.add(e.agentKey);
     return endTurn(turn, e, costs);
-  }
-
-  /**
-   * An edit by one crew is news for every other crew's turn working in that folder.
-   * @param {TownEvent} e @param {string} cwd
-   */
-  function othersEdited(e, cwd) {
-    const where = editedPath(e, cwd);
-    if (!where) return;
-    for (const [sessionId, turn] of turns) {
-      if (sessionId !== e.sessionId && !turn.receipt && isInside(where, turn.folder)) turn.othersAt = Math.max(turn.othersAt ?? 0, e.ts);
-    }
   }
 
   /**
@@ -285,9 +275,9 @@ function countsFor(e) {
 }
 
 /**
- * @param {Turn} turn @param {TownEvent} e @param {Who} who @param {string} cwd
+ * @param {Turn} turn @param {TownEvent} e @param {Who} who @param {string} cwd @param {boolean} shellEdit  a shell command that may have changed files
  */
-function addWork(turn, e, who, cwd) {
+function addWork(turn, e, who, cwd, shellEdit) {
   turn.agents.add(e.agentKey);
   if (who.role === 'subagent') {
     if (turn.helpers.size < MAX_HELPERS) turn.helpers.add(who.name);
@@ -303,7 +293,7 @@ function addWork(turn, e, who, cwd) {
     if (FILE_TOOLS.has(d.tool) || (d.tool === 'apply_patch' && d.file)) changedFile(turn, e, cwd);
     else if (SHELL_TOOLS.has(d.tool)) {
       ran(turn, e, who);
-      if (shellChanges(d)) {
+      if (shellEdit) {
         turn.shellEdits += 1;
         turn.lastEditAt = Math.max(turn.lastEditAt ?? 0, e.ts);
       }
@@ -318,6 +308,23 @@ function addWork(turn, e, who, cwd) {
   }
 }
 
+/**
+ * An edit by one crew is news for every other crew's open turn working in that folder.
+ * @param {Map<string, Turn>} turns @param {TownEvent} e @param {string} cwd @param {boolean} shellEdit
+ */
+function othersEdited(turns, e, cwd, shellEdit) {
+  const where = editedPath(e, cwd, shellEdit);
+  if (!where) return;
+  for (const [sessionId, turn] of turns) {
+    if (sessionId !== e.sessionId && !turn.receipt && isInside(where, turn.folder)) turn.othersAt = Math.max(turn.othersAt ?? 0, e.ts);
+  }
+}
+
+/** A shell call that went through and may have changed files. @param {TownEvent} e */
+function isShellEdit(e) {
+  return e.kind === 'tool.end' && SHELL_TOOLS.has(e.data.tool) && shellChanges(e.data);
+}
+
 /** git commands that record or send work without changing a file: no edit. */
 const GIT_BOOKKEEPING = new Set(['add', 'commit', 'push', 'tag', 'fetch', 'status', 'log', 'diff', 'show']);
 
@@ -327,8 +334,23 @@ const GIT_BOOKKEEPING = new Set(['add', 'commit', 'push', 'tag', 'fetch', 'statu
  * @param {Record<string, any>} d
  */
 function shellChanges(d) {
-  const powershell = d.tool === 'PowerShell';
-  return readShell(d.input?.command, { powershell }).segments.some((segment) => !isBookkeeping(segment.words) && changesFiles(segmentLine(segment), powershell));
+  // Most commands change nothing: the whole line is read once for that, and only a line that may
+  // is read command by command, to leave git's bookkeeping, tests and builds aside.
+  if (!changesFiles(d.input?.command, d.tool === 'PowerShell')) return false;
+  return segmentsOf(d).some((segment) => !isBookkeeping(segment.words) && changesFiles(segmentLine(segment), d.tool === 'PowerShell'));
+}
+
+/** Each call's command line, read once (core/shell.js) for everything a receipt asks of it. */
+const READ = new WeakMap();
+
+/** @param {Record<string, any>} d @returns {import('./shell.js').Segment[]} */
+function segmentsOf(d) {
+  let segments = READ.get(d);
+  if (!segments) {
+    segments = readShell(d.input?.command, { powershell: d.tool === 'PowerShell' }).segments;
+    READ.set(d, segments);
+  }
+  return segments;
 }
 
 /** A segment as a line again, with its here-documents' bodies. @param {import('./shell.js').Segment} segment */
@@ -347,13 +369,13 @@ function isBookkeeping(words) {
 /**
  * Where an event edited files, for other crews: a file tool's file, or the folder a shell command
  * that may have changed files ran in. '' for anything else.
- * @param {TownEvent} e @param {string} cwd
+ * @param {TownEvent} e @param {string} cwd @param {boolean} shellEdit
  */
-function editedPath(e, cwd) {
+function editedPath(e, cwd, shellEdit) {
   if (e.kind !== 'tool.end') return '';
   const d = e.data;
   if (FILE_TOOLS.has(d.tool) || (d.tool === 'apply_patch' && d.file)) return normalizePath(d.file, e.cwd || cwd);
-  return SHELL_TOOLS.has(d.tool) && shellChanges(d) ? normalizePath(e.cwd || cwd) : '';
+  return shellEdit ? normalizePath(e.cwd || cwd) : '';
 }
 
 /** A failure's line that says something (as the stuck rules read it), else its first. @param {Record<string, any>} d */
@@ -411,7 +433,7 @@ export function lineDelta(before, after) {
  */
 function ran(turn, e, who) {
   const d = e.data;
-  const commands = shellCommands(d.input?.command, { powershell: d.tool === 'PowerShell' });
+  const commands = segmentsOf(d);
   const runs = {
     test: commands.filter((c) => isTestRun(c.words) && !runsNoTests(c.words)),
     build: commands.filter((c) => isBuildRun(c.words)),
@@ -427,7 +449,7 @@ function ran(turn, e, who) {
 }
 
 /**
- * @param {TownEvent} e @param {import('./shell.js').ShellCommand[]} relevant
+ * @param {TownEvent} e @param {import('./shell.js').Segment[]} relevant
  * @returns {Pick<ReceiptRun, 'result'|'why'>}
  */
 function resultOf(e, relevant) {

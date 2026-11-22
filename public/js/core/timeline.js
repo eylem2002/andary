@@ -4,9 +4,12 @@
 // own, and your prompts and the turn's end are marks. Pure: the store feeds it the events it
 // applied and each agent's wait after them; timelineView() cuts a window out of it for the HUD.
 //
-// Memory is bounded without losing the day: a lane over its limit merges its older half in pairs
-// (two neighbouring calls become one span that counts both), so a busy morning stays visible at a
-// coarser grain; only what is more than a day older than the lane's newest moment goes.
+// Memory is bounded without losing the day: a lane over its limit merges what is older than an
+// hour into time buckets that grow with age (a minute up to three hours old, five up to eight,
+// fifteen beyond); if that is not enough, the last hour in 15 s, then 30 s, then one-minute
+// buckets, then every bucket twice as wide, until it fits. A busy morning keeps a readable,
+// coarser shape; only what is more than a day older than the lane's newest moment goes.
+import { BUILDINGS } from './catalog.js';
 import { changeHunks } from './changes.js';
 import { clip, oneLine, str } from './text.js';
 
@@ -62,6 +65,8 @@ import { clip, oneLine, str } from './text.js';
  * @property {Span[]} spans      by start
  * @property {WaitSpan[]} waits  by start
  * @property {Mark[]} marks      by time
+ * @property {number} trimmed    when it was last trimmed (its newest moment then)
+ * @property {number} level      how coarse its spans' buckets had to be last time (bucketWidth)
  */
 
 /** @typedef {{ kind: WaitKind, text: string }} WaitNow */
@@ -75,6 +80,16 @@ export const MAX_MARKS = 200;
 export const MAX_LANES = 120;
 /** How far back a lane keeps anything, from its newest moment. */
 export const DAY_MS = 24 * 60 * 60_000;
+/** A lane under its limits is trimmed of what is a day old at most this often. */
+const TRIM_EVERY_MS = 60_000;
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+/** How wide a bucket is for what is this old (at the first level): the last hour in full. */
+const BUCKETS = Object.freeze([[HOUR, 0], [3 * HOUR, MINUTE], [8 * HOUR, 5 * MINUTE], [Infinity, 15 * MINUTE]]);
+/** Levels that only coarsen the last hour (to 15 s, 30 s, a minute), before older buckets grow. */
+const RECENT_LEVELS = 3;
+/** Levels tried before the oldest go. */
+const MAX_LEVEL = 10;
 /** Open spans a finished call is matched against, newest first. */
 const MATCH_WINDOW = 64;
 const TEXT_CHARS = 300;
@@ -136,7 +151,7 @@ export function recordWait(t, agent, now, at) {
 function laneFor(t, e, who) {
   let lane = t.lanes[e.agentKey];
   if (!lane) {
-    lane = { key: e.agentKey, sessionId: e.sessionId, name: who.name, role: who.role, first: e.ts, last: e.ts, spans: [], waits: [], marks: [] };
+    lane = { key: e.agentKey, sessionId: e.sessionId, name: who.name, role: who.role, first: e.ts, last: e.ts, spans: [], waits: [], marks: [], trimmed: e.ts, level: 0 };
     t.lanes[e.agentKey] = lane;
     dropQuietLanes(t);
   }
@@ -254,52 +269,85 @@ function dropQuietLanes(t) {
 }
 
 /**
- * Keeps a lane within its limits: what is more than a day older than its newest moment goes, and
- * a list over its limit merges its older half in pairs.
+ * Keeps a lane within its limits, cheaply: once a minute, or as soon as a list is over its limit.
  * @param {Lane} lane
  */
 function trim(lane) {
+  const over = lane.spans.length > MAX_SPANS || lane.waits.length > MAX_WAITS || lane.marks.length > MAX_MARKS;
+  if (!over && lane.last - lane.trimmed < TRIM_EVERY_MS) return;
+  lane.trimmed = lane.last;
   const since = lane.last - DAY_MS;
   lane.spans = lane.spans.filter((s) => (s.end ?? lane.last) >= since);
   lane.waits = lane.waits.filter((w) => (w.end ?? lane.last) >= since);
   lane.marks = lane.marks.filter((m) => m.at >= since);
-  lane.spans = bound(lane.spans, MAX_SPANS, mergeSpans, (a, b) => a.end !== null && b.end !== null);
-  lane.waits = bound(lane.waits, MAX_WAITS, mergeWaits, (a, b) => a.end !== null && b.end !== null);
-  lane.marks = bound(lane.marks, MAX_MARKS, mergeMarks, (a, b) => a.kind === b.kind);
+  // A lane busy enough to need coarse buckets once needs them again: start one level finer.
+  const spans = bound(lane.spans, MAX_SPANS, lane.last, SPANS, Math.max(0, lane.level - 1));
+  lane.spans = spans.list;
+  if (spans.level >= 0) lane.level = spans.level;
+  lane.waits = bound(lane.waits, MAX_WAITS, lane.last, WAITS).list;
+  lane.marks = bound(lane.marks, MAX_MARKS, lane.last, MARKS).list;
 }
 
 /**
- * A list within `max`: over it, its older half merges in pairs; should little of it merge (calls
- * still open, prompts and caps in turn), the oldest go.
- * @template T @param {T[]} list @param {number} max @param {(a: T, b: T) => T} merge @param {(a: T, b: T) => boolean} mergeable
+ * How a list's items merge: when each is, which two may merge, and into what.
+ * @template T @typedef {{ at: (x: T) => number, mergeable: (a: T, b: T) => boolean, merge: (a: T, b: T) => T }} Merging
  */
-function bound(list, max, merge, mergeable) {
-  if (list.length <= max) return list;
-  const thinned = thin(list, merge, mergeable);
-  return thinned.length > max ? thinned.slice(-max) : thinned;
+
+/**
+ * How wide a time bucket is for what is `age` old, at a level (0 keeps the last hour in full).
+ * @param {number} age @param {number} level
+ */
+export function bucketWidth(age, level) {
+  const [, width] = BUCKETS.find(([upTo]) => age < upTo) ?? BUCKETS[BUCKETS.length - 1];
+  // The last hour first: 15 s, 30 s, a minute; then every bucket twice as wide at each level.
+  const wider = 2 ** Math.max(0, level - RECENT_LEVELS);
+  if (width) return width * wider;
+  return level === 0 ? 0 : 15_000 * 2 ** (Math.min(level, RECENT_LEVELS) - 1) * wider;
 }
 
 /**
- * The list with its older half merged in neighbouring pairs (those `mergeable` allows).
- * @template T @param {T[]} list @param {(a: T, b: T) => T} merge @param {(a: T, b: T) => boolean} mergeable
+ * A list within `max`: over it, neighbours in the same age-scaled time bucket merge, a level
+ * coarser each time (from level `from`) until it is down to 60% of `max`; should that not do
+ * (calls still open, prompts and caps in turn), the oldest go. Returns the level it took, or -1
+ * when it was within `max`.
+ * @template T
+ * @param {T[]} list @param {number} max @param {number} now @param {Merging<T>} merging @param {number} [from]
+ * @returns {{ list: T[], level: number }}
  */
-function thin(list, merge, mergeable) {
-  const half = Math.floor(list.length / 2);
+function bound(list, max, now, merging, from = 0) {
+  if (list.length <= max) return { list, level: -1 };
+  let out = list;
+  // Well under it, so a busy lane merges now and then, not on every call.
+  const target = Math.floor(max * 0.6);
+  let level = from;
+  for (; level <= MAX_LEVEL; level += 1) {
+    out = bucketed(out, now, level, merging);
+    if (out.length <= target) break;
+  }
+  return { list: out.length > max ? out.slice(-max) : out, level: Math.min(level, MAX_LEVEL) };
+}
+
+/**
+ * The list with neighbours in the same time bucket merged, buckets as wide as their age says.
+ * @template T
+ * @param {T[]} list @param {number} now @param {number} level @param {Merging<T>} merging
+ * @returns {T[]}
+ */
+function bucketed(list, now, level, { at, merge, mergeable }) {
   /** @type {T[]} */
   const out = [];
-  let i = 0;
-  while (i < half) {
-    const a = list[i];
-    const b = list[i + 1];
-    if (i + 1 < half && mergeable(a, b)) {
-      out.push(merge(a, b));
-      i += 2;
-    } else {
-      out.push(a);
-      i += 1;
+  let lastBucket = '';
+  for (const item of list) {
+    const width = bucketWidth(now - at(item), level);
+    const bucket = width ? `${width}:${Math.floor(at(item) / width)}` : '';
+    const last = out[out.length - 1];
+    if (bucket && bucket === lastBucket && mergeable(last, item)) out[out.length - 1] = merge(last, item);
+    else {
+      out.push(item);
+      lastBucket = bucket;
     }
   }
-  return out.concat(list.slice(i));
+  return out;
 }
 
 /** Two calls as one span: the building of the longer, what both did in words. @param {Span} a @param {Span} b @returns {Span} */
@@ -313,7 +361,7 @@ function mergeSpans(a, b) {
     start: Math.min(a.start, b.start),
     end: Math.max(a.end ?? a.start, b.end ?? b.start),
     tool: a.tool === b.tool ? a.tool : '',
-    summary: `${calls} calls, ${a.tool === b.tool && a.tool ? a.tool : 'several tools'}`,
+    summary: `${calls} calls, mostly ${BUILDINGS[main.building]?.name ?? main.tool}`,
     toolUseId: null,
     file: null,
     command: null,
@@ -334,6 +382,13 @@ function mergeWaits(a, b) {
 function mergeMarks(a, b) {
   return { ...b, id: a.id, count: a.count + b.count, text: b.text || a.text };
 }
+
+/** @type {Merging<Span>} */
+const SPANS = { at: (x) => x.start, mergeable: (a, b) => a.end !== null && b.end !== null, merge: mergeSpans };
+/** @type {Merging<WaitSpan>} */
+const WAITS = { at: (x) => x.start, mergeable: (a, b) => a.end !== null && b.end !== null, merge: mergeWaits };
+/** @type {Merging<Mark>} */
+const MARKS = { at: (x) => x.at, mergeable: (a, b) => a.kind === b.kind, merge: mergeMarks };
 
 // ---------------------------------------------------------------------------------------------
 // The window the HUD shows.
@@ -481,7 +536,7 @@ function coalesce(items, minMs) {
       const calls = last.calls + item.calls;
       const fails = last.fails + item.fails;
       const main = item.end - item.start > last.end - last.start ? item : last;
-      out[out.length - 1] = { ...main, id: last.id, start: last.start, end: Math.max(last.end, item.end), label: `${calls} calls${fails ? ` (${fails} failed)` : ''}`, calls, fails, detail: null, changeId: null };
+      out[out.length - 1] = { ...main, id: last.id, start: last.start, end: Math.max(last.end, item.end), label: `${calls} calls, mostly ${main.building ? BUILDINGS[main.building]?.name : 'tools'}${fails ? ` (${fails} failed)` : ''}`, calls, fails, detail: null, changeId: null };
     } else {
       out.push(item);
     }

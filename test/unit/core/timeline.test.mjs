@@ -4,13 +4,14 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { createStore } from '../../../public/js/core/store.js';
-import { DAY_MS, MAX_LANES, MAX_SPANS, createTimeline, recordEvent, recordWait, timelineView } from '../../../public/js/core/timeline.js';
+import { DAY_MS, MAX_LANES, MAX_SPANS, bucketWidth, createTimeline, recordEvent, recordWait, timelineView } from '../../../public/js/core/timeline.js';
 import { fromCodex } from '../../../server/adapters/codex.mjs';
 import { PATCH, codex } from '../server/adapters/fixtures.mjs';
 import { CWD, FIXTURES, SESSION, envelope, hook } from './helpers.mjs';
 
 const MAIN = `${SESSION}:main`;
 const T0 = 1_700_000_000_000;
+const HOUR = 60 * 60_000;
 
 function setup() {
   let t = T0;
@@ -130,14 +131,32 @@ describe('timeline: bounded memory keeps the day', () => {
   const call = (i, at) => /** @type {any} */ ({ id: `e${i}`, ts: at, kind: i % 2 ? 'tool.end' : 'tool.start', sessionId: 's', agentKey: 's:main', data: { tool: 'Read', toolUseId: `c${Math.floor(i / 2)}`, building: 'library', summary: 'Read a', input: {} } });
   const who = { name: 'Foreman', role: /** @type {const} */ ('lead') };
 
-  test('a busy lane merges its older calls instead of dropping them', () => {
+  test('a busy lane merges its older calls into buckets that grow with age, and keeps the day\'s shape', () => {
     const t = createTimeline();
-    for (let i = 0; i < 4000; i++) recordEvent(t, call(i, T0 + i * 1000), who);
-    const { spans } = t.lanes['s:main'];
+    // 80,000 events (40,000 calls) over 12 hours, a call a second or so, in four buildings.
+    const step = (12 * HOUR) / 40_000;
+    for (let i = 0; i < 80_000; i++) {
+      const e = call(i, T0 + Math.floor(i / 2) * step + (i % 2) * 400);
+      e.data.building = ['library', 'terminal', 'workshop', 'detective'][Math.floor(i / 2_000) % 4];
+      recordEvent(t, e, who);
+    }
+    const { spans, last } = t.lanes['s:main'];
     assert.ok(spans.length <= MAX_SPANS, `${spans.length} spans`);
-    assert.equal(spans[0].start, T0, 'the first call of the day is still there');
-    assert.equal(spans.reduce((n, s) => n + s.calls, 0), 2000, 'every call is counted');
-    assert.ok(spans[0].calls > 1 && spans.at(-1)?.calls === 1, 'older spans are coarser, recent ones exact');
+    assert.equal(spans.reduce((n, s) => n + s.calls, 0), 40_000, 'every call is counted');
+    assert.ok(spans[0].start - T0 < 15 * 60_000, 'the morning is still there');
+    for (let hour = 0; hour < 12; hour++) {
+      const inHour = spans.filter((s) => s.start >= T0 + hour * HOUR && s.start < T0 + (hour + 1) * HOUR);
+      assert.ok(inHour.length >= 2 && inHour.length <= (hour === 11 ? MAX_SPANS : 150), `hour ${hour}: ${inHour.length} spans`);
+      assert.ok(inHour.every((s) => (s.end ?? last) - s.start <= HOUR), `hour ${hour}: no span longer than an hour`);
+    }
+    assert.ok(spans.at(-1)?.calls === 1 || (spans.at(-1)?.calls ?? 0) < 20, 'the last minutes stay fine-grained');
+    assert.match(spans[0].summary, /^\d+ calls, mostly /);
+  });
+
+  test('bucket widths grow with age, and with each level', () => {
+    assert.deepEqual([bucketWidth(30 * 60_000, 0), bucketWidth(2 * HOUR, 0), bucketWidth(5 * HOUR, 0), bucketWidth(10 * HOUR, 0)], [0, 60_000, 300_000, 900_000]);
+    assert.deepEqual([bucketWidth(30 * 60_000, 1), bucketWidth(30 * 60_000, 3), bucketWidth(2 * HOUR, 3)], [15_000, 60_000, 60_000]);
+    assert.deepEqual([bucketWidth(30 * 60_000, 4), bucketWidth(2 * HOUR, 4), bucketWidth(10 * HOUR, 4)], [120_000, 120_000, 1_800_000]);
   });
 
   test('what is more than a day old goes', () => {
@@ -193,6 +212,6 @@ describe('timelineView: the window the HUD shows', () => {
     }
     const [lane] = timelineView(store.getState().timeline, { from: T0, to: now(), minMs: 5000 })[0].lanes;
     assert.equal(lane.items.length, 1);
-    assert.deepEqual([lane.items[0].calls, lane.items[0].fails, lane.items[0].label], [5, 1, '5 calls (1 failed)']);
+    assert.deepEqual([lane.items[0].calls, lane.items[0].fails, lane.items[0].label], [5, 1, '5 calls, mostly Terminal Works (1 failed)']);
   });
 });

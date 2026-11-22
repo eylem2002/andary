@@ -1073,10 +1073,13 @@ section.
      dialogs, a stopped turn, a stuck alert), so the store feeds it after every event and approval
      change rather than the HUD rebuilding it; agents' names are kept on each lane, so a crew that
      left still reads right for the rest of the day.
-187. **A day per lane, merged rather than dropped.** 400 spans, 120 waits and 200 marks a lane; over
-     that the older half merges in pairs (a busy morning shows as fewer, coarser spans that still
-     count every call and failure). Only what ended more than 24 hours before the lane's newest
-     moment goes, and the oldest only when nothing more can merge. 120 lanes; the quietest goes.
+187. **A day per lane, merged by age rather than dropped.** 400 spans, 120 waits and 200 marks a
+     lane; over that, what is older than an hour merges into time buckets that grow with age (a
+     minute, five, fifteen), then the last hour into 15 s to one-minute buckets, then every bucket
+     twice as wide, until the lane is at 60% of its limit. Twelve hours of a call a second keep a few
+     spans for each early hour, a dozen for the middle ones and dozens for the last two, every call
+     and failure counted. Only what ended more than 24 hours before the lane's newest moment goes,
+     and the oldest only when nothing more can merge. 120 lanes; the quietest goes.
 188. **A finished turn's "finished" wait is not hatched.** Waits are what blocks the agent on you
      (permission, question, plan, an MCP form or notice as "input", a stop, a stuck alert); an idle
      lead after its turn shows as the cap and the empty lane after it.
