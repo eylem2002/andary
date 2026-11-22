@@ -244,16 +244,19 @@ ignores case, can hide one.
 
 ### The timeline and turn receipts
 
-**Timeline.** A strip under the town (`T` or the toolbar's Timeline button; on phones it starts
-hidden, and Settings has a **Timeline** button) has one lane per agent, for one crew or every crew
-grouped: each tool call in its building's colour, a failed call as a red tick, the stretches an
+**Timeline.** A strip under the town (`T` or the toolbar's Timeline button; it starts hidden on
+screens narrower than 1280 pixels and on phones, where Settings has a **Timeline** button) shows
+each crew's lead on a lane of its own; `+N` opens that crew's helpers, and **Taller** gives every
+agent a lane. Each tool call is in its building's colour, a failed call a red tick, the stretches an
 agent waited for you hatched (a permission, a question, a plan, a stopped turn, a stuck alert),
-your prompts as pins and each turn's end as a cap, up to a "now" edge that moves with the clock.
-Zoom to the last 15 minutes, the last hour or today. Point at or focus a moment to see what it
-was; click it (or press Enter) to select the agent, point the camera at it and see the command,
-the file or the error in its details, or the diff when the town has it. The arrow keys move
-between moments (Up and Down between lanes), and **List** shows the same moments as a plain list.
-It keeps the whole day: older stretches are merged into coarser ones rather than dropped.
+your prompts pins and each turn's end a cap, up to a "now" edge that moves with the clock. Zoom to
+the last 15 minutes, the last hour or today; after a page reload the town remembers only the
+server's recent history (its last 2,000 events), so the axis then says "since 09:12". Point at or
+focus a moment to see what it was; click it (or press Enter) to select the agent, point the camera
+at it and see the command, the file or the error in its details, or the diff when the town has it.
+The arrow keys move between moments (Up and Down between lanes), and **List** shows the same
+moments as a plain list. It keeps the whole day: older stretches merge into coarser ones (minutes,
+then quarter hours) rather than being dropped.
 
 **Turn receipts.** When a lead's turn ends, its details (**Last turn**) and the activity log get a
 receipt: the files its crew changed with lines added and removed (from the edits' own text; a file

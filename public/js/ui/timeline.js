@@ -1,7 +1,9 @@
-// The timeline strip under the town (core/timeline.js has the model): one lane per agent of the
-// crew picked (or of every crew, grouped), with each call coloured by its building, failed calls
-// as red ticks, waits for you hatched, your prompts as pins and the turn's end as a cap, up to a
-// "now" edge that moves with the clock. Zoom: the last 15 minutes, the last hour, or today.
+// The timeline strip under the town (core/timeline.js has the model): each call coloured by its
+// building, failed calls as red ticks, waits for you hatched, your prompts as pins and the turn's
+// end as a cap, up to a "now" edge that moves with the clock. Compact by default: one lane per
+// crew's lead, whose name opens its helpers' lanes; Taller shows every agent's lane, grouped by
+// crew. Zoom: the last 15 minutes, the last hour, or today, never before what the town remembers.
+// It is rebuilt when the store changes; the clock alone only moves the now edge.
 //
 // Keyboard: the strip is one tab stop (roving focus): Left and Right move along a lane, Up and Down
 // to the lane above or below (the item nearest in time), Home and End to a lane's ends, Enter goes
@@ -30,18 +32,42 @@ const ZOOMS = Object.freeze([
 const MIN_PX = 4;
 /** Rows of the list view, newest first. */
 const MAX_LIST = 300;
+/** The shortest window shown, when the town remembers less than the zoom asks for. */
+const MIN_SPAN_MS = 2 * 60_000;
+/** Room ahead of now, as a share of the window: the now edge moves into it before a rebuild. */
+const HEADROOM = 0.05;
 
 /**
- * The window a zoom shows, ending now. Today starts at midnight on this computer's clock.
- * @param {Zoom} zoom @param {number} now
+ * The window a zoom shows, ending now: today starts at midnight on this computer's clock (an hour
+ * at least). It starts no earlier than what the town remembers (`earliest`, its first moment), but
+ * spans two minutes at least; `since` says it was cut so.
+ * @param {Zoom} zoom @param {number} now @param {number} [earliest]
+ * @returns {{ from: number, to: number, since: boolean }}
  */
-export function zoomWindow(zoom, now) {
-  if (zoom === '15m') return { from: now - 15 * 60_000, to: now };
-  if (zoom === '1h') return { from: now - 60 * 60_000, to: now };
+export function zoomWindow(zoom, now, earliest = -Infinity) {
   const midnight = new Date(now);
   midnight.setHours(0, 0, 0, 0);
   // A day that has barely begun still shows its first hour.
-  return { from: Math.min(midnight.getTime(), now - 60 * 60_000), to: now };
+  const from = zoom === '15m' ? now - 15 * 60_000 : zoom === '1h' ? now - 60 * 60_000 : Math.min(midnight.getTime(), now - 60 * 60_000);
+  if (earliest <= from) return { from, to: now, since: false };
+  return { from: Math.min(earliest, now - MIN_SPAN_MS), to: now, since: true };
+}
+
+/**
+ * The lanes shown: every lane when tall; else each crew's lead, with its helpers when that crew is
+ * opened. Each group also says how many helper lanes it has.
+ * @param {import('../core/timeline.js').TimelineGroup[]} groups
+ * @param {{ tall: boolean, opened: ReadonlySet<string> }} options
+ * @returns {ShownGroup[]}
+ */
+export function visibleLanes(groups, { tall, opened }) {
+  return groups.map((group) => {
+    const helpers = group.lanes.filter((lane) => lane.role !== 'lead').length;
+    const lead = group.lanes.filter((lane) => lane.role === 'lead');
+    // A crew whose lead did nothing in the window still shows its helpers.
+    const lanes = tall || opened.has(group.sessionId) || !lead.length ? group.lanes : lead;
+    return { ...group, lanes, helpers };
+  });
 }
 
 /**
@@ -83,6 +109,7 @@ function createParts() {
     crews: /** @type {HTMLSelectElement} */ (h('select', { class: 'hud-select hud-timeline__crews', 'aria-label': 'Crews shown', 'data-testid': 'timeline-crews' })),
     zoomButtons,
     listToggle: h('button', { type: 'button', class: 'hud-btn hud-btn--small', 'aria-pressed': 'false', 'data-testid': 'timeline-list-toggle' }, 'List'),
+    tallToggle: h('button', { type: 'button', class: 'hud-btn hud-btn--small', 'aria-pressed': 'false', 'data-testid': 'timeline-tall-toggle' }, 'Taller'),
     close: h('button', { type: 'button', class: 'hud-iconbtn', 'aria-label': 'Close the timeline' }, icon('close')),
     axis: h('div', { class: 'hud-timeline__axis', 'aria-hidden': 'true' }, h('span', { class: 'hud-timeline__from' }), h('span', { class: 'hud-timeline__now', text: 'now' })),
     lanes: h('div', { class: 'hud-timeline__lanes', 'data-testid': 'timeline-lanes' }),
@@ -95,6 +122,7 @@ function createParts() {
       h('h2', { class: 'hud-timeline__title', id: 'hud-timeline-title', text: 'Timeline' }),
       parts.crews,
       h('div', { class: 'hud-timeline__zooms', role: 'group', 'aria-label': 'Zoom' }, ...Object.values(zoomButtons)),
+      parts.tallToggle,
       parts.listToggle,
       parts.close),
     h('div', { class: 'hud-timeline__body' }, parts.axis, parts.lanes, parts.list, parts.empty),
@@ -105,21 +133,33 @@ function createParts() {
 /** @param {HudContext} ctx */
 export function createTimeline(ctx) {
   const parts = createParts();
-  const { el, lanes, list, tip } = parts;
+  const { el, lanes, list } = parts;
   const view = {
     /** @type {Zoom} */
     zoom: '15m',
     listView: false,
     /** the crew shown, or '' for all */
     crew: '',
+    /** @type {Set<string>} crews whose helpers' lanes are open in the compact strip */
+    opened: new Set(),
     /** @type {string|null} the item that holds the strip's one tab stop */
     focused: null,
     /** @type {TimelineLane[]} */
     shown: [],
     /** @type {Map<string, string>} lane key → who, in words */
     names: new Map(),
+    /** the store changed since the last rebuild */
+    dirty: true,
+    /** the window drawn: items are placed in it; the now edge moves inside it */
+    window: { from: 0, to: 0 },
   };
-  const redraw = () => render(ctx.store.getState());
+  ctx.store.subscribe(() => {
+    view.dirty = true;
+  });
+  const redraw = () => {
+    view.dirty = true;
+    render(ctx.store.getState());
+  };
 
   parts.crews.addEventListener('change', () => {
     view.crew = parts.crews.value;
@@ -137,23 +177,108 @@ export function createTimeline(ctx) {
     redraw();
     ctx.announcer.polite(view.listView ? 'Timeline as a list.' : 'Timeline as lanes.');
   });
+  parts.tallToggle.addEventListener('click', () => {
+    ctx.setPrefs({ timelineTall: !ctx.prefs.timelineTall });
+    redraw();
+    ctx.announcer.polite(ctx.prefs.timelineTall ? 'Taller timeline: a lane for every agent.' : 'Compact timeline: a lane for each crew.');
+  });
   parts.close.addEventListener('click', () => ctx.run('timeline'));
+  wireItems(parts, view, ctx, (sessionId) => toggleCrew(sessionId));
+
+  /** Opens or closes a crew's helpers' lanes in the compact strip. @param {string} sessionId */
+  function toggleCrew(sessionId) {
+    if (view.opened.has(sessionId)) view.opened.delete(sessionId);
+    else view.opened.add(sessionId);
+    redraw();
+  }
+
+  /** Rebuilds when the store or a control changed, or when now has moved past the window. @param {StoreState} state */
+  function render(state) {
+    if (el.hidden) return;
+    const now = Date.now();
+    if (!view.dirty && now <= view.window.to) return;
+    view.dirty = false;
+    view.crew = renderCrews(parts.crews, state, view.crew);
+    const firsts = Object.values(state.timeline.lanes).map((lane) => lane.first);
+    const earliest = firsts.length ? Math.min(...firsts) : -Infinity;
+    const window = zoomWindow(view.zoom, now, earliest);
+    const minMs = ((window.to - window.from) / (lanes.clientWidth || 600)) * MIN_PX;
+    const all = timelineView(state.timeline, { ...window, sessions: view.crew ? [view.crew] : null, order: state.sessions.map((s) => s.id), minMs });
+    const tall = ctx.prefs.timelineTall;
+    const groups = visibleLanes(all, { tall, opened: view.opened });
+    view.window = { from: window.from, to: now + (now - window.from) * HEADROOM };
+    view.shown = groups.flatMap((g) => g.lanes);
+    view.names = laneNames(state, groups);
+    for (const [id, button] of Object.entries(parts.zoomButtons)) setAttr(button, 'aria-pressed', String(id === view.zoom));
+    setAttr(parts.listToggle, 'aria-pressed', String(view.listView));
+    setAttr(parts.tallToggle, 'aria-pressed', String(tall));
+    el.classList.toggle('is-tall', tall);
+    setText(/** @type {HTMLElement} */ (parts.axis.firstElementChild), `${window.since ? 'since ' : ''}${formatClock(window.from)}`);
+    const any = view.shown.length > 0;
+    setHidden(parts.empty, any);
+    setHidden(lanes, view.listView || !any);
+    setHidden(parts.axis, view.listView || !any);
+    setHidden(list, !view.listView || !any);
+    if (view.listView) renderAsList(list, view.shown, view.names);
+    else {
+      renderLanes(lanes, state, groups, { window: view.window, names: view.names, tall, opened: view.opened });
+      syncRoving(lanes, view.focused);
+    }
+    moveNow(now);
+  }
+
+  /** The now edge, where the clock is in the window drawn. @param {number} now */
+  function moveNow(now) {
+    const share = Math.min(1, (now - view.window.from) / (view.window.to - view.window.from || 1));
+    el.style.setProperty('--tl-now', share.toFixed(4));
+  }
+
+  return {
+    el,
+    render,
+    /** The clock moves the now edge; past the window drawn, it is drawn again. */
+    tick() {
+      if (el.hidden) return;
+      const now = Date.now();
+      if (now > view.window.to) render(ctx.store.getState());
+      else moveNow(now);
+    },
+    /** @param {boolean} on */
+    setShown(on) {
+      setHidden(el, !on);
+      document.documentElement.classList.toggle('hud-timeline-open', on);
+      if (on) redraw();
+    },
+  };
+}
+
+/**
+ * The items' pointer and keyboard: the tooltip on hover and focus, a click (or Enter) goes to the
+ * moment, a lead's +N opens its crew's helpers, the arrow keys move between moments.
+ * @param {ReturnType<typeof createParts>} parts
+ * @param {{ shown: TimelineLane[], names: Map<string, string>, focused: string|null }} view
+ * @param {HudContext} ctx
+ * @param {(sessionId: string) => void} toggleCrew
+ */
+function wireItems({ el, lanes, list, tip }, view, ctx, toggleCrew) {
   const itemOf = (/** @type {EventTarget|null} */ target) => findItem(view.shown, itemButton(target));
   const showTip = (/** @type {EventTarget|null} */ target) => {
     const item = itemOf(target);
     if (item) placeTip(tip, el, /** @type {HTMLElement} */ (itemButton(target)), itemWords(item, view.names.get(item.laneKey) ?? ''));
   };
   const hideTip = () => setHidden(tip, true);
-  const go = (/** @type {Event} */ event) => {
-    const item = itemOf(event.target);
-    if (item) ctx.goToMoment(item);
-  };
   lanes.addEventListener('pointerover', (event) => showTip(event.target));
   lanes.addEventListener('focusin', (event) => showTip(event.target));
   lanes.addEventListener('pointerout', hideTip);
   lanes.addEventListener('focusout', hideTip);
-  lanes.addEventListener('click', go);
-  list.addEventListener('click', go);
+  const onClick = (/** @type {Event} */ event) => {
+    const opener = event.target instanceof Element ? /** @type {HTMLElement|null} */ (event.target.closest('[data-open-crew]')) : null;
+    if (opener) return toggleCrew(opener.dataset.openCrew ?? '');
+    const item = itemOf(event.target);
+    if (item) ctx.goToMoment(item);
+  };
+  lanes.addEventListener('click', onClick);
+  list.addEventListener('click', onClick);
   lanes.addEventListener('keydown', (event) => {
     const button = itemButton(event.target);
     const next = button ? moveFrom(view.shown, button.dataset.lane ?? '', button.dataset.item ?? '', event.key) : null;
@@ -163,45 +288,6 @@ export function createTimeline(ctx) {
     syncRoving(lanes, view.focused);
     /** @type {HTMLElement|null} */ (lanes.querySelector(`[data-item="${next.id}"]`))?.focus();
   });
-
-  /** @param {StoreState} state */
-  function render(state) {
-    if (el.hidden) return;
-    view.crew = renderCrews(parts.crews, state, view.crew);
-    const window = zoomWindow(view.zoom, Date.now());
-    const minMs = ((window.to - window.from) / (lanes.clientWidth || 600)) * MIN_PX;
-    const groups = timelineView(state.timeline, { ...window, sessions: view.crew ? [view.crew] : null, order: state.sessions.map((s) => s.id), minMs });
-    view.shown = groups.flatMap((g) => g.lanes);
-    view.names = laneNames(state, groups);
-    for (const [id, button] of Object.entries(parts.zoomButtons)) setAttr(button, 'aria-pressed', String(id === view.zoom));
-    setAttr(parts.listToggle, 'aria-pressed', String(view.listView));
-    setText(/** @type {HTMLElement} */ (parts.axis.firstElementChild), formatClock(window.from));
-    const any = view.shown.length > 0;
-    setHidden(parts.empty, any);
-    setHidden(lanes, view.listView || !any);
-    setHidden(parts.axis, view.listView || !any);
-    setHidden(list, !view.listView || !any);
-    if (view.listView) renderAsList(list, view.shown, view.names);
-    else {
-      renderLanes(lanes, state, groups, window, view.names);
-      syncRoving(lanes, view.focused);
-    }
-  }
-
-  return {
-    el,
-    render,
-    /** Moves the "now" edge with the clock. */
-    tick() {
-      if (!el.hidden) redraw();
-    },
-    /** @param {boolean} on */
-    setShown(on) {
-      setHidden(el, !on);
-      document.documentElement.classList.toggle('hud-timeline-open', on);
-      if (on) redraw();
-    },
-  };
 }
 
 /** @param {EventTarget|null} target @returns {HTMLElement|null} */
@@ -266,20 +352,32 @@ function laneNames(state, groups) {
 
 /**
  * @param {HTMLElement} lanes @param {StoreState} state
- * @param {import('../core/timeline.js').TimelineGroup[]} groups
- * @param {{ from: number, to: number }} window @param {Map<string, string>} names
+ * @param {ShownGroup[]} groups
+ * @param {{ window: { from: number, to: number }, names: Map<string, string>, tall: boolean, opened: ReadonlySet<string> }} options
  */
-function renderLanes(lanes, state, groups, window, names) {
+function renderLanes(lanes, state, groups, { window, names, tall, opened }) {
   renderList(lanes, groups, (g) => g.sessionId, createGroup, (groupEl, group) => {
     const session = findSession(state, group.sessionId);
     setCrewColor(groupEl, session?.color);
     const crewName = session ? `${session.number} · ${session.project}` : 'A crew that left';
-    setText(/** @type {HTMLElement} */ (groupEl.firstElementChild), crewName);
+    const heading = /** @type {HTMLElement} */ (groupEl.firstElementChild);
+    setText(heading, crewName);
+    // Compact: the lead's lane carries the crew's name instead of a row of its own.
+    setHidden(heading, !tall);
     setAttr(groupEl, 'aria-label', `Crew ${crewName}`);
     renderList(/** @type {HTMLElement} */ (groupEl.lastElementChild), group.lanes, (lane) => lane.key, createLane, (laneEl, lane) => {
       const who = names.get(lane.key) ?? lane.name;
       setAttr(laneEl, 'aria-label', who);
-      setText(/** @type {HTMLElement} */ (laneEl.firstElementChild), lane.name);
+      const [label, opener] = /** @type {HTMLElement[]} */ ([...laneEl.firstElementChild.children]);
+      const leadOfCompact = !tall && lane.role === 'lead';
+      setText(label, leadOfCompact ? crewName : lane.name);
+      laneEl.classList.toggle('is-helper', lane.role !== 'lead');
+      const open = opened.has(group.sessionId);
+      setHidden(opener, !leadOfCompact || !group.helpers);
+      opener.dataset.openCrew = group.sessionId;
+      setText(opener, open ? '−' : `+${group.helpers}`);
+      setAttr(opener, 'aria-expanded', String(open));
+      setAttr(opener, 'aria-label', `${open ? 'Hide' : 'Show'} ${group.helpers} helper${group.helpers === 1 ? '' : 's'} of crew ${crewName}`);
       renderList(/** @type {HTMLElement} */ (laneEl.lastElementChild), lane.items, (item) => item.id, createItem, (itemEl, item) => updateItem(itemEl, item, window, who));
     });
   });
@@ -295,14 +393,20 @@ function renderAsList(list, shown, names) {
   });
 }
 
-/** @param {import('../core/timeline.js').TimelineGroup} _group */
+/** @typedef {import('../core/timeline.js').TimelineGroup & { helpers: number }} ShownGroup */
+
+/** @param {ShownGroup} _group */
 function createGroup(_group) {
   return h('div', { class: 'hud-timeline__crew', role: 'group' }, h('p', { class: 'hud-timeline__crewname' }), h('div', { class: 'hud-timeline__crewlanes' }));
 }
 
 /** @param {TimelineLane} _lane */
 function createLane(_lane) {
-  return h('div', { class: 'hud-timeline__lane', role: 'group' }, h('span', { class: 'hud-timeline__name', 'aria-hidden': 'true' }), h('div', { class: 'hud-timeline__track' }));
+  return h('div', { class: 'hud-timeline__lane', role: 'group' },
+    h('div', { class: 'hud-timeline__who' },
+      h('span', { class: 'hud-timeline__name', 'aria-hidden': 'true' }),
+      h('button', { type: 'button', class: 'hud-timeline__open', hidden: true })),
+    h('div', { class: 'hud-timeline__track' }));
 }
 
 /** @param {TimelineItem} item */

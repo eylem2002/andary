@@ -3497,8 +3497,9 @@ body {
 /* ---- timeline: a lane per agent under the town (ui/timeline.js) --------------------------- */
 
 /* Between the crews and the board, above the toolbar; past the inspector where it opens beside the
-   crews. Each call takes its building's colour, waits for you are hatched, a failed call ends in a
-   red tick, a prompt is a pin and the turn's end a cap. */
+   crews. Compact (a lane per crew's lead) unless Taller. Each call takes its building's colour,
+   waits for you are hatched, a failed call ends in a red tick, a prompt is a pin and the turn's end a
+   cap. Every item is a 24 px tall target; the bar drawn in it is thinner. */
 .hud-timeline {
   --b-hall: #8A5CC2;
   --b-library: #2F7FC1;
@@ -3522,7 +3523,7 @@ body {
   z-index: 20;
   display: flex;
   flex-direction: column;
-  max-height: min(42vh, 300px);
+  max-height: min(42vh, 320px);
   background: var(--paper);
   border: 1px solid var(--hairline);
   border-radius: 9px;
@@ -3572,20 +3573,29 @@ body {
 .hud-timeline__body {
   position: relative;
   min-height: 0;
-  padding: 2px 10px 8px;
+  max-height: 112px;
+  padding: 2px 10px 6px;
   overflow: auto;
 }
 
+.hud-timeline.is-tall .hud-timeline__body {
+  max-height: 270px;
+}
+
 .hud-timeline__axis {
-  display: flex;
-  justify-content: space-between;
-  margin-left: 92px;
+  position: relative;
+  height: 18px;
+  margin-left: 124px;
   color: var(--ink-3);
   font: 600 11px/1.6 var(--font-ui);
 }
 
 .hud-timeline__now {
+  position: absolute;
+  top: 0;
+  left: calc(var(--tl-now, 1) * 100%);
   color: var(--ink-2);
+  transform: translateX(-100%);
 }
 
 .hud-timeline__crew {
@@ -3603,10 +3613,17 @@ body {
 
 .hud-timeline__lane {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-columns: 120px minmax(0, 1fr);
   align-items: center;
   gap: 4px;
-  min-height: 22px;
+  min-height: 28px;
+}
+
+.hud-timeline__who {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
 .hud-timeline__name {
@@ -3617,24 +3634,51 @@ body {
   white-space: nowrap;
 }
 
-/* The track ends at "now": its right edge, drawn as a line. */
+.hud-timeline__lane.is-helper .hud-timeline__name {
+  padding-left: 10px;
+}
+
+.hud-timeline__open {
+  flex: none;
+  min-width: 28px;
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font: 700 11px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+/* The now edge: where the clock is in the window drawn (--tl-now, moved every second). */
 .hud-timeline__track {
   position: relative;
-  height: 20px;
-  border-right: 2px solid var(--working);
+  height: 26px;
   background: linear-gradient(var(--hairline), var(--hairline)) center / 100% 1px no-repeat;
 }
 
-.hud-timeline__item {
+.hud-timeline__track::after {
   position: absolute;
-  top: 4px;
-  height: 12px;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--tl-now, 1) * 100%);
+  width: 2px;
+  background: var(--working);
+  content: "";
+}
+
+.hud-timeline__item {
+  --kind: var(--b-workshop);
+  position: absolute;
+  top: 1px;
+  height: 24px;
   min-width: 3px;
   margin: 0;
   padding: 0;
   border: 0;
   border-radius: 2px;
-  background: var(--b-workshop);
+  background: linear-gradient(var(--kind), var(--kind)) center / 100% 12px no-repeat;
   cursor: pointer;
 }
 
@@ -3645,21 +3689,21 @@ body {
 }
 
 .hud-timeline__item[data-type="tool"] { z-index: 1; }
-.hud-timeline__item[data-building="hall"] { background: var(--b-hall); }
-.hud-timeline__item[data-building="library"] { background: var(--b-library); }
-.hud-timeline__item[data-building="workshop"] { background: var(--b-workshop); }
-.hud-timeline__item[data-building="terminal"] { background: var(--b-terminal); }
-.hud-timeline__item[data-building="detective"] { background: var(--b-detective); }
-.hud-timeline__item[data-building="web"] { background: var(--b-web); }
-.hud-timeline__item[data-building="board"] { background: var(--b-board); }
-.hud-timeline__item[data-building="post"] { background: var(--b-post); }
-.hud-timeline__item[data-building="harbor"] { background: var(--b-harbor); }
-.hud-timeline__item[data-building="permits"] { background: var(--b-permits); }
-.hud-timeline__item[data-building="spa"] { background: var(--b-spa); }
-.hud-timeline__item[data-building="academy"] { background: var(--b-academy); }
-.hud-timeline__item[data-building="cafe"] { background: var(--b-cafe); }
-.hud-timeline__item[data-building="grove"] { background: var(--b-grove); }
-.hud-timeline__item[data-building="station"] { background: var(--b-station); }
+.hud-timeline__item[data-building="hall"] { --kind: var(--b-hall); }
+.hud-timeline__item[data-building="library"] { --kind: var(--b-library); }
+.hud-timeline__item[data-building="workshop"] { --kind: var(--b-workshop); }
+.hud-timeline__item[data-building="terminal"] { --kind: var(--b-terminal); }
+.hud-timeline__item[data-building="detective"] { --kind: var(--b-detective); }
+.hud-timeline__item[data-building="web"] { --kind: var(--b-web); }
+.hud-timeline__item[data-building="board"] { --kind: var(--b-board); }
+.hud-timeline__item[data-building="post"] { --kind: var(--b-post); }
+.hud-timeline__item[data-building="harbor"] { --kind: var(--b-harbor); }
+.hud-timeline__item[data-building="permits"] { --kind: var(--b-permits); }
+.hud-timeline__item[data-building="spa"] { --kind: var(--b-spa); }
+.hud-timeline__item[data-building="academy"] { --kind: var(--b-academy); }
+.hud-timeline__item[data-building="cafe"] { --kind: var(--b-cafe); }
+.hud-timeline__item[data-building="grove"] { --kind: var(--b-grove); }
+.hud-timeline__item[data-building="station"] { --kind: var(--b-station); }
 
 .hud-timeline__item.is-open {
   border-radius: 2px 0 0 2px;
@@ -3669,7 +3713,7 @@ body {
 /* A failed call ends in a red tick that rises above the lane. */
 .hud-timeline__item.is-failed::after {
   position: absolute;
-  top: -4px;
+  top: 2px;
   right: -1px;
   width: 3px;
   height: 20px;
@@ -3680,7 +3724,7 @@ body {
 
 .hud-timeline__item[data-type="wait"] {
   top: 1px;
-  height: 18px;
+  height: 24px;
   z-index: 0;
   border: 1px solid var(--waiting);
   background: repeating-linear-gradient(135deg, var(--waiting) 0 3px, transparent 3px 7px);
@@ -3692,47 +3736,61 @@ body {
   background: repeating-linear-gradient(135deg, var(--error) 0 3px, transparent 3px 7px);
 }
 
-/* A prompt: a pin with a head; the turn's end: a cap like a closing bracket. */
+/* A prompt: a pin with a head; the turn's end: a cap like a closing bracket. Each is a 12 px wide
+   target around its line. */
 .hud-timeline__item[data-type="prompt"],
 .hud-timeline__item[data-type="end"] {
-  top: 0;
-  width: 3px;
-  height: 20px;
+  --mark: var(--ink);
+  width: 12px;
   min-width: 0;
   z-index: 2;
-  transform: translateX(-1px);
-}
-
-.hud-timeline__item[data-type="prompt"] {
-  background: var(--ink);
+  background: none;
+  transform: translateX(-6px);
 }
 
 .hud-timeline__item[data-type="prompt"]::before {
   position: absolute;
-  top: -2px;
-  left: -3px;
-  width: 9px;
-  height: 9px;
+  top: 2px;
+  bottom: 2px;
+  left: 5px;
+  width: 2px;
+  background: var(--mark);
+  content: "";
+}
+
+.hud-timeline__item[data-type="prompt"]::after {
+  position: absolute;
+  top: 1px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--ink);
+  background: var(--mark);
   content: "";
 }
 
 .hud-timeline__item[data-type="end"] {
-  border-top: 3px solid var(--done);
-  border-bottom: 3px solid var(--done);
-  border-right: 3px solid var(--done);
-  width: 7px;
-  background: transparent;
-  transform: translateX(-6px);
+  --mark: var(--done);
+  transform: translateX(-11px);
+}
+
+.hud-timeline__item[data-type="end"]::before {
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  bottom: 4px;
+  width: 4px;
+  border: 3px solid var(--mark);
+  border-left: 0;
+  content: "";
 }
 
 .hud-timeline__item[data-ended="error"] {
-  border-color: var(--error);
+  --mark: var(--error);
 }
 
 .hud-timeline__item[data-ended="interrupted"] {
-  border-color: var(--idle);
+  --mark: var(--idle);
 }
 
 .hud-timeline__list {
@@ -3843,29 +3901,26 @@ body {
   overflow-wrap: anywhere;
 }
 
-/* Phones: above the toolbar, the width of the screen, when asked for from Settings. */
+/* Phones: above the toolbar, the width of the screen, when asked for from Settings; never taller
+   than the room between the sign (and a toast under it) and the toolbar over the sheet. */
 @media (max-width: 640px) {
   .hud-timeline {
     right: 8px;
     bottom: calc(var(--sheet-h) + var(--tools-h, var(--toolbar-h)) + 14px);
     left: 8px;
-    max-height: 34dvh;
+    max-height: max(120px, calc(100dvh - var(--sheet-h) - var(--tools-h, var(--toolbar-h)) - var(--sign-h) - var(--gap) * 2 - 110px));
+  }
+
+  .hud-timeline__body,
+  .hud-timeline.is-tall .hud-timeline__body {
+    max-height: none;
   }
 
   .hud-timeline__lane {
-    grid-template-columns: 64px minmax(0, 1fr);
+    grid-template-columns: 96px minmax(0, 1fr);
   }
 
   .hud-timeline__axis {
-    margin-left: 68px;
-  }
-
-  .hud-timeline__track {
-    height: 28px;
-  }
-
-  .hud-timeline__item {
-    top: 6px;
-    height: 16px;
+    margin-left: 100px;
   }
 }

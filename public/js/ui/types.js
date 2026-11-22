@@ -70,6 +70,7 @@
  * @property {boolean} follow
  * @property {boolean} paused
  * @property {boolean} mobile
+ * @property {boolean} wide              at least 1280 px wide: room for the timeline by default
  * @property {boolean} sheetOpen
  * @property {string} tab
  * @property {{ agentKey: string, item: import('../core/timeline.js').TimelineItem }|null} moment  the timeline item picked last, shown in its agent's details

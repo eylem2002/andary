@@ -1295,18 +1295,27 @@ Mark { id, kind: 'prompt'|'end', at, text, ended: 'done'|'error'|'interrupted'|n
 The strip (`ui/timeline.js`) sits under the town between the crews and the board, above the
 toolbar (past the inspector when that opens beside the crews), and is shown by the toolbar's
 Timeline button, `T`, and on phones Settings' **Timeline** button: `Prefs.timeline` is `'auto'`
-(shown, except on phones), `'shown'` or `'hidden'`; the full-screen town hides it with the boards,
-and showing it brings them back. Its height is `--timeline-h`, which lifts the director's caption
-and the building card. Zoom: the last 15 minutes, the last hour, or today (since local midnight, an
-hour at least); a crew picker (all crews, grouped, or one); calls narrower than 4 pixels merge. The
-strip is one tab stop: Left and Right move along a lane, Up and Down to the item nearest in time in
-the lane above or below, Home and End to a lane's ends; hover or focus shows the item's words
-(`itemWords`); a click or Enter calls `HudContext.goToMoment(item)`: its agent is selected, the
-camera points at it, and the inspector's **On the timeline** section shows the moment
-(`ViewState.moment`, forgotten when another agent or nothing is selected); an edit whose diff the
-agent still holds opens it. An agent that has left the town gets a toast instead. **List** shows
-the same items as a list of buttons, newest first (at most 300). A teammate's crews in a team town
-show too; viewers can only look.
+(shown on screens at least 1280 px wide, `ViewState.wide`, and not on phones), `'shown'` or
+`'hidden'`; the full-screen town hides it with the boards, and showing it brings them back. Its
+height is `--timeline-h`, which lifts the director's caption and the building card; on phones it
+is never taller than the room between the sign (with a toast's room under it) and the toolbar.
+**Compact** by default (`visibleLanes`): one lane per crew's lead, named by its crew, whose `+N`
+button (`aria-expanded`) opens that crew's helpers' lanes; **Taller** (`Prefs.timelineTall`) shows
+every agent's lane under a row per crew. Zoom: the last 15 minutes, the last hour, or today (since
+local midnight, an hour at least), but never before the timeline's first moment (two minutes at
+least): after a reload the town remembers only the server's history (its last 2,000 events), so
+the axis then reads "since 09:12" (`zoomWindow`). A crew picker (all crews, grouped, or one); calls
+narrower than 4 pixels merge. The strip is rebuilt only when the store changes or a control is
+used; the clock moves the now edge (`--tl-now`) every second, inside room left ahead of now (5% of
+the window), and a rebuild comes once now passes it. Every item is a 24 px tall target (prompts and
+caps 12 px wide). The strip is one tab stop: Left and Right move along a lane, Up and Down to the
+item nearest in time in the lane above or below, Home and End to a lane's ends; hover or focus
+shows the item's words (`itemWords`); a click or Enter calls `HudContext.goToMoment(item)`: its
+agent is selected, the camera points at it, and the inspector's **On the timeline** section shows
+the moment (`ViewState.moment`, forgotten when another agent or nothing is selected); an edit whose
+diff the agent still holds opens it. An agent that has left the town gets a toast instead. **List**
+shows the same items as a list of full-width buttons, newest first (at most 300). A teammate's
+crews in a team town show too; viewers can only look.
 
 **Turn receipts** (`core/receipts.js`, pure). The store runs `createReceipts().record(event, who,
 { costs: state.usage, cwd, member })` after each event and keeps its receipts on `StoreState.receipts`,
@@ -1635,7 +1644,7 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="settings-button"]` | opens the settings dialog (holds the remote approvals switch) |
 | `[data-testid="usage-gauge"]` | the plan-limit gauge on the Usage button (`data-level`, `data-percent`); hidden without a reading |
 | `[data-testid="limit-gauge"][data-kind]` | one plan limit in the Usage dialog; `[data-testid="limits-note"]` says why there is none |
-| `[data-testid="timeline"]` | the timeline strip; `[data-testid="timeline-lanes"]` holds `.hud-timeline__item[data-item][data-lane][data-type]` buttons, `[data-testid="timeline-list"]` the list view, toggled by `[data-testid="timeline-list-toggle"]`; `[data-testid="timeline-crews"]` picks the crew; Settings' `[data-testid="settings-timeline"]` shows or hides it |
+| `[data-testid="timeline"]` | the timeline strip; `[data-testid="timeline-lanes"]` holds `.hud-timeline__item[data-item][data-lane][data-type]` buttons and each compact lead's `.hud-timeline__open` (`+N` helpers), `[data-testid="timeline-list"]` the list view, toggled by `[data-testid="timeline-list-toggle"]`; `[data-testid="timeline-tall-toggle"]` is Taller; `[data-testid="timeline-crews"]` picks the crew; Settings' `[data-testid="settings-timeline"]` shows or hides it |
 | `[data-testid="inspector-moment"]` | in the inspector: the moment picked on the timeline |
 | `[data-testid="agent-receipt"]` | in the inspector: the receipt of a lead's last turn |
 | `[data-testid="director-caption"]` | the director camera's caption (plain text, not a live region); shown while it has a shot, hidden while you hold the camera or an agent is selected |

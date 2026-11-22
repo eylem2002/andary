@@ -208,13 +208,13 @@ export function goToNeed(hud, item) {
 }
 
 /**
- * Whether the timeline strip is on screen: as the viewer chose it, by default everywhere but on
- * phones, and never in the full-screen town, which puts every board away.
+ * Whether the timeline strip is on screen: as the viewer chose it, by default on screens 1280 px
+ * wide or more (not on phones), and never in the full-screen town, which puts every board away.
  * @param {HudContext} ctx
  */
 export function timelineShown(ctx) {
   if (panelsHidden(ctx)) return false;
-  return ctx.prefs.timeline === 'shown' || (ctx.prefs.timeline === 'auto' && !ctx.view.mobile);
+  return ctx.prefs.timeline === 'shown' || (ctx.prefs.timeline === 'auto' && ctx.view.wide && !ctx.view.mobile);
 }
 
 /**

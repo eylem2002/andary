@@ -40,6 +40,7 @@ import { createToolbar } from './toolbar.js';
 /** @typedef {import('./prefs.js').Prefs} Prefs */
 
 const MOBILE_QUERY = '(max-width: 640px)';
+const WIDE_QUERY = '(min-width: 1280px)';
 
 /**
  * @param {{ store: import('./types.js').Store, prefs: Prefs, controls: import('./types.js').Controls }} options
@@ -276,6 +277,7 @@ function initialView(prefs) {
     follow: false,
     paused: false,
     mobile: matchMedia(MOBILE_QUERY).matches,
+    wide: matchMedia(WIDE_QUERY).matches,
     sheetOpen: true,
     tab: prefs.tab,
     moment: null,
@@ -500,6 +502,11 @@ function watchEnvironment(ctx, ui, shell) {
   mobileQuery.addEventListener('change', () => {
     ctx.view.mobile = mobileQuery.matches;
     ui.board.setMobile(ctx.view.mobile);
+    ctx.refresh();
+  });
+  const wideQuery = matchMedia(WIDE_QUERY);
+  wideQuery.addEventListener('change', () => {
+    ctx.view.wide = wideQuery.matches;
     ctx.refresh();
   });
   matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', () => applyMotion(ctx.prefs, ctx.world()));

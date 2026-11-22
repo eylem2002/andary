@@ -1083,9 +1083,11 @@ section.
 188. **A finished turn's "finished" wait is not hatched.** Waits are what blocks the agent on you
      (permission, question, plan, an MCP form or notice as "input", a stop, a stuck alert); an idle
      lead after its turn shows as the cap and the empty lane after it.
-189. **The timeline is shown by default on desktop, hidden on phones, and hidden with the boards.**
-     `T` (free until now) toggles it; showing it from the full-screen town brings the boards back. On
-     phones it is reached from Settings, as the toolbar has no room.
+189. **The timeline starts compact, and only where there is room.** One lane per crew's lead (about
+     three lanes' height), helpers one click away, Taller remembered; shown by default on screens
+     1280 px wide or more, hidden below that and on phones, and hidden with the boards. `T` (free
+     until now) toggles it; showing it from the full-screen town brings the boards back. On phones it
+     is reached from Settings, as the toolbar has no room.
 190. **Calls narrower than 4 pixels merge in the view**, so "today" stays a few dozen buttons per
      lane; the merged item reads "N calls (M failed)" and goes to its agent without a detail.
 191. **A turn's work is the crew's.** Helpers' files, failures and tests count for their lead's turn
@@ -1118,3 +1120,11 @@ section.
      is left out.
 199. **A test run "selects" tests** when a name filter or a test file or folder is on its line; a pass
      then reads "selected tests passed", as the rest may not have run.
+200. **The timeline's window starts at its first moment.** A town just started (or a page just
+     reloaded, which replays only the server's last 2,000 events) would otherwise draw the window's
+     first 14 minutes empty; the axis says "since HH:MM" instead. Two minutes at least.
+201. **The clock only moves the now edge.** The strip is rebuilt when the store changes or a control
+     is used, else when now passes 5% of room left ahead of it; a running call's bar grows at those
+     rebuilds, not every second.
+202. **A timeline moment's target is 24 px tall but as wide as it lasted**, often narrower than
+     24 px; the List view offers every moment as a full-width button, WCAG 2.5.8's equivalent.
