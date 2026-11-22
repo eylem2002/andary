@@ -1067,35 +1067,83 @@ section.
 185. **A team viewer is not told to install the mod.** Limits are the host's and never reach a
      viewer; their Usage dialog says only the host sees them.
 
+## Team town on the internet (`--tunnel`, ADR 0019)
+
+186. **cloudflared keeps the visitor's Host.** A Quick Tunnel forwards requests with
+     `Host: <words>.trycloudflare.com` (cloudflared's default when no `httpHostHeader` is set),
+     and browsers send `Origin: https://<words>.trycloudflare.com`. The tunnel port accepts only
+     that name (bare or `:443`). Not checked against the live service: the sandbox could not
+     reach Cloudflare (see the PR notes); the address parsing was checked against the output of
+     cloudflared 2026.11.1.
+187. **Cloudflare's headers mark the internet.** Cloudflare's edge adds `Cf-Connecting-IP` and
+     `Cf-Ray` to every request it forwards, and a client cannot remove them. Any request with
+     them (or `Cf-Visitor`, `Cf-IPCountry`, `CDN-Loop: cloudflare`) is tunnelled on every port.
+     `X-Forwarded-For` is not a marker: other local proxies add it, and a request with it but
+     none of Cloudflare's headers is not Cloudflare's.
+188. **The static app stays open through the tunnel.** It is the public code (the same as the
+     hosted demo) and holds no data; everything with data needs the view token or a member key.
+     Requiring a token for the page itself would need a cookie, which ADR 0015 ruled out.
+189. **Rate limits are the network's.** Member keys keep their token bucket and the 4-upload cap,
+     viewers their connection cap and message limit; tokens are 256-bit (view and keys 192-bit),
+     so there is no guessing to slow down, and Cloudflare allows 200 requests in flight.
+190. **The town binds 127.0.0.1 with `--tunnel`.** Teammates come through the tunnel, so the
+     town is not also put on the LAN; `--host 0.0.0.0` puts it back for people nearby.
+191. **cloudflared runs with Andary's environment minus `ANDARY_*`,** so a team key or an ntfy
+     topic in the environment stays with Andary; `--no-autoupdate` keeps it from restarting
+     itself under the town.
+192. **The 30 s limit for the address** covers a slow edge; past it the town stops and the start
+     fails (exit 1), rather than run with no address. A tunnel that ends later is logged, marked
+     down in `server.json`, and reported by the doctor; it is not restarted (a restart is a new
+     address, which the invitees would not know).
+193. **`--tunnel-allowed-mail` is checked against `cloudflared tunnel --help`,** which lists
+     `--allowed-mail` from 2026.9.3 on, instead of parsing version numbers. Cloudflare's guide
+     says email sign-in needs an interactive browser, so a teammate's Andary cannot pass it; the
+     CLI says that with this flag teammates can watch, not share.
+194. **The doctor does not connect to the tunnel.** It reads `server.json` and checks that
+     cloudflared's pid is alive: reaching the public address would be a network call from the
+     doctor to Cloudflare, and a failure there says little about the town.
+195. **The watchdog is a Node process, not a signal trick.** Linux's "die with the parent" needs a
+     native call Node does not offer, and macOS and Windows have none. A pipe the town holds
+     closes on any death, `kill -9` included, so the watchdog that reads it stops cloudflared the
+     same way everywhere. If the watchdog itself is killed with SIGKILL, the next start or doctor
+     catches the cloudflared left behind.
+196. **A cloudflared left behind is stopped only after its command line is checked.** It must name
+     `cloudflared` and `http://127.0.0.1:<the recorded port>`, and the town in `server.json` must
+     be gone. A pid that may have been reused by another program, or a command line that cannot
+     be read, gets a warning naming the pid, never a signal.
+197. **Other cloudflared configuration folders are refused, not overridden.** Pointing `--config`
+     at an empty file might also stop a Quick Tunnel, which was not tested live. Refusing a
+     `config.yml` in any folder cloudflared reads (and `TUNNEL_*` variables, which it reads as
+     flags) keeps the tunnel to the flags Andary passes.
 ## Turn receipts (2026-11-22)
 
-186. **A turn's work is the crew's.** Helpers' files, failures and tests count for their lead's turn
+198. **A turn's work is the crew's.** Helpers' files, failures and tests count for their lead's turn
      (they work for it); agent-team teammates have turns of their own and are left out.
-187. **An edit is a file tool's change or a shell command that may change files.** "Tests not
+199. **An edit is a file tool's change or a shell command that may change files.** "Tests not
      re-run since the last edit" compares the last test run's start with the last Edit, MultiEdit,
      Write, NotebookEdit, Codex patch, or shell command that `changesFiles` (the stuck rules' reader)
      says may change files: `sed -i`, heredocs, formatters, installs. git's bookkeeping, test runs and
      builds are not edits (a commit or a report file changes no source). The town cannot tell which
      files a shell edit touched, so the receipt says "may have changed" and names none.
-188. **Lines from the hook's own text.** Added and removed lines per hunk are what is left once the
+200. **Lines from the hook's own text.** Added and removed lines per hunk are what is left once the
      lines both texts start and end with are set aside: exact for a typical Edit, approximate for a
      hunk that moves lines around. Text longer than the town keeps marks the counts "≥". A Write
      over an existing file has no "removed": the hook does not carry the old content.
-189. **A build** is a package's `build`/`build:…` script, `tsc`, a `build` subcommand of the common
+201. **A build** is a package's `build`/`build:…` script, `tsc`, a `build` subcommand of the common
      tools, `make` with no target (or `all`/`build`) and `python -m build`, in `core/shell.js` beside
      `isTestRun`. `runsNoTests` moved there from the digest, so both read tests the same way.
-190. **A turn's cost is a difference of running totals.** Usage arrives after the hooks, so the
+202. **A turn's cost is a difference of running totals.** Usage arrives after the hooks, so the
      receipt of a crew's latest turn takes new usage until your next prompt; usage that arrives
      later counts for the next turn. With no reading from before the turn (and no fresh session
      start seen), the cost is left out rather than guessed.
-191. **A Stop hook that keeps the turn going is the same turn.** Work between a Stop and a Stop with
+203. **A Stop hook that keeps the turn going is the same turn.** Work between a Stop and a Stop with
      `stop_hook_active` joins the receipt of the turn before; a Stop without it after work with no
      prompt is a new turn that started before the town saw it ("at least").
-192. **A receipt's log line is written again when a Stop hook updates it**, with the newer words;
+204. **A receipt's log line is written again when a Stop hook updates it**, with the newer words;
      the inspector shows the latest.
-193. **Another crew's edits are judged by folder.** An edit by another crew inside this crew's
+205. **Another crew's edits are judged by folder.** An edit by another crew inside this crew's
      session folder while its turn is open is reported, naming no file: the receipt cannot prove
      which of its files it touched. A teammate's crew in a team town works on another computer and
      is left out.
-194. **A test run "selects" tests** when a name filter or a test file or folder is on its line; a pass
+206. **A test run "selects" tests** when a name filter or a test file or folder is on its line; a pass
      then reads "selected tests passed", as the rest may not have run.

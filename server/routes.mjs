@@ -1,6 +1,6 @@
 // HTTP routes (CONTRACTS §4.4). Every response carries the security headers; every request must
 // name one of our own hosts.
-import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, PROOF_HEADER, browserRole, hasHookSecret, proveServer, safeEqual, signHookReply } from './auth.mjs';
+import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, PROOF_HEADER, allowedHostsFor, browserRole, hasHookSecret, isTunnelled, proveServer, safeEqual, signHookReply } from './auth.mjs';
 import { TEAM_HEADER, verifyMemberKey } from './team.mjs';
 import { offeredSuggestions } from './approvals.mjs';
 import { sourceOf } from './adapters/index.mjs';
@@ -8,7 +8,7 @@ import { ingestHook, ingestTeam } from './ingest.mjs';
 import { LIMITS_BODY_BYTES, parseLimitsReport } from './limits.mjs';
 import { APP_ID, LIMITS } from './config.mjs';
 import { publicSettings } from './browsers.mjs';
-import { BAD_TOKEN_PAGE, HttpError, readBody, sendHtml, sendJson, sendText } from './http-util.mjs';
+import { BAD_TOKEN_PAGE, HttpError, LOCAL_SIGN_IN_PAGE, readBody, sendHtml, sendJson, sendText } from './http-util.mjs';
 import { isAllowedHost } from './security.mjs';
 import { cardShowsAll } from '../public/js/core/card-fields.js';
 import { isObject } from '../public/js/core/text.js';
@@ -29,8 +29,10 @@ export async function handleRequest(ctx, req, res) {
   for (const [name, value] of Object.entries(ctx.headers)) res.setHeader(name, value);
   // A teammate's relay may reach the host by any name (a LAN address, a VPN name); its key, not
   // the Host header, is what authenticates it, and no browser can send that header cross-site.
-  const teamPost = Boolean(ctx.team) && req.method === 'POST' && req.url === '/api/team';
-  if (!teamPost && !isAllowedHost(req.headers.host, ctx.allowedHosts)) {
+  // Through the tunnel (ADR 0019) every request, the team's too, must name the tunnel exactly.
+  const tunnelled = isTunnelled(req);
+  const teamPost = Boolean(ctx.team) && !tunnelled && req.method === 'POST' && req.url === '/api/team';
+  if (!teamPost && !isAllowedHost(req.headers.host, allowedHostsFor(req, ctx))) {
     req.resume();
     sendText(res, 403, 'Forbidden: Andary does not answer to this host name. Open it at 127.0.0.1 or localhost (a team town also answers to its network address and to --team-host names).\n');
     return;
@@ -54,7 +56,9 @@ export async function handleRequest(ctx, req, res) {
     return;
   }
   if (req.method === 'GET' && url.searchParams.has('token') && isPagePath(url.pathname)) {
-    handleLogin(ctx, res, url);
+    // The owner signs in on this computer only: never through the tunnel, even with the token.
+    if (tunnelled) sendHtml(res, 403, LOCAL_SIGN_IN_PAGE);
+    else handleLogin(ctx, res, url);
     return;
   }
   if (req.method === 'GET' && url.searchParams.has('view') && isPagePath(url.pathname)) {
@@ -139,21 +143,38 @@ function redirectWithFragment(res, url, param, fragment) {
 /** @type {Record<string, { methods: string[], handle: (ctx: TownContext, req: Request, res: Response) => void|Promise<void> }>} */
 const API_ROUTES = {
   '/api/health': { methods: ['GET', 'HEAD'], handle: (_ctx, _req, res) => sendJson(res, 200, { ok: true }) },
-  '/api/hello': {
-    methods: ['GET', 'HEAD'],
-    handle: (ctx, req, res) =>
-      sendJson(res, 200, {
-        app: APP_ID,
-        version: ctx.version,
-        authenticated: browserRole(req, ctx.uiToken, ctx.team?.view ?? null) !== null,
-        settings: publicSettings(ctx),
-      }),
-  },
+  '/api/hello': { methods: ['GET', 'HEAD'], handle: handleHello },
   '/api/proof': { methods: ['GET'], handle: handleProof },
   '/api/hook': { methods: ['POST'], handle: handleHook },
   '/api/limits': { methods: ['POST'], handle: handleLimits },
   '/api/team': { methods: ['POST'], handle: handleTeam },
 };
+
+/**
+ * GET /api/hello: whether this is Andary, and whether the request's credentials sign it in.
+ * Through the tunnel (ADR 0019) the internet does not learn whether the owner answers prompts or
+ * gets phone notes, and without a view token or member key not even the version or the timeout.
+ * @param {TownContext} ctx
+ * @param {Request} req
+ * @param {Response} res
+ */
+function handleHello(ctx, req, res) {
+  const authenticated = browserRole(req, ctx.uiToken, ctx.team?.view ?? null) !== null;
+  if (!isTunnelled(req)) {
+    sendJson(res, 200, { app: APP_ID, version: ctx.version, authenticated, settings: publicSettings(ctx) });
+    return;
+  }
+  const known = authenticated || Boolean(ctx.team && verifyMemberKey(ctx.team.secret, req.headers[TEAM_HEADER]));
+  const { approvalTimeoutMs } = publicSettings(ctx);
+  const settings = { remoteApprovals: false, notify: false, notifyLimits: false, ...(known ? { approvalTimeoutMs } : {}) };
+  sendJson(res, 200, { app: APP_ID, ...(known ? { version: ctx.version } : {}), authenticated, settings });
+}
+
+/**
+ * The only routes the tunnel reaches (ADR 0019): the forwarder's (proof, hook) and the limits
+ * mod's belong to this computer, and answer 403 through it whatever they carry.
+ */
+const TUNNEL_ROUTES = new Set(['/api/health', '/api/hello', '/api/team']);
 
 /** Most events one teammate may send in one request. */
 const TEAM_BATCH = 200;
@@ -234,6 +255,11 @@ async function handleApi(ctx, req, res, pathname) {
   if (!route) {
     req.resume();
     sendJson(res, 404, { error: 'Not found' });
+    return;
+  }
+  if (isTunnelled(req) && !TUNNEL_ROUTES.has(pathname)) {
+    req.resume();
+    sendJson(res, 403, { error: 'Not available through the tunnel' });
     return;
   }
   if (!route.methods.includes(req.method ?? '')) {
