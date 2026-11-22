@@ -754,6 +754,9 @@ describe('director: a team town\'s people (§4.11)', () => {
     await ready();
     assert.equal(store.getState().sessions[0].color, CREW_COLORS[2], 'local crews are the host\'s');
     store.setPeople([{ name: 'Sam', color: 4, host: true }]);
-    assert.deepEqual(calls('updateAgent').at(-1), ['updateAgent', MAIN, { color: CREW_COLORS[4] }]);
+    assert.deepEqual(calls('updateAgent').at(-1), ['updateAgent', MAIN, { color: CREW_COLORS[4], name: 'Foreman' }]);
+    // One name for all their agents: the lead takes it.
+    store.setPeople([{ name: 'Sam', color: 4, host: true, profile: { agents: 'Pixel' } }]);
+    assert.deepEqual(calls('updateAgent').at(-1), ['updateAgent', MAIN, { color: CREW_COLORS[4], name: 'Pixel' }]);
   });
 });

@@ -379,6 +379,7 @@ function applyProfile(ctx, connection, raw) {
   const result = ctx.team.people.setProfile(name, check.profile);
   if (!result) sendError(ctx, connection, 'You are no longer on the team.');
   else if ('wait' in result) sendError(ctx, connection, 'Wait a few seconds before changing your character again.');
+  else if ('error' in result) sendError(ctx, connection, `Profile not saved: ${result.error}.`);
   else ctx.hub.send(connection, { t: 'profile', ok: true, color: result.color, asked: check.profile.color });
 }
 

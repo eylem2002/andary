@@ -245,10 +245,14 @@ export function removePerson(roster, name) {
  * @param {Roster} roster
  * @param {string} name
  * @param {import('../public/js/core/profile.js').Profile} profile  already validated
- * @returns {{ roster: Roster, color: number }|null}  null: not on the roster
+ * @returns {{ roster?: Roster, color?: number, error?: string }|null}  null: not on the roster; error: the
+ *   name the character shows is another person's
  */
 export function setProfile(roster, name, profile) {
   if (!Object.hasOwn(roster.people, name)) return null;
+  const shown = profile.name.toLocaleLowerCase();
+  const clash = shown && Object.entries(roster.people).find(([other, person]) => other !== name && (other.toLocaleLowerCase() === shown || person.profile?.name.toLocaleLowerCase() === shown));
+  if (clash) return { error: `Another person is called ${profile.name}: choose another name for your character` };
   const color = nextFree(takenBy(roster, 'color', name), PERSON_COLOR_COUNT, profile.color);
   const person = { ...roster.people[name], color, profile };
   return { roster: { ...roster, people: { ...roster.people, [name]: person } }, color };
@@ -331,18 +335,19 @@ export function createPeople({ home, host, onChange = () => {}, now = Date.now, 
      * one less than PROFILE_EVERY_MS ago.
      * @param {string} name
      * @param {import('../public/js/core/profile.js').Profile} profile
-     * @returns {{ color: number } | { wait: true } | null}
+     * @returns {{ color: number } | { wait: true } | { error: string } | null}
      */
     setProfile(name, profile) {
       const last = saved.get(name);
       if (last !== undefined && now() - last < PROFILE_EVERY_MS) return { wait: true };
       const result = updateRoster(home, (current) => setProfile(current, name, profile) ?? { roster: undefined, color: -1 });
+      if (result.error) return { error: result.error };
       if (!result.roster) return null;
       saved.set(name, now());
       roster = result.roster;
       stamp = fileStamp(home);
       onChange();
-      return { color: result.color };
+      return { color: /** @type {number} */ (result.color) };
     },
   };
 }

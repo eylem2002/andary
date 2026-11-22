@@ -312,8 +312,11 @@ ANDARY_TEAM_KEY=Lina.xxxxxxxx andary start --share-to http://192.168.1.20:4747
 
 The second is her **personal link** to the shared town. It opens the town as Lina: her character
 stands on the porch of her home, lit while she is online, and **Settings → You** lets her choose
-how her character looks (hair, face, clothes, shoes, hat, a cape or scarf…), her colour and her
-house's style; everyone sees the same. Lina's crews arrive in the host's town in her colour, with
+how her character looks, from picture tiles: body, hair and streaks, face (eyes, brows, mouth,
+glasses, freckles, earrings…), seventeen tops with patterns, bottoms, shoes, hats, extras, a pet
+and something to hold, or a ready-made outfit; her colour, her house's style, the name her
+character shows and one name for all her agents ("Pixel" gives Pixel, Pixel 1, Pixel 2…).
+Everyone sees the same. Lina's crews arrive in the host's town in her colour, with
 her name on their Foreman and a badge on the crews board. Anyone else can watch with the
 view-only link (`andary team view-link`). The demo is a small team town too: you and Lina.
 

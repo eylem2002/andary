@@ -10,8 +10,12 @@ import { PERSON_COLOR_COUNT, defaultProfile, validateProfile } from '../core/pro
 export const DEMO_ME = 'You';
 
 const LINA = /** @type {Profile} */ (/** @type {unknown} */ ({
-  v: 1, color: 1, house: 'desert',
-  look: { skin: 5, hair: 'curly', hairColor: 0, eyes: 'round', face: 'glasses', top: 'hoodie', topColor: 'theme', bottom: 'skirt', bottomColor: 1, shoes: 'sneakers', shoesColor: 4, hat: 'none', extra: 'headphones' },
+  v: 1, color: 1, house: 'desert', name: 'Lina', agents: '',
+  look: {
+    skin: 8, height: 'medium', build: 'slim', hair: 'curly', hairColor: 0, hairStreak: 8, eyes: 'round', brows: 'arched', mouth: 'grin',
+    facialHair: 'none', glasses: 'round', cheeks: 'freckles', earrings: 'hoops', top: 'hoodie', topPattern: 'emblem', topColor: 'theme', patternColor: 4,
+    bottom: 'skirt', bottomColor: 1, shoes: 'hightops', shoesColor: 4, hat: 'none', extra: 'headphones', pet: 'cat', hand: 'coffee',
+  },
 }));
 
 /**
@@ -21,7 +25,7 @@ const LINA = /** @type {Profile} */ (/** @type {unknown} */ ({
 export function createDemoPeople({ onPeople, saved = null }) {
   /** @type {PersonView[]} */
   let people = [
-    { name: DEMO_ME, slot: 0, color: saved?.color === LINA.color ? 0 : (saved?.color ?? 0), host: true, online: true, profile: saved ?? { ...defaultProfile(0), look: { ...defaultProfile(0).look, hat: 'cap' } } },
+    { name: DEMO_ME, slot: 0, color: saved?.color === LINA.color ? 0 : (saved?.color ?? 0), host: true, online: true, profile: saved ?? { ...defaultProfile(0), look: { ...defaultProfile(0).look, hat: 'cap', hand: 'laptop' } } },
     { name: 'Lina', slot: 1, color: LINA.color, host: false, online: true, profile: LINA },
   ];
   return {
@@ -31,12 +35,13 @@ export function createDemoPeople({ onPeople, saved = null }) {
     /**
      * Saves your profile, with the colour you asked for unless Lina has it (then the next free one).
      * @param {unknown} profile
-     * @returns {{ color: number, asked: number }|null}
+     * @returns {{ color: number, asked: number }|{ error: string }}
      */
     save(profile) {
       const check = validateProfile(profile);
-      if (!check.ok) return null;
-      const taken = new Set(people.filter((p) => p.name !== DEMO_ME).map((p) => p.color));
+      if (!check.ok) return { error: `Profile not saved: ${check.error}.` };
+      if (check.profile.name.toLocaleLowerCase() === 'lina') return { error: 'Profile not saved: Another person is called Lina: choose another name for your character.' };
+      const taken = /** @type {Set<number>} */ (new Set(people.filter((p) => p.name !== DEMO_ME).map((p) => p.color)));
       let color = check.profile.color;
       while (taken.has(color)) color = (color + 1) % PERSON_COLOR_COUNT;
       people = people.map((p) => (p.name === DEMO_ME ? { ...p, color, profile: check.profile } : p));

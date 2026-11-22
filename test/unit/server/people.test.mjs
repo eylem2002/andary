@@ -54,6 +54,11 @@ test('a colour someone else has goes to the next free one in order', () => {
   assert.equal(setProfile(roster, 'Lina', { ...defaultProfile(0), color: 0 })?.color, 1, 'her own colour is free to her');
   assert.equal(setProfile(roster, 'Lina', { ...defaultProfile(0), color: 6 })?.color, 6);
   assert.equal(setProfile(roster, 'Nobody', defaultProfile(0)), null);
+  // The name a character shows is never another person's, on the roster or chosen.
+  assert.match(setProfile(roster, 'Lina', { ...defaultProfile(0), name: 'omar' })?.error ?? '', /Another person is called omar/);
+  const named = /** @type {any} */ (setProfile(roster, 'Omar', { ...defaultProfile(2), name: 'Ozzy' })).roster;
+  assert.match(setProfile(named, 'Lina', { ...defaultProfile(0), name: 'OZZY' })?.error ?? '', /Another person/);
+  assert.equal(setProfile(named, 'Omar', { ...defaultProfile(2), name: 'Ozzy' })?.error, undefined, 'their own name is theirs');
 });
 
 test('people.json is private, and a broken or hand-edited file never breaks the town', () => {

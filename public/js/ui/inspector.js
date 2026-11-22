@@ -4,7 +4,7 @@
 // used how often, recent files and activity, its last message.
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
-import { doingText, formatAgo, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
+import { doingText, formatAgo, formatDuration, isCommandText, nameWithRole, roleLabel, shortenPath, truncate } from './format.js';
 import { changeSummary } from './changes.js';
 import { contextSentence, hasCounted, liveContext, usageSentence } from './usage.js';
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
@@ -113,7 +113,7 @@ export function createInspector(ctx) {
     const session = findSession(state, agent.sessionId);
     setCrewColor(el, session?.color ?? agent.color);
     updateRoundel(mark, crewNumber(state, agent.sessionId), session?.color ?? agent.color);
-    setText(name, agent.name);
+    setText(name, nameWithRole(agent));
     setText(role, `${roleLabel(agent)}${session ? ` in ${session.project}` : ''}`);
     updateStatusChip(chip, agent.status);
     const asking = state.approvals.find((approval) => approval.status === 'pending' && approvalAgentKey(approval) === agent.key);

@@ -11,7 +11,7 @@ import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from
 import { icon } from './icons.js';
 import { modelLabel } from '../core/catalog.js';
 import { agentKeyOf } from '../core/ids.js';
-import { doingText, formatDuration, isCommandText, plural, truncate } from './format.js';
+import { doingText, formatDuration, isCommandText, nameWithRole, plural, truncate } from './format.js';
 import { approvalAgentKey, roundel, setCurrent, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 import { itemsByAgent, notesByAgent, waitedText } from './needs-you.js';
 
@@ -210,6 +210,7 @@ function updateStation(ctx, parts, item, agent, facts) {
   const need = facts.needs.get(agent.key) ?? null;
   updateStatusChip(p.chip, agent.status);
   setText(p.name, agent.name);
+  setAttr(p.name, 'title', agent.roleName && agent.roleName !== agent.name ? nameWithRole(agent) : null);
   const doing = need ? truncate(need.text, 90) : doingText(agent, facts.asking.get(agent.key));
   setText(p.doing, doing);
   p.doing.classList.toggle('hud-mono', isCommandText(doing));

@@ -9,7 +9,7 @@
 import { ACHIEVEMENTS, achievementFor } from './achievements.js';
 import { BUILDINGS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
 import { LEAD_NAME, MAX_APPROVALS, MAX_RECENT, MAX_RETIRED, MAX_SPAWNS_PER_SESSION, boundedPush, createModel, helpersOf } from './store-model.js';
-import { agentFor, assignSpawn, attribute, dropAgent, personColor, place, pruneDoneHelpers, pruneEndedSessions, reconcileTeammate, repairGuesses, sessionFor, sessionStatus } from './crews.js';
+import { agentFor, assignSpawn, attribute, dropAgent, nameCrew, personColor, place, pruneDoneHelpers, pruneEndedSessions, reconcileTeammate, repairGuesses, sessionFor, sessionStatus } from './crews.js';
 import { recordChange, rememberFile } from './changes.js';
 import { hazardText } from './conflicts.js';
 import { NO_SESSION, normalize } from './events.js';
@@ -77,6 +77,8 @@ export { ACHIEVEMENTS };
  * @property {string} sessionId
  * @property {string|null} agentId
  * @property {string} name
+ * @property {string} [roleName]   the name its role gives it (Foreman, Scout 1, a teammate's name), when `name` is its person's agents name
+ * @property {string} [shownAs]    the name the store last gave it (core/crews.js nameCrew)
  * @property {'lead'|'subagent'|'teammate'} role
  * @property {string} type
  * @property {string} color
@@ -595,6 +597,7 @@ function apply(m, input) {
   if (!s.member && dialogsAfterEvent(m.dialogs, e, a ? a.agentId : e.agentId)) m.state.dialogs = m.dialogs.list();
   const newlyStuck = followLoops(m, e, s, a);
   const hazards = followConflicts(m, e, s, a);
+  nameCrew(m, s, relabels);
   if (relabels.length) e.data.relabels = relabels;
   s.lastActivity = Math.max(s.lastActivity, e.ts);
   if (a) a.lastActivity = Math.max(a.lastActivity, e.ts);
@@ -1056,14 +1059,15 @@ export function createStore(options = {}) {
 }
 
 /**
- * New people for the model; a person who picked another colour takes their crews with them.
- * True when a crew changed colour.
+ * New people for the model; a person who picked another colour or agents name takes their crews
+ * with them. True when a crew changed colour or a name.
  * @param {Model} m @param {Model['people']} people
  */
 function recolorPeople(m, people) {
   m.people = people;
   let changed = false;
   for (const s of m.state.sessions) {
+    if (nameCrew(m, s, [])) changed = true;
     const color = personColor(m, s.member ?? null);
     if (!color || color === s.color) continue;
     s.color = color;
@@ -1076,18 +1080,21 @@ function recolorPeople(m, people) {
 /**
  * A team town's people as the store keeps them: each name's colour and who hosts.
  * @param {unknown} list
- * @returns {{ host: string|null, colors: Map<string, string> }}
+ * @returns {{ host: string|null, colors: Map<string, string>, agents: Map<string, string> }}
  */
 function readPeople(list) {
   const colors = new Map();
+  const agents = new Map();
   let host = null;
   for (const person of Array.isArray(list) ? list : []) {
     const color = isObject(person) && Number.isInteger(person.color) ? CREW_COLORS[/** @type {number} */ (person.color)] : undefined;
     if (!isObject(person) || typeof person.name !== 'string' || !color) continue;
     colors.set(person.name, color);
+    const profile = isObject(person.profile) ? person.profile : null;
+    if (typeof profile?.agents === 'string' && profile.agents) agents.set(person.name, clip(oneLine(profile.agents), 20));
     if (person.host === true) host = person.name;
   }
-  return { host, colors };
+  return { host, colors, agents };
 }
 
 /** @param {unknown} n */

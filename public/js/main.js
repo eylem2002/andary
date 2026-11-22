@@ -140,8 +140,9 @@ async function boot() {
       ...demo,
       saveProfile: (profile) => {
         const saved = people.save(profile);
-        if (saved) hud.profileSaved(saved);
-        return Boolean(saved);
+        if ('error' in saved) hud.serverError(saved.error);
+        else hud.profileSaved(saved);
+        return true;
       },
     };
     hud.setLimits(demoLimits(Date.now()));

@@ -17,6 +17,11 @@ import { defaultProfile } from '../core/profile.js';
  * @property {import('../core/profile.js').Profile|null} profile
  */
 
+/** The name a person's character shows: their chosen one, else their name on the team. @param {PersonView} person */
+export function displayName(person) {
+  return person.profile?.name || person.name;
+}
+
 /** The world id of a person's figure. @param {string} name */
 export function personFigureId(name) {
   return `person:${name}`;
@@ -44,7 +49,7 @@ export function createTownPeople(getWorld) {
       if (!world) return;
       for (let slot = 0; slot < HOME_COUNT; slot++) {
         const person = people.find((p) => p.slot === slot);
-        const home = person ? { name: person.name, color: CREW_COLORS[person.color], style: person.profile?.house ?? 'coast', lights: person.online } : null;
+        const home = person ? { name: displayName(person), color: CREW_COLORS[person.color], style: person.profile?.house ?? 'coast', lights: person.online } : null;
         if (changed(`home:${slot}`, home)) world.setHome?.(slot, home);
       }
       const here = new Set();
@@ -52,7 +57,7 @@ export function createTownPeople(getWorld) {
         if (!person.online) continue;
         const id = personFigureId(person.name);
         here.add(id);
-        const spec = { id, name: person.name, color: CREW_COLORS[person.color], role: 'person', person: (person.profile ?? defaultProfile(person.color)).look, home: person.slot };
+        const spec = { id, name: displayName(person), color: CREW_COLORS[person.color], role: 'person', person: (person.profile ?? defaultProfile(person.color)).look, home: person.slot };
         const known = shown.has(`figure:${id}`);
         if (!changed(`figure:${id}`, spec)) continue;
         if (known && world.hasAgent(id)) world.updateAgent?.(id, { name: spec.name, color: spec.color, person: spec.person });

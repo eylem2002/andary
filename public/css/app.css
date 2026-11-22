@@ -2769,7 +2769,7 @@ body {
   font-size: 13px;
 }
 
-/* The "You" dialog: a live preview beside the choices; stacked on a phone, preview on top. */
+/* The "You" dialog: a live preview beside the sections; stacked on a phone, preview on top. */
 .hud-character {
   display: grid;
   grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
@@ -2787,7 +2787,7 @@ body {
 }
 
 .hud-character__preview {
-  aspect-ratio: 120 / 200;
+  aspect-ratio: 144 / 216;
   max-height: 46dvh;
   margin: 0 auto;
 }
@@ -2804,48 +2804,99 @@ body {
   font-size: 13px;
 }
 
-.hud-character__field {
-  padding: 8px 0;
+.hud-character__undo {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
 }
 
-.hud-swatches {
+.hud-character__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 12px 0 4px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.hud-character__tab {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: none;
+  font-weight: 700;
+}
+
+.hud-character__tab[aria-selected="true"] {
+  border-bottom-color: var(--sign);
+  color: var(--ink);
+}
+
+.hud-character__tab[aria-selected="false"] {
+  color: var(--ink-2);
+}
+
+.hud-character__outfits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.hud-tiles {
   min-width: 0;
   margin: 0;
   padding: 10px 0;
   border: 0;
 }
 
-.hud-swatches > legend {
+.hud-tiles > legend {
   float: left;
   width: 100%;
   margin-bottom: 8px;
   padding: 0;
 }
 
-.hud-swatches__choice {
+.hud-tiles__choice {
   color: var(--ink-2);
   font-weight: 400;
 }
 
-.hud-swatches__list {
+.hud-tiles__list {
   clear: both;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
+  gap: 6px;
+}
+
+.hud-tiles__list--swatches {
+  grid-template-columns: repeat(auto-fill, 44px);
   gap: 4px;
 }
 
-/* Each swatch is a 44 px target around a 28 px chip; the radio itself is visually hidden. */
-.hud-swatch {
+/* A tile: the option drawn on the character, its name below; the radio itself is hidden. */
+.hud-tile {
   position: relative;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 4px;
+  border: 2px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--paper);
   cursor: pointer;
 }
 
-.hud-swatch__input {
+.hud-tile--button {
+  width: 76px;
+  color: inherit;
+}
+
+.hud-tile__input {
   position: absolute;
   inset: 0;
   margin: 0;
@@ -2853,30 +2904,68 @@ body {
   cursor: inherit;
 }
 
-.hud-swatch__chip {
-  width: 28px;
-  height: 28px;
-  border: 2px solid var(--paper);
+.hud-tile__art {
+  display: block;
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  background: var(--stage);
+}
+
+.hud-tile--button .hud-tile__art {
+  height: 84px;
+}
+
+.hud-tile__name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+}
+
+.hud-tiles__list--swatches .hud-tile {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.hud-tiles__list--swatches .hud-tile__name {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.hud-tile__art--swatch {
+  width: 44px;
+  height: 44px;
+  border: 8px solid var(--paper);
   border-radius: 50%;
   background: var(--swatch, var(--ink-2));
-  box-shadow: 0 0 0 1px var(--edge);
+  box-shadow: inset 0 0 0 1px var(--edge);
 }
 
-.hud-swatch__input:checked + .hud-swatch__chip {
-  box-shadow: 0 0 0 3px var(--ink);
+.hud-tile:has(.hud-tile__input:checked) {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
 }
 
-.hud-swatch__input:focus-visible + .hud-swatch__chip {
+.hud-tiles__list--swatches .hud-tile:has(.hud-tile__input:checked) .hud-tile__art--swatch {
+  border-color: var(--ink);
+  border-width: 3px;
+}
+
+.hud-tile:has(.hud-tile__input:focus-visible) {
   outline: 2px solid var(--focus);
-  outline-offset: 4px;
+  outline-offset: 2px;
 }
 
-.hud-swatch__input:disabled + .hud-swatch__chip {
-  opacity: 0.35;
-  background-image: linear-gradient(135deg, transparent 45%, var(--paper) 45% 55%, transparent 55%);
-}
-
-.hud-swatch:has(.hud-swatch__input:disabled) {
+.hud-tile:has(.hud-tile__input:disabled) {
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
@@ -2891,7 +2980,7 @@ body {
   }
 
   .hud-character__preview {
-    max-height: 26dvh;
+    max-height: 22dvh;
   }
 }
 

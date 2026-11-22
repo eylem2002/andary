@@ -223,7 +223,7 @@ describe('Team town', () => {
 
     // A profile: checked, saved, and broadcast to everyone, viewers included.
     lina.send(JSON.stringify({ t: 'profile', p: { ...defaultProfile(0), extra: 'cape' } }));
-    assert.match((await waitForMessage(lina, (m) => m?.t === 'error' && /Profile not saved/.test(m.message))).message, /exactly v, color, house and look/);
+    assert.match((await waitForMessage(lina, (m) => m?.t === 'error' && /Profile not saved/.test(m.message))).message, /A profile has exactly/);
     lina.send(JSON.stringify({ t: 'profile', p: { ...defaultProfile(2), look: { ...defaultProfile(2).look, extra: 'cape' } } }));
     const saved = await waitForMessage(lina, (m) => m?.t === 'profile');
     assert.deepEqual([saved.ok, saved.asked, saved.color], [true, 2, 3], 'Omar has pine: the next free colour');

@@ -1148,3 +1148,26 @@ section.
      guessing (README "Upgrading").
 207. **With no `--name` and a teammate called "Host", the host becomes "Host 2"** (then 3…), with a
      line in the log, rather than refusing to start.
+208. **The creator has no dropdowns.** Every choice is a radio group of picture tiles (the option
+     drawn on the character and cropped to the part it changes; colours as round chips), with a
+     legend that names the current choice, in six tabbed sections (Body, Hair, Face, Clothes,
+     Accessories, Home and names). Only the open section's tiles are drawn, so a change redraws at
+     most a few dozen small SVGs. The two names are text fields, the only typed input.
+209. **Profile v1 grew in place** (nothing was released): 25 look fields, the two names, and a cap
+     of 768 bytes (was 512) so two 20-character names in a three-byte script still fit. The
+     palettes grew to 12 skins, 12 hair colours and 12 cloth colours; `face` became `facialHair`,
+     `glasses` and `cheeks`. Each tile, the preview and the 3D figure use the same palettes and the
+     same shading (`mix` towards white or black), so a cap or a beanie's pompom looks alike in both.
+210. **"Detailed" is modelled, not textured.** Patterns, seams, collars, hoods and glasses are small
+     shapes in the person's one figure geometry, coloured per vertex: no texture or atlas, nothing
+     new to load, still one draw call per person. A pet walks at the person's heel on the body
+     bone (it moves with them, it does not wander), a bird sits on the shoulder.
+211. **Undo goes back through the last 30 changes of this opening of the dialog**; outfits replace
+     only clothes and accessories, keeping the person's body, hair and face.
+212. **The agents' name numbers a crew's helpers in the order they joined**, in each crew
+     separately ("Pixel 1" may be in two crews, told apart by crew number), and a lead takes the
+     name alone until PR 3 lets the person's character play their lead. Teammates of an agent team
+     take it too. Log lines written before a rename keep the name they had.
+213. **A character name equal to another person's is refused by the host**, whether the other one
+     is their roster name or their chosen name, ignoring case; the demo refuses "Lina" the same way.
+

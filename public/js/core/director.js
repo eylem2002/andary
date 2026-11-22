@@ -1119,15 +1119,16 @@ const CHANGE_SHOWS = Object.freeze({
 });
 
 /**
- * A person of a team town changed colour: their crews in the town change with them.
+ * A person of a team town changed colour or agents name: their crews in the town change with them.
  * @param {Director} d
  */
 function onPeople(d) {
   for (const rt of d.crew.values()) {
     const agent = agentState(d, rt.key);
-    if (!agent || agent.color === rt.color) continue;
+    if (!agent || (agent.color === rt.color && agent.name === rt.name)) continue;
     rt.color = agent.color;
-    d.world.updateAgent(rt.key, { color: agent.color });
+    rt.name = agent.name;
+    d.world.updateAgent(rt.key, { color: agent.color, name: agent.name });
   }
 }
 

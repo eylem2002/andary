@@ -23,5 +23,6 @@ test('saving your look keeps Lina\'s colour hers', () => {
   assert.deepEqual(people.save(defaultProfile(1)), { color: 2, asked: 1 });
   assert.deepEqual(people.save(defaultProfile(5)), { color: 5, asked: 5 });
   assert.equal(seen.at(-1)[0].color, 5);
-  assert.equal(people.save({ v: 2 }), null);
+  assert.match(/** @type {any} */ (people.save({ v: 2 })).error, /Profile not saved/);
+  assert.match(/** @type {any} */ (people.save({ ...defaultProfile(3), name: 'Lina' })).error, /Another person is called Lina/);
 });

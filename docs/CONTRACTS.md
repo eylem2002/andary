@@ -702,21 +702,38 @@ prints the view link; `andary team reset` makes a new secret, which revokes ever
   person's connections close, everyone gets `{t:'people'}`). A hand-edited file is read
   defensively: malformed entries are dropped, a bad profile cleared.
 - **Profile** (`public/js/core/profile.js`, shared with the server): version 1,
-  `{ v: 1, color: 0–7, house: 'coast'|'snow'|'neon'|'desert'|'amman', look: { skin: 0–7,
-  hair: 'short'|'long'|'bun'|'curly'|'buzz'|'bald', hairColor: 0–8, eyes: 'dot'|'round'|'happy',
-  face: 'none'|'freckles'|'beard'|'moustache'|'glasses', top: 'tee'|'hoodie'|'jacket'|'sweater',
-  topColor: 'theme'|0–9, bottom: 'trousers'|'shorts'|'skirt', bottomColor: 0–9,
-  shoes: 'boots'|'sneakers'|'sandals', shoesColor: 0–9, hat: 'none'|'cap'|'beanie'|'beret'|'sunhat'|'wizard'|'crown'|'hardhat',
-  extra: 'none'|'cape'|'scarf'|'backpack'|'headphones' } }`. Colours are indices into fixed
-  palettes (`SKIN_TONES`, `HAIR_COLORS`, `CLOTH_COLORS`; `'theme'` is the person's colour). Every
-  key is required; an unknown or missing key, a value out of range, or more than 512 bytes of JSON
+  `{ v: 1, color: 0–7, house: 'coast'|'snow'|'neon'|'desert'|'amman', name, agents, look }`.
+  `name` is the name the character shows (its name pill and home plate; '' for the roster name)
+  and `agents` one name for all the person's agents ('' for role names): each up to 20 letters or
+  digits of any script, spaces, dots, dashes or underscores, already clean (`cleanDisplayName`:
+  NFC, single inner spaces, no control or invisible characters), shown as text only. The host
+  refuses a `name` equal (ignoring case) to another person's roster name or chosen name. `look`
+  holds exactly: `skin` 0–11, `height` short|medium|tall, `build` slim|regular|broad, `hair`
+  short|side|quiff|spiky|straight|wavy|ponytail|pigtails|bun|braids|afro|curly|mohawk|buzz|bald,
+  `hairColor` 0–11, `hairStreak` 'none'|0–11, `eyes` dot|round|happy|sleepy|lashes|wink, `brows`
+  none|thin|thick|arched, `mouth` smile|grin|neutral|open, `facialHair`
+  none|stubble|beard|goatee|moustache, `glasses` none|round|square|sunglasses|goggles, `cheeks`
+  none|freckles|blush|both, `earrings` none|studs|hoops, `top`
+  tee|longsleeve|hoodie|zip|denim|bomber|blazer|shirt|polo|tank|sweater|cardigan|vest|labcoat|overalls|dress|kimono,
+  `topPattern` plain|stripes|checks|dots|emblem, `topColor` and `patternColor` 'theme'|0–11,
+  `bottom` trousers|jeans|cargo|shorts|skirt|longskirt|joggers, `bottomColor` 0–11, `shoes`
+  sneakers|hightops|boots|sandals|loafers|slippers, `shoesColor` 0–11, `hat`
+  none|cap|beanie|beret|sunhat|wizard|crown|hardhat|bucket|headband|bandana|flowers|viking|tophat|chef|halo,
+  `extra` none|cape|scarf|backpack|headphones|tie|bowtie|necklace|watch|satchel|wings, `pet`
+  none|cat|dog|bird, `hand` none|laptop|coffee|book. Colours are indices into fixed palettes
+  (`SKIN_TONES`, `HAIR_COLORS`, `CLOTH_COLORS`; `'theme'` is the person's colour). Every key is
+  required; an unknown or missing key, a value out of range, or more than 768 bytes of JSON
   rejects the whole profile. `{t:'profile', p}` is validated, saved (at most once per 10 s per
   person, else `{t:'error'}`), answered with `{t:'profile', ok, color, asked}` and broadcast as
   `{t:'people'}`. `color` asks for a colour: when another person has it, the next free one in
   order is given and the browser says so. The browser keeps its own profile in its storage
-  (`andary:profile`) and sends it again when the host has none for it (after a fresh
-  `people.json`); the demo starts with it too.
-
+  (`andary:profile`) once the host saved it, and sends it again when the host has none for it
+  (after a fresh `people.json`); the demo starts with it too.
+- **Agents' names**: with `agents` set ("Pixel"), every crew of that person names its lead
+  "Pixel" and its helpers "Pixel 1", "Pixel 2"… in the order they joined (`core/crews.js`
+  `nameCrew`), in the crews board, the log, the inspector, notifications and the town; the role
+  name stays as `AgentState.roleName` and shows beside it ("Pixel 2 · Scout 1") in the inspector
+  and the row's tooltip. A member's crews take their own person's name; local crews the host's.
 - **Member key**: `encodeURIComponent(name) + "." + HMAC-SHA256(secret, "member:" + name + ":" + nonce)`
   (base64url, first 32 characters). Names keep letters, digits, spaces and `._-`, at most 24.
 - **Personal link**: `encodeURIComponent(name) + "." + HMAC-SHA256(secret, "person:" + name + ":" + nonce)`
@@ -1502,11 +1519,14 @@ and, when it fits at the current zoom (or the mode says so), its name and stat c
   on clear days. Static parts are in the town batch; the homes are one mesh, the park's life three.
 - Each agent is one skinned mesh (one draw call, two on high with the shadow pass); blob shadows
   are one instanced call for everyone; each effect type costs one call while active.
-- A person (`role: 'person'`) is drawn from their look: hair style and colour, skin, eyes, face
-  (freckles, beard, moustache, glasses), top (a tee has short sleeves), bottoms, shoes, hat and an
-  extra (cape, scarf, backpack, headphones), all in the geometry cache key, so each person costs
-  one geometry; 1.3× a helper's height, with a house before the name on their pill. Helpers keep
-  the plain look (tee, trousers, boots, short hair, dot eyes).
+- A person (`role: 'person'`) is drawn from their whole look by `agents/figure-person.js`: build
+  and height (0.92, 1 or 1.08 of 1.3× a helper), every top with its details (hood, collar, zip,
+  lapels, buttons, bib, sash) and pattern, bottoms with seams and pockets, shoes, hair styles with
+  a streak (volume hidden under hats that cover the crown), eyes, brows, mouth, cheeks, facial
+  hair, glasses, earrings, hats, extras, a pet at their heel (on the body bone) or a bird on the
+  shoulder, and an item in the right hand. All of it is in the geometry cache key and one skinned
+  mesh: each person costs one geometry and one draw call. A house before the name on their pill.
+  Helpers keep their plain figure (`figure-body.js`).
 
 ## 7. Simulation (`public/js/sim/simulation.js`)
 

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CREW_COLORS } from '../../../public/js/core/catalog.js';
 import { defaultProfile } from '../../../public/js/core/profile.js';
-import { createTownPeople, personFigureId } from '../../../public/js/ui/town-people.js';
+import { createTownPeople, displayName, personFigureId } from '../../../public/js/ui/town-people.js';
 import { describeLook } from '../../../public/js/ui/character.js';
 
 function fakeWorld() {
@@ -59,8 +59,10 @@ test('only what changed reaches the world, and someone going offline leaves', ()
   assert.equal(world.calls.filter((c) => c[0] === 'setHome').length, 6, 'a new world gets everything again');
 });
 
-test('the preview is described in one sentence', () => {
-  const look = { ...defaultProfile(2).look, face: /** @type {const} */ ('glasses'), hat: /** @type {const} */ ('beanie'), extra: /** @type {const} */ ('scarf') };
-  assert.equal(describeLook({ ...defaultProfile(2), look }), 'Peach skin, brown short hair, glasses, a beanie, a pine t-shirt, navy trousers, white sneakers and a scarf.');
-  assert.match(describeLook({ ...defaultProfile(0), look: { ...look, hair: 'bald', topColor: 5 } }), /^Peach skin, bald, glasses, a beanie, a red t-shirt/);
+test('the preview is described in one sentence, the character by their own name', () => {
+  const look = { ...defaultProfile(2).look, glasses: 'round', hat: 'beanie', extra: 'headphones', pet: 'dog', hand: 'coffee' };
+  assert.equal(describeLook({ ...defaultProfile(2), look }), 'Medium, regular, peach skin, brown short hair, round glasses, a beanie, headphones; wearing pine t-shirt, navy trousers, white sneakers, with a dog, holding a coffee.');
+  assert.match(describeLook({ ...defaultProfile(0), look: { ...look, hair: 'bald', topColor: 5, topPattern: 'stripes', patternColor: 4 } }), /bald.*red t-shirt with white stripes/);
+  assert.equal(displayName({ ...lina, profile: { ...lina.profile, name: 'Lina Ç.' } }), 'Lina Ç.');
+  assert.equal(displayName(sam), 'Sam');
 });

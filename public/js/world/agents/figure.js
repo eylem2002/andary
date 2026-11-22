@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { PartList } from './figure-parts.js';
 import { addBody, addWearable } from './figure-body.js';
 import { addHat } from './figure-hats.js';
-import { addExtra } from './figure-person.js';
+import { addPerson } from './figure-person.js';
 import { addProps } from './figure-props.js';
 import { createSkeleton } from './rig.js';
 
@@ -26,10 +26,12 @@ const BOUNDS = new THREE.Sphere(new THREE.Vector3(0, 0.6, 0), 0.95);
 /** @param {import('./looks.js').Look} look */
 function buildGeometry(look) {
   const parts = new PartList();
-  addBody(parts, look);
-  addWearable(parts, look);
-  addHat(parts, look);
-  addExtra(parts, look);
+  if (look.person) addPerson(parts, look.person);
+  else {
+    addBody(parts, look);
+    addWearable(parts, look);
+    addHat(parts, look);
+  }
   addProps(parts, look);
   return parts.merge();
 }

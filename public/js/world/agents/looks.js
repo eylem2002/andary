@@ -5,8 +5,8 @@
 // the mapping is unit-tested.
 
 import { hashString, rand01 } from './easing.js';
-import { lighten, safeColor } from './color.js';
-import { CLOTH_COLORS, HAIR_COLORS as PERSON_HAIR, LOOK_CHOICES, LOOK_FIELDS, SKIN_TONES as PERSON_SKIN, defaultProfile } from '../../core/profile.js';
+import { safeColor } from './color.js';
+import { CLOTH_COLORS, HAIR_COLORS as PERSON_HAIR, LOOK_FIELDS, SKIN_TONES as PERSON_SKIN, defaultProfile, validChoice } from '../../core/profile.js';
 
 export const HATS = Object.freeze(['hardhat', 'cap', 'crown', 'beret', 'sunhat', 'wizard', 'beanie', 'none']);
 
@@ -19,8 +19,9 @@ const PANTS_COLORS = Object.freeze(['#2F3B57', '#3A3F48', '#5E5140', '#25496E'])
  * game characters are (toy proportions), while still fitting the 0.75-unit spacing of work spots.
  */
 const FIGURE_SCALE = 1.6;
-/** A person stands 1.3× a helper's height: the main character of their crew. */
+/** A person stands 1.3× a helper's height: the main character of their crew; a little less or more by their height. */
 const PERSON_SCALE = 1.3;
+const PERSON_HEIGHTS = Object.freeze({ short: 0.92, medium: 1, tall: 1.08 });
 
 /**
  * Things worn on the body (always visible), as opposed to the "kit" carried in a hand.
@@ -80,8 +81,6 @@ function normalizeRole(role) {
   return role === 'lead' || role === 'teammate' || role === 'person' ? role : 'subagent';
 }
 
-/** What a helper wears: the plain figure every person's options are variations of. */
-const PLAIN = Object.freeze({ hairStyle: 'short', eyes: 'dot', face: 'none', top: 'tee', bottom: 'trousers', shoes: 'boots', shoesColor: '#4A3426', extra: 'none' });
 
 /**
  * A person's look, every field checked against its choices (a bad one falls back to the default
@@ -90,15 +89,15 @@ const PLAIN = Object.freeze({ hairStyle: 'short', eyes: 'dot', face: 'none', top
  * @returns {import('../../core/profile.js').PersonLook}
  */
 export function cleanPersonLook(raw) {
-  const fallback = defaultProfile(0).look;
+  const fallback = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (defaultProfile(0).look));
   const source = raw && typeof raw === 'object' ? /** @type {Record<string, unknown>} */ (raw) : {};
-  return /** @type {any} */ (Object.fromEntries(LOOK_FIELDS.map((field) => {
-    const value = source[field];
-    const choices = /** @type {readonly unknown[]} */ (LOOK_CHOICES[field]);
-    const ok = typeof choices[0] === 'string' ? choices.includes(value) : (Number.isInteger(value) && /** @type {number} */ (value) >= 0 && /** @type {number} */ (value) < choices.length) || (field === 'topColor' && value === 'theme');
-    return [field, ok ? value : fallback[field]];
-  })));
+  return /** @type {any} */ (Object.fromEntries(LOOK_FIELDS.map((field) => [field, validChoice(field, source[field]) ? source[field] : fallback[field]])));
 }
+
+/**
+ * A person's chosen look with its colours resolved, for the figure builder (figure-person.js).
+ * @typedef {import('../../core/profile.js').PersonLook & { colors: { skin: string, hair: string, streak: string|null, shirt: string, pattern: string, pants: string, shoes: string, theme: string } }} PersonParts
+ */
 
 /**
  * @typedef {object} Look
@@ -110,15 +109,7 @@ export function cleanPersonLook(raw) {
  * @property {string} skin
  * @property {string} hair
  * @property {string} pants
- * @property {string} shirt     top colour
- * @property {string} hairStyle 'short'|'long'|'bun'|'curly'|'buzz'|'bald'
- * @property {string} eyes      'dot'|'round'|'happy'
- * @property {string} face      'none'|'freckles'|'beard'|'moustache'|'glasses'
- * @property {string} top       'tee'|'hoodie'|'jacket'|'sweater'
- * @property {string} bottom    'trousers'|'shorts'|'skirt'
- * @property {string} shoes     'boots'|'sneakers'|'sandals'
- * @property {string} shoesColor
- * @property {string} extra     'none'|'cape'|'scarf'|'backpack'|'headphones'
+ * @property {PersonParts|null} person   a person's whole look; null for helpers
  * @property {number} height    uniform scale of the figure
  * @property {number} seedInt   hash of the id: drives animation timing and lanes
  * @property {string} key       cache key for the figure geometry (everything baked into it)
@@ -144,8 +135,7 @@ export function resolveLook(spec) {
   // The Foreman stands a head taller than the crew; everyone else varies a little.
   const height = FIGURE_SCALE * (role === 'lead' ? 1.1 : 0.95 + 0.1 * rand01(seedInt, 4));
   const key = [color, hat, kit, wearable, skin, hair, pants].join('|');
-  const shirt = lighten(color, 0.1);
-  return { color, role, hat, kit, wearable, skin, hair, pants, shirt, ...PLAIN, height, seedInt, key };
+  return { color, role, hat, kit, wearable, skin, hair, pants, person: null, height, seedInt, key };
 }
 
 /**
@@ -156,15 +146,22 @@ export function resolveLook(spec) {
 function personLook(spec, seedInt) {
   const look = cleanPersonLook(spec.person);
   const color = safeColor(spec.color, '#2457d6');
-  const cloth = (/** @type {number} */ i) => CLOTH_COLORS[i].hex;
-  const shirt = look.topColor === 'theme' ? color : cloth(look.topColor);
-  const parts = {
-    color, role: /** @type {const} */ ('person'), hat: look.hat, kit: null,
-    wearable: /** @type {Wearable} */ (look.extra === 'backpack' ? 'backpack' : null),
-    skin: PERSON_SKIN[look.skin].hex, hair: PERSON_HAIR[look.hairColor].hex, pants: cloth(look.bottomColor), shirt,
-    hairStyle: look.hair, eyes: look.eyes, face: look.face, top: look.top, bottom: look.bottom,
-    shoes: look.shoes, shoesColor: cloth(look.shoesColor), extra: look.extra,
+  const cloth = (/** @type {'theme'|number} */ i) => (i === 'theme' ? color : CLOTH_COLORS[i].hex);
+  /** @type {PersonParts} */
+  const person = {
+    ...look,
+    colors: {
+      skin: PERSON_SKIN[look.skin].hex,
+      hair: PERSON_HAIR[look.hairColor].hex,
+      streak: look.hairStreak === 'none' ? null : PERSON_HAIR[look.hairStreak].hex,
+      shirt: cloth(look.topColor),
+      pattern: cloth(look.patternColor),
+      pants: cloth(look.bottomColor),
+      shoes: cloth(look.shoesColor),
+      theme: color,
+    },
   };
-  const key = ['person', ...Object.values(parts)].join('|');
-  return { ...parts, height: FIGURE_SCALE * PERSON_SCALE, seedInt, key };
+  const key = `person|${color}|${LOOK_FIELDS.map((field) => look[field]).join('|')}`;
+  const height = FIGURE_SCALE * PERSON_SCALE * (PERSON_HEIGHTS[/** @type {keyof typeof PERSON_HEIGHTS} */ (look.height)] ?? 1);
+  return { color, role: 'person', hat: look.hat, kit: null, wearable: null, skin: person.colors.skin, hair: person.colors.hair, pants: person.colors.pants, person, height, seedInt, key };
 }

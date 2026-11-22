@@ -724,6 +724,28 @@ describe('store: team town members (§4.11)', () => {
     assert.equal(ctx.state().sessions[0].color, CREW_COLORS[6]);
   });
 
+  it('names a person\'s agents with their one name, and keeps the role name beside it', () => {
+    const ctx = setup();
+    ctx.store.setPeople([{ name: 'Sam', color: 0, host: true, profile: { agents: 'Pixel' } }, { name: 'Lina', color: 1 }]);
+    ctx.send(FIXTURES.SessionStart);
+    ctx.send(spawn('Explore', 'Find the login code', 't1'));
+    ctx.send(hook('SubagentStart', { agent_id: 'a1', agent_type: 'Explore' }));
+    ctx.send(spawn('Plan', 'Plan the fix', 't2'));
+    ctx.send(hook('SubagentStart', { agent_id: 'a2', agent_type: 'Plan' }));
+    ctx.send(hook('SessionStart', { source: 'startup', andary_member: 'Lina' }, { session: 'Lina~s1' }));
+    const agents = ctx.state().agents;
+    assert.equal(agents[MAIN].name, 'Pixel');
+    assert.equal(agents[MAIN].roleName, 'Foreman');
+    assert.deepEqual([agents[`${SESSION}:a1`].name, agents[`${SESSION}:a1`].roleName], ['Pixel 1', 'Scout 1']);
+    assert.deepEqual([agents[`${SESSION}:a2`].name, agents[`${SESSION}:a2`].roleName], ['Pixel 2', 'Architect 1']);
+    assert.equal(agents['Lina~s1:main'].name, 'Lina', 'only the person\'s own crews take it');
+    // Back to role names when they clear it.
+    ctx.store.setPeople([{ name: 'Sam', color: 0, host: true, profile: { agents: '' } }]);
+    assert.equal(ctx.changes.at(-1).type, 'people');
+    assert.equal(ctx.state().agents[`${SESSION}:a1`].name, 'Scout 1');
+    assert.equal(ctx.state().agents[MAIN].name, 'Foreman');
+  });
+
   it('keeps a member name to one short line', () => {
     const ctx = setup();
     ctx.send(hook('UserPromptSubmit', { prompt: 'hi', andary_member: `Lina\n${'x'.repeat(40)}` }, { session: 'Lina~s2' }));

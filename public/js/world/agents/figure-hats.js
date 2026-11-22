@@ -1,7 +1,8 @@
 // Hats, bound to the hat bone so they can hop off the head when celebrating. The hat tells you
 // the model a crew runs on (crown = Opus, beret = Sonnet, sunhat = Haiku, wizard = …); the
-// Foreman's default is a hard hat. A person of a team town picks any of them, or a beanie in
-// their own colour.
+// Foreman's default is a hard hat. A person of a team town picks any of them, or one of their own:
+// a beanie, a bucket hat, a headband, a bandana, a flower crown, a viking helmet, a top hat, a
+// chef's hat or a halo (core/profile.js), in their own colour where it has one.
 
 import { B } from './rig.js';
 import { ball, cone, cyl, dome, halfDisc, ring } from './figure-parts.js';
@@ -55,7 +56,44 @@ const HATS = {
   beanie(parts, crew) {
     parts.add(B.HAT, dome(0.182).scale(1, 0.95, 1.02).translate(0, 0.83, -0.005), crew);
     parts.add(B.HAT, cyl(0.186, 0.186, 0.05, 20).translate(0, 0.845, -0.005), darken(crew, 0.22));
-    parts.add(B.HAT, ball(0.045, 8, 6).translate(0, 1.02, -0.01), lighten(crew, 0.45));
+    parts.add(B.HAT, ball(0.045, 8, 6).translate(0, 1.02, -0.01), '#F2F0EA');
+  },
+  bucket(parts, crew) {
+    parts.add(B.HAT, cyl(0.15, 0.185, 0.12, 18).translate(0, 0.92, 0), crew);
+    parts.add(B.HAT, cyl(0.26, 0.26, 0.012, 22).rotateX(0.05).translate(0, 0.87, 0), darken(crew, 0.18));
+  },
+  headband(parts, crew) {
+    parts.add(B.HAT, ring(0.17, 0.02, TAU, 20).rotateX(Math.PI / 2).translate(0, 0.86, -0.01), crew);
+  },
+  bandana(parts, crew) {
+    parts.add(B.HAT, dome(0.178).scale(1, 0.7, 1.02).translate(0, 0.86, -0.01), crew);
+    parts.add(B.HAT, cone(0.04, 0.1, 4).rotateX(-2.2).translate(0, 0.86, -0.19), darken(crew, 0.2));
+    for (const [x, z] of [[0.06, 0.12], [-0.08, 0.1], [0.12, 0.02]]) parts.add(B.HAT, ball(0.012, 4, 3).translate(x, 0.93, z), '#F2F0EA');
+  },
+  flowers(parts) {
+    const petals = ['#FF6B8B', '#FFD54A', '#FFFFFF', '#B987FF', '#FF9F43'];
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * TAU;
+      parts.add(B.HAT, ball(0.03, 6, 4).translate(Math.sin(a) * 0.15, 0.9, Math.cos(a) * 0.15), petals[k % petals.length]);
+      parts.add(B.HAT, ball(0.022, 5, 3).translate(Math.sin(a + 0.4) * 0.16, 0.89, Math.cos(a + 0.4) * 0.16), '#5C9E4A');
+    }
+  },
+  viking(parts) {
+    parts.add(B.HAT, dome(0.185).translate(0, 0.84, 0), '#9AA3AD');
+    parts.add(B.HAT, cyl(0.188, 0.188, 0.03, 20).translate(0, 0.85, 0), '#C9944A');
+    for (const side of [-1, 1]) parts.add(B.HAT, cone(0.035, 0.16, 8).rotateZ(side * -0.9).translate(side * 0.2, 0.96, 0), '#F2EAD8');
+  },
+  tophat(parts, crew) {
+    parts.add(B.HAT, cyl(0.25, 0.25, 0.014, 22).translate(0, 0.885, 0), '#1E1E22');
+    parts.add(B.HAT, cyl(0.13, 0.13, 0.26, 18).translate(0, 1.02, 0), '#1E1E22');
+    parts.add(B.HAT, cyl(0.133, 0.133, 0.035, 18).translate(0, 0.915, 0), crew);
+  },
+  chef(parts) {
+    parts.add(B.HAT, cyl(0.15, 0.15, 0.1, 18).translate(0, 0.92, 0), '#FFFFFF');
+    for (const [x, z] of [[0, 0], [0.08, 0.04], [-0.08, 0.04], [0, -0.08]]) parts.add(B.HAT, ball(0.1, 10, 8).translate(x, 1.03, z), '#FFFFFF');
+  },
+  halo(parts) {
+    parts.add(B.HAT, ring(0.12, 0.016, TAU, 24).rotateX(Math.PI / 2).translate(0, 1.07, 0), '#FFE58A');
   },
   wizard(parts) {
     const purple = '#4C3A9E';
