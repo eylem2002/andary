@@ -33,7 +33,7 @@ test.beforeEach(async ({ page, isMobile }) => {
   // few cores and would pick low, so desktop asks for high. The phone keeps its own choice (low).
   const quality = isMobile ? 'auto' : 'high';
   // A small view: a software renderer (CI) draws far more frames per second.
-  if (!isMobile) await page.setViewportSize({ width: 640, height: 400 });
+  if (!isMobile) await page.setViewportSize({ width: 480, height: 300 });
   await page.addInitScript((q) => {
     localStorage.setItem('andary:prefs', JSON.stringify({ setupSeen: true, panels: 'hidden', directorCam: 'off', quality: q }));
   }, quality);
@@ -101,7 +101,12 @@ async function darkestInStorm(page) {
   return darkest;
 }
 
+test.describe.configure({ retries: 0 });
+
 test('at 23:00 the town is night but readable, and stays so in a foggy storm with arrivals', async ({ page }) => {
+  // High quality on CI's software GPU draws a bloom frame in seconds, not milliseconds: this one
+  // test gets four minutes and no retry, so it can never stall the run.
+  test.setTimeout(240_000);
   await openTownAt(page, '23:00');
   const clear = await townLuma(page);
   expect(clear, 'clear night brightness').toBeGreaterThanOrEqual(MIN_LUMA);
