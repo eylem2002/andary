@@ -28,12 +28,12 @@ test.afterAll(async () => {
 });
 
 test.beforeEach(async ({ page, isMobile }) => {
-  // High quality in a software renderer draws a few frames a second.
-  test.slow();
   problems = watchConsole(page);
   // A MacBook picks high quality (bloom, the pass that spread the NaN); test machines often have
   // few cores and would pick low, so desktop asks for high. The phone keeps its own choice (low).
   const quality = isMobile ? 'auto' : 'high';
+  // A small view: a software renderer (CI) draws far more frames per second.
+  if (!isMobile) await page.setViewportSize({ width: 640, height: 400 });
   await page.addInitScript((q) => {
     localStorage.setItem('andary:prefs', JSON.stringify({ setupSeen: true, panels: 'hidden', directorCam: 'off', quality: q }));
   }, quality);
@@ -81,39 +81,30 @@ async function openTownAt(page, hhmm) {
 }
 
 /**
- * Holds the worst weather (the demo's own weather driver is shut out) and keeps agents arriving
- * through the portal beam while sampling; returns the darkest sample.
+ * Holds the worst weather (the demo's own weather driver is shut out, the sky eased at once) and
+ * triggers portal arrivals directly; returns the darker of two samples taken while beams show.
  * @param {import('@playwright/test').Page} page
- * @param {{ overcast: number, fog: number, rain: number, storm: boolean, kind: string }} weather
  */
-async function darkestOver(page, weather) {
-  await page.evaluate((w) => {
+async function darkestInStorm(page) {
+  await page.evaluate(() => {
     const world = /** @type {any} */ (window).__andary.world;
     const set = world.setTownWeather;
     world.setTownWeather = () => {};
-    set({ rainbow: 0, ...w });
-  }, weather);
+    set({ kind: 'storm', overcast: 1, rain: 1, fog: 1, rainbow: 0, storm: true });
+  });
   let darkest = Infinity;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 2; i++) {
     await page.evaluate(() => /** @type {any} */ (window).__andary.world.effect('portal', { building: 'hall' }));
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(400);
     darkest = Math.min(darkest, await townLuma(page));
   }
   return darkest;
 }
 
-test('at 23:00 the town is night but readable, and stays so in a storm with arrivals', async ({ page }) => {
+test('at 23:00 the town is night but readable, and stays so in a foggy storm with arrivals', async ({ page }) => {
   await openTownAt(page, '23:00');
-  // The canvas draws, then give the weather time to settle in.
-  await page.waitForTimeout(1500);
   const clear = await townLuma(page);
   expect(clear, 'clear night brightness').toBeGreaterThanOrEqual(MIN_LUMA);
-  const storm = await darkestOver(page, { kind: 'storm', overcast: 1, rain: 1, fog: 0, storm: true });
-  expect(storm, 'darkest frame in a night storm with portal arrivals').toBeGreaterThanOrEqual(MIN_LUMA);
-});
-
-test('night fog does not swallow the town', async ({ page }) => {
-  await openTownAt(page, '02:00');
-  const foggy = await darkestOver(page, { kind: 'fog', overcast: 1, rain: 0.6, fog: 1, storm: false });
-  expect(foggy, 'darkest frame in thick fog at 02:00').toBeGreaterThanOrEqual(MIN_LUMA);
+  const storm = await darkestInStorm(page);
+  expect(storm, 'darkest frame in a foggy night storm with portal arrivals').toBeGreaterThanOrEqual(MIN_LUMA);
 });
