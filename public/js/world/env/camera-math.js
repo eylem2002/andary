@@ -8,7 +8,7 @@ export const ISO_PITCH = (35 * Math.PI) / 180;
 export const MIN_ZOOM = 0.7;
 export const MAX_ZOOM = 9;
 /** World-space footprint the default framing should show (x and z extents of the plinth). */
-const TOWN_VIEW = Object.freeze({ width: 60, depth: 66 });
+const TOWN_VIEW = Object.freeze({ width: 60, depth: 78 });
 
 /**
  * @param {number} value

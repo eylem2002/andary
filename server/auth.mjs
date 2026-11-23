@@ -3,13 +3,15 @@
 // are fresh random values on every server start.
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
-/** Where a page sends the owner's sign-in token, and a team viewer's view token. */
+/** Where a page sends the owner's sign-in token, a team viewer's view token and a teammate's personal link. */
 export const UI_TOKEN_HEADER = 'x-andary-token';
 export const VIEW_TOKEN_HEADER = 'x-andary-view';
+const PERSON_HEADER = 'x-andary-person';
 /** The WebSocket subprotocol the town speaks; credentials ride along as `andary.token.<token>`. */
 export const WS_PROTOCOL = 'andary';
 export const TOKEN_PROTOCOL_PREFIX = 'andary.token.';
 export const VIEW_PROTOCOL_PREFIX = 'andary.view.';
+const PERSON_PROTOCOL_PREFIX = 'andary.person.';
 const HOOK_SECRET_HEADER = 'x-andary-secret';
 /** The forwarder's per-request nonce, and the server's signature over nonce + reply body. */
 export const HOOK_NONCE_HEADER = 'x-andary-nonce';
@@ -46,7 +48,7 @@ export function safeEqual(supplied, expected) {
  * cookie: a cookie for 127.0.0.1 goes to every port on it, so another local web server opened in
  * the same browser would receive it. Page storage is per origin (port included).
  * @param {import('node:http').IncomingMessage} req
- * @returns {{ token: string|null, view: string|null }}
+ * @returns {{ token: string|null, view: string|null, person: string|null }}
  */
 export function browserCredentials(req) {
   const header = (/** @type {string} */ name) => {
@@ -60,6 +62,7 @@ export function browserCredentials(req) {
   return {
     token: header(UI_TOKEN_HEADER) ?? fromProtocol(TOKEN_PROTOCOL_PREFIX),
     view: header(VIEW_TOKEN_HEADER) ?? fromProtocol(VIEW_PROTOCOL_PREFIX),
+    person: header(PERSON_HEADER) ?? fromProtocol(PERSON_PROTOCOL_PREFIX),
   };
 }
 
@@ -140,17 +143,22 @@ export function allowedHostsFor(req, { allowedHosts, tunnelHosts }) {
 }
 
 /**
- * Who a browser is: the owner (signed in), a teammate watching (view token), or nobody. The
- * owner's token counts only on this computer: through the tunnel it is ignored (ADR 0019).
+ * Who a browser is: the owner (signed in), a teammate with their personal link, someone watching
+ * with the view link, or nobody. The owner's sign-in wins over the others, and counts only on
+ * this computer: through the tunnel it is ignored (ADR 0019).
  * @param {import('node:http').IncomingMessage} req
  * @param {string} uiToken
- * @param {string|null} view  the team's view token, null when this is not a team host
- * @returns {'owner'|'viewer'|null}
+ * @param {{ view: string, personOf: (token: string|null) => string|null }|null} team
+ *   a team host's view token, and the roster name a personal link belongs to (null: none)
+ * @returns {{ role: 'owner'|'person'|'viewer', person: string|null }|null}
  */
-export function browserRole(req, uiToken, view) {
+export function browserRole(req, uiToken, team) {
   const credentials = browserCredentials(req);
-  if (!isTunnelled(req) && safeEqual(credentials.token, uiToken)) return 'owner';
-  if (view && safeEqual(credentials.view, view)) return 'viewer';
+  if (!isTunnelled(req) && safeEqual(credentials.token, uiToken)) return { role: 'owner', person: null };
+  if (!team) return null;
+  const person = credentials.person ? team.personOf(credentials.person) : null;
+  if (person) return { role: 'person', person };
+  if (safeEqual(credentials.view, team.view)) return { role: 'viewer', person: null };
   return null;
 }
 

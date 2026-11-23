@@ -67,7 +67,7 @@ const NO_READING = Object.freeze({
  */
 export function limitsNote(view, accounts, shown) {
   // A teammate watching with the view link gets no limits (they are the host's): no hint to install anything.
-  if (view.serverSettings.team?.role === 'viewer') return NO_READING.viewer;
+  if (['viewer', 'person'].includes(view.serverSettings.team?.role)) return NO_READING.viewer;
   if (view.mode === 'demo') return NO_READING.demo;
   if (!accounts) return NO_READING.none;
   return shown ? '' : NO_READING.empty;

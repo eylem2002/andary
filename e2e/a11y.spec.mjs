@@ -94,6 +94,22 @@ test('settings and setup dialogs have no violations', async ({ page }) => {
   expect(await violations(page)).toEqual([]);
 });
 
+for (const theme of /** @type {const} */ (['light', 'dark'])) {
+  test(`the "You" dialog has no violations in any section, and Escape closes it (${theme})`, async ({ page }) => {
+    await openDemo(page, { theme, world: 'fake' });
+    await page.getByTestId('settings-button').click();
+    await page.getByTestId('open-character').click();
+    const dialog = page.getByRole('dialog', { name: 'You' });
+    await expect(dialog).toBeVisible();
+    for (const tab of ['Body', 'Hair', 'Face', 'Clothes', 'Accessories', 'Home and names']) {
+      await dialog.getByRole('tab', { name: tab }).click();
+      expect(await violations(page), tab).toEqual([]);
+    }
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+  });
+}
+
 test('catch-up dialog has no violations, and Escape gives focus back', async ({ page }) => {
   await openDemo(page, { theme: 'dark', world: 'fake' });
   // A few seconds of the story (at 4×), so the crews have done something to tell.

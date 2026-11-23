@@ -7,6 +7,7 @@ import { confirmSignIn, readCredentials, signInHeaders, signInProtocols } from '
 const TOKEN = 'Abc_def-0123456789ghijklmnopqrstuvwxyzABCDE';
 const OTHER = 'Other-token-0123456789abcdefghijklmnopqrstu';
 const VIEW = 'View_token-0123456789abcdefghijklmnopqrstu';
+const PERSON = 'Zeynep%20%C3%87..Abc_def-0123456789ghijklmnopqrst';
 
 /** A page at `hash`, with storage and history that record what happens. @param {string} hash */
 function page(hash) {
@@ -33,10 +34,10 @@ function page(hash) {
 
 test('the sign-in link leaves the address bar and waits as a candidate until the server accepts it', () => {
   const p = page(`#signin=${TOKEN}`);
-  assert.deepEqual(readCredentials(p.place), { token: null, view: null, candidate: { token: TOKEN, view: null } });
+  assert.deepEqual(readCredentials(p.place), { token: null, view: null, person: null, candidate: { token: TOKEN, view: null, person: null } });
   assert.deepEqual(p.replaced, ['/?demo=1'], 'the query stays, the token goes');
   confirmSignIn(true, p.place);
-  assert.deepEqual(readCredentials(p.place), { token: TOKEN, view: null, candidate: null }, 'kept for later requests');
+  assert.deepEqual(readCredentials(p.place), { token: TOKEN, view: null, person: null, candidate: null }, 'kept for later requests');
 });
 
 test('a link with a token the server refuses cannot replace a sign-in that works', () => {
@@ -46,7 +47,7 @@ test('a link with a token the server refuses cannot replace a sign-in that works
   p.place.location.hash = `#signin=${OTHER}`; // someone else's link, or a stale one
   assert.equal(readCredentials(p.place).candidate?.token, OTHER);
   confirmSignIn(false, p.place);
-  assert.deepEqual(readCredentials(p.place), { token: TOKEN, view: null, candidate: null });
+  assert.deepEqual(readCredentials(p.place), { token: TOKEN, view: null, person: null, candidate: null });
 });
 
 test('a view link adds a view token without dropping the owner\'s', () => {
@@ -56,12 +57,27 @@ test('a view link adds a view token without dropping the owner\'s', () => {
   p.place.location.hash = `#view=${VIEW}`;
   readCredentials(p.place);
   confirmSignIn(true, p.place);
-  assert.deepEqual(readCredentials(p.place), { token: TOKEN, view: VIEW, candidate: null });
+  assert.deepEqual(readCredentials(p.place), { token: TOKEN, view: VIEW, person: null, candidate: null });
+});
+
+test('a personal link signs a teammate in as themselves, kept beside a view token', () => {
+  const p = page(`#view=${VIEW}`);
+  readCredentials(p.place);
+  confirmSignIn(true, p.place);
+  // The server puts the token in the fragment percent-encoded; a name may hold a space or a dot.
+  p.place.location.hash = `#me=${encodeURIComponent(PERSON)}`;
+  assert.equal(readCredentials(p.place).candidate?.person, PERSON);
+  confirmSignIn(true, p.place);
+  assert.deepEqual(readCredentials(p.place), { token: null, view: VIEW, person: PERSON, candidate: null });
+  assert.equal(signInHeaders({ token: null, view: null, person: PERSON })['x-andary-person'], PERSON);
+  assert.deepEqual(signInProtocols({ token: null, view: null, person: PERSON }), ['andary', `andary.person.${PERSON}`]);
+  const bad = page('#me=Lina.short');
+  assert.equal(readCredentials(bad.place).candidate, null);
 });
 
 test('anything that is not a token is ignored and left alone', () => {
   const p = page('#signin=<script>&other=1');
-  assert.deepEqual(readCredentials(p.place), { token: null, view: null, candidate: null });
+  assert.deepEqual(readCredentials(p.place), { token: null, view: null, person: null, candidate: null });
   assert.deepEqual(p.replaced, []);
 });
 

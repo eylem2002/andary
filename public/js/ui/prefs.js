@@ -26,6 +26,8 @@ import { PLACE_NAMES } from '../core/place-names.js';
  * @property {boolean} ambient       waves, gulls, city hum and soft music while sound is on
  * @property {'coast'|'snow'|'neon'|'desert'|'amman'} townLook  the town's look (core/looks.js, read by page.js); changing it reloads
  * @property {'auto'|'always'|'off'} placeNames  labels on the buildings: names where they fit, always, or none (core/place-names.js)
+ * @property {boolean} lookAsks      a teammate's "come look" shows a note (team towns)
+ * @property {boolean} walkPad       the step pad in walk mode on phones
  */
 
 /** @type {Readonly<Prefs>} */
@@ -49,6 +51,8 @@ export const DEFAULT_PREFS = Object.freeze({
   ambient: true,
   townLook: 'coast',
   placeNames: 'auto',
+  lookAsks: true,
+  walkPad: true,
 });
 
 export const STORAGE_KEY = PREFS_STORAGE_KEY;

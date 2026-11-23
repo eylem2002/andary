@@ -16,9 +16,10 @@ import { nextPlaceNames } from '../core/place-names.js';
  * @property {ReturnType<typeof import('./building-card.js').createBuildingCard>} place
  * @property {ReturnType<typeof import('./approvals.js').createApprovalsPanel>} approvals
  * @property {Record<DialogName, { open(): void, close(): void, isOpen: boolean }>} dialogs
+ * @property {ReturnType<typeof import('./walk.js').createWalk>} walk
  */
 
-/** @typedef {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'catchUp'} DialogName */
+/** @typedef {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'catchUp'|'character'} DialogName */
 
 /** @typedef {{ ctx: HudContext, ui: HudParts }} Hud */
 
@@ -138,6 +139,7 @@ export function runAction(hud, action) {
     director: () => toggleDirector(hud),
     'toggle-panels': () => togglePanels(ctx),
     follow: () => setFollow(hud),
+    'walk-mode': () => toggleWalk(hud),
     'rotate-left': byHand(() => world?.rotateCamera(-1)),
     'rotate-right': byHand(() => world?.rotateCamera(1)),
     'zoom-in': byHand(() => world?.zoomBy(1.25)),
@@ -192,6 +194,16 @@ export function goToNeed(hud, item) {
     ui.crews.reveal(item.sessionId);
     select(hud, { type: 'agent', id: item.agentKey }, { camera: true, focus: true });
   }
+}
+
+/**
+ * Walk mode on or off; the town takes the keyboard, and on a phone the sheet folds away so the
+ * town can be seen.
+ * @param {Hud} hud
+ */
+function toggleWalk({ ctx, ui }) {
+  ui.walk.toggle({ focus: true });
+  if (ctx.view.walking && ctx.view.mobile) ui.board.setSheetOpen(false);
 }
 
 /**
@@ -286,6 +298,8 @@ export function handleShortcut(hud, action, event) {
   const inWorld = document.getElementById('world')?.contains(/** @type {Node} */ (event.target));
   if (inWorld && (action === 'zoom-in' || action === 'zoom-out')) return false;
   if (action === 'escape') return escape(hud);
+  // In walk mode W and A are steps, never Catch me up or Approvals, wherever the focus is.
+  if (ctx.view.walking && (action === 'catch-up' || action === 'approvals')) return false;
   if (action === 'approvals') {
     ctx.showTab('approvals', { focus: true });
     return true;

@@ -15,7 +15,7 @@ const ACCEL = 14; // units/s², so walkers ease into their stride
 const TAU = Math.PI * 2;
 
 /** How far above the head bone each hat reaches (figure units), for pills and icons. */
-const HAT_TOP = { hardhat: 0.38, cap: 0.35, crown: 0.43, beret: 0.35, sunhat: 0.35, wizard: 0.66, none: 0.33 };
+const HAT_TOP = { hardhat: 0.38, cap: 0.35, crown: 0.43, beret: 0.35, sunhat: 0.35, wizard: 0.66, beanie: 0.4, bucket: 0.4, headband: 0.34, bandana: 0.36, flowers: 0.36, viking: 0.46, tophat: 0.62, chef: 0.58, halo: 0.5, none: 0.33 };
 
 /**
  * Appear/disappear animations. Each maps progress u (0..1) to scale, lift and extra spin.
@@ -67,6 +67,8 @@ export class Agent {
     this.look = look;
     /** @type {string|undefined} agent type (Explore, Plan, …), kept so restyles can re-derive the look */
     this.type = undefined;
+    /** A person's chosen look (core/profile.js PersonLook), for role 'person'. @type {unknown} */
+    this.person = undefined;
     const { mesh, bones } = createFigure(look);
     this.mesh = mesh;
     this.bones = bones;
@@ -85,6 +87,8 @@ export class Agent {
     this.queued = false;
     /** @type {Route|null} */
     this.route = null;
+    /** A person's timed walk (crowd.placePerson): where they are at a time, the same on every screen. @type {((now: number) => {x: number, z: number, done: boolean})|null} */
+    this.track = null;
     this.speed = 0;
     /** @type {((arrived: boolean) => void)[]} */
     this.waiters = [];
@@ -128,6 +132,35 @@ export class Agent {
     this.route = { points, index: 0, speed: pace === 'run' ? RUN_SPEED : WALK_SPEED, facing, then };
     this.anim.set(pace === 'run' ? 'run' : 'walk');
     this.anim.setOverlay(this.activity);
+  }
+
+  /**
+   * Follows a timed walk: each frame the figure stands where the walk is at that moment.
+   * @param {(now: number) => {x: number, z: number, done: boolean}} track
+   */
+  follow(track) {
+    this.route = null;
+    this.track = track;
+    this.anim.set('run');
+    this.anim.setOverlay(null);
+  }
+
+  /** @returns {number} how far the figure moved */
+  stepTrack() {
+    const track = /** @type {NonNullable<Agent['track']>} */ (this.track);
+    const p = track(Date.now());
+    const pos = this.group.position;
+    const dx = p.x - pos.x;
+    const dz = p.z - pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 1e-3) this.goalHeading = Math.atan2(dx, dz);
+    pos.x = p.x;
+    pos.z = p.z;
+    if (p.done) {
+      this.track = null;
+      this.settle();
+    }
+    return d;
   }
 
   /**
@@ -212,7 +245,7 @@ export class Agent {
    */
   update(dt) {
     this.stepTransition(dt);
-    const travelled = this.stepRoute(dt);
+    const travelled = this.track ? this.stepTrack() : this.stepRoute(dt);
     if (travelled > 0) this.anim.advanceGait(travelled);
     this.heading = turnToward(this.heading, this.goalHeading, TURN_SPEED * dt);
     const pose = this.anim.update(dt, travelled > 0);

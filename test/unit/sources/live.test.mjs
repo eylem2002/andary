@@ -80,6 +80,76 @@ describe('connectLive', () => {
     assert.deepEqual(errors, ['Too many browsers']);
   });
 
+  test('a team town\'s people come before the history, then as they change; a profile is sent and answered', () => {
+    const store = fakeStore();
+    /** @type {any[]} */
+    const seen = [];
+    /** @type {any[]} */
+    const saved = [];
+    const live = connectLive({
+      store,
+      WebSocketImpl: /** @type {any} */ (FakeSocket),
+      url: 'ws://x/ws',
+      onPeople: (people, me) => {
+        seen.push([people.length, me]);
+        store.calls.push(['people']);
+      },
+      onProfile: (answer) => saved.push(answer),
+    });
+    const socket = FakeSocket.all[0];
+    socket.open();
+    socket.receive({ t: 'hello', history: [{ id: 1 }], approvals: [], people: [{ name: 'Sam' }, { name: 'Lina' }], me: 'Lina' });
+    assert.deepEqual(store.calls, [['reset'], ['people'], ['ingest', 1]], 'crews take their colours as the history replays');
+    socket.receive({ t: 'people', people: [{ name: 'Sam' }] });
+    socket.receive({ t: 'people', people: 'junk' });
+    assert.deepEqual(seen, [[2, 'Lina'], [1, 'Lina'], [0, 'Lina']]);
+    assert.equal(live.saveProfile(/** @type {any} */ ({ v: 1 })), true);
+    assert.deepEqual(socket.sent.at(-1), { t: 'profile', p: { v: 1 } });
+    socket.receive({ t: 'profile', ok: true, color: 3, asked: 2 });
+    socket.receive({ t: 'profile', ok: false });
+    assert.deepEqual(saved, [{ color: 3, asked: 2 }]);
+    socket.receive({ t: 'hello', history: [], approvals: [] });
+    assert.deepEqual(seen.at(-1), [0, null], 'a town that is no team host has no people');
+  });
+
+  test('walks, emotes, phrases and "come look" (§4.11): what comes in, and what this person can ask', () => {
+    /** @type {any[]} */
+    const seen = [];
+    const live = connectLive({
+      store: fakeStore(),
+      WebSocketImpl: /** @type {any} */ (FakeSocket),
+      url: 'ws://x/ws',
+      onPeople: (people, me, offset) => seen.push(['people', me, offset]),
+      onPresence: (people) => seen.push(['presence', people]),
+      onSaid: (said) => seen.push(['said', said]),
+      onLookAsk: (ask) => seen.push(['look', ask]),
+    });
+    const socket = FakeSocket.all[0];
+    socket.open();
+    const serverTime = Date.now() + 5000;
+    socket.receive({ t: 'hello', history: [], approvals: [], people: [], me: 'Lina', serverTime });
+    const [, , offset] = seen[0];
+    assert.ok(Math.abs(offset - 5000) < 1000, 'walks are timed on the server\'s clock');
+    seen.length = 0;
+    socket.receive({ t: 'presence', people: [{ name: 'Sam', tile: [2, 3] }] });
+    socket.receive({ t: 'presence', people: 'junk' });
+    socket.receive({ t: 'emote', name: 'Sam', id: 2 });
+    socket.receive({ t: 'phrase', name: 'Sam', id: 1 });
+    socket.receive({ t: 'phrase', name: 'Sam', id: 'x' });
+    socket.receive({ t: 'look-ask', from: 'Sam', at: { building: 'library' } });
+    socket.receive({ t: 'look-ask', at: { building: 'library' } });
+    assert.deepEqual(seen, [
+      ['presence', [{ name: 'Sam', tile: [2, 3] }]],
+      ['said', { kind: 'emote', name: 'Sam', id: 2 }],
+      ['said', { kind: 'phrase', name: 'Sam', id: 1 }],
+      ['look', { from: 'Sam', at: { building: 'library' } }],
+    ]);
+    assert.equal(live.walk([4, 9]), true);
+    assert.equal(live.say('emote', 3), true);
+    assert.equal(live.lookAsk('Sam', { agent: 'a1' }), true);
+    assert.deepEqual(socket.sent.filter((m) => m.t !== 'ping'), [{ t: 'walk', to: [4, 9] }, { t: 'emote', id: 3 }, { t: 'look', to: 'Sam', at: { agent: 'a1' } }]);
+  });
+
   test('one bad event does not stop the stream', () => {
     const errorLog = mock.method(console, 'error', () => {});
     const store = { ...fakeStore(), ingest: (e) => {

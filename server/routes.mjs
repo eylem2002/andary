@@ -1,7 +1,7 @@
 // HTTP routes (CONTRACTS §4.4). Every response carries the security headers; every request must
 // name one of our own hosts.
 import { HOOK_NONCE_HEADER, HOOK_SIGNATURE_HEADER, PROOF_HEADER, allowedHostsFor, browserRole, hasHookSecret, isTunnelled, proveServer, safeEqual, signHookReply } from './auth.mjs';
-import { TEAM_HEADER, verifyMemberKey } from './team.mjs';
+import { TEAM_HEADER } from './team.mjs';
 import { offeredSuggestions } from './approvals.mjs';
 import { sourceOf } from './adapters/index.mjs';
 import { ingestHook, ingestTeam } from './ingest.mjs';
@@ -55,16 +55,7 @@ export async function handleRequest(ctx, req, res) {
     sendText(res, 405, 'Method not allowed\n', { Allow: 'GET, HEAD' });
     return;
   }
-  if (req.method === 'GET' && url.searchParams.has('token') && isPagePath(url.pathname)) {
-    // The owner signs in on this computer only: never through the tunnel, even with the token.
-    if (tunnelled) sendHtml(res, 403, LOCAL_SIGN_IN_PAGE);
-    else handleLogin(ctx, res, url);
-    return;
-  }
-  if (req.method === 'GET' && url.searchParams.has('view') && isPagePath(url.pathname)) {
-    handleViewLogin(ctx, res, url);
-    return;
-  }
+  if (req.method === 'GET' && isPagePath(url.pathname) && signIn(ctx, res, url, tunnelled)) return;
   await ctx.serveStatic(req, res, url.pathname);
 }
 
@@ -87,6 +78,25 @@ function parseUrl(raw) {
  */
 function isPagePath(pathname) {
   return pathname === '/' || /^\/[\w-]+\.html$/.test(pathname);
+}
+
+/**
+ * A page asked with a sign-in link (?token=, ?view= or ?me=): answers it and returns true.
+ * @param {TownContext} ctx
+ * @param {Response} res
+ * @param {URL} url
+ * @param {boolean} tunnelled
+ */
+function signIn(ctx, res, url, tunnelled) {
+  const has = (/** @type {string} */ name) => url.searchParams.has(name);
+  // The owner signs in on this computer only: never through the tunnel, even with the token.
+  if (has('token')) {
+    if (tunnelled) sendHtml(res, 403, LOCAL_SIGN_IN_PAGE);
+    else handleLogin(ctx, res, url);
+  } else if (has('view')) handleViewLogin(ctx, res, url);
+  else if (has('me')) handlePersonLogin(ctx, res, url);
+  else return false;
+  return true;
 }
 
 /**
@@ -118,6 +128,21 @@ function handleViewLogin(ctx, res, url) {
     return;
   }
   redirectWithFragment(res, url, 'view', `view=${ctx.team.view}`);
+}
+
+/**
+ * GET /?me=… (a teammate's personal link): the same, with `#me=…`, while the name is on the roster.
+ * @param {TownContext} ctx
+ * @param {Response} res
+ * @param {URL} url
+ */
+function handlePersonLogin(ctx, res, url) {
+  const token = url.searchParams.get('me');
+  if (!ctx.team?.personOf(token)) {
+    sendHtml(res, 403, BAD_TOKEN_PAGE);
+    return;
+  }
+  redirectWithFragment(res, url, 'me', `me=${encodeURIComponent(/** @type {string} */ (token))}`);
 }
 
 /**
@@ -159,12 +184,12 @@ const API_ROUTES = {
  * @param {Response} res
  */
 function handleHello(ctx, req, res) {
-  const authenticated = browserRole(req, ctx.uiToken, ctx.team?.view ?? null) !== null;
+  const authenticated = browserRole(req, ctx.uiToken, ctx.team) !== null;
   if (!isTunnelled(req)) {
     sendJson(res, 200, { app: APP_ID, version: ctx.version, authenticated, settings: publicSettings(ctx) });
     return;
   }
-  const known = authenticated || Boolean(ctx.team && verifyMemberKey(ctx.team.secret, req.headers[TEAM_HEADER]));
+  const known = authenticated || Boolean(ctx.team?.memberOf(req.headers[TEAM_HEADER]));
   const { approvalTimeoutMs } = publicSettings(ctx);
   const settings = { remoteApprovals: false, notify: false, notifyLimits: false, ...(known ? { approvalTimeoutMs } : {}) };
   sendJson(res, 200, { app: APP_ID, ...(known ? { version: ctx.version } : {}), authenticated, settings });
@@ -190,7 +215,7 @@ const TEAM_UPLOADS = 4;
  * @param {Response} res
  */
 async function handleTeam(ctx, req, res) {
-  const member = ctx.team ? verifyMemberKey(ctx.team.secret, req.headers[TEAM_HEADER]) : null;
+  const member = ctx.team ? ctx.team.memberOf(req.headers[TEAM_HEADER]) : null;
   if (!member) {
     req.resume();
     sendJson(res, ctx.team ? 401 : 404, { error: ctx.team ? 'Missing or wrong team key' : 'Not found' });

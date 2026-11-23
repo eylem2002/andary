@@ -7,7 +7,7 @@ import { CLI_PATH, DEFAULT_HOST, readVersion, resolveHome } from '../config.mjs'
 import { applyHooksChange, inspectInstallations, planHooksChange, refreshForwarder, settingsPathFor } from '../installer.mjs';
 import { openBrowser } from '../open-browser.mjs';
 import { hostWithPort, isLoopbackHost, isWildcardHost } from '../security.mjs';
-import { lanAddresses } from '../team.mjs';
+import { cleanMemberName, lanAddresses } from '../team.mjs';
 import { TUNNEL_TIMEOUT_MS, blockingConfig, describeOrphan, stopOrphanTunnel, findCloudflared, installHelp, parseAllowedMail, startQuickTunnel, supportsAllowedMail } from '../tunnel.mjs';
 import { savedTopicUrl } from '../notify.mjs';
 import { ensureHome, findRunningServer, isProcessAlive, loginUrl, probeServer, readStateFile, removeStateFileIfOwned } from '../state-file.mjs';
@@ -24,6 +24,7 @@ export const START_OPTIONS = Object.freeze({
   'notify-url': { type: 'string' },
   'notify-limits': { type: 'boolean' },
   team: { type: 'boolean' },
+  name: { type: 'string' },
   'team-host': { type: 'string', multiple: true },
   'share-to': { type: 'string' },
   'team-key': { type: 'string' },
@@ -46,6 +47,7 @@ export const START_OPTIONS = Object.freeze({
  * @property {string|null} notifyUrl   --notify-url or ANDARY_NOTIFY_URL
  * @property {boolean} notifyLimits    --notify-limits: a phone note when a plan limit reaches 90%
  * @property {boolean} team            --team: host a team town
+ * @property {string|null} teamName    --name: the host's own name in the team town
  * @property {string[]} teamHosts      --team-host: other names teammates reach it by
  * @property {{ url: string, key: string, member: string }|null} shareTo  --share-to and --team-key
  * @property {number|undefined} approvalTimeoutMs
@@ -68,6 +70,7 @@ function startSettings(values, io, demo) {
   const shareTo = parseShareTo(values['share-to'] ?? io.env.ANDARY_SHARE_TO, values['team-key'] ?? io.env.ANDARY_TEAM_KEY);
   if (team && shareTo) throw new UsageError('A town either hosts the team (--team) or shares with one (--share-to), not both.');
   if (values['team-host'] && !team) throw new UsageError('--team-host only matters with --team.');
+  const teamName = teamNameOf(values, team);
   const { tunnel, tunnelAllowedMail } = tunnelSettings(values, team);
   const notifyUrl = parseNotifyUrl(values['notify-url'] ?? io.env.ANDARY_NOTIFY_URL);
   if (values['notify-limits'] && !values.notify && !notifyUrl) throw new UsageError('--notify-limits sends phone notes: add --notify (or --notify-url).');
@@ -77,6 +80,7 @@ function startSettings(values, io, demo) {
     // says where; with --tunnel they come through the tunnel, so it stays on this computer.
     host: values.host ?? (team && !tunnel ? '0.0.0.0' : DEFAULT_HOST),
     team,
+    teamName,
     teamHosts: parseTeamHosts(values['team-host']),
     shareTo,
     open: !values['no-open'],
@@ -92,6 +96,20 @@ function startSettings(values, io, demo) {
     detach: Boolean(values.detach),
     demo,
   };
+}
+
+/**
+ * --name: the host's name in the team town (with --team only), or null.
+ * @param {Record<string, any>} values
+ * @param {boolean} team
+ * @returns {string|null}
+ */
+function teamNameOf(values, team) {
+  if (values.name === undefined) return null;
+  if (!team) throw new UsageError('--name only matters with --team: it is your name in the team town.');
+  const name = cleanMemberName(values.name);
+  if (!name) throw new UsageError('--name takes letters, digits, spaces, dots, dashes or underscores (at most 24).');
+  return name;
 }
 
 /**
@@ -250,6 +268,7 @@ async function runForeground(settings, home, io, cloudflared = null) {
       notifyUrl: settings.notifyUrl ?? (settings.notify ? savedTopicUrl(home) : null),
       notifyLimits: settings.notifyLimits,
       team: settings.team,
+      teamName: settings.teamName,
       teamHosts: settings.teamHosts,
       shareTo: settings.shareTo,
       approvalTimeoutMs: settings.approvalTimeoutMs,
@@ -257,6 +276,7 @@ async function runForeground(settings, home, io, cloudflared = null) {
       tunnel: settings.tunnel,
       record: settings.record,
       awayMs: testAwayMs(io.env),
+      presenceMs: testPresenceMs(io.env),
       log,
     });
   } catch (error) {
@@ -291,6 +311,19 @@ async function runForeground(settings, home, io, cloudflared = null) {
 function testAwayMs(env) {
   const ms = Number(env.ANDARY_AWAY_MS);
   return Number.isInteger(ms) && ms >= 100 ? ms : undefined;
+}
+
+/**
+ * The porch and inside timers of a team town (ANDARY_PORCH_MS, ANDARY_INSIDE_MS), shortened for
+ * tests; undocumented, like ANDARY_AWAY_MS.
+ * @param {NodeJS.ProcessEnv} env
+ */
+function testPresenceMs(env) {
+  const read = (/** @type {string|undefined} */ value) => {
+    const ms = Number(value);
+    return Number.isInteger(ms) && ms >= 100 ? ms : undefined;
+  };
+  return { porchMs: read(env.ANDARY_PORCH_MS), insideMs: read(env.ANDARY_INSIDE_MS) };
 }
 
 /**
@@ -382,8 +415,8 @@ function printBanner(server, settings, io, tunnelView = null) {
   io.out(notifyUrl ? `  Phone notifications: on. In the free ntfy app, subscribe to ${notifyUrl}` : '  Phone notifications: off (start with --notify to get them in the free ntfy app)');
   if (notifyUrl && settings.notifyLimits) io.out('  Also when a Claude plan limit reaches 90% (with the andary-limits mod).');
   if (server.viewUrl) {
-    io.out(`  Team town: on. Invite a teammate with: ${cliInvocation()} team invite <name>`);
-    io.out(`  Teammates watch (view only) at ${tunnelView ?? server.viewUrl}`);
+    io.out(`  Team town: on. Invite a teammate (a home, a character and a personal link) with: ${cliInvocation()} team invite <name>`);
+    io.out(`  Anyone else may watch (view only) at ${tunnelView ?? server.viewUrl}`);
   }
   if (tunnelView) {
     io.out(`  On the internet at ${new URL(tunnelView).origin} (a Cloudflare Quick Tunnel; it changes when Andary restarts).`);
@@ -509,6 +542,7 @@ function forwardedFlags(settings) {
   if (settings.notify) flags.push('--notify');
   if (settings.notifyLimits) flags.push('--notify-limits');
   if (settings.team) flags.push('--team');
+  if (settings.teamName) flags.push('--name', settings.teamName);
   for (const name of settings.teamHosts) flags.push('--team-host', name);
   if (settings.approvalTimeoutMs !== undefined) flags.push('--approval-timeout', String(settings.approvalTimeoutMs / 1000));
   // Paths only: the background server reads the files itself.

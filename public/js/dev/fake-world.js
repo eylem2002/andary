@@ -6,6 +6,8 @@
 /** @typedef {{ method: string, args: unknown[] }} WorldCall */
 
 const MAX_CALLS = 500;
+/** @type {Record<string, [number, number]>} */
+const STEP_KEYS = { ArrowUp: [0, -1], w: [0, -1], W: [0, -1], ArrowDown: [0, 1], s: [0, 1], S: [0, 1], ArrowLeft: [-1, 0], a: [-1, 0], A: [-1, 0], ArrowRight: [1, 0], d: [1, 0], D: [1, 0] };
 
 /**
  * @param {HTMLElement} container
@@ -15,11 +17,24 @@ export function createFakeWorld(container, { timeOfDay = 'auto', log = false } =
   /** @type {WorldCall[]} */
   const calls = [];
   /** @type {Map<string, Set<(sel: any) => void>>} */
-  const listeners = new Map([['select', new Set()], ['hover', new Set()]]);
+  const listeners = new Map([['select', new Set()], ['hover', new Set()], ['ground', new Set()], ['step', new Set()]]);
   const agents = new Set();
   let hour = timeOfDay;
 
   container.classList.add('is-fake-world');
+  let walking = false;
+  // Walk mode: arrows and WASD on the town take a step, as in the 3D world under its default camera.
+  container.addEventListener('keydown', (event) => {
+    const step = STEP_KEYS[event.key];
+    if (!walking || event.target !== container || !step || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+    event.preventDefault();
+    emit('step', step);
+  });
+
+  /** @param {string} event @param {unknown} value */
+  function emit(event, value) {
+    for (const cb of listeners.get(event) ?? []) cb(value);
+  }
 
   /** @param {string} method @param {unknown[]} args */
   function record(method, args) {
@@ -65,6 +80,7 @@ export function createFakeWorld(container, { timeOfDay = 'auto', log = false } =
     setNodeModules: noop('setNodeModules'),
     addWorktree: noop('addWorktree'),
     removeWorktree: noop('removeWorktree'),
+    setHome: noop('setHome'),
     /** @param {{ id: string }} spec */
     addAgent(spec) {
       record('addAgent', [spec]);
@@ -95,8 +111,21 @@ export function createFakeWorld(container, { timeOfDay = 'auto', log = false } =
       record('sendMessage', [fromId, to]);
     },
     vehicle: noop('vehicle'),
+    /** Walk mode; the town takes keyboard focus while it is on. @param {boolean} on */
+    setWalkMode(on) {
+      record('setWalkMode', [on]);
+      walking = Boolean(on);
+      if (walking) {
+        container.tabIndex = 0;
+        container.setAttribute('role', 'application');
+        container.setAttribute('aria-label', 'The town (walk mode: arrow keys walk)');
+      } else for (const name of ['tabindex', 'role', 'aria-label']) container.removeAttribute(name);
+    },
+    placePerson: noop('placePerson'),
+    /** @param {number} right @param {number} up @returns {[number, number]} */
+    screenStep: (right, up) => [right, up === 0 ? 0 : -up],
     /**
-     * @param {'select'|'hover'} event
+     * @param {'select'|'hover'|'ground'|'step'} event
      * @param {(sel: any) => void} cb
      */
     on(event, cb) {
@@ -109,7 +138,11 @@ export function createFakeWorld(container, { timeOfDay = 'auto', log = false } =
     },
     /** Test hook: raises 'select' as a click on an agent or building sign would. @param {any} sel */
     emitSelect(sel) {
-      for (const cb of listeners.get('select') ?? []) cb(sel);
+      emit('select', sel);
+    },
+    /** Test hook: raises 'ground' as a click on the ground in walk mode would. @param {[number, number]} tile */
+    emitGround(tile) {
+      emit('ground', tile);
     },
     getScreenPosition: () => null,
     stats: () => ({ fps: 0, agents: agents.size, drawCalls: 0 }),

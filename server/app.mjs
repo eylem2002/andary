@@ -10,7 +10,9 @@ import { createWorkTrees } from './work-trees.mjs';
 import { createTownDigest } from './digest.mjs';
 import { createNoteDesk } from './notes.mjs';
 import { createLimitsTracker } from './limits.mjs';
-import { announceTeam, createHub, handleUpgrade } from './browsers.mjs';
+import { announcePeople, announcePresence, tellPerson, announceTeam, createHub, dropRemovedPeople, handleUpgrade } from './browsers.mjs';
+import { createPresence } from './presence.mjs';
+import { createPeople } from './people.mjs';
 import { createTeamHost, createTeamRelay, lanAddresses, teamSecret } from './team.mjs';
 import { DEFAULT_APPROVAL_TIMEOUT_MS, DEFAULT_HOST, DEFAULT_PORT, LIMITS, PUBLIC_DIR, readVersion, resolveClaudeConfigDir, resolveHome } from './config.mjs';
 import { createHistory, createRecorder, recordingPath } from './history.mjs';
@@ -37,8 +39,10 @@ const NOTE_SWEEP_MS = 15_000;
  * @property {boolean} [notifyLimits]      a phone note when a plan limit reaches 90% (off by default)
  * @property {number} [notifyDelayMs]      how long a dialog's phone note waits (DIALOG_DELAY_MS); for tests, no CLI flag
  * @property {number} [awayMs]             how long without you counts as away (AWAY_MS); for tests, no CLI flag
+ * @property {{ porchMs?: number, insideMs?: number }} [presenceMs]  a team town's porch and inside timers (presence.mjs); for tests, no CLI flag
  * @property {string} [claudeDir]          Claude Code's config folder, for reading token usage from transcripts
  * @property {boolean} [team]              host a team town: teammates' Andarys may send their events here
+ * @property {string|null} [teamName]       the host's own name in a team town (--name), already cleaned
  * @property {string[]} [teamHosts]        names teammates reach a team host by (a VPN name), besides its addresses
  * @property {{ url: string, key: string }|null} [shareTo]  send this town's events to a team host
  * @property {number} [approvalTimeoutMs]
@@ -81,6 +85,7 @@ const NOTE_SWEEP_MS = 15_000;
  * @property {{ events: number }} counts
  * @property {NodeJS.Timeout|null} graceTimer
  * @property {NodeJS.Timeout|null} [hostTimer]  a team host's refresh of its network names
+ * @property {NodeJS.Timeout|null} [peopleTimer]  a team host's look at people.json (the CLI edits it)
  */
 
 /**
@@ -102,6 +107,9 @@ const NOTE_SWEEP_MS = 15_000;
  * @property {() => number} browserCount
  * @property {() => Promise<void>} stop
  */
+
+/** How often a team host looks whether `andary team invite` or `remove` changed people.json. */
+const PEOPLE_POLL_MS = 2000;
 
 /**
  * Starts a server and writes server.json. Rejects if the port cannot be bound (EADDRINUSE…).
@@ -128,6 +136,9 @@ export async function startTownServer(options = {}) {
       ctx.allowedHosts = allowedHostHeaders(port, config.host, hostNames());
     }, 30_000);
     ctx.hostTimer.unref();
+    const people = ctx.team.people;
+    ctx.peopleTimer = setInterval(() => people.poll(), PEOPLE_POLL_MS);
+    ctx.peopleTimer.unref();
   }
 
   /** @type {import('./state-file.mjs').ServerState} */
@@ -292,15 +303,7 @@ function createContext(config, options) {
     // Owners only: a note is the owner's own words, for their own agents.
     notes: createNoteDesk({ onChange: (note) => hub.broadcastOwners({ t: 'note', n: note }) }),
     noteLimiter: createTokenBucket({ ratePerSecond: LIMITS.notesPerMinute / 60, burst: LIMITS.noteBurst }),
-    team: options.team
-      ? createTeamHost({
-          secret: /** @type {string} */ (teamSecret(config.home)),
-          onMember: (members) => {
-            config.log(`Team town: ${members.at(-1)} is sharing now (${members.length} teammate${members.length === 1 ? '' : 's'})`);
-            announceTeam(ctx);
-          },
-        })
-      : null,
+    team: options.team ? createTeam(config, options, () => ctx) : null,
     relay: options.shareTo ? createTeamRelay({ url: options.shareTo.url, key: options.shareTo.key, log: config.log }) : null,
     usage: createUsageTracker({
       claudeDir: options.claudeDir ?? resolveClaudeConfigDir(),
@@ -331,6 +334,41 @@ function createContext(config, options) {
 }
 
 /**
+ * A team host: its secret, its people and where they are.
+ * @param {{ home: string, log: (message: string) => void }} config
+ * @param {ServerOptions} options
+ * @param {() => TownContext} town  the context, once it exists (everything here calls back later)
+ */
+function createTeam(config, options, town) {
+  const people = createPeople({
+    home: config.home,
+    host: options.teamName ?? null,
+    log: config.log,
+    onChange: () => {
+      dropRemovedPeople(town());
+      announcePeople(town());
+    },
+  });
+  const presence = createPresence({
+    homeOf: (name) => people.list().find((person) => person.name === name)?.slot ?? null,
+    hostName: () => people.host,
+    onChange: (names) => announcePresence(town(), names),
+    onRefused: (name, message) => tellPerson(town(), name, message),
+    ...options.presenceMs,
+  });
+  return createTeamHost({
+    secret: /** @type {string} */ (teamSecret(config.home)),
+    log: config.log,
+    people,
+    presence,
+    onMember: (members) => {
+      config.log(`Team town: ${members.at(-1)} is sharing now (${members.length} teammate${members.length === 1 ? '' : 's'})`);
+      announceTeam(town());
+    },
+  });
+}
+
+/**
  * @param {import('node:net').Server} server
  * @param {number} port
  * @param {string} host
@@ -357,6 +395,8 @@ async function stopServer(ctx, listeners, config) {
   ctx.tunnelHosts = new Set();
   if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
   if (ctx.hostTimer) clearInterval(ctx.hostTimer);
+  if (ctx.peopleTimer) clearInterval(ctx.peopleTimer);
+  ctx.team?.presence.dispose();
   if (ctx.noteTimer) clearInterval(ctx.noteTimer);
   // First, so no phone note goes out while the server stops: whoever stops it is at the computer.
   ctx.notifier.dispose();

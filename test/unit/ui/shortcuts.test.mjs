@@ -7,6 +7,8 @@ describe('shortcutFor', () => {
     const cases = {
       f: 'follow',
       F: 'follow',
+      g: 'walk-mode',
+      G: 'walk-mode',
       Escape: 'escape',
       '[': 'rotate-left',
       ']': 'rotate-right',

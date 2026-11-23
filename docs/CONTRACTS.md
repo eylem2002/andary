@@ -52,10 +52,12 @@ public/js/core/              Pure logic, no DOM, no I/O: events (normalize), sto
                              conflicts (two agents on the same files, + git-commands, paths),
                              digest (what each crew did, for Catch me up), receipts (what each
                              lead's turn did), notes (notes to agents: which hooks carry them,
-                             how they are cleaned)
+                             how they are cleaned), town-map (the town
+                             plan: tiles, lots, home plots, routes; shared with the server),
+                             profile (a team town person's look, validated; shared with the server)
 public/js/sources/           Where events come from: live.js (WebSocket) and demo.js (simulation),
                              one TownSource shape (types.js)
-public/js/world/layout.js    Town plan (shared, pure data)
+public/js/world/layout.js    The town plan as the world uses it: core/town-map.js plus standing spots
 public/js/world/env/         Environment: terrain, water, buildings, props, vehicles, sky, post-processing, camera rig
 public/js/world/agents/      Characters, animation, walking, bubbles, effects
 public/js/world/world.js     World facade (the only world module the app imports)
@@ -315,7 +317,8 @@ shows up as a crew of its own.
 Server → browser:
 
 ```js
-{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits }, history: Envelope[], approvals: Approval[], notes: Note[] /* §4.15; [] for a viewer */, usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null }
+{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits }, history: Envelope[], approvals: Approval[], notes: Note[] /* §4.15; [] for a viewer */, usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null,
+  people: Person[] /* §4.11, [] off a team host */, me: string|null /* the person this browser plays */ }
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
 { t: 'note', n: Note }                  // §4.15, owners only: on queue and on every status change
@@ -327,7 +330,16 @@ Server → browser:
 { t: 'notify-test', ok: boolean }                  // §4.10, the answer to a test
 { t: 'away', away: Away }                          // §4.13, owners: an absence began or ended
 { t: 'digest', d: Digest }                         // §4.13, the answer to a digest request
+{ t: 'people', people: Person[] }                  // §4.11, everyone: someone came online or left, saved a profile, was invited or removed
+{ t: 'profile', ok: true, color: number, asked: number }  // §4.11, to the sender: the colour they got (another may hold the one asked)
+{ t: 'presence', people: ({ name } & Presence)[] }  // §4.11, everyone: where some people are now (at most 10 a second)
+{ t: 'emote', name, id: 0–7 }                      // §4.11, everyone: one of the set emotes (core/presence.js EMOTES)
+{ t: 'phrase', name, id: 0–9 }                     // §4.11, everyone: one of the set phrases (PHRASES)
+{ t: 'look-ask', from, at: { agent: string }|{ building: BuildingKey } }  // §4.11, to the asked person's browsers only
 { t: 'error', message }
+// Person = { name, slot: 0–5 /* their home */, color: 0–7 /* CREW_COLORS index */, host: boolean, profile: Profile|null /* core/profile.js */ } & Presence
+// Presence = { tile: [col, row], walk: { path: [col, row][], at: number /* server ms */ }|null, online: boolean,
+//              away: null|'porch'|'inside', duty: 'free'|'work'|'needs', lights: boolean }
 // Envelope = { id: number /* server sequence */, ts: number /* hook start, ms, never after rx nor more than an hour before it (a teammate's: §7) */, rx: number /* server receive */, event: object /* sanitized payload */ }
 // Approval = { id, status: 'pending'|'allowed'|'denied'|'expired'|'resolved', held: boolean, sessionId, agentId: string|null,
 //              toolName, toolInput, callKey: string|null /* the request's andary_key, §4.6 */, source: 'claude'|'codex',
@@ -346,6 +358,10 @@ Browser → server:
 { t: 'settings', settings: { remoteApprovals: boolean } }
 { t: 'notify-test' }   // sends a test phone notification (rate limits apply)
 { t: 'digest', since: number }   // §4.13: what each crew did since then (ms, the server's clock; 0: all kept)
+{ t: 'profile', p: Profile }     // §4.11: the sender's own profile (a person, or the owner as the host); at most one per 10 s
+{ t: 'walk', to: [col, row] }    // §4.11: the sender's character walks there (person or owner)
+{ t: 'emote', id } / { t: 'phrase', id }   // §4.11: a set emote (one per 2 s) or phrase (one per 5 s)
+{ t: 'look', to: string, at: { agent }|{ building } }   // §4.11: asks a teammate to come look (one per 30 s per pair)
 { t: 'ping' }
 ```
 
@@ -718,13 +734,119 @@ agents on the same files, in the item's words without backticks.
 
 ### 4.11 Team town
 
-`server/team.mjs`. One person hosts: `andary start --team` (listens on `0.0.0.0` unless `--host`
-says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the host,
-`andary team invite <name> [--url <address>]` prints a member key and the view link;
-`andary team reset` makes a new secret, which revokes every key and the link.
+`server/team.mjs`, `server/people.mjs`. One person hosts: `andary start --team [--name <name>]`
+(listens on `0.0.0.0` unless `--host` says otherwise) keeps a team secret in
+`<ANDARY_HOME>/team.json` (0600) and its people in `<ANDARY_HOME>/people.json` (0600). On the
+host, `andary team invite <name> [--url <address>]` adds a teammate and prints their member key
+and personal link; `andary team remove <name>` takes one off; `andary team view-link [--url]`
+prints the view link; `andary team reset` makes a new secret, which revokes every key and link.
 
-- **Member key**: `encodeURIComponent(name) + "." + HMAC-SHA256(secret, "member:" + name)`
+- **People** (`people.json`): `{ v: 1, host: <name>, people: { <name>: { slot, color, nonce, profile } } }`,
+  at most 6 (the host and 5 teammates; a seventh invite is refused, and a teammate never takes
+  the last place before the host has one). `slot` (0–5) is their home in the residential quarter
+  (`core/town-map.js` `HOMES`) and `color` (0–7) an index into `CREW_COLORS`, both the first free
+  one on joining and never shared. `--name` names the host (default `Host`; a later `--name`
+  renames the host's entry, keeping its home, colour and profile; a teammate's name is refused).
+  The host cannot be removed, nor invited as a teammate; with no `--name` and a teammate called
+  Host, the host becomes "Host 2" (and the log says so). `nonce` (16 random base64url characters)
+  is part of the person's key and link: inviting someone already on the roster prints the same
+  key and link, and inviting them again after `team remove` makes new ones, so a removed key or
+  link never works again. Every read-modify-write of the file (the CLI's invite and remove, the
+  host's profile saves) holds `<ANDARY_HOME>/people.lock` (created exclusively; waited for up to
+  2 s; one older than 5 s is taken over). A running host reads the file again within 2 s of a
+  change and before every key or link check; any change it sees is announced once (the removed
+  person's connections close, everyone gets `{t:'people'}`). A hand-edited file is read
+  defensively: malformed entries are dropped, a bad profile cleared.
+- **Profile** (`public/js/core/profile.js`, shared with the server): version 1,
+  `{ v: 1, color: 0–7, house: 'coast'|'snow'|'neon'|'desert'|'amman', name, agents, look }`.
+  `name` is the name the character shows (its name pill and home plate; '' for the roster name)
+  and `agents` one name for all the person's agents ('' for role names): each up to 20 letters or
+  digits of any script (each with at most 2 combining marks, which do not count), spaces, dots,
+  dashes or underscores, already clean (`cleanDisplayName`: NFC, single inner spaces, no control
+  or invisible characters), shown as text only. The host refuses a `name` or `agents` that
+  `nameProblem` refuses: one equal, compared by `nameKey` (NFKC, case-folded, without marks or
+  separators, Cyrillic and Greek look-alikes folded to Latin), to another person's roster name,
+  chosen name or agents' name (or to one of those plus a number: "Pixel 2" when someone's agents
+  are Pixel), or a word the town uses (You, Host, Foreman, Scout, Builder, Lead, Andary, with or
+  without a number). Where a chosen name differs from the roster name, details show both
+  ("Ali (alice)": the crews badge, the inspector's "…'s crew", the "You" dialog's taken colours,
+  `nameWithRoster`). `look`
+  holds exactly: `skin` 0–11, `height` short|medium|tall, `build` slim|regular|broad, `hair`
+  short|side|quiff|spiky|straight|wavy|ponytail|pigtails|bun|braids|afro|curly|mohawk|buzz|bald,
+  `hairColor` 0–11, `hairStreak` 'none'|0–11, `eyes` dot|round|happy|sleepy|lashes|wink, `brows`
+  none|thin|thick|arched, `mouth` smile|grin|neutral|open, `facialHair`
+  none|stubble|beard|goatee|moustache, `glasses` none|round|square|sunglasses|goggles, `cheeks`
+  none|freckles|blush|both, `earrings` none|studs|hoops, `top`
+  tee|longsleeve|hoodie|zip|denim|bomber|blazer|shirt|polo|tank|sweater|cardigan|vest|labcoat|overalls|dress|kimono,
+  `topPattern` plain|stripes|checks|dots|emblem, `topColor` and `patternColor` 'theme'|0–11,
+  `bottom` trousers|jeans|cargo|shorts|skirt|longskirt|joggers, `bottomColor` 0–11, `shoes`
+  sneakers|hightops|boots|sandals|loafers|slippers, `shoesColor` 0–11, `hat`
+  none|cap|beanie|beret|sunhat|wizard|crown|hardhat|bucket|headband|bandana|flowers|viking|tophat|chef|halo,
+  `extra` none|cape|scarf|backpack|headphones|tie|bowtie|necklace|watch|satchel|wings, `pet`
+  none|cat|dog|bird, `hand` none|laptop|coffee|book. Colours are indices into fixed palettes
+  (`SKIN_TONES`, `HAIR_COLORS`, `CLOTH_COLORS`; `'theme'` is the person's colour). Every key is
+  required; an unknown or missing key, a value out of range, or more than 1,152 bytes of JSON
+  rejects the whole profile. `{t:'profile', p}` is validated, saved (at most once per 10 s per
+  person, else `{t:'error'}`), answered with `{t:'profile', ok, color, asked}` and broadcast as
+  `{t:'people'}`. `color` asks for a colour: when another person has it, the next free one in
+  order is given and the browser says so. The browser keeps its own profile in its storage
+  (`andary:profile`) once the host saved it, and sends it again when the host has none for it
+  (after a fresh `people.json`); the demo starts with it too.
+- **Presence** (`server/presence.mjs`, `public/js/core/presence.js`; never stored or recorded:
+  after a restart everyone starts at their door). Every `Person` carries where they are: `tile`,
+  their last `walk` (`path` from tile to tile on the town plan's walking grid, `at` on the
+  host's clock), `online` (a connection plays them), `away` (no connection: `porch` after 60 s,
+  dimmed on their porch and back at their door; `inside` after 10 min, not shown),
+  `duty` (from their own events: a prompt `work`; a permission request, a failed turn or a
+  `permission_prompt`, `elicitation_dialog` or question notification `needs` (an `idle_prompt`
+  changes nothing); Stop or SessionEnd `free`; and `free` again after 10 min without an event
+  from them, their relay's included) and `lights` (online, or their relay posted in
+  the last 2 min). Changes go out as `{t:'presence'}` at most ten times a second.
+  `{t:'walk', to}` comes from a person or the owner, for the character the connection plays
+  (never a name from the message): the tile must be walkable and reachable in at most 60 steps,
+  it is refused while `duty` is not `free` ("Your character is at work"), and a walk asked less
+  than 250 ms after the last waits for its turn (the latest wins; if it can no longer start, the
+  person's browsers get `{t:'error', message:'Walk dropped: …'}`). A new walk carries on from
+  where the figure is (`continueWalk`: mid-step it finishes the step first, `at` set back by the
+  part walked), so it never jumps. Every browser places the figure with `positionAt(path, at,
+  now + offset)` at 2.2 tiles a second (offset: `hello.serverTime` against its own clock).
+  `emote` and `phrase` are indices into fixed lists (no free text reaches another screen), at
+  most one emote per 2 s and one phrase per 5 s per person, broadcast with the sender's name.
+  `look` names a teammate and an agent key the host has seen in the town's events (the newest
+  2,000) or a building; at most one per 30 s per pair, sent
+  as `look-ask` to that person's browsers only. A viewer's walk, emote, phrase or look gets the
+  viewer error. `ANDARY_PORCH_MS` and `ANDARY_INSIDE_MS` shorten the away times (tests).
+- **Walking in the browser** (`ui/walk.js`): walk mode is the toolbar's Walk button or **G**
+  (shown to whoever plays a person, and to you in the demo). While it is on the camera follows
+  your character (it cuts instead of easing under reduced motion), a click or tap on the ground
+  walks to the nearest walkable tile (agents and buildings are still picked first), and on the
+  focused town the arrows or WASD take one step a press, from the tile being entered (a held
+  key repeats four times a second) while Shift+arrows pan; W and A are not Catch me up and
+  Approvals then. The Walk panel above the toolbar has a "Walk to…" list (every building door,
+  every home, the teammates who are out), a status line that is a polite live region ("Walking
+  to the Library door…", "You are at the Library door."), the eight emotes and ten phrases (on
+  a phone the emotes fold away with the phrases), "Ask to come look" (at the selected agent or
+  building), and on phones a four-button step pad with 44 px targets (Settings can hide it). A
+  `look-ask` is a note with **Go** (selects it; only then does the camera move) and **Not
+  now**; Settings → "Come look" notes turns them off. On a phone, walk mode folds the board's
+  sheet away. The demo does the same with you and Lina (who strolls and waves now and then).
+- **Agents' names**: with `agents` set ("Pixel"), every crew of that person names its lead
+  "Pixel" and its helpers "Pixel 1", "Pixel 2"… in the order they joined (`core/crews.js`
+  `nameCrew`), in the crews board, the log, the inspector, notifications and the town; the role
+  name stays as `AgentState.roleName` and shows beside it ("Pixel 2 · Scout 1") in the inspector
+  and the row's tooltip. A member's crews take their own person's name; local crews the host's.
+- **Member key**: `encodeURIComponent(name) + "." + HMAC-SHA256(secret, "member:" + name + ":" + nonce)`
   (base64url, first 32 characters). Names keep letters, digits, spaces and `._-`, at most 24.
+- **Personal link**: `encodeURIComponent(name) + "." + HMAC-SHA256(secret, "person:" + name + ":" + nonce)`
+  (base64url, first 32 characters): separate from the member key, so a leaked link cannot post
+  events and a leaked key cannot drive a character. `GET /?me=<token>` (pages only) redirects to
+  the same page with `#me=<token>` (percent-encoded), which the page keeps like the sign-in
+  (`x-andary-person`, subprotocol `andary.person.<token>`). A member key and a personal link work
+  only while their name is on the roster with that nonce: `team remove` stops both at once (a
+  person's open connections close with "Removed from the team"), and their `POST /api/team`
+  answers 401. A key signed for a name not on the roster (a team from before rosters) is refused
+  with one log line per name ("Refused <name>'s key: not on the roster. Run: andary team invite
+  <name>"); the member's relay logs "key refused by the host".
 - **View token**: `HMAC-SHA256(secret, "view")`, same length. `GET /?view=<token>` (pages only)
   redirects to the same page with `#view=<token>`, which the page keeps like the sign-in (§4.4;
   `x-andary-view`, subprotocol `andary.view.<token>`); a wrong token answers 403.
@@ -751,13 +873,21 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
   (§4.9) but not usage, notifications, approvals or the catch-up (§4.13): a teammate answers
   their own prompts.
   A local `/api/hook` event never keeps an `andary_member` field.
-- **Browsers** are `owner` (the UI token) or `viewer` (the view token, team hosts only); `/api/hello` reports `authenticated: true` for both. A viewer's `hello` has no
+- **Browsers** are `owner` (the UI token; on a team host the host's own person), `person` (a
+  personal link on the roster) or `viewer` (the view token), the last two on team hosts only; the
+  owner's sign-in wins over the others. `/api/hello` reports `authenticated: true` for all three.
+  A person is treated like a viewer below, except that it may also send `{t:'profile'}`,
+  `walk`, `emote`, `phrase` and `look` for itself; its `decide`, `settings`, `digest` and `notify-test` get
+  `{t:'error', message:'Teammates can change their own character only…'}`. Each person may hold
+  2 connections, and people may use the connections kept for the owner. Every browser gets
+  `hello.people` and `{t:'people'}` (a person is `online` while any connection plays them); `me` is
+  the person a browser plays (the host's name for the owner, null for a viewer). A viewer's `hello` has no
   approvals, empty usage, empty limits, `notifyUrl: null`, `away: null` and `remoteApprovals: false`;
   `approval`, `usage`, `limits`, `away` and `settings` broadcasts go to owners only (a team host
   never receives a member's limits: they are not events); a viewer's messages other than `ping` get
   `{t:'error', message:'Viewers can only watch…'}`. Viewers never use the last 4 connections, and
   held prompts wait only while an owner is connected. On a team host `settings.team` is
-  `{ role, members }` (members: names seen since start); when a new member's first batch
+  `{ role, members }` (role `owner`, `person` or `viewer`; members: names seen since start); when a new member's first batch
   arrives every browser gets `{t:'settings', settings:{team}}`.
 - **Tunnel** (`server/tunnel.mjs`, ADR 0019): `andary start --team --tunnel
   [--tunnel-allowed-mail <emails>]` (`--tunnel` needs `--team`; the mail list needs `--tunnel`,
@@ -786,8 +916,16 @@ says otherwise) keeps a team secret in `<ANDARY_HOME>/team.json` (0600). On the 
   on and waits until `server.json` has `tunnel`.
 - **Browser**: `TownEvent.member` (from `andary_member`, one line, ≤ 24 characters) →
   `Session.member`; a member's lead agent is named after them, and the crews board shows a
-  `crew-member` badge. Settings shows a "Team town" note for both roles and hides remote
-  approvals and phone notifications from viewers. Notifications on this computer skip
+  `crew-member` badge. Every crew of a person takes their colour (`store.setPeople`, from
+  `hello.people` before its history and from `{t:'people'}`; a member's crews are theirs, local
+  ones the host's; crews of anyone else take turns as before), and changes with it. Each person's
+  home in the residential quarter shows their house style, their colour on the door and flag, a
+  name plate, and lit windows while `lights`; their figure stands where they are, walks their
+  walks, sits dimmed on their porch while `away` is `porch` and is gone while `inside`
+  (`ui/town-people.js`, World `setHome`, `placePerson` and an `AgentSpec` with `role: 'person'`). Settings shows
+  a "Team town" note for every role, a "You" block with **Your character** for whoever plays a
+  person (the "You" dialog, `ui/character.js`), and hides remote approvals and phone
+  notifications from viewers and people. Notifications on this computer skip
   teammates' crews, and a viewer gets none. `hello` always sets `settings.team` (null when not
   a team host). `server.json` records `team: true` on a host, so `team invite` can warn when the
   running town is not one.
@@ -1543,6 +1681,8 @@ World {
   setNodeModules(level: number): void              // 0–5: size of the node_modules box pile
   addWorktree(id: string, label: string): void     // grows a labelled tree in the grove
   removeWorktree(id: string): void
+  setHome(slot: 0–5, home: { name: string, color: string /* hex */, style: LookId, lights?: boolean }|null): void
+    // who lives in a home of the residential quarter (§4.11); null: an empty cottage
 
   addAgent(spec: AgentSpec): void
   updateAgent(id, patch: Partial<AgentSpec>): void
@@ -1562,14 +1702,23 @@ World {
   sendMessage(fromId: string, to: {agent: string}|{building: BuildingKey}): Promise<void>  // paper plane
   vehicle(kind: 'mailtruck'|'boat'|'bus', action?: 'arrive'|'depart'|'trip'): void
 
+  placePerson(id, where: { tile?: [col, row], walk?: { path: [col, row][], at: number /* this browser's ms */ }|null, dim?: boolean }): void
+    // a person (§4.11): follows a timed walk (core/presence.js positionAt), or stands on a tile
+    // (on their porch when it is their door); dim while they are away
+  setWalkMode(on: boolean): void                   // walk mode: a ground click emits 'ground', arrows/WASD on the town emit 'step'
+  screenStep(right: -1|0|1, up: -1|0|1): [dc, dr]   // the grid step for a screen direction under the current camera
   on(event: 'select'|'hover', cb: (sel: {type:'agent', id}|{type:'building', key}|null) => void): () => void
+  on(event: 'ground', cb: (tile: [col, row]) => void): () => void   // walk mode: the walkable tile nearest a click on the ground
+  on(event: 'step', cb: (step: [dc, dr]) => void): () => void       // walk mode: an arrow or WASD key, turned onto the grid
   select(sel: {type:'agent', id}|{type:'building', key}|null): void
   getScreenPosition(id): { x: number, y: number, visible: boolean } | null
   stats(): { fps: number, agents: number, drawCalls: number }
 }
 
-AgentSpec { id, name, color /* crew hex */, role: 'lead'|'subagent'|'teammate', type?: string,
-            hat?: 'hardhat'|'cap'|'crown'|'beret'|'sunhat'|'wizard'|'none',
+AgentSpec { id, name, color /* crew hex; a person's own colour */, role: 'lead'|'subagent'|'teammate'|'person', type?: string,
+            hat?: 'hardhat'|'cap'|'crown'|'beret'|'sunhat'|'wizard'|'beanie'|'none',
+            person?: PersonLook /* role 'person': the look of core/profile.js, each field checked, a bad one replaced */,
+            home?: 0–5 /* role 'person': stands on that home's porch */,
             spawnAt?: BuildingKey /* default hall */, entrance?: 'portal'|'bus'|'pop'|'none' }
 EffectKind = 'sparks'|'smoke'|'confetti'|'fireworks'|'books'|'magnify'|'signal'|'portal'|'poof'|'steam'
            | 'check'|'cross'|'hearts'|'zzz'|'bulb'|'boxes'
@@ -1578,7 +1727,8 @@ EffectKind = 'sparks'|'smoke'|'confetti'|'fireworks'|'books'|'magnify'|'signal'|
 Character models face +z at yaw 0 (yaw π faces north, toward building doors). The facade owns the
 renderer, the frame loop, the DOM overlay for name pills / bubbles / emotes (`aria-hidden="true"`)
 and pointer picking. The canvas container is focusable (`tabindex="0"`, `role="application"`,
-`aria-label`); arrow keys pan, `+`/`-` zoom, `Q`/`E` rotate.
+`aria-label`); arrow keys pan, `+`/`-` zoom, `Q`/`E` rotate; in walk mode arrows and WASD take a
+step and Shift+arrows pan.
 
 ### 6.1 Environment (`public/js/world/env/environment.js`), used only by the facade
 
@@ -1605,6 +1755,9 @@ Env {
                                                   // cars and the mail truck wait for people in their lane
   setFigures(figures: () => {x, y, feet, half}[]): void  // the crowd's screen boxes (px, last frame):
                                                   // a label with a figure in front of it fades
+  setHome(slot: 0–5, home: { name: string, color: number /* sRGB hex */, style: LookId, lights: boolean }|null): void
+                                                  // who lives in a home of the quarter: house style, door and
+                                                  // flag colour, name plate, lit windows; null: an empty cottage
   dispose(): void
 }
 ```
@@ -1633,8 +1786,21 @@ and, when it fits at the current zoom (or the mode says so), its name and stat c
   door, or walking along the road). The bus keeps its timetable, which the crowd's bus arrivals
   are timed to.
 - `world.debugPlace(id, x, z, yaw)` exists for the lab pages only.
+- The town plan (`core/town-map.js`) is 26 × 32 tiles: the original 26 × 26 town, whose centre
+  stays at the world's origin, and south of the ring road a residential quarter: six 2 × 2 home
+  plots (`HOMES`, doors south onto Home Street like every other door) with a garden and a mailbox
+  each, and a park with a fountain, benches, a food cart with balloons, a dog, pigeons, and kites
+  on clear days. Static parts are in the town batch; the homes are one mesh, the park's life three.
 - Each agent is one skinned mesh (one draw call, two on high with the shadow pass); blob shadows
   are one instanced call for everyone; each effect type costs one call while active.
+- A person (`role: 'person'`) is drawn from their whole look by `agents/figure-person.js`: build
+  and height (0.92, 1 or 1.08 of 1.3× a helper), every top with its details (hood, collar, zip,
+  lapels, buttons, bib, sash) and pattern, bottoms with seams and pockets, shoes, hair styles with
+  a streak (volume hidden under hats that cover the crown), eyes, brows, mouth, cheeks, facial
+  hair, glasses, earrings, hats, extras, a pet at their heel (on the body bone) or a bird on the
+  shoulder, and an item in the right hand. All of it is in the geometry cache key and one skinned
+  mesh: each person costs one geometry and one draw call. A house before the name on their pill.
+  Helpers keep their plain figure (`figure-body.js`).
 
 ## 7. Simulation (`public/js/sim/simulation.js`)
 
@@ -1677,15 +1843,16 @@ decision is treated as "answered in the terminal" and the story carries on as al
   uses the network.
 - `node scripts/shot.mjs <url> <out.png> [--wait=ms] [--size=WxH]` takes a screenshot with WebGL
   enabled, for visual checks.
-- Pages: `public/index.html` (the app), `public/world-lab.html` (full world + scripted scenario),
+- Pages: `public/index.html` (the app), `public/world-lab.html` (full world + scripted scenario;
+  `?scenario=people&quality=low` is a full team town, the phone frame-budget case),
   `public/world-env-lab.html` (environment only). Every page uses the **byte-identical** import map
   from `index.html` (the server whitelists it in the CSP by hash). Each lab page loads its script
   with `<script type="module" src="…">`. `index.html` links `css/env.css`, `css/world.css` and
   `css/app.css`; each is owned by the module that renders those elements.
 - Demo mode: `/?demo=1` forces the simulation even when a server is running. The app picks live
   mode when `GET ./api/hello` answers `{"app":"andary"}`; otherwise demo mode.
-- The app exposes `window.__andary = { mode, store, world }` for tests and debugging (it holds no
-  secrets).
+- The app exposes `window.__andary = { mode, store, world, hud }` for tests and debugging (it
+  holds no secrets; `hud` lets a test hand the HUD what a server would, such as a `look-ask`).
 
 ### 8.1 Stable test ids (the HUD renders these; e2e suites rely on them)
 
@@ -1707,6 +1874,11 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]`, and, when a rule can be saved, `[data-testid="approve-always"]` with the rule in `[data-testid="approve-always-rule"]`; `[data-testid="deny-stop"]` ("Deny and stop") with its line, or why the agent cannot be stopped, in `[data-testid="deny-stop-note"]`; a hint in `[data-testid="approval-hint"]` |
 | `[data-testid="remote-approvals-toggle"]` | checkbox/switch for remote approvals (live mode) |
 | `[data-testid="settings-button"]` | opens the settings dialog (holds the remote approvals switch) |
+| `[data-testid="walk-panel"]` | the Walk panel, shown in walk mode (§4.11) |
+| `[data-testid="walk-to"]` | its "Walk to…" list |
+| `[data-testid="walk-where"]` | its status line (a polite live region): where your character is going or is |
+| `[data-testid="open-character"]` | Settings' **Your character** button, shown when this browser plays a person (§4.11; the demo's "You") |
+| `[data-testid="character-dialog"]` | the "You" dialog; `[data-testid="character-random"]`, `[data-testid="character-save"]`, `[data-testid="character-status"]` (a live status line) |
 | `[data-testid="usage-gauge"]` | the plan-limit gauge on the Usage button (`data-level`, `data-percent`); hidden without a reading |
 | `[data-testid="limit-gauge"][data-kind]` | one plan limit in the Usage dialog; `[data-testid="limits-note"]` says why there is none |
 | `[data-testid="agent-receipt"]` | in the inspector: the receipt of a lead's last turn |

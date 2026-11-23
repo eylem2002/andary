@@ -747,6 +747,20 @@ describe('director: lifecycle and robustness', () => {
   });
 });
 
+describe('director: a team town\'s people (§4.11)', () => {
+  it('repaints a person\'s crew in the town when they pick another colour', async () => {
+    const { store, ready, calls } = setup();
+    store.setPeople([{ name: 'Sam', color: 2, host: true }]);
+    await ready();
+    assert.equal(store.getState().sessions[0].color, CREW_COLORS[2], 'local crews are the host\'s');
+    store.setPeople([{ name: 'Sam', color: 4, host: true }]);
+    assert.deepEqual(calls('updateAgent').at(-1), ['updateAgent', MAIN, { color: CREW_COLORS[4], name: 'Foreman' }]);
+    // One name for all their agents: the lead takes it.
+    store.setPeople([{ name: 'Sam', color: 4, host: true, profile: { agents: 'Pixel' } }]);
+    assert.deepEqual(calls('updateAgent').at(-1), ['updateAgent', MAIN, { color: CREW_COLORS[4], name: 'Pixel' }]);
+  });
+});
+
 describe('director: notes to agents', () => {
   it('shows an envelope on the badge while notes wait, beside a combo, until they are delivered', async () => {
     const { store, send, ready, calls, clock } = setup();

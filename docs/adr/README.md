@@ -24,3 +24,4 @@ Accepted or Superseded. Add a new record (next number) instead of rewriting an a
 | [0017](0017-place-labels-on-the-buildings.md) | Place labels on the buildings; agents first | Accepted |
 | [0018](0018-notes-to-agents-owner-only.md) | Notes to agents come only from the owner, never from the team | Accepted |
 | [0019](0019-team-town-on-the-internet.md) | A team town on the internet through a Cloudflare Quick Tunnel | Accepted |
+| [0020](0020-people-of-a-team-town.md) | People of a team town: a roster, personal links and enumerated profiles | Accepted |

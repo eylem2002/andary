@@ -12,11 +12,13 @@ import { createBoard } from './board.js';
 import { createBrightnessGuard } from './brightness-guard.js';
 import { createBuildingFx } from './building-fx.js';
 import { buildBuildings } from './buildings/index.js';
+import { createHomes } from './buildings/homes.js';
 import { createClockHands } from './buildings/civic.js';
 import { createCameraRig } from './camera-rig.js';
 import { createGrove } from './grove.js';
 import { Kit } from './kit.js';
 import { createLighting } from './lighting.js';
+import { createParkLife } from './park-life.js';
 import { createPile } from './node-modules.js';
 import { createPost } from './post.js';
 import { buildProps } from './props.js';
@@ -26,6 +28,7 @@ import { buildTerrain } from './terrain.js';
 import { createTownMaterial, createTownUniforms } from './town-material.js';
 import { createTrees } from './trees.js';
 import { createVehicles } from './vehicles.js';
+import { LOOK } from '../../page.js';
 import { createSea } from './water.js';
 
 /** @typedef {import('../../core/catalog.js').BuildingKey} BuildingKey */
@@ -141,6 +144,8 @@ function createFeatures(core, options) {
     grove: createGrove({ scene, material: materials.foliage, record: world.records.grove, signs, reducedMotion: reduced }),
     vehicles: createVehicles({ scene, material: materials.dynamic, records: world.records, reducedMotion: reduced }),
     ambient: createAmbient({ scene, town, material: materials.dynamic, records: world.records, reducedMotion: reduced }),
+    parkLife: createParkLife({ scene, town, material: materials.dynamic, reducedMotion: reduced }),
+    homes: createHomes({ scene, material: materials.static, signs, townLook: LOOK }),
   };
 }
 
@@ -153,7 +158,7 @@ function createApi(core, f) {
   const { renderer, scene, town, world, rig, post, atmosphere, guard, view } = core;
   /** @param {unknown} key */
   const record = (key) => (BUILDING_KEYS.includes(/** @type {BuildingKey} */ (key)) ? world.records[/** @type {BuildingKey} */ (key)] : null);
-  const movers = [f.fx, f.pile, f.grove, f.vehicles, f.ambient, f.signs, f.weather, f.landmarks];
+  const movers = [f.fx, f.pile, f.grove, f.vehicles, f.ambient, f.parkLife, f.signs, f.weather, f.landmarks];
   return {
     scene,
     camera: rig.camera,
@@ -172,6 +177,7 @@ function createApi(core, f) {
       f.grove.update(step);
       f.vehicles.update(step, elapsed);
       f.ambient.update(step, elapsed);
+      f.parkLife.update(step, elapsed);
       f.board.update();
       f.signs.update(rig.camera, view.width, view.height, rig.zoom);
       f.weather.update(step);
@@ -215,6 +221,7 @@ function createApi(core, f) {
     setWeather(w) {
       atmosphere.setWeather(w);
       f.weather.set(w);
+      f.parkLife.setWeather(w);
     },
     /** @param {boolean} on */
     setReducedMotion(on) {
@@ -270,6 +277,11 @@ function createApi(core, f) {
     addWorktree: (id, label) => f.grove.add(id, label),
     /** @param {string} id */
     removeWorktree: (id) => f.grove.remove(id),
+    /**
+     * Who lives in a home of the residential quarter (buildings/homes.js); null: nobody.
+     * @param {number} slot @param {import('./buildings/homes.js').Home|null} home
+     */
+    setHome: (slot, home) => f.homes.set(slot, home),
     /** @param {'mailtruck'|'boat'|'bus'} kind @param {'arrive'|'depart'|'trip'} [action] */
     vehicle: (kind, action) => f.vehicles.trigger(kind, action ?? 'trip'),
     /**
@@ -285,7 +297,7 @@ function createApi(core, f) {
     setFigures: (figures) => f.signs.setFigures(figures),
     dispose() {
       rig.dispose();
-      for (const part of [f.signs, f.fx, f.board, f.pile, f.grove, f.vehicles, f.ambient, atmosphere, core.lighting]) part.dispose();
+      for (const part of [f.signs, f.fx, f.board, f.pile, f.grove, f.vehicles, f.ambient, f.parkLife, f.homes, atmosphere, core.lighting]) part.dispose();
       post.dispose();
       disposeScene(scene);
       renderer.info.autoReset = true;

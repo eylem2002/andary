@@ -108,7 +108,7 @@ references may cross.
 | --- | --- |
 | `hooks/` | Node built-ins only (it is copied out and must stand alone) |
 | `mods/` | its own folder only, no packages (Claude Code copies only the plugin's folder and runs the module without Node.js) |
-| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules`, `loops`, `shell`, `summaries`, `digest`, `limits`, `notes` |
+| `server/` | `server/`, and only the pure core modules `prices`, `growth`, `ids`, `dates`, `text`, `dialogs`, `card-fields`, `permission-rules`, `loops`, `shell`, `summaries`, `digest`, `limits`, `town-map`, `profile`, `notes` |
 | `server/cli/`, `cli/` | the server, those core modules, the simulation (for `andary simulate`) |
 | `public/js/core/` | `core/` only |
 | `public/js/sources/` | `sources/`, `core/` |
@@ -131,6 +131,7 @@ references may cross.
 | when you were away, and what your crews did meanwhile (Catch me up) | `server/digest.mjs`, `public/js/core/digest.js`, `public/js/core/shell.js`, `public/js/ui/catch-up.js` |
 | who may connect, and what they may do | `server/auth.mjs`, `server/browsers.mjs`, `server/security.mjs` |
 | the team town | `server/team.mjs`, `ingestTeam` in `server/ingest.mjs` |
+| a team town's people: roster, personal links, profiles, homes, the "You" dialog | `server/people.mjs`, `public/js/core/profile.js`, `ui/character.js`, `ui/town-people.js`, `world/agents/looks.js` (with `figure-body.js`, `figure-hats.js`, `figure-person.js`) |
 | notes to agents, and Deny and stop | `server/notes.mjs`, `public/js/core/notes.js`, `hooks/hook.mjs` (`notesFrom`, `decisionFrom`), `public/js/ui/agent-note.js`, `public/js/ui/approvals.js` |
 | the team town on the internet (`--tunnel`) | `server/tunnel.mjs` (cloudflared), `server/tunnel-watchdog.mjs` (stops it with the town), `isTunnelled` in `server/auth.mjs`, `openTunnel` in `server/cli/start.mjs` |
 | plan limits (the andary-limits mod) | `mods/andary-limits/`, `server/limits.mjs`, `public/js/core/limits.js`, `ui/limits.js` |
@@ -143,6 +144,8 @@ references may cross.
 | who walks where, and what they say | `public/js/core/director.js`, `director-queue.js`, `humor.js` |
 | the HUD | `public/js/ui/` (`hud.js` composes it) |
 | the town's buildings, sea, sky and looks | `public/js/world/env/`, `core/looks.js`, `page.js` |
+| the town plan: tiles, lots, the six home plots, routes | `public/js/core/town-map.js` (re-exported by `world/layout.js`) |
+| the residential quarter: homes, gardens, the park and its life | `public/js/world/env/quarter.js`, `env/buildings/homes.js`, `env/park-life.js` |
 | the people and their animations | `public/js/world/agents/` |
 | the demo's story | `public/js/sim/` |
 

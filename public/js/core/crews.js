@@ -32,6 +32,53 @@ function freeCrewNumber(m) {
   return n;
 }
 
+/**
+ * The colour of a person's crews in a team town: a member's crews are theirs, local ones the
+ * host's. Null when the crew belongs to nobody on the roster.
+ * @param {Model} m @param {string|null} member
+ */
+export function personColor(m, member) {
+  const owner = member ?? m.people.host;
+  return owner ? (m.people.colors.get(owner) ?? null) : null;
+}
+
+/**
+ * The one name a person gave all their agents (profile `agents`), for a crew of theirs; '' when
+ * none (their helpers keep their role names).
+ * @param {Model} m @param {string|null} member
+ */
+function agentsNameOf(m, member) {
+  const owner = member ?? m.people.host;
+  return owner ? (m.people.agents.get(owner) ?? '') : '';
+}
+
+/**
+ * Names a crew's agents with its person's agents name: the lead "Pixel", helpers "Pixel 1",
+ * "Pixel 2"… in the order they joined; with none, their role names. The role name stays in
+ * `roleName` (picked up whenever the store names an agent anew), so details can still say
+ * "Pixel 2 · Scout 1". Pushes a relabel for every agent whose name changed.
+ * @param {Model} m @param {Session} s @param {Relabel[]} relabels
+ * @returns {boolean} whether a name changed
+ */
+export function nameCrew(m, s, relabels) {
+  const agents = agentsNameOf(m, s.member ?? null);
+  let n = 0;
+  let changed = false;
+  for (const key of s.agentKeys) {
+    const a = m.state.agents[key];
+    if (!a) continue;
+    if (a.name !== a.shownAs) a.roleName = a.name;
+    const name = !agents ? /** @type {string} */ (a.roleName) : a.role === 'lead' ? agents : `${agents} ${++n}`;
+    if (name !== a.name) {
+      a.name = name;
+      relabels.push({ key, name, role: a.role, hat: a.hat });
+      changed = true;
+    }
+    a.shownAs = name;
+  }
+  return changed;
+}
+
 /** @param {Model} m @param {TownEvent} e */
 export function newSession(m, e) {
   /** @type {Session} */
@@ -41,7 +88,7 @@ export function newSession(m, e) {
     project: projectName(e.cwd, e.sessionId),
     cwd: e.cwd,
     title: undefined,
-    color: CREW_COLORS[m.colorTurn++ % CREW_COLORS.length],
+    color: personColor(m, e.member ?? null) ?? CREW_COLORS[m.colorTurn++ % CREW_COLORS.length],
     model: undefined,
     permissionMode: undefined,
     status: 'idle',

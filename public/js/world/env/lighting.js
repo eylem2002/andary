@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { boxCorners, fitLightFrame } from './shadow-fit.js';
 
 /** World box that must receive shadows (the plinth plus the tallest towers). */
-const SHADOW_BOX = Object.freeze({ min: [-27, -0.5, -37], max: [27, 12, 27] });
+const SHADOW_BOX = Object.freeze({ min: [-27, -0.5, -37], max: [27, 12, 39] });
 const CORNERS = boxCorners(/** @type {any} */ (SHADOW_BOX));
 
 /**
