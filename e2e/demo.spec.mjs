@@ -102,9 +102,10 @@ test('the crews show before the 3D world is ready, and the town plays them once 
   await expect(page.getByTestId('log-entry').first()).toBeVisible();
   expect(await page.evaluate(() => /** @type {any} */ (window).__andary.world)).toBeNull();
   release();
-  // The director plays what happened meanwhile: the first crew still arrives by bus.
+  // The director plays what happened meanwhile: the first crew still arrives by bus. (The demo's
+  // people, a small team town, appear at their homes first, with a pop: they are not a crew.)
   const firstArrival = () =>
-    page.evaluate(() => /** @type {any} */ (window).__andary.world?.calls.find((/** @type {any} */ c) => c.method === 'addAgent')?.args[0].entrance ?? null);
+    page.evaluate(() => /** @type {any} */ (window).__andary.world?.calls.find((/** @type {any} */ c) => c.method === 'addAgent' && c.args[0].role !== 'person')?.args[0].entrance ?? null);
   await expect.poll(firstArrival).toBe('bus');
 });
 
