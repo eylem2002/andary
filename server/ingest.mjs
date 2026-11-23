@@ -5,7 +5,7 @@
 //                   (adapters/)                 (usage, growth,       (sanitize, history,
 //                                                notifications,        recording, broadcast)
 //                                                approvals, digest,
-//                                                relay)
+//                                                git status, relay)
 //
 // Which observers see an event depends on where it came from, and that is written down once, in
 // POLICIES, instead of in each route. Before any of them, a tool hook gets its call key
@@ -90,6 +90,8 @@ function admit(ctx, origin, item) {
   // Sanitized, as what it counts (a turn's last message) goes to browsers; timed by arrival, so a
   // late hook still counts in the period a browser asks about.
   if (policy.digest) ctx.digest.observe(envelope.event, envelope.rx);
+  // This computer's work trees only: a teammate's folders are on theirs (§4.16).
+  if (origin === 'local') ctx.git?.observe(event);
   // A team town: a person's duty (their character at work) and their relay's lights.
   ctx.team?.presence.observe(envelope.event, origin);
   if (policy.relay) ctx.relay?.send(envelope);

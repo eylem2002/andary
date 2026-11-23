@@ -10,6 +10,8 @@
 //   alert    two agents on the same files (core/conflicts.js): a Write over another agent's
 //            change, or a git command over its changes, counted until you set it aside; an Edit
 //            of such a file is a note that counts for nothing
+//   alert    a crew pushed while its latest test run had failed (core/pushes.js): counted until
+//            you set it aside, the crew pushes again after a passing run, or it leaves
 //   ready    a lead finished its turn and nobody has answered: counted once Claude Code says so
 //            (idle_prompt, a minute later; Codex has no such signal: a minute too), for 30 minutes
 import { CONFLICT_MS, hazardText } from './conflicts.js';
@@ -21,7 +23,7 @@ import { agentKeyOf } from './ids.js';
 /** @typedef {import('./store.js').Approval} Approval */
 /** @typedef {import('./dialogs.js').Dialog} Dialog */
 /** @typedef {import('./conflicts.js').Hazard} Hazard */
-/** @typedef {'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'finished'} AttentionKind */
+/** @typedef {'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'pushed'|'finished'} AttentionKind */
 /** @typedef {'blocked'|'stopped'|'alert'|'ready'} AttentionLevel */
 
 /**
@@ -85,10 +87,7 @@ export function attentionItems(state, now, { dismissed } = {}) {
       if (item.kind === 'stopped' && agent.wait?.cause === 'rate_limit') limited.push(item);
     }
   }
-  for (const hazard of state.hazards ?? []) {
-    const item = conflictItem(hazard, state, yours, now);
-    if (item) items.push(item);
-  }
+  items.push(...alertItems(state, yours, now));
   // A dismissed item stays away until the situation changes (a new episode has a new id).
   return mergeSharedStops(items, limited)
     .filter((item) => !(item.dismissable && dismissed?.has(item.id)))
@@ -251,6 +250,46 @@ function conflictItem(hazard, state, yours, now) {
     counted: alert,
     dismissable: alert,
     crews: new Set([hazard.sessionId, ...others.map((other) => other.sessionId)]).size,
+    settled: true,
+  };
+}
+
+/**
+ * Alerts about your crews' work: agents on the same files, and pushes while the tests were red.
+ * @param {StoreState} state @param {Map<string, Session>} yours @param {number} now
+ * @returns {AttentionItem[]}
+ */
+function alertItems(state, yours, now) {
+  /** @type {AttentionItem[]} */
+  const items = [];
+  for (const hazard of state.hazards ?? []) {
+    const item = conflictItem(hazard, state, yours, now);
+    if (item) items.push(item);
+  }
+  for (const red of state.redPushes ?? []) if (yours.has(red.sessionId)) items.push(pushedItem(red));
+  return items;
+}
+
+/**
+ * A crew that pushed while its latest test run had failed: counted until set aside.
+ * @param {import('./pushes.js').RedPush} red
+ * @returns {AttentionItem}
+ */
+function pushedItem(red) {
+  return {
+    id: `pushed:${red.sessionId}:${red.id}:${red.at}`,
+    kind: 'pushed',
+    level: 'alert',
+    sessionId: red.sessionId,
+    agentKey: red.agentKey,
+    agentKeys: [red.agentKey],
+    approvalId: null,
+    since: red.at,
+    countedSince: red.at,
+    text: `Pushed while the last test run failed: ${red.test}`,
+    counted: true,
+    dismissable: true,
+    crews: 1,
     settled: true,
   };
 }

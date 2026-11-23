@@ -1,6 +1,7 @@
 // The agent inspector: everything known about the selected agent — role, crew, status, what it is
 // doing (or waiting for you on, or why it seems stuck, and since when; and a note when another
-// agent changed a file it edits), the receipt of a lead's last turn, a note to send it
+// agent changed a file it edits), the receipt of a lead's last turn, where it works (folder,
+// branch, model, session id: agent-where.js), a note to send it
 // (agent-note.js), its brief, its context in use and what it cost, which tools it used how often,
 // recent files and activity, its last message.
 import { nameWithRoster } from './town-people.js';
@@ -12,6 +13,7 @@ import { contextSentence, hasCounted, liveContext, usageSentence } from './usage
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 import { isNote, waitedText } from './needs-you.js';
 import { createNoteSection } from './agent-note.js';
+import { createWhereSection } from './agent-where.js';
 import { receiptRows } from '../core/receipts.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
@@ -53,18 +55,8 @@ export function createInspector(ctx) {
   const message = h('p', { class: 'hud-inspector__message' });
   const usage = createUsageLines();
   const toAgent = createNoteSection(ctx);
-  const sections = {
-    now: section('Now', h('div', {}, now, need.el, note)),
-    receipt: section('Last turn', h('dl', { class: 'hud-receipt', 'data-testid': 'agent-receipt' })),
-    note: section('Send a note', toAgent.el),
-    brief: section('Brief', brief),
-    usage: section('Usage', usage.el),
-    tools: section('Tools used', tools),
-    changes: section('Changes', changes),
-    files: section('Recent files', files),
-    recent: section('Recent activity', recent),
-    message: section('Last message', message),
-  };
+  const where = createWhereSection(ctx);
+  const sections = buildSections({ now: h('div', {}, now, need.el, note), where: where.el, note: toAgent.el, brief, usage: usage.el, tools, changes, files, recent, message });
   const follow = h('button', { type: 'button', class: 'hud-btn hud-btn--primary', 'aria-pressed': 'false' }, icon('follow', { size: 18 }), 'Follow');
   const closeText = h('button', { type: 'button', class: 'hud-btn' }, 'Close');
   const el = h('aside', { class: 'hud hud-inspector', 'data-testid': 'agent-inspector', 'aria-labelledby': 'hud-inspector-title', hidden: true },
@@ -129,6 +121,7 @@ export function createInspector(ctx) {
     setHidden(note, !newest);
     renderSections(agent, session?.cwd, asking);
     setHidden(sections.note, !toAgent.update(state, agent, session));
+    setHidden(sections.where, !where.update(state, agent, session));
     setHidden(sections.receipt, !renderReceipt(/** @type {HTMLElement} */ (sections.receipt.lastElementChild), state.receipts.findLast((r) => r.agentKey === agent.key)));
     setHidden(sections.usage, !usage.update(state, agent.key, Date.now()));
     setAttr(follow, 'aria-pressed', String(ctx.view.follow));
@@ -282,6 +275,26 @@ function createUsageLines() {
       tick(now);
       return Boolean(sentence || reading);
     },
+  };
+}
+
+/**
+ * The details' sections, in order, each with its heading.
+ * @param {Record<'now'|'where'|'note'|'brief'|'usage'|'tools'|'changes'|'files'|'recent'|'message', HTMLElement>} c  their contents
+ */
+function buildSections(c) {
+  return {
+    now: section('Now', c.now),
+    receipt: section('Last turn', h('dl', { class: 'hud-receipt', 'data-testid': 'agent-receipt' })),
+    where: section('Where', c.where),
+    note: section('Send a note', c.note),
+    brief: section('Brief', c.brief),
+    usage: section('Usage', c.usage),
+    tools: section('Tools used', c.tools),
+    changes: section('Changes', c.changes),
+    files: section('Recent files', c.files),
+    recent: section('Recent activity', c.recent),
+    message: section('Last message', c.message),
   };
 }
 

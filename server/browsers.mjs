@@ -300,6 +300,7 @@ function attachBrowser(ctx, connection, role, person) {
     notes: owner ? ctx.notes.list() : [],
     usage: owner ? ctx.usage.snapshot() : { agents: [], days: [] },
     limits: owner ? ctx.limits.snapshot() : { accounts: [], contexts: {} },
+    git: owner ? (ctx.git?.snapshot() ?? []) : [],
     progress: ctx.progress.snapshot(),
     notifyUrl: owner ? ctx.notifier.url : null,
     // The latest time the owner was away: a page opened after one offers to catch up.

@@ -5,12 +5,14 @@
 // and a finished turn, a stop, a stuck alert or two agents on the same files can be set aside from
 // its row. A note (an edit of a file another agent changed) goes on a line of its own under what
 // the agent does. The lead's row also shows the crew's context in use, under its time, where it
-// takes no room from the crew's name.
+// takes no room from the crew's name. Under the crew's goal, its branch and working tree: the
+// branch (or worktree), commits ahead of and behind its upstream, and files changed.
 import { nameWithRoster } from './town-people.js';
 import { contextShort, crewUsage, liveContext, usageShort } from './usage.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from './dom.js';
 import { icon } from './icons.js';
 import { modelLabel } from '../core/catalog.js';
+import { gitOf, gitSentence, gitShort } from '../core/git-status.js';
 import { agentKeyOf } from '../core/ids.js';
 import { doingText, formatDuration, isCommandText, nameWithRole, plural, truncate } from './format.js';
 import { approvalAgentKey, roundel, setCurrent, statusChip, updateRoundel, updateStatusChip } from './parts.js';
@@ -73,6 +75,10 @@ export function createCrewsPanel(ctx) {
     const agent = h('span', { class: 'hud-line__member hud-line__member--agent', 'data-testid': 'crew-agent', text: 'Codex' });
     const cost = h('button', { type: 'button', class: 'hud-line__cost', 'data-testid': 'crew-cost', on: { click: () => ctx.openDialog('usage') } });
     const goal = h('p', { class: 'hud-line__goal' });
+    // The crew's branch and working tree (core/git-status.js): words for screen readers, signs for the eye.
+    const gitShown = h('span', { 'aria-hidden': 'true' });
+    const gitWords = srOnly('');
+    const git = h('p', { class: 'hud-line__git hud-mono', 'data-testid': 'crew-git', hidden: true }, icon('branch', { size: 14 }), gitShown, gitWords);
     const stations = h('ol', { class: 'hud-stations' });
     const more = h('button', { type: 'button', class: 'hud-line__more' });
     more.addEventListener('click', () => {
@@ -81,8 +87,8 @@ export function createCrewsPanel(ctx) {
       render(ctx.store.getState());
     });
     const line = h('li', { class: 'hud-line', 'data-testid': 'crew', 'data-session-id': session.id },
-      h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, member, agent, model, cost)), goal, stations, more);
-    parts.set(line, { mark, number, title, name, model, cost, member, memberName, agent, goal, stations, more });
+      h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, member, agent, model, cost)), goal, git, stations, more);
+    parts.set(line, { mark, number, title, name, model, cost, member, memberName, agent, goal, git, gitShown, gitWords, stations, more });
     return line;
   }
 
@@ -113,6 +119,12 @@ export function createCrewsPanel(ctx) {
     setHidden(p.cost, !spent);
     setText(p.goal, session.goal ? truncate(session.goal, 140) : '');
     setHidden(p.goal, !session.goal || ended);
+    // A teammate's folders are on their computer: a path like one here is not this repository.
+    const repo = ended || session.member ? null : gitOf(state.git, session);
+    setText(p.gitShown, repo ? gitShort(repo) : '');
+    setText(p.gitWords, repo ? gitSentence(repo) : '');
+    setAttr(p.git, 'title', repo ? gitSentence(repo) : null);
+    setHidden(p.git, !repo);
     const showAll = unfolded.has(session.id);
     const shown = ended ? [] : visibleAgents(session, state, showAll);
     renderList(p.stations, shown, (agent) => agent.key, (agent) => createStation(ctx, parts, agent), (item, agent) => updateStation(ctx, parts, item, agent, facts));

@@ -7,6 +7,7 @@ import { createUsageTracker } from './usage.mjs';
 import { createProgress } from './progress.mjs';
 import { createNotifier } from './notify.mjs';
 import { createWorkTrees } from './work-trees.mjs';
+import { createGitStatus } from './git-status.mjs';
 import { createTownDigest } from './digest.mjs';
 import { createNoteDesk } from './notes.mjs';
 import { createLimitsTracker } from './limits.mjs';
@@ -70,6 +71,7 @@ const NOTE_SWEEP_MS = 15_000;
  * @property {ReturnType<typeof createProgress>} progress
  * @property {ReturnType<typeof createNotifier>} notifier
  * @property {import('./work-trees.mjs').WorkTrees} [workTrees]  where local hooks' work trees start (andary_root)
+ * @property {ReturnType<typeof createGitStatus>} [git]  each local work tree's branch and changed files (§4.16), owners only
  * @property {ReturnType<typeof createTownDigest>} digest   what your crews did while you were away
  * @property {ReturnType<typeof createLimitsTracker>} limits  plan limits from the andary-limits mod
  * @property {import('./notes.mjs').NoteDesk} notes  the owner's notes waiting for their agents' next step (§4.15)
@@ -274,6 +276,7 @@ function createContext(config, options) {
     limitNotesFile: config.writeState ? join(config.home, 'limit-notes.json') : null,
   });
   // Your absences are yours: only signed-in browsers hear of them.
+  const workTrees = createWorkTrees();
   const digest = createTownDigest({ awayMs: options.awayMs, onAway: (away) => hub.broadcastOwners({ t: 'away', away }) });
   /** @type {TownContext} */
   const ctx = {
@@ -311,7 +314,9 @@ function createContext(config, options) {
       onChange: (record, days) => hub.broadcastOwners({ t: 'usage', u: record, days }),
     }),
     notifier,
-    workTrees: createWorkTrees(),
+    workTrees,
+    // Your folders, your branches: owners only, never relayed to a team host.
+    git: createGitStatus({ workTrees, log: config.log, onChange: (status) => hub.broadcastOwners({ t: 'git', g: status }) }),
     // Per account, not per session: owners only, like costs; never relayed to a team host.
     limits: createLimitsTracker({
       onChange: (snapshot, account) => {
@@ -401,6 +406,7 @@ async function stopServer(ctx, listeners, config) {
   // First, so no phone note goes out while the server stops: whoever stops it is at the computer.
   ctx.notifier.dispose();
   ctx.digest.dispose();
+  ctx.git?.dispose();
   ctx.broker.releaseAll();
   // Last events to the team host, but never hold up shutdown for long.
   if (ctx.relay) await Promise.race([ctx.relay.flush(), new Promise((resolve) => setTimeout(resolve, 1500).unref())]);

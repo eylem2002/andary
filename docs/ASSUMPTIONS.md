@@ -1414,3 +1414,45 @@ section.
      backpack, cup, beard, earrings) plus 24 helpers in 55–57 draw calls, one per figure as
      before. Frame rate is not meaningful under the software renderer here; on a phone it is
      bound by those draw calls, unchanged from PR 1's 58–60.
+
+## Branch and working tree per crew, pushes while red (feat/git-status)
+
+269. **git status runs on the server, for local crews only.** The browser cannot see the disk, and
+     a teammate's folders are on their computer, so only this computer's hooks ask for a look and
+     the result goes to owners only, never to a view link or a team host. A team host's own crews
+     do show their branch to the host.
+270. **10 s per repository, 2 s per look, two looks at once.** The study's numbers. A hook inside
+     the 10 s asks for one more look when it is up (a trailing look), so a burst of edits ends with
+     a fresh count and costs at most one git process per repository every 10 s.
+271. **"Read-only" means no writes at all**: `--no-optional-locks` and `GIT_OPTIONAL_LOCKS=0` keep
+     git from refreshing the index's stat cache, and `core.fsmonitor=false` keeps a repository's
+     config from naming a program for git to run. Clean filters (such as git-lfs) can still run
+     when git compares a racily-clean file, as with any `git status` the agents themselves run;
+     this is accepted rather than disabling every filter by name.
+272. **A huge working tree stops counting new files** rather than stopping altogether: a look that
+     times out or prints more than 1 MiB is made again with `--untracked-files=no` and stays that
+     way for that repository; the line then says "no changes to tracked files" instead of "clean".
+     No threshold on file count is guessed beforehand.
+273. **"N changed" adds changed tracked files and new files**, as a developer reads `git status`;
+     the details' sentence names the two apart. Ignored files never count. Conflicts count as
+     changed.
+274. **A crew's repository is the work tree its last tool hook named**, else the deepest
+     repository holding its folder. A crew that `cd`s into another repository for one command
+     keeps its session's repository until a tool hook's own folder changes.
+275. **A failed git look sends nothing** (not a repository, `safe.directory` refusal, git missing):
+     the line simply stays hidden, and a missing git is said once in the server's log, without any
+     folder name.
+276. **Model and effort**: the details show the model (label and id). Claude Code's hooks do not
+     carry the reasoning effort, so no effort is shown rather than a guess.
+277. **"Pushed while the last test run failed" is per crew, across turns.** The latest test run of
+     any agent in the crew (lead or helper) counts, read exactly as a turn receipt reads it, so a
+     failure is counted only when the exit status proves it. It stays (counted, dismissable) until
+     set aside, the crew pushes again after a run that passed, or the crew leaves; a passing run on
+     its own does not clear it, as the red commit is already on the remote.
+278. **Catch me up counts pushes while red from the day's latest test result**, the one it already
+     keeps per crew, so it can say so for an absence even when the store was reloaded. A rate limit
+     is highlighted from the stops it already counts (`rate_limit`).
+279. **The demo makes up branch lines from its story** (the scripted branch per project, edits since
+     the last commit, one ahead per commit, a push sends them) and its story is unchanged: it does
+     not stage a push while red; the end-to-end test drives that with real hooks and a real
+     repository.

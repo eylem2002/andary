@@ -178,6 +178,17 @@ describe('connectLive', () => {
     assert.deepEqual(seen, [limits, { accounts: [], contexts: {} }, null]);
   });
 
+  test("each repository's branch reaches the store: from the hello and from each git message", () => {
+    const store = { ...fakeStore(), setGit: (/** @type {any} */ g) => store.calls.push(['git', g.root]) };
+    connectLive({ store, WebSocketImpl: /** @type {any} */ (FakeSocket), url: 'ws://x/ws' });
+    const socket = FakeSocket.all[0];
+    socket.open();
+    socket.receive({ t: 'hello', history: [], approvals: [], git: [{ root: '/w/a' }] });
+    socket.receive({ t: 'git', g: { root: '/w/b' } });
+    socket.receive({ t: 'hello', history: [], approvals: [], git: 'nonsense' });
+    assert.deepEqual(store.calls.filter((c) => c[0] === 'git'), [['git', '/w/a'], ['git', '/w/b']]);
+  });
+
   test('decide and settings are sent only on an open socket', () => {
     const link = connectLive({ store: fakeStore(), WebSocketImpl: /** @type {any} */ (FakeSocket), url: 'ws://x/ws' });
     const socket = FakeSocket.all[0];

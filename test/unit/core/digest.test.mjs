@@ -129,6 +129,15 @@ describe('what each hook counts for', () => {
     assert.deepEqual([failed?.pushes, failed?.failures], [0, 1]);
   });
 
+  test('a push while the latest test run had failed is counted apart; one after a passing run is not', () => {
+    const red = ran('npm test', 'PostToolUseFailure', { error: 'Exit code 1\n FAIL  test/login.test.ts > login' });
+    const crew = crewAfter([red, ran('git push'), ran('git push origin other')]);
+    assert.deepEqual([crew?.tests, crew?.pushes, crew?.redPushes], ['failed', 2, 2]);
+    assert.equal(crewAfter([red, ran('npm test'), ran('git push')])?.redPushes, 0);
+    assert.equal(crewAfter([red, ran('npm test && git push')])?.redPushes, 0, 'the same line: tests first');
+    assert.equal(crewAfter([ran('git push')])?.redPushes, 0, 'no test run known');
+  });
+
   test('a Codex command proves a result only when its adapter found the exit code', () => {
     const codex = (/** @type {string} */ command, /** @type {Record<string, any>} */ extra = {}) => ({ ...ran(command), andary_source: 'codex', ...extra });
     assert.equal(crewAfter([codex('npm test && git commit -am x && git push')]), undefined, 'no exit code: nothing proved');
