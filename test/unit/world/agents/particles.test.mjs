@@ -88,3 +88,16 @@ test('upright fields keep their geometry orientation; billboards face the camera
   e.setFromQuaternion(q);
   assert.ok(Math.abs(e.y - 1.2) < 1e-6, 'turned to the camera yaw');
 });
+
+test('curveScale never returns NaN, even a frame past a particle\'s life', () => {
+  for (const curve of Object.values(CURVE)) {
+    for (const u of [-0.1, 0, 0.5, 1, 1.0000001, 1.5, Number.NaN, Infinity]) assert.ok(Number.isFinite(curveScale(curve, u)), `curve ${curve} at ${u}`);
+  }
+});
+
+test('the portal beam\'s vertex colours are finite (a NaN alpha blacked out the whole frame)', async () => {
+  const { createBeamGeometry } = await import('../../../../public/js/world/agents/effect-shapes.js');
+  const colors = createBeamGeometry().attributes.color.array;
+  assert.ok(Array.from(colors).every(Number.isFinite));
+  for (let i = 3; i < colors.length; i += 4) assert.ok(colors[i] >= 0 && colors[i] <= 1);
+});

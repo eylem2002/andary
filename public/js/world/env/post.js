@@ -13,6 +13,47 @@ import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltSh
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
 import { gradeAt } from './grade.js';
 
+/**
+ * One NaN or infinite pixel in the HDR frame (a bad vertex colour, a degenerate normal, a value
+ * past half-float range) is harmless on its own, but bloom blurs it through every mip level and the
+ * tilt-shift spreads it further, until the whole frame is NaN: a black (or, on a transparent
+ * canvas, empty) town. Every pass that reads the frame reads it through ttSafe, which turns such
+ * pixels black and keeps the rest in half-float range.
+ */
+const SAFE_GLSL = /* glsl */ `
+vec4 ttSafe( vec4 c ) {
+  if ( any( isnan( c ) ) || any( isinf( c ) ) ) return vec4( 0.0, 0.0, 0.0, 1.0 );
+  return clamp( c, vec4( 0.0 ), vec4( 64000.0 ) );
+}
+`;
+
+/** Three's horizontal tilt-shift blur, reading the frame through ttSafe. */
+const SafeTiltShader = {
+  name: 'SafeTiltShader',
+  uniforms: HorizontalTiltShiftShader.uniforms,
+  vertexShader: HorizontalTiltShiftShader.vertexShader,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float h;
+    uniform float r;
+    varying vec2 vUv;
+    ${SAFE_GLSL}
+    void main() {
+      vec4 sum = vec4( 0.0 );
+      float hh = h * abs( r - vUv.y );
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x - 4.0 * hh, vUv.y ) ) ) * 0.051;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x - 3.0 * hh, vUv.y ) ) ) * 0.0918;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x - 2.0 * hh, vUv.y ) ) ) * 0.12245;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x - 1.0 * hh, vUv.y ) ) ) * 0.1531;
+      sum += ttSafe( texture2D( tDiffuse, vUv ) ) * 0.1633;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x + 1.0 * hh, vUv.y ) ) ) * 0.1531;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x + 2.0 * hh, vUv.y ) ) ) * 0.12245;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x + 3.0 * hh, vUv.y ) ) ) * 0.0918;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x + 4.0 * hh, vUv.y ) ) ) * 0.051;
+      gl_FragColor = sum;
+    }`,
+};
+
 /** Three's vertical tilt-shift blur with the colour grade applied to its result (linear HDR). */
 const TiltGradeShader = {
   name: 'TiltGradeShader',
@@ -37,19 +78,19 @@ const TiltGradeShader = {
     uniform vec3 uHighlight;
     uniform float uVignette;
     varying vec2 vUv;
-
+    ${SAFE_GLSL}
     void main() {
       vec4 sum = vec4( 0.0 );
       float vv = v * abs( r - vUv.y );
-      sum += texture2D( tDiffuse, vec2( vUv.x, vUv.y - 4.0 * vv ) ) * 0.051;
-      sum += texture2D( tDiffuse, vec2( vUv.x, vUv.y - 3.0 * vv ) ) * 0.0918;
-      sum += texture2D( tDiffuse, vec2( vUv.x, vUv.y - 2.0 * vv ) ) * 0.12245;
-      sum += texture2D( tDiffuse, vec2( vUv.x, vUv.y - 1.0 * vv ) ) * 0.1531;
-      sum += texture2D( tDiffuse, vUv ) * 0.1633;
-      sum += texture2D( tDiffuse, vec2( vUv.x, vUv.y + 1.0 * vv ) ) * 0.1531;
-      sum += texture2D( tDiffuse, vec2( vUv.x, vUv.y + 2.0 * vv ) ) * 0.12245;
-      sum += texture2D( tDiffuse, vec2( vUv.x, vUv.y + 3.0 * vv ) ) * 0.0918;
-      sum += texture2D( tDiffuse, vec2( vUv.x, vUv.y + 4.0 * vv ) ) * 0.051;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x, vUv.y - 4.0 * vv ) ) ) * 0.051;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x, vUv.y - 3.0 * vv ) ) ) * 0.0918;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x, vUv.y - 2.0 * vv ) ) ) * 0.12245;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x, vUv.y - 1.0 * vv ) ) ) * 0.1531;
+      sum += ttSafe( texture2D( tDiffuse, vUv ) ) * 0.1633;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x, vUv.y + 1.0 * vv ) ) ) * 0.1531;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x, vUv.y + 2.0 * vv ) ) ) * 0.12245;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x, vUv.y + 3.0 * vv ) ) ) * 0.0918;
+      sum += ttSafe( texture2D( tDiffuse, vec2( vUv.x, vUv.y + 4.0 * vv ) ) ) * 0.051;
 
       vec3 c = sum.rgb;
       float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
@@ -93,8 +134,15 @@ export function createPost(renderer, scene, camera) {
     composer.setSize(width, height);
     composer.addPass(new RenderPass(scene, camera));
     const bloom = new UnrealBloomPass(new THREE.Vector2(width, height), bloomSettings.strength, 0.55, bloomSettings.threshold);
+    // Bloom's first step reads the frame; sanitise it there so no bad pixel reaches the blur.
+    const highPass = bloom.materialHighPassFilter;
+    const read = 'vec4 texel = texture2D( tDiffuse, vUv );';
+    if (highPass.fragmentShader.includes(read)) {
+      highPass.fragmentShader = `${SAFE_GLSL}\n${highPass.fragmentShader.replace(read, 'vec4 texel = ttSafe( texture2D( tDiffuse, vUv ) );')}`;
+      highPass.needsUpdate = true;
+    }
     composer.addPass(bloom);
-    const tiltH = new ShaderPass(HorizontalTiltShiftShader);
+    const tiltH = new ShaderPass(SafeTiltShader);
     const tiltV = new ShaderPass(TiltGradeShader);
     composer.addPass(tiltH);
     composer.addPass(tiltV);

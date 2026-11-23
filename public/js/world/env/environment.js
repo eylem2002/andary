@@ -9,6 +9,7 @@ import { createTownWeatherFx } from './town-weather-fx.js';
 import { createLandmarks } from './landmarks.js';
 import { GeometryBatch } from './batch.js';
 import { createBoard } from './board.js';
+import { createBrightnessGuard } from './brightness-guard.js';
 import { createBuildingFx } from './building-fx.js';
 import { buildBuildings } from './buildings/index.js';
 import { createHomes } from './buildings/homes.js';
@@ -84,6 +85,7 @@ function createCore(options) {
     { renderer, scene, lighting, backdrop, skyEnv: createSkyEnvironment(renderer), town, post, onChange: (state) => skyListeners.forEach((fn) => fn(state)) },
     options.timeOfDay ?? 'auto',
   );
+  const guard = createBrightnessGuard(renderer);
   const view = { width: 1, height: 1, quality: /** @type {'high'|'low'} */ ('high'), reduced: !!options.reducedMotion };
   renderer.info.autoReset = false;
 
@@ -91,7 +93,7 @@ function createCore(options) {
   function applyQuality(q) {
     view.quality = q;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.1;
+    renderer.toneMappingExposure = atmosphere.exposure * guard.gain;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     const shadows = q === 'high';
     if (renderer.shadowMap.enabled !== shadows) {
@@ -110,7 +112,7 @@ function createCore(options) {
     post.resize(view.width, view.height);
   }
 
-  return { renderer, container, scene, town, materials, animators, world, rig, post, lighting, atmosphere, skyListeners, view, applyQuality };
+  return { renderer, container, scene, town, materials, animators, world, rig, post, lighting, atmosphere, guard, skyListeners, view, applyQuality };
 }
 
 /**
@@ -153,7 +155,7 @@ function createFeatures(core, options) {
  * @param {ReturnType<typeof createFeatures>} f
  */
 function createApi(core, f) {
-  const { renderer, scene, town, world, rig, post, atmosphere, view } = core;
+  const { renderer, scene, town, world, rig, post, atmosphere, guard, view } = core;
   /** @param {unknown} key */
   const record = (key) => (BUILDING_KEYS.includes(/** @type {BuildingKey} */ (key)) ? world.records[/** @type {BuildingKey} */ (key)] : null);
   const movers = [f.fx, f.pile, f.grove, f.vehicles, f.ambient, f.parkLife, f.signs, f.weather, f.landmarks];
@@ -180,14 +182,22 @@ function createApi(core, f) {
       f.signs.update(rig.camera, view.width, view.height, rig.zoom);
       f.weather.update(step);
       f.landmarks.update(step);
-      // A lightning flash brightens the whole picture for a moment.
+      // A lightning flash brightens the whole picture for a moment; the guard lifts a dark one.
       f.flash.level = Math.max(0, f.flash.level - step * 7);
-      renderer.toneMappingExposure = 1.1 + f.flash.level * 1.4;
+      guard.update(step);
+      renderer.toneMappingExposure = atmosphere.exposure * guard.gain + f.flash.level * 1.4;
     },
     /** Renders the scene; renderer.info then holds this frame's totals (shadow and post passes included). */
     render() {
       renderer.info.reset();
       post.render(1 / 60);
+      // Not during a lightning flash: that frame is meant to be bright.
+      if (f.flash.level === 0) guard.afterRender();
+    },
+    /** The GPU context came back after a loss: redraw what lived only on the GPU. */
+    restoreContext() {
+      atmosphere.restore();
+      guard.reset();
     },
     /** @param {number} width @param {number} height */
     resize(width, height) {

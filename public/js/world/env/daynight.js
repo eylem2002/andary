@@ -36,8 +36,8 @@ const MOON_RISES = 18.9;
 
 /** @type {readonly SkyKey[]} */
 const COAST_KEYS = Object.freeze([
-  { h: 0, zenith: '#140a35', horizon: '#3b1d5e', bottom: '#120b2b', light: '#b9b0ff', lightI: 0.85, hemiSky: '#5a4aa8', hemiGround: '#2c2030', hemiI: 0.8, envI: 0.35, night: 1 },
-  { h: 4.6, zenith: '#150b37', horizon: '#3d1f60', bottom: '#130c2d', light: '#b9b0ff', lightI: 0.8, hemiSky: '#5a4aa8', hemiGround: '#2c2030', hemiI: 0.8, envI: 0.35, night: 1 },
+  { h: 0, zenith: '#140a35', horizon: '#3b1d5e', bottom: '#120b2b', light: '#b9b0ff', lightI: 1.15, hemiSky: '#5a4aa8', hemiGround: '#2c2030', hemiI: 0.8, envI: 0.35, night: 1 },
+  { h: 4.6, zenith: '#150b37', horizon: '#3d1f60', bottom: '#130c2d', light: '#b9b0ff', lightI: 1.1, hemiSky: '#5a4aa8', hemiGround: '#2c2030', hemiI: 0.8, envI: 0.35, night: 1 },
   { h: 5.35, zenith: '#2a1f5e', horizon: '#8a5a9a', bottom: '#2a1f44', light: '#c4b0ff', lightI: 0.06, hemiSky: '#6a5cb0', hemiGround: '#3a2a34', hemiI: 0.75, envI: 0.32, night: 0.85 },
   { h: MOON_SETS, zenith: '#3a3f86', horizon: '#e08a9a', bottom: '#4a3a64', light: '#ffb09a', lightI: 0, hemiSky: '#7a78bc', hemiGround: '#4a3634', hemiI: 0.7, envI: 0.3, night: 0.75 },
   { h: 6.25, zenith: '#4f7fd0', horizon: '#ffb7a0', bottom: '#c4a2c0', light: '#ffb27c', lightI: 0.6, hemiSky: '#a4b8e8', hemiGround: '#9a7460', hemiI: 0.5, envI: 0.26, night: 0.35 },
@@ -49,14 +49,14 @@ const COAST_KEYS = Object.freeze([
   { h: 18.2, zenith: '#5a4fb4', horizon: '#ff8f6a', bottom: '#d796a8', light: '#ff9a55', lightI: 1.1, hemiSky: '#98a8e4', hemiGround: '#86685a', hemiI: 0.46, envI: 0.25, night: 0.25 },
   { h: 18.7, zenith: '#3b2a86', horizon: '#ff5f8f', bottom: '#7a4a86', light: '#ff6a6a', lightI: 0.18, hemiSky: '#8a6cc8', hemiGround: '#5c3c44', hemiI: 0.55, envI: 0.25, night: 0.6 },
   { h: MOON_RISES, zenith: '#2e2370', horizon: '#c45a92', bottom: '#4f3a72', light: '#c8b8ff', lightI: 0, hemiSky: '#7462bc', hemiGround: '#40303a', hemiI: 0.65, envI: 0.3, night: 0.72 },
-  { h: 19.6, zenith: '#1c1550', horizon: '#5a2f7e', bottom: '#24194a', light: '#b0a8ff', lightI: 0.45, hemiSky: '#5c4cb0', hemiGround: '#2e2232', hemiI: 0.75, envI: 0.32, night: 0.92 },
-  { h: 20.6, zenith: '#160b38', horizon: '#3d1f60', bottom: '#140c2e', light: '#b9b0ff', lightI: 0.8, hemiSky: '#5a4aa8', hemiGround: '#2c2030', hemiI: 0.8, envI: 0.35, night: 1 },
+  { h: 19.6, zenith: '#1c1550', horizon: '#5a2f7e', bottom: '#24194a', light: '#b0a8ff', lightI: 0.6, hemiSky: '#5c4cb0', hemiGround: '#2e2232', hemiI: 0.75, envI: 0.32, night: 0.92 },
+  { h: 20.6, zenith: '#160b38', horizon: '#3d1f60', bottom: '#140c2e', light: '#b9b0ff', lightI: 1.1, hemiSky: '#5a4aa8', hemiGround: '#2c2030', hemiI: 0.8, envI: 0.35, night: 1 },
 ]);
 
 /** The limestone town's sky: softer days, a peach dusk and blue nights. @type {readonly SkyKey[]} */
 const AMMAN_KEYS = Object.freeze([
-  { h: 0, zenith: '#0a1430', horizon: '#22315c', bottom: '#121a33', light: '#a9bdff', lightI: 0.85, hemiSky: '#5268ab', hemiGround: '#2c2824', hemiI: 0.8, envI: 0.35, night: 1 },
-  { h: 4.6, zenith: '#0b1532', horizon: '#24325e', bottom: '#131b35', light: '#a9bdff', lightI: 0.8, hemiSky: '#5268ab', hemiGround: '#2c2824', hemiI: 0.8, envI: 0.35, night: 1 },
+  { h: 0, zenith: '#0a1430', horizon: '#22315c', bottom: '#121a33', light: '#a9bdff', lightI: 1.15, hemiSky: '#5268ab', hemiGround: '#2c2824', hemiI: 0.8, envI: 0.35, night: 1 },
+  { h: 4.6, zenith: '#0b1532', horizon: '#24325e', bottom: '#131b35', light: '#a9bdff', lightI: 1.1, hemiSky: '#5268ab', hemiGround: '#2c2824', hemiI: 0.8, envI: 0.35, night: 1 },
   { h: 5.35, zenith: '#26315e', horizon: '#86708f', bottom: '#2a2a4a', light: '#b9b4ff', lightI: 0.06, hemiSky: '#6a72b0', hemiGround: '#3a2e2a', hemiI: 0.75, envI: 0.32, night: 0.85 },
   { h: MOON_SETS, zenith: '#33447a', horizon: '#c48a86', bottom: '#47405e', light: '#ffb184', lightI: 0, hemiSky: '#7a82b8', hemiGround: '#4a3a30', hemiI: 0.7, envI: 0.3, night: 0.75 },
   { h: 6.25, zenith: '#5577b8', horizon: '#ffc4a0', bottom: '#b9a6b6', light: '#ffb27c', lightI: 0.6, hemiSky: '#9cb4dd', hemiGround: '#8a6e55', hemiI: 0.5, envI: 0.26, night: 0.35 },
@@ -68,8 +68,8 @@ const AMMAN_KEYS = Object.freeze([
   { h: 18.2, zenith: '#5568a5', horizon: '#ffa178', bottom: '#c9a3a6', light: '#ff9a5c', lightI: 1.0, hemiSky: '#a6acd6', hemiGround: '#8e6a52', hemiI: 0.48, envI: 0.25, night: 0.25 },
   { h: 18.7, zenith: '#38457a', horizon: '#d07a7c', bottom: '#6e5a78', light: '#ff7c52', lightI: 0.18, hemiSky: '#7a7fb8', hemiGround: '#5c4436', hemiI: 0.55, envI: 0.25, night: 0.6 },
   { h: MOON_RISES, zenith: '#2c376a', horizon: '#9e6b82', bottom: '#4b4466', light: '#c4c2ff', lightI: 0, hemiSky: '#6670ad', hemiGround: '#40322c', hemiI: 0.65, envI: 0.3, night: 0.72 },
-  { h: 19.6, zenith: '#18234d', horizon: '#45497a', bottom: '#202748', light: '#a9b8ff', lightI: 0.45, hemiSky: '#5568aa', hemiGround: '#2c2622', hemiI: 0.75, envI: 0.32, night: 0.92 },
-  { h: 20.6, zenith: '#0c1736', horizon: '#24325e', bottom: '#141c38', light: '#a9bdff', lightI: 0.8, hemiSky: '#5268ab', hemiGround: '#2c2824', hemiI: 0.8, envI: 0.35, night: 1 },
+  { h: 19.6, zenith: '#18234d', horizon: '#45497a', bottom: '#202748', light: '#a9b8ff', lightI: 0.6, hemiSky: '#5568aa', hemiGround: '#2c2622', hemiI: 0.75, envI: 0.32, night: 0.92 },
+  { h: 20.6, zenith: '#0c1736', horizon: '#24325e', bottom: '#141c38', light: '#a9bdff', lightI: 1.1, hemiSky: '#5268ab', hemiGround: '#2c2824', hemiI: 0.8, envI: 0.35, night: 1 },
 ]);
 
 /**
@@ -261,6 +261,7 @@ function smooth(t) {
  * @property {number} stars       0..1
  * @property {number} bloom       bloom strength
  * @property {number} bloomThreshold
+ * @property {number} exposure    tone-mapping exposure: a little higher at night (see readable)
  */
 
 /**
@@ -295,7 +296,51 @@ export function skyState(hour) {
     stars: smooth((night - 0.55) / 0.4),
     bloom: 0.16 + 0.5 * night,
     bloomThreshold: 0.92 - 0.2 * night,
+    exposure: DAY_EXPOSURE + (NIGHT_EXPOSURE - DAY_EXPOSURE) * night,
   };
+}
+
+/** Tone-mapping exposure by day and at full night (night lifts it so dark walls stay legible). */
+const DAY_EXPOSURE = 1.1;
+const NIGHT_EXPOSURE = 1.3;
+
+/**
+ * The night floor: the least light the town ever gets, whatever the hour, look or weather, so every
+ * building, road, agent and label stays readable. Both are linear luminances (colour × intensity)
+ * as three.js sees them: the hemisphere fill reaches every face, the key light (the moon at night)
+ * models the shapes. The day is far above both, so they only act after dusk.
+ */
+export const NIGHT_FLOOR = Object.freeze({ fill: 0.2, key: 0.42 });
+
+/**
+ * Linear (light) luminance of an sRGB triplet.
+ * @param {number[]} rgb
+ */
+export function linearLuminance(rgb) {
+  const lin = (/** @type {number} */ c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
+}
+
+/**
+ * Applies the night floor to a sky state (after the weather has dimmed it): the hemisphere fill is
+ * raised to NIGHT_FLOOR.fill and the moon to NIGHT_FLOOR.key. The moon's floor fades in with the
+ * night so the key light still reaches ~0 where it switches between sun and moon. Never lowers
+ * anything; returns the same object when nothing needs lifting.
+ * @template {SkyState} T
+ * @param {T} state
+ * @returns {T}
+ */
+export function readable(state) {
+  const fillLum = linearLuminance(state.hemiSky);
+  const keyLum = linearLuminance(state.light);
+  const hemiFloor = fillLum > 1e-4 ? NIGHT_FLOOR.fill / fillLum : 0;
+  // The moon floor only applies once it is properly night (night 0.85 → 1), well past the switch.
+  const moonWeight = state.sunUp ? 0 : smooth((state.night - 0.85) / 0.15);
+  const keyFloor = keyLum > 1e-4 ? (NIGHT_FLOOR.key / keyLum) * moonWeight : 0;
+  const hemiIntensity = Math.max(state.hemiIntensity, hemiFloor);
+  const lightIntensity = Math.max(state.lightIntensity, keyFloor);
+  if (hemiIntensity === state.hemiIntensity && lightIntensity === state.lightIntensity) return state;
+  return { ...state, hemiIntensity, lightIntensity };
 }
 
 /**
