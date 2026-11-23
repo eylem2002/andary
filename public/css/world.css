@@ -101,6 +101,11 @@
   filter: drop-shadow(0 1px 1px rgb(0 0 0 / 30%));
 }
 
+/* A person away from their browser: on their porch, dimmed. */
+.tt-tag.is-away {
+  opacity: 0.55;
+}
+
 /* A person's pill: a little house before the name (they live in town). */
 .tt-pill__home {
   font-size: 10px;

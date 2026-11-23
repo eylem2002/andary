@@ -50,7 +50,7 @@ test('keys and links work only while their name is on the roster', () => {
   const home = join(temp, 'roster');
   const people = createPeople({ home, host: 'Sam' });
   writeRoster(home, { ...readRoster(home), people: { ...readRoster(home).people, Lina: { slot: 1, color: 1, nonce: '', profile: null } } });
-  const team = createTeamHost({ secret: SECRET, people });
+  const team = createTeamHost({ secret: SECRET, people, presence: /** @type {any} */ (null) });
   assert.equal(team.memberOf(memberKey(SECRET, 'Lina')), 'Lina');
   assert.equal(team.personOf(personToken(SECRET, 'Lina')), 'Lina');
   assert.equal(team.memberOf(memberKey(SECRET, 'Omar')), null, 'a valid key for someone not invited');
@@ -77,7 +77,7 @@ test('the team host rate-limits each member and announces each new member once',
   /** @type {string[][]} */
   const announced = [];
   const people = createPeople({ home: join(temp, 'limits'), host: null });
-  const team = createTeamHost({ secret: SECRET, people, onMember: (members) => announced.push(members), ratePerSecond: 1, burst: 3 });
+  const team = createTeamHost({ secret: SECRET, people, presence: /** @type {any} */ (null), onMember: (members) => announced.push(members), ratePerSecond: 1, burst: 3 });
   assert.equal(team.view, viewToken(SECRET));
   assert.equal(team.limiter('Lina').take(3), true);
   assert.equal(team.limiter('Lina').take(1), false);

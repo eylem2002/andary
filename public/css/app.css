@@ -3779,6 +3779,219 @@ body {
 
 /* ---- reduced motion ----------------------------------------------------------------------- */
 
+/* ---- walking (team towns and the demo): the Walk panel, above the toolbar --------------- */
+
+.hud-walk {
+  position: fixed;
+  bottom: calc(var(--gap) + var(--tools-h, var(--toolbar-h)) + 12px);
+  left: 50%;
+  z-index: 26;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  width: min(560px, calc(100vw - var(--left-w) - var(--right-w) - var(--gap) * 4));
+  min-width: min(360px, calc(100vw - 16px));
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--paper);
+  box-shadow: var(--shadow-lift);
+  transform: translateX(-50%);
+}
+
+.hud-walk[hidden] {
+  display: none;
+}
+
+.hud-walk__head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-2);
+}
+
+.hud-walk__where {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.hud-walk__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.hud-walk__label {
+  color: var(--ink-2);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.hud-walk__to {
+  max-width: 190px;
+}
+
+.hud-walk__emotes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.hud-walk__more .hud-walk__emotes {
+  margin-top: 6px;
+}
+
+.hud-walk__emote {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hud-walk__emote:hover {
+  border-color: var(--hairline);
+  background: var(--paper-3);
+}
+
+.hud-walk__pad {
+  grid-row: 2 / span 2;
+  grid-column: 2;
+  display: grid;
+  grid-template-areas: ". up ." "left . right" ". down .";
+  grid-template-columns: repeat(3, 44px);
+  grid-template-rows: repeat(3, 44px);
+  gap: 2px;
+}
+
+.hud-walk__pad[hidden] {
+  display: none;
+}
+
+.hud-walk__step {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--paper-3);
+  color: var(--ink);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.hud-walk__step--up {
+  grid-area: up;
+}
+
+.hud-walk__step--left {
+  grid-area: left;
+}
+
+.hud-walk__step--left .hud-icon {
+  transform: rotate(-90deg);
+}
+
+.hud-walk__step--right {
+  grid-area: right;
+}
+
+.hud-walk__step--right .hud-icon {
+  transform: rotate(90deg);
+}
+
+.hud-walk__step--down {
+  grid-area: down;
+}
+
+.hud-walk__step--down .hud-icon {
+  transform: rotate(180deg);
+}
+
+.hud-walk__more {
+  grid-column: 1;
+  font-size: 13px;
+}
+
+.hud-walk__more > summary {
+  min-height: 24px;
+  color: var(--ink-2);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hud-walk__phrases,
+.hud-walk__look {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin-top: 6px;
+}
+
+.hud-toast__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+@media (max-width: 640px) {
+  .hud-walk {
+    bottom: calc(var(--sheet-h) + var(--tools-h, var(--toolbar-h)) + 16px + env(safe-area-inset-bottom, 0px));
+    width: calc(100vw - 16px);
+    min-width: 0;
+  }
+
+  .hud-walk__emote {
+    width: 44px;
+    height: 44px;
+  }
+
+  .hud-walk__more[open] {
+    max-height: 38dvh;
+    overflow-y: auto;
+  }
+
+  .hud-walk__more > summary {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .hud-walk__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .hud-walk__to {
+    flex: 1;
+    min-height: 44px;
+    max-width: none;
+  }
+
+  .hud-walk__phrases .hud-btn,
+  .hud-walk__look .hud-btn,
+  .hud-walk__look .hud-select {
+    min-height: 44px;
+  }
+}
+
 [data-motion="reduce"] .hud,
 [data-motion="reduce"] .hud *,
 [data-motion="reduce"] .hud *::before,

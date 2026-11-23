@@ -1353,3 +1353,40 @@ section.
      Andary) with or without a number. The demo applies the same rule. Up to two combining marks
      per letter are kept (Vietnamese, Devanagari), more are dropped; marks do not count towards 20.
 
+258. **A new walk carries on from where the figure is.** Mid-step it first finishes the step it is
+     on and the walk's start time is set back by the part already walked, so every screen sees
+     the figure turn rather than jump back to the tile it was leaving. Keys step from the tile
+     being entered, so a held key never walks back.
+259. **A held key repeats at most four times a second; a different key goes at once.** The walk
+     itself moves 2.2 tiles a second, so a held key keeps a step ahead of the figure rather than
+     piling up walks; the host's own 250 ms limit (latest wins) is the backstop.
+260. **Walk mode zooms the camera in (2.2×) and follows your character**; under reduced motion
+     the follow cuts instead of easing. Turning walk mode off stops the follow and leaves the
+     view where it is. Each walk asks the director camera to stand back, as a pan does.
+261. **The "Walk to…" list offers teammates who are out, by where they are going**, not a live
+     follow (following or teleporting to a teammate stays out, as the design says). Homes are
+     listed by whose they are; empty plots are not offered.
+262. **The live region speaks once per walk**: "Walking to …" for a walk longer than one step and
+     "You are at …" on arrival (a door, a home, or "the street"), not every tile. A teammate's
+     emote or phrase is read out by name ("Lina: Wave").
+263. **On a phone the step pad shows in walk mode** (Settings can hide it), the emotes fold into
+     the phrases' disclosure so the panel leaves the town in view, and walk mode folds the board's
+     sheet away.
+264. **"Come look" asks about the current selection** (an agent or a building), from the Walk
+     panel; the note's Go selects it (and so moves the camera), Not now and the close button only
+     dismiss it. Notes can be turned off in Settings; asks are still rate limited on the host.
+     In the demo the ask is accepted but Lina does not answer.
+265. **"Show me as away" and walking up to an agent to open it** (design §2 and §6) are not in this
+     pull request: online status follows connections only, and an agent opens by click or from the
+     crews board as before.
+266. **Only notifications that need the person block their walking**: `permission_prompt`,
+     `elicitation_dialog` (and a question). Claude Code's `idle_prompt`, a minute after Stop, is
+     not a reason to keep a character at work. A duty lapses to free after 10 minutes with no
+     event from that person (their relay going quiet counts), so a lost Stop cannot pin them.
+267. **"Come look" at an agent names one the host has seen**: the host remembers the newest 2,000
+     agent keys from the town's events, so a look never carries an invented key to a teammate.
+268. **Six detailed people on a phone, measured**: world-lab `?scenario=people&quality=low` at
+     390×844 (×3) draws six people in their most detailed looks (pet, hat, glasses, striped top,
+     backpack, cup, beard, earrings) plus 24 helpers in 55–57 draw calls, one per figure as
+     before. Frame rate is not meaningful under the software renderer here; on a phone it is
+     bound by those draw calls, unchanged from PR 1's 58–60.

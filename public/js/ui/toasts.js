@@ -15,6 +15,7 @@ import { roundel } from './parts.js';
  * @property {number} [number]         crew number, shown as a roundel
  * @property {string} [color]          crew colour for the roundel
  * @property {{ label: string, run: () => void }} [action]
+ * @property {{ label: string, run: () => void }} [secondary]  a second, quieter button beside the action ("Not now")
  * @property {string} [group]          a newer toast of the same group replaces this one (one crew
  *                                     arrival, one achievement on screen at a time: the panels keep the rest)
  */
@@ -106,13 +107,16 @@ export function pickEviction(toasts) {
  * @param {ToastOptions} options
  * @param {(toast: HTMLElement) => void} dismiss
  */
-function build({ tone = 'info', title, body, mono, icon: iconName, number, color, action }, dismiss) {
+function build({ tone = 'info', title, body, mono, icon: iconName, number, color, action, secondary }, dismiss) {
   const badge = number
     ? roundel(number, color)
     : h('span', { class: 'hud-toast__badge', 'aria-hidden': 'true' }, icon(iconName ?? 'info', { size: 18 }));
   const close = h('button', { type: 'button', class: 'hud-iconbtn hud-toast__close', 'aria-label': 'Dismiss notification' }, icon('close', { size: 16 }));
   const actionButton = action
     ? h('button', { type: 'button', class: 'hud-btn hud-btn--small hud-toast__action' }, action.label)
+    : null;
+  const secondaryButton = action && secondary
+    ? h('button', { type: 'button', class: 'hud-btn hud-btn--small hud-toast__action' }, secondary.label)
     : null;
   const toast = h(
     'li',
@@ -121,13 +125,17 @@ function build({ tone = 'info', title, body, mono, icon: iconName, number, color
     h('div', { class: 'hud-toast__text' },
       h('p', { class: 'hud-toast__title', text: title }),
       body ? h('p', { class: mono ? 'hud-toast__body hud-mono' : 'hud-toast__body', text: body }) : null),
-    actionButton,
+    secondaryButton ? h('span', { class: 'hud-toast__actions' }, actionButton, secondaryButton) : actionButton,
     close,
   );
   close.addEventListener('click', () => dismiss(toast));
   actionButton?.addEventListener('click', () => {
     dismiss(toast);
     action.run();
+  });
+  secondaryButton?.addEventListener('click', () => {
+    dismiss(toast);
+    secondary.run();
   });
   return toast;
 }

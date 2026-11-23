@@ -117,8 +117,11 @@ export function socketUrl(pageUrl) {
  * @property {(digest: unknown) => void} [onDigest]   the answer to requestDigest(): what each crew did
  * @property {(reply: { ref: string|null, ok: boolean, error?: string }) => void} [onNoteReply]  the server's answer to sendNote(), with its ref (§4.15)
  * @property {(away: unknown, offset: number) => void} [onAway]  the latest time you were away, from hello and as it changes, with how far the server's clock is ahead of this browser's (from hello)
- * @property {(people: unknown[], me: string|null) => void} [onPeople]  a team town's people (§4.11), from hello (before its history) and as they change; me: who this browser plays
+ * @property {(people: unknown[], me: string|null, offset: number) => void} [onPeople]  a team town's people (§4.11), from hello (before its history) and as they change; me: who this browser plays; offset: how far the server's clock is ahead of this browser's
  * @property {(saved: { color: number, asked: number }) => void} [onProfile]  the answer to saveProfile(): the colour this person got
+ * @property {(people: unknown[]) => void} [onPresence]  where some people are now (§4.11): a part of each person, by name
+ * @property {(said: { kind: 'emote'|'phrase', name: string, id: number }) => void} [onSaid]  someone's emote or set phrase
+ * @property {(ask: { from: string, at: unknown }) => void} [onLookAsk]  a teammate asks this person to come look
  * @property {new (url: string, protocols?: string[]) => WebSocket} [WebSocketImpl]
  * @property {() => import('./credentials.js').Credentials} [credentials]
  * @property {() => Promise<Hello|null>} [hello]
@@ -126,7 +129,7 @@ export function socketUrl(pageUrl) {
  */
 
 /**
- * @typedef {Required<Pick<LiveOptions, 'onSettings'|'onError'|'onProgress'|'onLimits'|'onNotifyTest'|'onDigest'|'onAway'|'onPeople'|'onProfile'|'onNoteReply'>> & { store: LiveOptions['store'], ingest: (envelope: unknown) => void, clock: { offset: number }, me: { name: string|null } }} Sinks
+ * @typedef {Required<Pick<LiveOptions, 'onSettings'|'onError'|'onProgress'|'onLimits'|'onNotifyTest'|'onDigest'|'onAway'|'onPeople'|'onProfile'|'onPresence'|'onSaid'|'onLookAsk'|'onNoteReply'>> & { store: LiveOptions['store'], ingest: (envelope: unknown) => void, clock: { offset: number }, me: { name: string|null } }} Sinks
  */
 
 /**
@@ -149,13 +152,26 @@ const MESSAGES = Object.freeze({
   'notify-test': (m, to) => to.onNotifyTest(m.ok === true),
   digest: (m, to) => to.onDigest(m.d),
   away: (m, to) => to.onAway(m.away ?? null, to.clock.offset),
-  people: (m, to) => to.onPeople(Array.isArray(m.people) ? m.people : [], to.me.name),
+  people: (m, to) => to.onPeople(Array.isArray(m.people) ? m.people : [], to.me.name, to.clock.offset),
   profile: (m, to) => {
     if (m.ok === true && Number.isInteger(m.color)) to.onProfile({ color: m.color, asked: Number.isInteger(m.asked) ? m.asked : m.color });
+  },
+  presence: (m, to) => {
+    if (Array.isArray(m.people)) to.onPresence(m.people);
+  },
+  emote: (m, to) => said('emote', m, to),
+  phrase: (m, to) => said('phrase', m, to),
+  'look-ask': (m, to) => {
+    if (typeof m.from === 'string') to.onLookAsk({ from: m.from, at: m.at });
   },
   'note-reply': (m, to) => to.onNoteReply({ ref: typeof m.ref === 'string' ? m.ref : null, ok: m.ok === true, ...(typeof m.error === 'string' ? { error: m.error } : {}) }),
   error: (m, to) => to.onError(String(m.message ?? 'The server reported an error.')),
 });
+
+/** @param {'emote'|'phrase'} kind @param {Record<string, any>} m @param {Sinks} to */
+function said(kind, m, to) {
+  if (typeof m.name === 'string' && Number.isInteger(m.id)) to.onSaid({ kind, name: m.name, id: m.id });
+}
 
 /**
  * The owner's notes to agents from hello (§4.15): a viewer, and an older server, send none.
@@ -176,6 +192,9 @@ const NO_HANDLERS = Object.freeze({
   onAway: () => {},
   onPeople: () => {},
   onProfile: () => {},
+  onPresence: () => {},
+  onSaid: () => {},
+  onLookAsk: () => {},
   onNoteReply: () => {},
 });
 
@@ -262,6 +281,8 @@ export function connectLive({
     attempt = 0;
     store.reset();
     // The people first: their crews take their colours as the history is replayed.
+    // The server's clock against this one (walks are timed on it; the catch-up's half hour; the trip is ignored).
+    sinks.clock.offset = Number.isFinite(message.serverTime) ? message.serverTime - Date.now() : 0;
     helloPeople(message, sinks);
     for (const envelope of message.history ?? []) ingest(envelope);
     for (const approval of message.approvals ?? []) store.setApproval(approval);
@@ -272,8 +293,6 @@ export function connectLive({
     // Whole values, so nothing is left over from before a restart (a town that no longer hosts a team).
     sinks.onSettings({ ...(message.settings ?? {}), team: message.settings?.team ?? null, notifyUrl: typeof message.notifyUrl === 'string' ? message.notifyUrl : null });
     if (message.progress) sinks.onProgress(message.progress);
-    // The server's clock against this one (for the catch-up's half hour; the trip is ignored).
-    sinks.clock.offset = Number.isFinite(message.serverTime) ? message.serverTime - Date.now() : 0;
     // Always, so an absence from before a restart is not offered again.
     sinks.onAway(message.away ?? null, sinks.clock.offset);
     // Whole, so a restarted server's empty list replaces what the town showed before.
@@ -334,7 +353,7 @@ export function connectLive({
  */
 function helloPeople(message, sinks) {
   sinks.me.name = typeof message.me === 'string' ? message.me : null;
-  sinks.onPeople(Array.isArray(message.people) ? message.people : [], sinks.me.name);
+  sinks.onPeople(Array.isArray(message.people) ? message.people : [], sinks.me.name, sinks.clock.offset);
 }
 
 /**
@@ -386,6 +405,21 @@ function requests(send) {
      */
     saveProfile(profile) {
       return send({ t: 'profile', p: profile });
+    },
+    /** Walks this person's character to a tile (§4.11). @param {[number, number]} to */
+    walk(to) {
+      return send({ t: 'walk', to });
+    },
+    /** Shows one of the set emotes or phrases over this person's character. @param {'emote'|'phrase'} kind @param {number} id */
+    say(kind, id) {
+      return send({ t: kind, id });
+    },
+    /**
+     * Asks a teammate to come look at an agent or a building.
+     * @param {string} to @param {{ agent: string }|{ building: string }} at
+     */
+    lookAsk(to, at) {
+      return send({ t: 'look', to, at });
     },
   };
 }

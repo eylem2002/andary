@@ -12,7 +12,8 @@ import { createCinema } from './cinema.js';
 import { createCrewsPanel } from './crews.js';
 import { createHelpDialog, createSettingsDialog, createSetupDialog } from './dialogs.js';
 import { createCharacterDialog, loadSavedProfile } from './character.js';
-import { createTownPeople } from './town-people.js';
+import { createTownPeople, mergePresence } from './town-people.js';
+import { createWalk, showLookAsk } from './walk.js';
 import { PERSON_COLOR_NAMES } from '../core/profile.js';
 import { goToNeed, handleShortcut, openDialog, panelsHidden, runAction, select, setFollow } from './hud-actions.js';
 import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
@@ -108,9 +109,9 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     attachWorld(world, { failed = false } = {}) {
       shell.world = world;
       if (view.progress) world.setLandmarks?.(unlockedAt(view.progress.points));
-      world.on?.('select', (sel) => select(hud, sel, { from: 'world', camera: false }));
+      listenToWorld(hud, world);
       applyWorldPrefs(prefs, world);
-      townPeople.redraw(view.people);
+      townPeople.redraw(view.people, view.clockOffset);
       if (failed) {
         view.worldFailed = true;
         ui.notices.showWorldFallback();
@@ -194,6 +195,16 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
 }
 
 /**
+ * What the world tells the HUD: a click on an agent or a building, and in walk mode the ground
+ * and the keys' steps.
+ * @param {{ ctx: HudContext, ui: ReturnType<typeof createParts> }} hud @param {World} world
+ */
+function listenToWorld(hud, world) {
+  world.on?.('select', (sel) => select(hud, sel, { from: 'world', camera: false }));
+  hud.ui.walk.attachWorld(world);
+}
+
+/**
  * Facts about how the page runs, from main.js.
  * @param {HudContext} ctx
  */
@@ -226,11 +237,13 @@ function peopleApi(hud, townPeople) {
      * Who lives in town and who this browser plays: their homes and figures in the town, and the
      * "You" dialog.
      * @param {unknown[]} people @param {string|null} me
+     * @param {number} [offset]  how far the server's clock is ahead of this browser's
      */
-    setPeople(people, me) {
+    setPeople(people, me, offset = 0) {
       ctx.view.people = /** @type {import('./town-people.js').PersonView[]} */ (people.filter((p) => p && typeof p === 'object'));
       ctx.view.me = typeof me === 'string' ? me : null;
-      townPeople.sync(ctx.view.people);
+      ctx.view.clockOffset = Number.isFinite(offset) ? offset : 0;
+      townPeople.sync(ctx.view.people, ctx.view.clockOffset);
       hud.ui.dialogs.character.peopleChanged();
       const mine = ctx.view.people.find((p) => p.name === ctx.view.me);
       if (mine && !mine.profile && !restored) {
@@ -240,15 +253,25 @@ function peopleApi(hud, townPeople) {
       }
       ctx.refresh();
     },
-    /**
-     * The host saved this person's profile; another person may hold the colour they asked for.
-     * @param {{ color: number, asked: number }} saved
-     */
+    /** Where some people are now: walks, who came or went, lights (§4.11). @param {unknown[]} patches */
+    setPresence(patches) {
+      ctx.view.people = mergePresence(ctx.view.people, patches);
+      townPeople.sync(ctx.view.people, ctx.view.clockOffset);
+      ctx.refresh();
+    },
+    /** Someone's emote or set phrase. @param {{ kind: 'emote'|'phrase', name: string, id: number }} said */
+    said: (said) => hud.ui.walk.said(said),
+    /** A teammate asks this person to come look. @param {{ from: string, at: unknown }} ask */
+    lookAsked: (ask) => showLookAsk(ctx, ask),
     /** An error from the server: in the "You" dialog when it waits for a save, else a toast. @param {string} message */
     serverError(message) {
       if (hud.ui.dialogs.character.pending) hud.ui.dialogs.character.refused(message);
       else ctx.toasts.show({ tone: 'error', icon: 'warning', title: message });
     },
+    /**
+     * The host saved this person's profile; another person may hold the colour they asked for.
+     * @param {{ color: number, asked: number }} saved
+     */
     profileSaved({ color, asked }) {
       hud.ui.dialogs.character.saved();
       if (color === asked) return;
@@ -331,6 +354,8 @@ function initialView(prefs) {
     serverSettings: {},
     people: [],
     me: null,
+    clockOffset: 0,
+    walking: false,
     progress: null,
     limits: [],
     selection: null,
@@ -359,6 +384,7 @@ function createParts(ctx) {
     place: createBuildingCard(ctx),
     toolbar: createToolbar(ctx),
     notices: createNotices(ctx),
+    walk: createWalk(ctx),
     dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx), usage: createUsageDialog(ctx), leaderboard: createLeaderboard(ctx), catchUp: ctx.catchUp, character: createCharacterDialog(ctx) },
   };
 }
@@ -374,7 +400,7 @@ function createParts(ctx) {
 function mount(ctx, ui) {
   const main = /** @type {HTMLElement} */ (document.getElementById('main'));
   main.before(ui.masthead.el, ui.board.leftDock, ui.inspector.el);
-  main.append(ui.notices.el, ui.place.el, ctx.cinema.el, ui.toolbar.el, ...ctx.announcer.elements);
+  main.append(ui.notices.el, ui.place.el, ctx.cinema.el, ui.walk.el, ui.toolbar.el, ...ctx.announcer.elements);
   main.after(ui.board.el, ctx.toasts.el, ...Object.values(ui.dialogs).map((dialog) => dialog.el));
 }
 
@@ -427,6 +453,7 @@ function flush(hud, shell, effects) {
   ui.inspector.render(state);
   ui.place.render(state);
   ui.toolbar.render();
+  ui.walk.render();
   applyPanels(hud, shell.measureSheets);
   ui.notices.show(noticeKind(ctx.view, state));
   ui.dialogs.settings.sync();

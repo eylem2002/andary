@@ -168,6 +168,7 @@ building to see who is inside.
 | `C` | Director camera on or off: it follows the most interesting thing by itself |
 | `H` | Full-screen town: put the side boards away or bring them back |
 | `F` / `Esc` | Follow the selected agent / stop following, close the open panel |
+| `G` | Walk mode (a team town, or the demo): on the town, arrows or `W` `A` `S` `D` take a step |
 | `[` `]` · `+` `−` · `0` | Rotate · zoom · reset the view |
 | `N` | Day, sunset, night or your clock |
 | `P` | Place names: on the buildings where they fit (zoom in for more), always, or off |
@@ -355,9 +356,14 @@ how her character looks, from picture tiles: body, hair and streaks, face (eyes,
 glasses, freckles, earrings…), seventeen tops with patterns, bottoms, shoes, hats, extras, a pet
 and something to hold, or a ready-made outfit; her colour, her house's style, the name her
 character shows and one name for all her agents ("Pixel" gives Pixel, Pixel 1, Pixel 2…).
-Everyone sees the same. Lina's crews arrive in the host's town in her colour, with
-her name on their Foreman and a badge on the crews board. Anyone else can watch with the
-view-only link (`andary team view-link`). The demo is a small team town too: you and Lina.
+Everyone sees the same. **Walk** (the toolbar button, or `G`) lets her walk her character: click
+or tap the ground, use the arrows or `W` `A` `S` `D` on the town, or pick a place from
+**Walk to…**; wave or say one of a few set phrases ("Review please?", "Nice!"), or ask a teammate
+to come look at an agent or a building (they get a note with Go and Not now). After a minute
+without her browser her character sits on her porch, and after ten it goes inside. Lina's crews
+arrive in the host's town in her colour, with her name on their Foreman and a badge on the crews
+board. Anyone else can watch with the view-only link (`andary team view-link`). The demo is a
+small team town too: you and Lina.
 
 What is shared and what is not:
 

@@ -169,6 +169,8 @@ function stepRig(s, dt, dragging) {
     const p = s.follow();
     if (p) setGoalFromPoint(s, p);
     else s.follow = null;
+    // Reduced motion: the camera keeps the one it follows in place instead of easing after them.
+    if (p && s.reduced) s.target.set(s.goal.x, s.target.y, s.goal.z);
   }
   if (!dragging && s.velocity.lengthSq() > 1e-4) {
     s.goal.x += s.velocity.x * dt;

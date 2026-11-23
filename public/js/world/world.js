@@ -7,11 +7,13 @@ import * as THREE from 'three';
 import { Crowd, isBuilding } from './agents/crowd.js';
 import { EFFECT_KINDS } from './agents/effects.js';
 import { detectQuality } from './agents/quality.js';
-import { attachKeyboard, attachPointer } from './agents/input.js';
+import { attachKeyboard, attachPointer, stepToTile } from './agents/input.js';
 import { truncateText } from './agents/bubbles.js';
 import { safeColor } from './agents/color.js';
 import { isPlaceNames } from '../core/place-names.js';
 import { HOUSE_STYLES } from '../core/profile.js';
+import { isTile } from '../core/presence.js';
+import { nearestWalkable } from './layout.js';
 
 const LABEL =
   'Andary: a 3D view of your agents at work. Arrow keys pan, plus and minus zoom, Q and E rotate, Escape deselects.';
@@ -85,8 +87,12 @@ class World {
     this.fps = 0;
     this.fpsSince = 0;
     this.drawCalls = 0;
-    /** @type {Record<'select'|'hover', Set<(sel: Selection) => void>>} */
-    this.listeners = { select: new Set(), hover: new Set() };
+    /** @type {Record<'select'|'hover'|'ground'|'step', Set<(value: any) => void>>} */
+    this.listeners = { select: new Set(), hover: new Set(), ground: new Set(), step: new Set() };
+    /** Walk mode: arrows and WASD take a step (emitted as 'step'), a click on the ground is a 'ground' tile. */
+    this.walkMode = false;
+    this.groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    this.groundHit = new THREE.Vector3();
     /** @type {string} */
     this.hoverKey = '';
     this.warned = new Set();
@@ -163,11 +169,11 @@ class World {
     const canvas = this.renderer.domElement;
     this.cleanups.push(
       attachPointer(canvas, {
-        onClick: (x, y) => this.userSelect(this.pickAt(x, y)),
+        onClick: (x, y) => this.clickAt(x, y),
         onHover: (x, y) => this.hoverAt(x, y),
         onLeave: () => this.setHover(null),
       }),
-      attachKeyboard(this.container, (action) => this.keyAction(action)),
+      attachKeyboard(this.container, (action) => this.keyAction(action), () => this.walkMode),
     );
     const observer = new ResizeObserver(() => this.resize());
     observer.observe(this.container);
@@ -259,6 +265,18 @@ class World {
     return isBuilding(key) ? { type: 'building', key } : null;
   }
 
+  /**
+   * A click: an agent or a building is selected as always; in walk mode a click on the ground
+   * also says which walkable tile it was nearest ('ground').
+   * @param {number} x @param {number} y
+   */
+  clickAt(x, y) {
+    const sel = this.pickAt(x, y);
+    this.userSelect(sel);
+    if (sel || !this.walkMode || !this.raycaster.ray.intersectPlane(this.groundPlane, this.groundHit)) return;
+    this.emit('ground', nearestWalkable(this.groundHit.x, this.groundHit.z));
+  }
+
   /** @param {number} x @param {number} y */
   hoverAt(x, y) {
     this.setHover(this.pickAt(x, y));
@@ -289,13 +307,14 @@ class World {
     } else if (action.type === 'zoom') this.zoomBy(action.factor);
     else if (action.type === 'rotate') this.rotateCamera(action.dir);
     else if (action.type === 'reset') this.resetCamera();
+    else if (action.type === 'step') this.emit('step', stepToTile(action.right, action.up, this.view.faceYaw));
     else if (action.type === 'deselect') {
       this.stopFollow();
       this.userSelect(null);
     }
   }
 
-  /** @param {'select'|'hover'} event @param {Selection} sel */
+  /** @param {'select'|'hover'|'ground'|'step'} event @param {any} sel */
   emit(event, sel) {
     for (const cb of this.listeners[event]) {
       try {
@@ -335,8 +354,7 @@ class World {
     this.disposed = true;
     this.stop();
     for (const cleanup of this.cleanups.splice(0)) cleanup();
-    this.listeners.select.clear();
-    this.listeners.hover.clear();
+    for (const set of Object.values(this.listeners)) set.clear();
     this.crowd?.dispose();
     this.envCall('dispose');
     this.env = null;
@@ -597,11 +615,44 @@ class World {
     this.envCall('vehicle', kind, action);
   }
 
+  // ── World API: people ───────────────────────────────────────────────────────
+
+  /**
+   * Walk mode (a person's own controls): arrows and WASD on the focused town emit 'step'
+   * ([dc, dr] on the grid, from the screen direction under the current camera), Shift+arrows pan,
+   * and a click on the ground emits 'ground' (the nearest walkable tile).
+   * @param {boolean} on
+   */
+  setWalkMode(on) {
+    this.walkMode = Boolean(on);
+  }
+
+  /**
+   * The grid step for a screen direction under the current camera (the phone pad's buttons).
+   * @param {-1|0|1} right @param {-1|0|1} up
+   * @returns {[number, number]} [dc, dr]
+   */
+  screenStep(right, up) {
+    return stepToTile(right, up, this.view.faceYaw);
+  }
+
+  /**
+   * Where a person is: walking a tile path that started at `at` (ms on this browser's clock), or
+   * standing on a tile; dim while they are away on their porch.
+   * @param {string} id
+   * @param {{ tile?: [number, number], walk?: { path: [number, number][], at: number }|null, dim?: boolean }} where
+   */
+  placePerson(id, where) {
+    if (!where || typeof where !== 'object') return;
+    const walk = where.walk && Array.isArray(where.walk.path) && where.walk.path.length && where.walk.path.every(isTile) && Number.isFinite(where.walk.at) ? where.walk : null;
+    this.crowd.placePerson(id, { tile: isTile(where.tile) ? where.tile : null, walk, dim: where.dim === true });
+  }
+
   // ── World API: selection ────────────────────────────────────────────────────
 
   /**
-   * @param {'select'|'hover'} event
-   * @param {(sel: Selection) => void} cb
+   * @param {'select'|'hover'|'ground'|'step'} event
+   * @param {(value: any) => void} cb  select, hover: the selection; ground, step: a tile, a [dc, dr] step
    * @returns {() => void} unsubscribe
    */
   on(event, cb) {

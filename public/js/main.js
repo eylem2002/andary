@@ -36,8 +36,8 @@ async function boot() {
   const saved = loadPrefs();
   const prefs = { ...saved, speed: speedParam(saved.speed) };
   const store = createStore();
-  /** @type {{ mode: 'live'|'demo', store: any, world: World|null }} */
-  const app = { mode: 'demo', store, world: null };
+  /** @type {{ mode: 'live'|'demo', store: any, world: World|null, hud: any }} */
+  const app = { mode: 'demo', store, world: null, hud: null };
   /** @type {any} */ (window).__andary = app;
 
   /** The one place events come from: live or demo (sources/types.js). @type {import('./sources/types.js').TownSource|null} */
@@ -62,6 +62,9 @@ async function boot() {
       notifyTest: () => source?.notifyTest?.() ?? false,
       requestDigest: (since) => source?.requestDigest(since) ?? false,
       saveProfile: (profile) => source?.saveProfile?.(profile) ?? false,
+      walk: (to) => source?.walk?.(to) ?? false,
+      say: (kind, id) => source?.say?.(kind, id) ?? false,
+      lookAsk: (to, at) => source?.lookAsk?.(to, at) ?? false,
     },
   });
 
@@ -69,12 +72,14 @@ async function boot() {
    * A team town's people (or the demo's): their crews take their colours, and the HUD shows
    * their homes, their figures and the "You" dialog.
    * @param {unknown[]} people @param {string|null} me
+   * @param {number} offset  how far the server's clock is ahead of this browser's
    */
-  function setPeople(people, me) {
+  function setPeople(people, me, offset) {
     store.setPeople(people);
-    hud.setPeople(people, me);
+    hud.setPeople(people, me, offset);
   }
 
+  app.hud = hud;
   // The director starts with the world; until then it gets a record of what the store did.
   const backlog = recordChanges(store);
   // The 3D modules load from now on; the world is built once the first content is drawn.
@@ -127,6 +132,9 @@ async function boot() {
       onAway: (away, offset) => hud.setAway(away, offset),
       onPeople: setPeople,
       onProfile: (saved) => hud.profileSaved(saved),
+      onPresence: (people) => hud.setPresence(people),
+      onSaid: (said) => hud.said(said),
+      onLookAsk: (ask) => hud.lookAsked(ask),
       onNoteReply: (reply) => hud.noteReply(reply),
     });
   }
@@ -136,7 +144,7 @@ async function boot() {
     const { createSimulation } = await import('./sim/simulation.js');
     const demo = createDemo({ store, createSimulation, speed: prefs.speed, seed: seedParam(), onProgress: (progress) => hud.setProgress(progress), onDigest: (digest) => hud.setDigest(digest) });
     // The demo is a small team town: you, and Lina with her crew. People first, so crews take their colours.
-    const people = createDemoPeople({ onPeople: setPeople, saved: loadSavedProfile() });
+    const people = createDemoPeople({ onPeople: setPeople, onPresence: (moved) => hud.setPresence(moved), onSaid: (said) => hud.said(said), saved: loadSavedProfile() });
     people.start();
     source = {
       ...demo,
@@ -146,6 +154,14 @@ async function boot() {
         else hud.profileSaved(saved);
         return true;
       },
+      walk: (to) => {
+        const walked = people.walk(to);
+        if (!walked.ok) hud.serverError(walked.error ?? 'You cannot walk there');
+        return true;
+      },
+      say: (kind, id) => people.say(kind, id),
+      // Lina gets the note in the demo's story only; asking is fine.
+      lookAsk: () => true,
     };
     hud.setLimits(demoLimits(Date.now()));
     app.mode = 'demo';

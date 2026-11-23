@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CREW_COLORS } from '../../../public/js/core/catalog.js';
 import { defaultProfile } from '../../../public/js/core/profile.js';
-import { createTownPeople, displayName, personFigureId } from '../../../public/js/ui/town-people.js';
+import { HOMES } from '../../../public/js/core/town-map.js';
+import { createTownPeople, displayName, mergePresence, personFigureId, whereOf } from '../../../public/js/ui/town-people.js';
 import { describeLook } from '../../../public/js/ui/character.js';
 
 function fakeWorld() {
@@ -22,6 +23,7 @@ function fakeWorld() {
       agents.delete(id);
     },
     hasAgent: (/** @type {string} */ id) => agents.has(id),
+    placePerson: (/** @type {any[]} */ ...args) => calls.push(['placePerson', ...args]),
   };
 }
 
@@ -49,7 +51,7 @@ test('only what changed reaches the world, and someone going offline leaves', ()
   people.sync([sam, lina]);
   assert.deepEqual(world.calls, [], 'nothing changed');
   people.sync([sam, { ...lina, profile: { ...lina.profile, look: { ...lina.profile.look, hat: 'crown' } } }]);
-  assert.deepEqual(world.calls.map((c) => c[0]), ['updateAgent']);
+  assert.deepEqual(world.calls.map((c) => c[0]), ['updateAgent'], 'her place did not change');
   assert.equal(world.calls[0][2].person.hat, 'crown');
   world.calls.length = 0;
   people.sync([sam, { ...lina, online: false }]);
@@ -65,4 +67,29 @@ test('the preview is described in one sentence, the character by their own name'
   assert.match(describeLook({ ...defaultProfile(0), look: { ...look, hair: 'bald', topColor: 5, topPattern: 'stripes', patternColor: 4 } }), /bald.*red t-shirt with white stripes/);
   assert.equal(displayName({ ...lina, profile: { ...lina.profile, name: 'Lina Ç.' } }), 'Lina Ç.');
   assert.equal(displayName(sam), 'Sam');
+});
+
+test('presence: walks on this browser\'s clock, dim on the porch, gone inside, lights from the host', () => {
+  const world = fakeWorld();
+  const people = createTownPeople(() => /** @type {any} */ (world));
+  /** @type {[number, number][]} */
+  const path = [[2, 3], [3, 3]];
+  let town = [sam, lina];
+  people.sync(town, 0);
+  const placed = world.calls.filter((c) => c[0] === 'placePerson');
+  assert.deepEqual(placed, [['placePerson', 'person:Lina', { tile: [...HOMES[1].door], walk: null, dim: false }]], 'standing at her door');
+  world.calls.length = 0;
+  town = mergePresence(town, [{ name: 'Lina', walk: { path, at: 5000 }, tile: [2, 3], profile: 'ignored' }, { name: 'Zed', online: true }, null]);
+  assert.equal(town.length, 2, 'nobody new from a presence message');
+  assert.equal(town[1].profile, lina.profile, 'only presence fields are taken');
+  people.sync(town, 1000);
+  assert.deepEqual(world.calls, [['placePerson', 'person:Lina', { tile: [2, 3], walk: { path, at: 4000 }, dim: false }]], 'the server is 1 s ahead');
+  world.calls.length = 0;
+  town = mergePresence(town, [{ name: 'Lina', online: false, away: 'porch', lights: true }, { name: 'Sam', lights: true }]);
+  people.sync(town, 1000);
+  assert.deepEqual(world.calls.map((/** @type {any} */ c) => c[0] === 'setHome' ? [c[0], c[1], c[2].lights] : [c[0], c[1], c[2].dim]), [['setHome', 0, true], ['placePerson', 'person:Lina', true]], 'Sam\'s crews light his home; Lina sits dimmed on her porch');
+  world.calls.length = 0;
+  people.sync(mergePresence(town, [{ name: 'Lina', away: 'inside', lights: false }]), 1000);
+  assert.deepEqual(world.calls.map((c) => c.slice(0, 2)), [['setHome', 1], ['removeAgent', 'person:Lina']]);
+  assert.deepEqual(whereOf({ ...sam, tile: /** @type {any} */ ('x'), walk: /** @type {any} */ ({ path: [] }) }, 0), { tile: [...HOMES[0].door], walk: null, dim: true });
 });

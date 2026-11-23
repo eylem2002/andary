@@ -112,6 +112,44 @@ describe('connectLive', () => {
     assert.deepEqual(seen.at(-1), [0, null], 'a town that is no team host has no people');
   });
 
+  test('walks, emotes, phrases and "come look" (§4.11): what comes in, and what this person can ask', () => {
+    /** @type {any[]} */
+    const seen = [];
+    const live = connectLive({
+      store: fakeStore(),
+      WebSocketImpl: /** @type {any} */ (FakeSocket),
+      url: 'ws://x/ws',
+      onPeople: (people, me, offset) => seen.push(['people', me, offset]),
+      onPresence: (people) => seen.push(['presence', people]),
+      onSaid: (said) => seen.push(['said', said]),
+      onLookAsk: (ask) => seen.push(['look', ask]),
+    });
+    const socket = FakeSocket.all[0];
+    socket.open();
+    const serverTime = Date.now() + 5000;
+    socket.receive({ t: 'hello', history: [], approvals: [], people: [], me: 'Lina', serverTime });
+    const [, , offset] = seen[0];
+    assert.ok(Math.abs(offset - 5000) < 1000, 'walks are timed on the server\'s clock');
+    seen.length = 0;
+    socket.receive({ t: 'presence', people: [{ name: 'Sam', tile: [2, 3] }] });
+    socket.receive({ t: 'presence', people: 'junk' });
+    socket.receive({ t: 'emote', name: 'Sam', id: 2 });
+    socket.receive({ t: 'phrase', name: 'Sam', id: 1 });
+    socket.receive({ t: 'phrase', name: 'Sam', id: 'x' });
+    socket.receive({ t: 'look-ask', from: 'Sam', at: { building: 'library' } });
+    socket.receive({ t: 'look-ask', at: { building: 'library' } });
+    assert.deepEqual(seen, [
+      ['presence', [{ name: 'Sam', tile: [2, 3] }]],
+      ['said', { kind: 'emote', name: 'Sam', id: 2 }],
+      ['said', { kind: 'phrase', name: 'Sam', id: 1 }],
+      ['look', { from: 'Sam', at: { building: 'library' } }],
+    ]);
+    assert.equal(live.walk([4, 9]), true);
+    assert.equal(live.say('emote', 3), true);
+    assert.equal(live.lookAsk('Sam', { agent: 'a1' }), true);
+    assert.deepEqual(socket.sent.filter((m) => m.t !== 'ping'), [{ t: 'walk', to: [4, 9] }, { t: 'emote', id: 3 }, { t: 'look', to: 'Sam', at: { agent: 'a1' } }]);
+  });
+
   test('one bad event does not stop the stream', () => {
     const errorLog = mock.method(console, 'error', () => {});
     const store = { ...fakeStore(), ingest: (e) => {

@@ -87,6 +87,8 @@ export class Agent {
     this.queued = false;
     /** @type {Route|null} */
     this.route = null;
+    /** A person's timed walk (crowd.placePerson): where they are at a time, the same on every screen. @type {((now: number) => {x: number, z: number, done: boolean})|null} */
+    this.track = null;
     this.speed = 0;
     /** @type {((arrived: boolean) => void)[]} */
     this.waiters = [];
@@ -130,6 +132,35 @@ export class Agent {
     this.route = { points, index: 0, speed: pace === 'run' ? RUN_SPEED : WALK_SPEED, facing, then };
     this.anim.set(pace === 'run' ? 'run' : 'walk');
     this.anim.setOverlay(this.activity);
+  }
+
+  /**
+   * Follows a timed walk: each frame the figure stands where the walk is at that moment.
+   * @param {(now: number) => {x: number, z: number, done: boolean}} track
+   */
+  follow(track) {
+    this.route = null;
+    this.track = track;
+    this.anim.set('run');
+    this.anim.setOverlay(null);
+  }
+
+  /** @returns {number} how far the figure moved */
+  stepTrack() {
+    const track = /** @type {NonNullable<Agent['track']>} */ (this.track);
+    const p = track(Date.now());
+    const pos = this.group.position;
+    const dx = p.x - pos.x;
+    const dz = p.z - pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 1e-3) this.goalHeading = Math.atan2(dx, dz);
+    pos.x = p.x;
+    pos.z = p.z;
+    if (p.done) {
+      this.track = null;
+      this.settle();
+    }
+    return d;
   }
 
   /**
@@ -214,7 +245,7 @@ export class Agent {
    */
   update(dt) {
     this.stepTransition(dt);
-    const travelled = this.stepRoute(dt);
+    const travelled = this.track ? this.stepTrack() : this.stepRoute(dt);
     if (travelled > 0) this.anim.advanceGait(travelled);
     this.heading = turnToward(this.heading, this.goalHeading, TURN_SPEED * dt);
     const pose = this.anim.update(dt, travelled > 0);
