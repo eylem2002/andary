@@ -176,6 +176,7 @@ building to see who is inside.
 | `U` · `L` | Usage (tokens and estimated cost) · Leaderboard |
 | `I` | Go to what needs you, most urgent first (again for the next) |
 | `W` | Catch me up: what your crews did since you last looked |
+| `R` | Review: what each crew changed since you last marked it reviewed |
 | `A` | Go to approvals |
 | `1`–`9` | Jump to crew 1 to 9 |
 | `?` | All shortcuts |
@@ -294,6 +295,34 @@ line at the end. Press `W` any time for what happened since you last looked. The
 the counts for the last day, in memory only: a page reload loses nothing, a restart of Andary
 forgets them (the dialog then says it only remembers since the restart). A teammate's crews in a
 team town are theirs and left out.
+
+**Standup or end of day:** in Catch me up, **Today** shows everything since midnight, and **Copy as
+Markdown** copies the lines on show (with each crew's estimated cost so far) for a standup note or
+a daily log. It goes to your clipboard only.
+
+### Review what your crews changed
+
+Press `R` (or the **Review** button in the toolbar, whose badge counts the crews waiting) for one
+card per crew with finished turns you have not reviewed yet: what deserves a second look first
+(the latest test run failed, "said done, but tests were not re-run", another crew edited the same
+folder, a turn stopped on an error, failed calls), then the files its turns changed with lines
+added and removed (a click opens the diff when the town still has it), the latest test and build,
+what the turns cost, and a git command to copy, such as
+`git -C ~/code/api diff 'HEAD@{2026-11-23T09:05:00Z}'`: what changed in that work tree since then,
+committed or not, read from git's own record of where the work tree was (its reflog). **Mark
+reviewed** clears the card until the crew finishes another turn. Your marks stay in this browser
+(and its other tabs); nothing is sent anywhere. It covers the latest 60 turns the town keeps across
+crews. It is a list of what to look at, not a code editor.
+
+### Resume and hand off
+
+A lead's details hold **Resume and hand off**: the command that resumes its session in its folder
+(`cd ~/code/api && claude --resume <id>`, or `codex resume <id>`) with a copy button, and **Copy
+handoff**: Markdown with the crew's goal, the files its turns changed, the latest test and build,
+open warnings, its to-dos and the last words of its latest turns, to paste into another agent, a
+pull request or a teammate's chat. It is built from what the town already holds, never written by
+a model. It quotes your prompt and the agent's words, and goes to your clipboard only (**Show the
+handoff** shows it first).
 
 ### Everything else
 

@@ -16,6 +16,7 @@ import { formatAgo, formatClock, listJoin, plural } from './format.js';
 import { icon } from './icons.js';
 import { focusFallback } from './masthead.js';
 import { roundel } from './parts.js';
+import { createStandup, standupText, startOfDay } from './standup.js';
 import { projectName } from '../core/store-model.js';
 import { stopWords } from '../core/waits.js';
 
@@ -26,7 +27,7 @@ import { stopWords } from '../core/waits.js';
 /** @typedef {import('../core/digest.js').CrewDigest} CrewDigest */
 /** @typedef {import('../core/attention.js').AttentionItem} AttentionItem */
 /** @typedef {{ since: number, until: number|null }} Away  the latest time you were away (server/digest.mjs) */
-/** @typedef {'looked'|'left'|'all'} Reason  where a period starts: when you last looked, when you left, or as far back as the town remembers */
+/** @typedef {'looked'|'left'|'all'|'today'} Reason  where a period starts: when you last looked, when you left, as far back as the town remembers, or midnight (a standup) */
 
 export const CAUGHT_UP_KEY = 'andary:caught-up';
 /**
@@ -147,6 +148,7 @@ export function emptyNote(reason, digest) {
  * @param {(ts: number) => string} clock  a time on the server's clock as a time of day here
  */
 export function periodText(reason, since, digest, clock) {
+  if (reason === 'today') return digest.limit ? `Today. The town only remembers since ${clock(digest.since)}${digest.limit === 'started' ? ' (it restarted)' : ''}.` : 'Today, since midnight.';
   if (reason === 'all') return digest.limit === 'day' ? 'Everything the town remembers: the last day.' : `Everything the town remembers: since ${clock(digest.since)}, when it started.`;
   const ago = formatAgo(since, digest.until).replace('just now', 'a moment ago');
   const you = reason === 'left' ? 'you left' : 'you last looked';
@@ -433,7 +435,8 @@ export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } =
     dialog.el.addEventListener('close', () => ctx.goToNeed(item), { once: true });
     dialog.close();
   });
-  const content = h('div', { class: 'hud-catchup' }, period, ...lines.els);
+  const standup = createStandup(ctx, { onScope: (today) => look(today) });
+  const content = h('div', { class: 'hud-catchup' }, period, ...lines.els, standup.el);
   const dialog = createDialog({ id: 'hud-catchup', title: 'Catch me up', scrollable: true, body: [content], fallback: focusFallback });
   const body = /** @type {HTMLElement|null} */ (dialog.el.querySelector('.hud-dialog__body'));
   dialog.el.setAttribute('data-testid', 'catch-up');
@@ -454,15 +457,41 @@ export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } =
     asked = null;
     content.removeAttribute('aria-busy');
     setText(period, words);
+    standup.show('');
   }
 
   function render() {
     if (!dialog.isOpen || !shown) return;
     const state = ctx.store.getState();
     const { digest, since, reason } = shown;
-    setText(period, periodText(reason, since, digest, (ts) => formatClock(ts - offset)));
-    lines.draw(catchUpRows(state, digest, ctx.needsYou.items(state)), { fallback: body, said: nothingNew(reason, digest), none: emptyNote(reason, digest) });
+    const words = periodText(reason, since, digest, (ts) => formatClock(ts - offset));
+    setText(period, words);
+    const rows = catchUpRows(state, digest, ctx.needsYou.items(state));
+    lines.draw(rows, { fallback: body, said: nothingNew(reason, digest), none: emptyNote(reason, digest) });
+    standup.show(standupText(state, rows, { today: reason === 'today', period: words, now: now() }));
     content.removeAttribute('aria-busy');
+  }
+
+  /**
+   * Asks the town about a period: since you last looked (or left), or today since midnight on this
+   * computer's clock (a standup).
+   * @param {boolean} today
+   */
+  function look(today) {
+    const start = today ? { since: Math.max(0, startOfDay(now()) + offset), reason: /** @type {Reason} */ ('today') } : catchUpStart(looked.get(live()), live() ? away : null);
+    asked = start;
+    shown = null;
+    standup.setScope(today);
+    content.setAttribute('aria-busy', 'true');
+    setText(period, 'Counting what your crews did…');
+    lines.clear();
+    standup.show('');
+    if (live() && viewOnly()) showProblem('Only the person who hosts this town can catch up on its crews.');
+    else if (!ctx.controls.requestDigest(start.since)) showProblem('The town is not connected right now. Try again once it says Live.');
+    else {
+      clearTimeout(answerTimer);
+      answerTimer = setTimeout(() => showProblem('The town did not answer. Try again in a moment.'), ANSWER_MS);
+    }
   }
 
   /** The offer ends OFFER_MS after you came back, with no event to redraw the masthead then. */
@@ -492,20 +521,9 @@ export function createCatchUp(ctx, { storage = safeStorage(), now = Date.now } =
     render,
     /** Opens the dialog and asks the town what happened since you last looked. */
     open() {
-      const start = catchUpStart(looked.get(live()), live() ? away : null);
       offerKept = offeredNow();
-      asked = start;
-      shown = null;
-      content.setAttribute('aria-busy', 'true');
-      setText(period, 'Counting what your crews did…');
-      lines.clear();
       dialog.open();
-      if (live() && viewOnly()) showProblem('Only the person who hosts this town can catch up on its crews.');
-      else if (!ctx.controls.requestDigest(start.since)) showProblem('The town is not connected right now. Try again once it says Live.');
-      else {
-        clearTimeout(answerTimer);
-        answerTimer = setTimeout(() => showProblem('The town did not answer. Try again in a moment.'), ANSWER_MS);
-      }
+      look(false);
     },
     /** The town's answer: shown if the dialog still waits for it, and then you have seen it. @param {unknown} raw */
     showDigest(raw) {

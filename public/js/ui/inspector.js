@@ -1,8 +1,9 @@
 // The agent inspector: everything known about the selected agent — role, crew, status, what it is
 // doing (or waiting for you on, or why it seems stuck, and since when; and a note when another
 // agent changed a file it edits), the receipt of a lead's last turn, a note to send it
-// (agent-note.js), its brief, its context in use and what it cost, which tools it used how often,
-// recent files and activity, its last message.
+// (agent-note.js), for a lead the resume command and a handoff to copy (handoff.js), its brief,
+// its context in use and what it cost, which tools it used how often, recent files and activity,
+// its last message.
 import { nameWithRoster } from './town-people.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
@@ -12,6 +13,7 @@ import { contextSentence, hasCounted, liveContext, usageSentence } from './usage
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 import { isNote, waitedText } from './needs-you.js';
 import { createNoteSection } from './agent-note.js';
+import { createHandoffSection } from './handoff.js';
 import { receiptRows } from '../core/receipts.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
@@ -53,10 +55,12 @@ export function createInspector(ctx) {
   const message = h('p', { class: 'hud-inspector__message' });
   const usage = createUsageLines();
   const toAgent = createNoteSection(ctx);
+  const handoff = createHandoffSection(ctx);
   const sections = {
     now: section('Now', h('div', {}, now, need.el, note)),
     receipt: section('Last turn', h('dl', { class: 'hud-receipt', 'data-testid': 'agent-receipt' })),
     note: section('Send a note', toAgent.el),
+    handoff: section('Resume and hand off', handoff.el),
     brief: section('Brief', brief),
     usage: section('Usage', usage.el),
     tools: section('Tools used', tools),
@@ -129,6 +133,7 @@ export function createInspector(ctx) {
     setHidden(note, !newest);
     renderSections(agent, session?.cwd, asking);
     setHidden(sections.note, !toAgent.update(state, agent, session));
+    setHidden(sections.handoff, !handoff.update(state, agent.role === 'lead' ? session : null));
     setHidden(sections.receipt, !renderReceipt(/** @type {HTMLElement} */ (sections.receipt.lastElementChild), state.receipts.findLast((r) => r.agentKey === agent.key)));
     setHidden(sections.usage, !usage.update(state, agent.key, Date.now()));
     setAttr(follow, 'aria-pressed', String(ctx.view.follow));
@@ -170,10 +175,8 @@ export function createInspector(ctx) {
     const end = agent.status === 'done' ? agent.lastActivity : nowMs;
     setText(since, `Started ${formatAgo(agent.startedAt, nowMs)}, on the job for ${formatDuration(end - agent.startedAt)}`);
     for (const part of [need, usage, toAgent]) part.tick(nowMs);
-    for (const item of recent.children) {
-      const time = item.querySelector('time');
-      if (time) setText(time, formatAgo(Number(/** @type {HTMLElement} */ (item).dataset.ts), nowMs, { short: true }));
-    }
+    // Each entry's time sits in its item, which keeps when it happened.
+    for (const time of recent.querySelectorAll('.hud-recent__item > time')) setText(time, formatAgo(Number(time.parentElement?.dataset.ts), nowMs, { short: true }));
   }
 
   return { el, open, hide, render, tick, noteReply: toAgent.reply, get agentKey() { return agentKey; } };
