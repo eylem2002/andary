@@ -2,12 +2,15 @@
 // map cell (asphalt roads, paved plaza, lawns, courtyards), sidewalks, road markings, zebra
 // crossings, the seawall and promenade, the sea floor and the resin-look sea sides, and the
 // tunnel portals where buses leave the island.
-import { COLS, ROWS, TILE, tileAt, tileToWorld } from '../layout.js';
+import { COLS, MAP_BOUNDS, ROWS, TILE, tileAt, tileToWorld } from '../layout.js';
 import { C, S, STYLE } from './palette.js';
 import { createRng, range } from './rand.js';
 
-/** Plinth extents (world units). The sea continues north of the map to the plinth's far edge. */
-export const PLINTH = Object.freeze({ minX: -26.6, maxX: 26.6, minZ: -36.5, maxZ: 26.6, bottom: -4.6 });
+/**
+ * Plinth extents (world units): the map plus a lawn rim. The sea continues north of the map to the
+ * plinth's far edge.
+ */
+export const PLINTH = Object.freeze({ minX: MAP_BOUNDS.minX - 0.6, maxX: MAP_BOUNDS.maxX + 0.6, minZ: -36.5, maxZ: MAP_BOUNDS.maxZ + 0.6, bottom: -4.6 });
 /** Sea geometry: shoreline (seawall) z, water level and sea floor. */
 export const SEA = Object.freeze({ shoreZ: -22, level: -0.5, floor: -1.9 });
 /** Ground heights of tile kinds. Roads and plaza are at 0, where agents walk. */
@@ -22,7 +25,7 @@ const CROSSINGS = Object.freeze([
 ]);
 
 /** Lot letter → courtyard colour. */
-const LOT_GROUND = Object.freeze({ G: C.lawn, M: 0xcfcbc2, T: 0xd6cfc2, x: C.lawn, n: C.gravel });
+const LOT_GROUND = Object.freeze({ G: C.lawn, M: 0xcfcbc2, T: 0xd6cfc2, x: C.lawn, n: C.gravel, h: C.lawn });
 
 /** @param {number} col @param {number} row */
 const isRoad = (col, row) => tileAt(col, row) === '#';
@@ -68,9 +71,9 @@ function buildTile(kit, col, row, rng) {
   const jitter = range(rng, -0.025, 0.025);
   if (ch === '~') return;
   if (ch === '#') return buildRoadTile(kit, col, row, x, z);
-  if (ch === 'P' || ch === 'F') return buildPlazaTile(kit, col, row, x, z);
+  if (ch === 'P' || ch === 'F' || ch === 'f') return buildPlazaTile(kit, col, row, x, z);
   if (ch === '=') return slab(kit, [x, z], TOP.promenade, shadeHex(C.paving, jitter), S.stone);
-  if (ch === 't') return slab(kit, [x, z], TOP.lawn, shadeHex(C.lawn, jitter * 2), S.ground);
+  if (ch === 't' || ch === 'g' || ch === 'k') return slab(kit, [x, z], TOP.lawn, shadeHex(C.lawn, jitter * 2), S.ground);
   if (ch === '.') return slab(kit, [x, z], TOP.open, shadeHex(0xbfc98a, jitter * 2), S.ground);
   const ground = /** @type {Record<string, number>} */ (LOT_GROUND)[ch] ?? C.paving;
   slab(kit, [x, z], TOP.lot, shadeHex(ground, jitter * 0.6), ground === C.lawn ? S.ground : S.matte);
@@ -130,13 +133,14 @@ function buildPlazaTile(kit, col, row, x, z) {
 function buildRim(kit, rng) {
   const { minX, maxX, maxZ } = PLINTH;
   const half = (COLS * TILE) / 2;
-  const depth = maxZ - half;
+  const south = MAP_BOUNDS.maxZ;
+  const depth = maxZ - south;
   const color = () => shadeHex(C.lawn, range(rng, -0.03, 0.03));
-  kit.box([0, BASE, half + depth / 2], [maxX - minX, TOP.lawn - BASE, depth], color(), { surface: S.ground });
+  kit.box([0, BASE, south + depth / 2], [maxX - minX, TOP.lawn - BASE, depth], color(), { surface: S.ground });
   const sideW = maxX - half;
   const z0 = SEA.shoreZ;
-  kit.box([-half - sideW / 2, BASE, (z0 + half) / 2], [sideW, TOP.lawn - BASE, half - z0], color(), { surface: S.ground });
-  kit.box([half + sideW / 2, BASE, (z0 + half) / 2], [sideW, TOP.lawn - BASE, half - z0], color(), { surface: S.ground });
+  kit.box([-half - sideW / 2, BASE, (z0 + south) / 2], [sideW, TOP.lawn - BASE, south - z0], color(), { surface: S.ground });
+  kit.box([half + sideW / 2, BASE, (z0 + south) / 2], [sideW, TOP.lawn - BASE, south - z0], color(), { surface: S.ground });
 }
 
 /**

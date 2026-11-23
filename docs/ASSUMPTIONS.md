@@ -1239,3 +1239,117 @@ section.
      is left out.
 229. **A test run "selects" tests** when a name filter or a test file or folder is on its line; a pass
      then reads "selected tests passed", as the rest may not have run.
+
+## People of a team town and walking (feat/org-people, feat/org-walk)
+
+230. **The town grew south by six rows (26 × 26 → 26 × 32 tiles, +23 %), not west.** The owner asked
+     for a modestly bigger, livelier town; the org-town design had squeezed the six homes onto the
+     west strip, facing east. A quarter of their own south of the ring road keeps every door facing
+     south (the default camera sees them all, as before, so no east-facing exception is needed) and
+     sits nearest the camera. Tile (13, 13)'s corner stays the world's origin, so every older
+     building, route, lamp and vehicle path keeps its coordinates; the plinth, the shadow box and the
+     camera's framing (depth 66 → 78, home 1.5 m further south) grew to fit.
+231. **The quarter's plan:** six 2 × 2 home plots (`h`) on row 24–25 with a garden column (`g`)
+     between neighbours, Home Street on row 26 joined to the west and east ring roads, and a park
+     (`k` lawns, a paved `P` square, an `f` fountain) on rows 27–30, with a row of trees at the
+     front edge. Each home's door tile is the west half of its plot's street frontage.
+232. **Park life is cheap and quiet:** a dog trotting round the square, five pigeons pecking by the
+     fountain, two kites over the east lawn only in clear or rainbow weather by day, and balloons
+     tied to the food cart (static). Three small meshes, nothing allocated per frame; reduced motion
+     sits the dog down and holds the pigeons and kites still. The gardens, mailboxes, benches, cart,
+     lamps and fountain stone are in the town batch.
+233. **An unowned home is a plain cottage in the town's own look**, door in wood, no flag, no name
+     plate and dark windows, so a town without a team still looks lived in. All six homes are one
+     mesh, rebuilt when one changes.
+234. **A member key now needs its name on the roster (`people.json`).** The design asks for
+     `team remove` to revoke one person; that needs both checks to look the name up. A team that
+     invited people before this change runs `andary team invite <name>` once more for each: the key
+     printed is the same, so their relays keep working with no change on their side.
+235. **The host is named "Host" until `--name` says otherwise**, never the computer's user name (it
+     shows on a name plate to everyone). A later `--name` renames the host's entry and keeps its home,
+     colour and profile; a name a teammate already has is refused at start.
+236. **The roster file is shared by the CLI and the running host under a lock.** `team invite`,
+     `team remove` and the host's profile saves each read, change and write people.json while
+     holding `people.lock` (an exclusive create, retried every 20 ms for up to 2 s; a lock older
+     than 5 s is taken to be left by a process that died). The host also re-reads the file every 2 s
+     and before every key or link check, and announces any change it sees once (a microtask), so a
+     key check that notices a removal first still closes the removed person's town.
+237. **A teammate never takes the host's home.** Before the host has started once, five invites fill
+     the roster; the sixth place is the host's.
+238. **Every profile key is required, not only known ones.** "Unknown keys rejected" is read as an
+     exact key set: a profile missing a field is as malformed as one with an extra, and the browser
+     always sends whole profiles.
+239. **A colour asked for and taken goes to the next free one in order, wrapping round,** and a
+     person's own colour counts as free to them. The browser greys out colours others hold in the
+     "You" dialog (with whose they are), so this mostly happens when two people save at once.
+240. **The palettes are fixed in `core/profile.js`:** 8 skin tones, 9 hair colours (black to teal),
+     10 cloth colours, each named for screen readers; `'theme'` tops wear the person's colour.
+     Indices, not hex, cross the wire, so a later palette tweak changes everyone's look the same way.
+241. **The preview in the "You" dialog is a flat SVG drawing, not the 3D figure.** The HUD may not
+     reach into the 3D world (layer rules), a second WebGL renderer would cost a phone its frame
+     budget, and SVG works where WebGL does not. It is drawn from the same profile and palettes.
+242. **In PR 1 a person stands on their porch while online and is not drawn while offline**; the
+     60 s porch and 10 min inside timers, walking, and lights from a relay that posted in the last
+     2 min come with presence (PR 2). Lights are on while any browser plays the person (the owner's
+     browser plays the host).
+243. **The owner may save the host's profile too** (`{t:'profile'}` from the owner's browser), since
+     the host is a person of the town like the others.
+244. **A person counts as view-only in the HUD** (no Needs you for others' prompts, no plan limits,
+     no catch-up, no remote approvals or phone settings), exactly like a viewer, besides their own
+     character.
+245. **Each person may hold 2 connections, and people may use the 4 connections kept for the
+     owner**; viewers still cannot. The design lists this under PR 2's abuse cover; it is a few
+     lines and closes a way for one link to fill the town, so it came now.
+246. **The demo is a small team town:** "You" (the host, slot 0, cobalt, the coast cottage) and Lina
+     (slot 1, raspberry, a desert house: curly hair, round eyes, glasses, a hoodie, headphones), both
+     online, so it shows two lit homes and two people. The "You" dialog works in the demo and keeps
+     your look in this browser; a saved look asking for Lina's colour starts on the next free one.
+     Every local crew is yours, so the demo's own crews now share your colour, told apart by number.
+247. **A home's door tile is the west half of its plot's frontage**, and a person stands on the
+     street side of it, facing south. Home Street has no traffic, so nobody stands in a lane.
+248. **The frame budget is checked with `world-lab.html?scenario=people&quality=low` at 390 × 844**:
+     six people at home plus 24 helpers walking about (30 figures), every home lived in. This
+     container renders with SwiftShader on the CPU, so its frames per second say nothing about a
+     phone; what it does show is that the quarter adds 6 to 7 draw calls to the same 20-figure crowd
+     (44 → 49–50: the homes, the park's pool, dog, pigeons and two kites; its gardens, lamps and
+     props are in the town batch) and the same frame rate as `main` there, so the 30 fps target on a
+     phone is as near as it was. A person costs one figure geometry and one draw call like any
+     helper.
+249. **A nonce per person makes a removal final.** Keys and links are HMACs of the name and a
+     random 16-character nonce kept in people.json; inviting someone already on the roster keeps
+     it (the same lines print again), inviting them after a removal makes a new one. People from
+     before nonces have an empty one, which signs exactly as before.
+250. **The host is told which old keys it refuses**, once per name, and a member's relay words a 401
+     as "key refused by the host", so a team upgrading from a town without rosters is not left
+     guessing (README "Upgrading").
+251. **With no `--name` and a teammate called "Host", the host becomes "Host 2"** (then 3…), with a
+     line in the log, rather than refusing to start.
+252. **The creator has no dropdowns.** Every choice is a radio group of picture tiles (the option
+     drawn on the character and cropped to the part it changes; colours as round chips), with a
+     legend that names the current choice, in six tabbed sections (Body, Hair, Face, Clothes,
+     Accessories, Home and names). Only the open section's tiles are drawn, so a change redraws at
+     most a few dozen small SVGs. The two names are text fields, the only typed input.
+253. **Profile v1 grew in place** (nothing was released): 25 look fields, the two names, and a cap
+     of 1,152 bytes (was 512): the longest look takes 526 bytes, and two names of 20 four-byte
+     letters with two three-byte marks each take 400 more (926 measured, test-checked). The
+     palettes grew to 12 skins, 12 hair colours and 12 cloth colours; `face` became `facialHair`,
+     `glasses` and `cheeks`. Each tile, the preview and the 3D figure use the same palettes and the
+     same shading (`mix` towards white or black), so a cap or a beanie's pompom looks alike in both.
+254. **"Detailed" is modelled, not textured.** Patterns, seams, collars, hoods and glasses are small
+     shapes in the person's one figure geometry, coloured per vertex: no texture or atlas, nothing
+     new to load, still one draw call per person. A pet walks at the person's heel on the body
+     bone (it moves with them, it does not wander), a bird sits on the shoulder.
+255. **Undo goes back through the last 30 changes of this opening of the dialog**; outfits replace
+     only clothes and accessories, keeping the person's body, hair and face.
+256. **The agents' name numbers a crew's helpers in the order they joined**, in each crew
+     separately ("Pixel 1" may be in two crews, told apart by crew number), and a lead takes the
+     name alone until PR 3 lets the person's character play their lead. Teammates of an agent team
+     take it too. Log lines written before a rename keep the name they had.
+257. **A name that could pass for another person's is refused by the host**, for both the
+     character's name and the agents' name: equal to another person's roster, character or agents'
+     name after NFKC, case folding, dropping marks and separators, and folding Cyrillic and Greek
+     look-alikes (a small fixed table, not the whole Unicode confusables list), or to one of those
+     with a number added; also the town's own words (You, Host, Foreman, Scout, Builder, Lead,
+     Andary) with or without a number. The demo applies the same rule. Up to two combining marks
+     per letter are kept (Vietnamese, Devanagari), more are dropped; marks do not count towards 20.
+

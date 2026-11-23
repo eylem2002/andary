@@ -117,6 +117,8 @@ export function socketUrl(pageUrl) {
  * @property {(digest: unknown) => void} [onDigest]   the answer to requestDigest(): what each crew did
  * @property {(reply: { ref: string|null, ok: boolean, error?: string }) => void} [onNoteReply]  the server's answer to sendNote(), with its ref (§4.15)
  * @property {(away: unknown, offset: number) => void} [onAway]  the latest time you were away, from hello and as it changes, with how far the server's clock is ahead of this browser's (from hello)
+ * @property {(people: unknown[], me: string|null) => void} [onPeople]  a team town's people (§4.11), from hello (before its history) and as they change; me: who this browser plays
+ * @property {(saved: { color: number, asked: number }) => void} [onProfile]  the answer to saveProfile(): the colour this person got
  * @property {new (url: string, protocols?: string[]) => WebSocket} [WebSocketImpl]
  * @property {() => import('./credentials.js').Credentials} [credentials]
  * @property {() => Promise<Hello|null>} [hello]
@@ -124,7 +126,7 @@ export function socketUrl(pageUrl) {
  */
 
 /**
- * @typedef {Required<Pick<LiveOptions, 'onSettings'|'onError'|'onProgress'|'onLimits'|'onNotifyTest'|'onDigest'|'onAway'|'onNoteReply'>> & { store: LiveOptions['store'], ingest: (envelope: unknown) => void, clock: { offset: number } }} Sinks
+ * @typedef {Required<Pick<LiveOptions, 'onSettings'|'onError'|'onProgress'|'onLimits'|'onNotifyTest'|'onDigest'|'onAway'|'onPeople'|'onProfile'|'onNoteReply'>> & { store: LiveOptions['store'], ingest: (envelope: unknown) => void, clock: { offset: number }, me: { name: string|null } }} Sinks
  */
 
 /**
@@ -147,6 +149,10 @@ const MESSAGES = Object.freeze({
   'notify-test': (m, to) => to.onNotifyTest(m.ok === true),
   digest: (m, to) => to.onDigest(m.d),
   away: (m, to) => to.onAway(m.away ?? null, to.clock.offset),
+  people: (m, to) => to.onPeople(Array.isArray(m.people) ? m.people : [], to.me.name),
+  profile: (m, to) => {
+    if (m.ok === true && Number.isInteger(m.color)) to.onProfile({ color: m.color, asked: Number.isInteger(m.asked) ? m.asked : m.color });
+  },
   'note-reply': (m, to) => to.onNoteReply({ ref: typeof m.ref === 'string' ? m.ref : null, ok: m.ok === true, ...(typeof m.error === 'string' ? { error: m.error } : {}) }),
   error: (m, to) => to.onError(String(m.message ?? 'The server reported an error.')),
 });
@@ -159,6 +165,20 @@ function applyNotes(store, notes) {
   if (Array.isArray(notes)) for (const note of notes) store.setNote?.(note);
 }
 
+/** Where a server message goes when the page did not ask for it. */
+const NO_HANDLERS = Object.freeze({
+  onSettings: () => {},
+  onError: () => {},
+  onProgress: () => {},
+  onLimits: () => {},
+  onNotifyTest: () => {},
+  onDigest: () => {},
+  onAway: () => {},
+  onPeople: () => {},
+  onProfile: () => {},
+  onNoteReply: () => {},
+});
+
 /**
  * Opens and keeps open the live connection.
  * @param {LiveOptions} options
@@ -167,18 +187,11 @@ export function connectLive({
   store,
   authenticated = true,
   onStatus = () => {},
-  onSettings = () => {},
-  onError = () => {},
-  onProgress = () => {},
-  onLimits = () => {},
-  onNotifyTest = () => {},
-  onDigest = () => {},
-  onAway = () => {},
-  onNoteReply = () => {},
   WebSocketImpl = globalThis.WebSocket,
   credentials = () => readCredentials(),
   hello = () => fetchHello({ credentials }),
   url = socketUrl(globalThis.location?.href ?? 'http://127.0.0.1/'),
+  ...handlers
 }) {
   /** @type {WebSocket|null} */
   let socket = null;
@@ -191,7 +204,7 @@ export function connectLive({
   /** @type {ReturnType<typeof setInterval>|null} */
   let pingTimer = null;
   /** Where the server's messages go (MESSAGES). @type {Sinks} */
-  const sinks = { store, ingest, onSettings, onError, onProgress, onLimits, onNotifyTest, onDigest, onAway, onNoteReply, clock: { offset: 0 } };
+  const sinks = { ...NO_HANDLERS, ...handlers, store, ingest, clock: { offset: 0 }, me: { name: null } };
 
   /** @param {LinkStatus} next */
   function setStatus(next) {
@@ -248,6 +261,8 @@ export function connectLive({
   function applyHello(message) {
     attempt = 0;
     store.reset();
+    // The people first: their crews take their colours as the history is replayed.
+    helloPeople(message, sinks);
     for (const envelope of message.history ?? []) ingest(envelope);
     for (const approval of message.approvals ?? []) store.setApproval(approval);
     applyNotes(store, message.notes);
@@ -255,14 +270,14 @@ export function connectLive({
     for (const record of Array.isArray(usage.agents) ? usage.agents : []) store.setUsage?.(record);
     if (Array.isArray(usage.days)) store.setUsage?.(null, usage.days);
     // Whole values, so nothing is left over from before a restart (a town that no longer hosts a team).
-    onSettings({ ...(message.settings ?? {}), team: message.settings?.team ?? null, notifyUrl: typeof message.notifyUrl === 'string' ? message.notifyUrl : null });
-    if (message.progress) onProgress(message.progress);
+    sinks.onSettings({ ...(message.settings ?? {}), team: message.settings?.team ?? null, notifyUrl: typeof message.notifyUrl === 'string' ? message.notifyUrl : null });
+    if (message.progress) sinks.onProgress(message.progress);
     // The server's clock against this one (for the catch-up's half hour; the trip is ignored).
     sinks.clock.offset = Number.isFinite(message.serverTime) ? message.serverTime - Date.now() : 0;
     // Always, so an absence from before a restart is not offered again.
-    onAway(message.away ?? null, sinks.clock.offset);
+    sinks.onAway(message.away ?? null, sinks.clock.offset);
     // Whole, so a restarted server's empty list replaces what the town showed before.
-    onLimits(message.limits ?? null);
+    sinks.onLimits(message.limits ?? null);
     setStatus('live');
     startPing();
   }
@@ -314,6 +329,15 @@ export function connectLive({
 }
 
 /**
+ * Who lives in a team town, and who this browser plays, from `hello`.
+ * @param {Record<string, any>} message @param {Sinks} sinks
+ */
+function helloPeople(message, sinks) {
+  sinks.me.name = typeof message.me === 'string' ? message.me : null;
+  sinks.onPeople(Array.isArray(message.people) ? message.people : [], sinks.me.name);
+}
+
+/**
  * What the browser can ask the server for (CONTRACTS §4.5); false when the socket is not open.
  * @param {(message: object) => boolean} send
  */
@@ -355,6 +379,13 @@ function requests(send) {
     /** @param {boolean} on */
     setRemoteApprovals(on) {
       return send({ t: 'settings', settings: { remoteApprovals: Boolean(on) } });
+    },
+    /**
+     * Saves this person's profile on the team host (§4.11); the answer comes to onProfile.
+     * @param {import('../core/profile.js').Profile} profile
+     */
+    saveProfile(profile) {
+      return send({ t: 'profile', p: profile });
     },
   };
 }

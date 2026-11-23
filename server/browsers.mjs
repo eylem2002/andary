@@ -1,61 +1,78 @@
 // Browsers connect over /ws (CONTRACTS §4.5). This module accepts them (after the Host, Origin and
-// sign-in checks), sends the hello snapshot, and handles their decide/note/settings/digest/ping messages.
-// On a team host (§4.11) a browser is either the owner (signed in) or a teammate watching with
-// the view link: viewers get the town but not the owner's prompts, costs, settings or topic.
+// sign-in checks), sends the hello snapshot, and handles their decide/note/settings/digest/profile/ping
+// messages. On a team host (§4.11) a browser is the owner (signed in on this computer, and the
+// host's own person), a teammate with their personal link (a person: they may set their own
+// profile and move their character, nothing else), or someone watching with the view link (a
+// viewer). People and viewers get the town and its people, but not the owner's prompts, costs,
+// settings or topic.
 import { WS_PROTOCOL, allowedHostsFor, browserRole, isTunnelled, offersAndaryProtocol } from './auth.mjs';
+import { validateProfile } from '../public/js/core/profile.js';
 import { LIMITS } from './config.mjs';
 import { createTokenBucket } from './rate-limit.mjs';
 import { isAllowedHost, isAllowedOrigin, isTunnelOrigin } from './security.mjs';
 import { acceptUpgrade, rejectUpgrade, validateUpgradeRequest } from './websocket.mjs';
 import { CLOSE_CODE } from './ws-frame.mjs';
 
-/** @typedef {'owner'|'viewer'} BrowserRole */
+/** @typedef {'owner'|'person'|'viewer'} BrowserRole */
+/** @typedef {{ role: BrowserRole, person: string|null }} Who  person: the roster name (the host's for the owner on a team host) */
 
-/** Places kept free for the owner: viewers can never fill the town's last few connections. */
+/** Places kept free for the owner and the people: viewers can never fill the town's last few connections. */
 const OWNER_RESERVE = 4;
+/** Connections one person may hold at once (say a laptop and a phone). */
+const PERSON_CONNECTIONS = 2;
 
 /**
  * The set of connected browsers and who each one is.
  * @param {number} maxClients
  */
 export function createHub(maxClients) {
-  /** @type {Map<import('./websocket.mjs').WsConnection, BrowserRole>} */
+  /** @type {Map<import('./websocket.mjs').WsConnection, Who>} */
   const clients = new Map();
-  const count = (/** @type {BrowserRole} */ role) => [...clients.values()].filter((r) => r === role).length;
+  const count = (/** @type {(who: Who) => boolean} */ test) => [...clients.values()].filter(test).length;
   return {
     get size() {
       return clients.size;
     },
     /** Signed-in browsers: only they can answer prompts. */
     get owners() {
-      return count('owner');
+      return count((who) => who.role === 'owner');
     },
-    /** @param {BrowserRole} [role] */
-    full(role = 'owner') {
+    /** @param {BrowserRole} [role] @param {string|null} [person] */
+    full(role = 'owner', person = null) {
       if (clients.size >= maxClients) return true;
-      return role === 'viewer' && count('viewer') >= maxClients - OWNER_RESERVE;
+      if (role === 'person') return count((who) => who.role === 'person' && who.person === person) >= PERSON_CONNECTIONS;
+      return role === 'viewer' && count((who) => who.role === 'viewer') >= maxClients - OWNER_RESERVE;
     },
     /**
      * @param {import('./websocket.mjs').WsConnection} connection
      * @param {BrowserRole} [role]
+     * @param {string|null} [person]
      */
-    add(connection, role = 'owner') {
-      clients.set(connection, role);
+    add(connection, role = 'owner', person = null) {
+      clients.set(connection, { role, person });
       connection.once('close', () => clients.delete(connection));
     },
     /** @param {import('./websocket.mjs').WsConnection} connection */
     roleOf(connection) {
-      return clients.get(connection) ?? null;
+      return clients.get(connection)?.role ?? null;
+    },
+    /** The roster name a connection plays, or null. @param {import('./websocket.mjs').WsConnection} connection */
+    personOf(connection) {
+      return clients.get(connection)?.person ?? null;
+    },
+    /** Whether anyone is connected as this person. @param {string} name */
+    online(name) {
+      return count((who) => who.person === name) > 0;
     },
     /** @param {(connection: import('./websocket.mjs').WsConnection, role: BrowserRole) => void} fn */
     each(fn) {
-      for (const [connection, role] of clients) fn(connection, role);
+      for (const [connection, who] of clients) fn(connection, who.role);
     },
     /** @param {object} message for signed-in browsers only (prompts, costs, settings) */
     broadcastOwners(message) {
       if (clients.size === 0) return;
       const text = JSON.stringify(message);
-      for (const [connection, role] of clients) if (role === 'owner') connection.send(text);
+      for (const [connection, who] of clients) if (who.role === 'owner') connection.send(text);
     },
     /**
      * @param {import('./websocket.mjs').WsConnection} connection
@@ -107,7 +124,40 @@ export function teamSettings(ctx, role) {
 }
 
 /**
- * Settings as one browser may see them: a viewer never sees the owner's approval or phone settings.
+ * The people of a team town as every browser sees them, with who is online now; empty when this
+ * server is not a team host.
+ * @param {import('./app.mjs').TownContext} ctx
+ * @returns {(import('./people.mjs').PersonView & { online: boolean })[]}
+ */
+export function peopleView(ctx) {
+  return ctx.team ? ctx.team.people.list().map((person) => ({ ...person, online: ctx.hub.online(person.name) })) : [];
+}
+
+/**
+ * Tells every browser who lives in the town (a profile, the roster or someone's presence changed).
+ * @param {import('./app.mjs').TownContext} ctx
+ */
+export function announcePeople(ctx) {
+  if (ctx.team) ctx.hub.broadcast({ t: 'people', people: peopleView(ctx) });
+}
+
+/**
+ * Closes the connections of people taken off the roster (`andary team remove`).
+ * @param {import('./app.mjs').TownContext} ctx
+ */
+export function dropRemovedPeople(ctx) {
+  const team = ctx.team;
+  if (!team) return;
+  const gone = [];
+  ctx.hub.each((connection, role) => {
+    const name = ctx.hub.personOf(connection);
+    if (role === 'person' && name && !team.people.has(name)) gone.push(connection);
+  });
+  for (const connection of gone) connection.close(CLOSE_CODE.POLICY_VIOLATION, 'Removed from the team');
+}
+
+/**
+ * Settings as one browser may see them: a viewer or a teammate never sees the owner's approval or phone settings.
  * @param {import('./app.mjs').TownContext} ctx
  * @param {BrowserRole} role
  */
@@ -149,8 +199,8 @@ export function handleUpgrade(ctx, req, socket, head) {
  * @param {Buffer} head
  */
 function upgrade(ctx, req, socket, head) {
-  const role = browserRole(req, ctx.uiToken, ctx.team?.view ?? null);
-  const verdict = checkUpgrade(ctx, req, role);
+  const who = browserRole(req, ctx.uiToken, ctx.team);
+  const verdict = checkUpgrade(ctx, req, who);
   if (!verdict.ok) {
     rejectUpgrade(socket, verdict.status, verdict.message, verdict.headers);
     return;
@@ -162,16 +212,18 @@ function upgrade(ctx, req, socket, head) {
     heartbeatMs: LIMITS.wsHeartbeatMs,
   });
   // checkUpgrade refuses a browser without a role.
-  attachBrowser(ctx, connection, /** @type {BrowserRole} */ (role));
+  const { role, person } = /** @type {NonNullable<typeof who>} */ (who);
+  // On a team host the owner plays the host's own person.
+  attachBrowser(ctx, connection, role, role === 'owner' ? (ctx.team?.people.host ?? null) : person);
 }
 
 /**
  * @param {import('./app.mjs').TownContext} ctx
  * @param {import('node:http').IncomingMessage} req
- * @param {BrowserRole|null} role
+ * @param {ReturnType<typeof browserRole>} who
  * @returns {import('./websocket.mjs').UpgradeVerdict}
  */
-function checkUpgrade(ctx, req, role) {
+function checkUpgrade(ctx, req, who) {
   // Through the tunnel only its own name, as Host and as Origin (ADR 0019).
   const hosts = allowedHostsFor(req, ctx);
   if (!isAllowedHost(req.headers.host, hosts)) return { ok: false, status: 403, message: 'Forbidden host' };
@@ -180,8 +232,8 @@ function checkUpgrade(ctx, req, role) {
   if (!handshake.ok) return handshake;
   const origin = isTunnelled(req) ? isTunnelOrigin(req.headers.origin, hosts) : isAllowedOrigin(req.headers.origin, hosts);
   if (!origin) return { ok: false, status: 403, message: 'Forbidden origin' };
-  if (!role) return { ok: false, status: 401, message: 'Sign in with the link printed by andary start' };
-  if (ctx.hub.full(role)) return { ok: false, status: 503, message: 'Too many browser connections' };
+  if (!who) return { ok: false, status: 401, message: 'Sign in with the link printed by andary start' };
+  if (ctx.hub.full(who.role, who.person)) return { ok: false, status: 503, message: 'Too many browser connections' };
   return handshake;
 }
 
@@ -201,12 +253,13 @@ function pathOf(rawUrl) {
  * @param {import('./app.mjs').TownContext} ctx
  * @param {import('./websocket.mjs').WsConnection} connection
  * @param {BrowserRole} role
+ * @param {string|null} person  the roster name this browser plays
  */
-function attachBrowser(ctx, connection, role) {
-  ctx.hub.add(connection, role);
+function attachBrowser(ctx, connection, role, person) {
+  ctx.hub.add(connection, role, person);
   const owner = role === 'owner';
   if (owner) cancelRelease(ctx);
-  ctx.log(`${owner ? 'Browser' : 'Team viewer'} connected (${ctx.hub.size} open)`);
+  ctx.log(`${BROWSER_LOG[role]} connected (${ctx.hub.size} open)`);
   ctx.hub.send(connection, {
     t: 'hello',
     version: ctx.version,
@@ -221,7 +274,10 @@ function attachBrowser(ctx, connection, role) {
     notifyUrl: owner ? ctx.notifier.url : null,
     // The latest time the owner was away: a page opened after one offers to catch up.
     away: owner ? ctx.digest.away() : null,
+    people: peopleView(ctx),
+    me: person,
   });
+  if (person) announcePeople(ctx);
   const limiter = createTokenBucket({ ratePerSecond: LIMITS.wsMessagesPerSecond, burst: LIMITS.wsMessageBurst });
   connection.on('message', (text) => {
     if (!limiter.take()) {
@@ -231,10 +287,17 @@ function attachBrowser(ctx, connection, role) {
     handleBrowserMessage(ctx, connection, text);
   });
   connection.on('close', () => {
-    ctx.log(`${owner ? 'Browser' : 'Team viewer'} disconnected (${ctx.hub.size} open)`);
+    ctx.log(`${BROWSER_LOG[role]} disconnected (${ctx.hub.size} open)`);
     if (ctx.hub.owners === 0) scheduleRelease(ctx);
+    if (person) announcePeople(ctx);
   });
 }
+
+/** How the log names each kind of browser (never who). */
+const BROWSER_LOG = Object.freeze({ owner: 'Browser', person: 'Teammate', viewer: 'Team viewer' });
+
+/** What each role may send besides the owner's full set: a viewer only pings. */
+const ALLOWED = Object.freeze({ person: new Set(['profile', 'ping']), viewer: new Set(['ping']) });
 
 /**
  * @param {import('./app.mjs').TownContext} ctx
@@ -249,8 +312,11 @@ function handleBrowserMessage(ctx, connection, text) {
     sendError(ctx, connection, 'Messages must be JSON');
     return;
   }
-  if (ctx.hub.roleOf(connection) === 'viewer' && message?.t !== 'ping') {
-    sendError(ctx, connection, 'Viewers can only watch: the team town\'s host answers prompts and changes settings.');
+  const role = ctx.hub.roleOf(connection);
+  if (role && role !== 'owner' && !ALLOWED[role].has(message?.t)) {
+    sendError(ctx, connection, role === 'viewer'
+      ? 'Viewers can only watch: the team town\'s host answers prompts and changes settings.'
+      : 'Teammates can change their own character only: the team town\'s host answers prompts and changes settings.');
     return;
   }
   switch (message?.t) {
@@ -270,6 +336,9 @@ function handleBrowserMessage(ctx, connection, text) {
       return;
     case 'digest':
       sendDigest(ctx, connection, message.since);
+      return;
+    case 'profile':
+      applyProfile(ctx, connection, message.p);
       return;
     case 'ping':
       return;
@@ -295,6 +364,31 @@ function applySettings(ctx, connection, settings) {
   ctx.hub.broadcastOwners({ t: 'settings', settings: publicSettings(ctx) });
   // Nobody may answer from the town any more: give waiting prompts back to the terminal.
   if (!settings.remoteApprovals) ctx.broker.releaseAll();
+}
+
+/**
+ * Saves `{ t: 'profile', p }` for the person this browser plays, after validateProfile, and tells
+ * everyone. The sender learns which colour it got (another may hold the one it asked for).
+ * @param {import('./app.mjs').TownContext} ctx
+ * @param {import('./websocket.mjs').WsConnection} connection
+ * @param {unknown} raw
+ */
+function applyProfile(ctx, connection, raw) {
+  const name = ctx.hub.personOf(connection);
+  if (!ctx.team || !name) {
+    sendError(ctx, connection, 'Only the people of a team town have a character.');
+    return;
+  }
+  const check = validateProfile(raw);
+  if (!check.ok) {
+    sendError(ctx, connection, `Profile not saved: ${check.error}.`);
+    return;
+  }
+  const result = ctx.team.people.setProfile(name, check.profile);
+  if (!result) sendError(ctx, connection, 'You are no longer on the team.');
+  else if ('wait' in result) sendError(ctx, connection, 'Wait a few seconds before changing your character again.');
+  else if ('error' in result) sendError(ctx, connection, `Profile not saved: ${result.error}.`);
+  else ctx.hub.send(connection, { t: 'profile', ok: true, color: result.color, asked: check.profile.color });
 }
 
 /**

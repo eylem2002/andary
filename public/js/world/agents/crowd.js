@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { BUILDING_KEYS } from '../../core/catalog.js';
-import { LOTS, tileToWorld } from '../layout.js';
+import { HOMES, LOTS, TILE, tileToWorld } from '../layout.js';
 import { Agent, isWorkActivity } from './agent.js';
 import { enter, leave } from './arrivals.js';
 import { isActivity } from './activities.js';
@@ -110,8 +110,10 @@ export class Crowd {
     const tag = this.overlay.createTag(spec.id, this.onPick);
     const agent = new Agent(spec.id, truncateText(spec.name ?? 'Agent', 40), look, tag);
     agent.type = typeof spec.type === 'string' ? spec.type : undefined;
+    agent.person = look.role === 'person' ? spec.person : undefined;
     tag.setName(agent.name);
     tag.setColor(look.color);
+    tag.setHome(look.role === 'person');
     agent.setCastShadow(this.castShadows);
     agent.anim.setCalm(this.reducedMotion);
     this.root.add(agent.group);
@@ -121,6 +123,17 @@ export class Crowd {
     this.claim(agent, spawn);
     const entrance = ['portal', 'bus', 'pop', 'none'].includes(spec.entrance) ? spec.entrance : 'pop';
     enter(this, agent, entrance);
+    const home = HOMES[spec.home];
+    if (look.role === 'person' && home) this.standAtHome(agent, home);
+  }
+
+  /**
+   * A person stands on their porch, facing the street (no walking yet: CONTRACTS §6).
+   * @param {Agent} agent @param {import('../../core/town-map.js').HomePlot} home
+   */
+  standAtHome(agent, home) {
+    const door = tileToWorld(home.door[0], home.door[1]);
+    this.place(agent.id, door.x, door.z - TILE * 0.375, 0);
   }
 
   /** @param {string} id @param {any} patch */
@@ -137,8 +150,10 @@ export class Crowd {
       role: patch.role ?? agent.look.role,
       type: 'type' in patch ? patch.type : agent.type,
       hat: patch.hat ?? agent.look.hat,
+      person: patch.person ?? agent.person,
     });
     if ('type' in patch) agent.type = patch.type;
+    if (look.role === 'person' && patch.person) agent.person = patch.person;
     if (look.color !== agent.look.color) agent.tag.setColor(look.color);
     agent.restyle(look); // swaps geometry only when something baked into it changed
   }

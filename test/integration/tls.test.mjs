@@ -97,7 +97,7 @@ describe('HTTPS for other computers', { skip: !hasOpenssl || !lan ? 'needs opens
   });
 
   it('prints view links and invites with https and records it for the CLI', () => {
-    assert.match(town.output(), /Teammates watch \(view only\) at https:\/\//);
+    assert.match(town.output(), /Anyone else may watch \(view only\) at https:\/\//);
     const state = JSON.parse(readFileSync(join(town.home, 'server.json'), 'utf8'));
     assert.equal(state.tls, true);
   });

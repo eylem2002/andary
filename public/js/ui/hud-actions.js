@@ -18,7 +18,7 @@ import { nextPlaceNames } from '../core/place-names.js';
  * @property {Record<DialogName, { open(): void, close(): void, isOpen: boolean }>} dialogs
  */
 
-/** @typedef {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'catchUp'} DialogName */
+/** @typedef {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'catchUp'|'character'} DialogName */
 
 /** @typedef {{ ctx: HudContext, ui: HudParts }} Hud */
 

@@ -6,12 +6,13 @@
 // its row. A note (an edit of a file another agent changed) goes on a line of its own under what
 // the agent does. The lead's row also shows the crew's context in use, under its time, where it
 // takes no room from the crew's name.
+import { nameWithRoster } from './town-people.js';
 import { contextShort, crewUsage, liveContext, usageShort } from './usage.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from './dom.js';
 import { icon } from './icons.js';
 import { modelLabel } from '../core/catalog.js';
 import { agentKeyOf } from '../core/ids.js';
-import { doingText, formatDuration, isCommandText, plural, truncate } from './format.js';
+import { doingText, formatDuration, isCommandText, nameWithRole, plural, truncate } from './format.js';
 import { approvalAgentKey, roundel, setCurrent, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 import { itemsByAgent, notesByAgent, waitedText } from './needs-you.js';
 
@@ -101,7 +102,8 @@ export function createCrewsPanel(ctx) {
     setText(p.number, `Crew ${number}: `);
     setText(p.title, session.title ? truncate(session.title, 60) : session.project);
     setAttr(p.name, 'title', session.cwd);
-    setText(p.memberName, session.member ?? '');
+    const person = ctx.view.people.find((one) => one.name === session.member);
+    setText(p.memberName, person ? nameWithRoster(person) : (session.member ?? ''));
     setHidden(p.member, !session.member);
     setHidden(p.agent, session.source !== 'codex');
     setText(p.model, ended ? 'Ended' : modelLabel(session.model));
@@ -210,6 +212,7 @@ function updateStation(ctx, parts, item, agent, facts) {
   const need = facts.needs.get(agent.key) ?? null;
   updateStatusChip(p.chip, agent.status);
   setText(p.name, agent.name);
+  setAttr(p.name, 'title', agent.roleName && agent.roleName !== agent.name ? nameWithRole(agent) : null);
   const doing = need ? truncate(need.text, 90) : doingText(agent, facts.asking.get(agent.key));
   setText(p.doing, doing);
   p.doing.classList.toggle('hud-mono', isCommandText(doing));

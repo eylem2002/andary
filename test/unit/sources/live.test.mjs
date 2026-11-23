@@ -80,6 +80,38 @@ describe('connectLive', () => {
     assert.deepEqual(errors, ['Too many browsers']);
   });
 
+  test('a team town\'s people come before the history, then as they change; a profile is sent and answered', () => {
+    const store = fakeStore();
+    /** @type {any[]} */
+    const seen = [];
+    /** @type {any[]} */
+    const saved = [];
+    const live = connectLive({
+      store,
+      WebSocketImpl: /** @type {any} */ (FakeSocket),
+      url: 'ws://x/ws',
+      onPeople: (people, me) => {
+        seen.push([people.length, me]);
+        store.calls.push(['people']);
+      },
+      onProfile: (answer) => saved.push(answer),
+    });
+    const socket = FakeSocket.all[0];
+    socket.open();
+    socket.receive({ t: 'hello', history: [{ id: 1 }], approvals: [], people: [{ name: 'Sam' }, { name: 'Lina' }], me: 'Lina' });
+    assert.deepEqual(store.calls, [['reset'], ['people'], ['ingest', 1]], 'crews take their colours as the history replays');
+    socket.receive({ t: 'people', people: [{ name: 'Sam' }] });
+    socket.receive({ t: 'people', people: 'junk' });
+    assert.deepEqual(seen, [[2, 'Lina'], [1, 'Lina'], [0, 'Lina']]);
+    assert.equal(live.saveProfile(/** @type {any} */ ({ v: 1 })), true);
+    assert.deepEqual(socket.sent.at(-1), { t: 'profile', p: { v: 1 } });
+    socket.receive({ t: 'profile', ok: true, color: 3, asked: 2 });
+    socket.receive({ t: 'profile', ok: false });
+    assert.deepEqual(saved, [{ color: 3, asked: 2 }]);
+    socket.receive({ t: 'hello', history: [], approvals: [] });
+    assert.deepEqual(seen.at(-1), [0, null], 'a town that is no team host has no people');
+  });
+
   test('one bad event does not stop the stream', () => {
     const errorLog = mock.method(console, 'error', () => {});
     const store = { ...fakeStore(), ingest: (e) => {

@@ -3,9 +3,10 @@
 // agent changed a file it edits), the receipt of a lead's last turn, a note to send it
 // (agent-note.js), its brief, its context in use and what it cost, which tools it used how often,
 // recent files and activity, its last message.
+import { nameWithRoster } from './town-people.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
-import { doingText, formatAgo, formatDuration, isCommandText, roleLabel, shortenPath, truncate } from './format.js';
+import { doingText, formatAgo, formatDuration, isCommandText, nameWithRole, roleLabel, shortenPath, truncate } from './format.js';
 import { changeSummary } from './changes.js';
 import { contextSentence, hasCounted, liveContext, usageSentence } from './usage.js';
 import { approvalAgentKey, crewNumber, findSession, roundel, statusChip, updateRoundel, updateStatusChip } from './parts.js';
@@ -116,8 +117,8 @@ export function createInspector(ctx) {
     const session = findSession(state, agent.sessionId);
     setCrewColor(el, session?.color ?? agent.color);
     updateRoundel(mark, crewNumber(state, agent.sessionId), session?.color ?? agent.color);
-    setText(name, agent.name);
-    setText(role, `${roleLabel(agent)}${session ? ` in ${session.project}` : ''}`);
+    setText(name, nameWithRole(agent));
+    setText(role, roleLine(ctx, agent, session));
     updateStatusChip(chip, agent.status);
     const asking = state.approvals.find((approval) => approval.status === 'pending' && approvalAgentKey(approval) === agent.key);
     const items = ctx.needsYou.items(state).filter((item) => item.agentKeys.includes(agent.key));
@@ -317,4 +318,16 @@ function createRecent(entry) {
 /** @param {HTMLElement} item @param {import('./types.js').LogEntry} entry */
 function updateRecent(item, entry) {
   setText(/** @type {HTMLElement} */ (item.querySelector('time')), formatAgo(entry.ts, Date.now(), { short: true }));
+}
+
+/**
+ * The agent's role and project and, for a teammate's crew in a team town, whose: the character's
+ * name with the name on the team beside it when the two differ ("Scout 1 in api, Ali (alice)'s crew").
+ * @param {HudContext} ctx
+ * @param {import('./types.js').AgentState} agent
+ * @param {import('./types.js').Session|undefined|null} session
+ */
+function roleLine(ctx, agent, session) {
+  const person = session?.member ? ctx.view.people.find((one) => one.name === session.member) : null;
+  return `${roleLabel(agent)}${session ? ` in ${session.project}` : ''}${person ? `, ${nameWithRoster(person)}'s crew` : ''}`;
 }

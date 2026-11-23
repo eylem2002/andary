@@ -10,6 +10,7 @@ import { after, before, describe, it } from 'node:test';
 import { ROOT_DIR } from '../../server/config.mjs';
 import { isProcessAlive, readStateFile, writeStateFile } from '../../server/state-file.mjs';
 import { createTeamRelay, memberKey, teamSecret, viewToken } from '../../server/team.mjs';
+import { addPerson, readRoster, updateRoster } from '../../server/people.mjs';
 import { connectWebSocket } from '../../server/ws-client.mjs';
 import { closeBrowser, hookPayload, rawRequest, startTown, waitForMessage } from './helpers.mjs';
 
@@ -130,7 +131,10 @@ describe('Team town on the internet (--tunnel)', { skip: process.platform === 'w
     launched = JSON.parse(readFileSync(env.FAKE_LOG, 'utf8'));
     tunnelPort = Number(new URL(launched.args[launched.args.indexOf('--url') + 1]).port);
     secret = /** @type {string} */ (teamSecret(town.home, { create: false }));
+    for (const name of ['Lina', 'Omar']) assert.ok(updateRoster(town.home, (roster) => addPerson(roster, name)).ok);
   });
+  /** A teammate's key, signed with their nonce on the roster. @param {string} name */
+  const keyOf = (name) => memberKey(secret, name, readRoster(town.home).people[name].nonce);
   after(() => town?.stop());
 
   it('starts cloudflared at a loopback port of its own and records the address', async () => {
@@ -148,7 +152,7 @@ describe('Team town on the internet (--tunnel)', { skip: process.platform === 'w
     const output = town.output();
     assert.match(output, /WARNING: --tunnel puts the team town on the internet/);
     assert.match(output, /team reset/);
-    assert.match(output, new RegExp(`Teammates watch \\(view only\\) at ${TUNNEL}/\\?view=${viewToken(secret)}`));
+    assert.match(output, new RegExp(`Anyone else may watch \\(view only\\) at ${TUNNEL}/\\?view=${viewToken(secret)}`));
     assert.match(output, /changes when Andary restarts/);
   });
 
@@ -180,7 +184,7 @@ describe('Team town on the internet (--tunnel)', { skip: process.platform === 'w
     assert.equal(known.authenticated, true);
     assert.equal(typeof known.version, 'string');
     assert.equal(typeof known.settings.approvalTimeoutMs, 'number');
-    const member = JSON.parse((await viaTunnel(tunnelPort, { path: '/api/hello', headers: { 'x-andary-team': memberKey(secret, 'Lina') } })).text);
+    const member = JSON.parse((await viaTunnel(tunnelPort, { path: '/api/hello', headers: { 'x-andary-team': keyOf('Lina') } })).text);
     assert.equal(typeof member.version, 'string');
     // The owner's WebSocket sign-in.
     await assert.rejects(socketViaTunnel(tunnelPort, `andary, andary.token.${town.uiToken}`), /401/);
@@ -215,7 +219,7 @@ describe('Team town on the internet (--tunnel)', { skip: process.platform === 'w
     );
     // Even the team's route, which skips the Host check on the network, names the tunnel here.
     const batch = JSON.stringify({ v: 1, events: [{ ts: Date.now(), event: hookPayload('Stop') }] });
-    const team = { method: 'POST', path: '/api/team', body: batch, headers: { 'x-andary-team': memberKey(secret, 'Omar'), 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(batch)) } };
+    const team = { method: 'POST', path: '/api/team', body: batch, headers: { 'x-andary-team': keyOf('Omar'), 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(batch)) } };
     assert.equal((await rawRequest(tunnelPort, { ...team, headers: { ...team.headers, host: `127.0.0.1:${tunnelPort}` } })).status, 403);
     assert.equal((await viaTunnel(tunnelPort, team)).status, 200);
     assert.equal((await viaTunnel(tunnelPort, { ...team, headers: { ...team.headers, 'x-andary-team': 'Omar.wrong' } })).status, 401);
@@ -243,7 +247,7 @@ describe('Team town on the internet (--tunnel)', { skip: process.platform === 'w
       const answer = await viaTunnel(tunnelPort, { method: 'POST', path: url.pathname, body, headers: { ...headers, 'content-length': String(Buffer.byteLength(body)) } });
       return new Response(answer.text, { status: answer.status, headers: { 'content-type': 'application/json' } });
     };
-    const relay = createTeamRelay({ url: TUNNEL, key: memberKey(secret, 'Lina'), fetchImpl: throughTunnel, flushMs: 10 });
+    const relay = createTeamRelay({ url: TUNNEL, key: keyOf('Lina'), fetchImpl: throughTunnel, flushMs: 10 });
     const relayed = waitForMessage(viewer, (m) => m?.t === 'hook' && m.e.event.andary_member === 'Lina', 10_000);
     relay.send({ ts: Date.now(), event: hookPayload('UserPromptSubmit', { prompt: 'From far away' }) });
     assert.equal((await relayed).e.event.prompt, 'From far away');
@@ -257,7 +261,7 @@ describe('Team town on the internet (--tunnel)', { skip: process.platform === 'w
     const invite = await runCli(['team', 'invite', 'Lina'], { ANDARY_HOME: town.home });
     assert.equal(invite.code, 0, invite.output);
     assert.match(invite.output, new RegExp(`ANDARY_TEAM_KEY=Lina\\.[\\w-]{32} andary start --share-to ${TUNNEL}\\n`));
-    assert.match(invite.output, new RegExp(`${TUNNEL}/\\?view=${viewToken(secret)}`));
+    assert.match(invite.output, new RegExp(`${TUNNEL}/\\?me=Lina\\.[\\w-]{32}\\n`));
     assert.match(invite.output, /on the internet \(a Cloudflare Quick Tunnel\)/);
     assert.doesNotMatch(invite.output, /plain HTTP/);
     const doctor = await runCli(['doctor'], { ANDARY_HOME: town.home, PATH: process.env.PATH ?? '' });

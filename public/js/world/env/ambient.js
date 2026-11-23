@@ -59,7 +59,7 @@ function createClouds(scene) {
   // in front of the plinth's sides or the sky, but never in front of the streets.
   const spots = [
     [-34, -5.5, 6, 3.2], [33, -7, -10, 3.6], [-30, -8.5, -26, 2.6], [32, -3.2, 18, 2.4],
-    [-36, -3.5, -14, 2.8], [6, -12, 38, 3.4], [-12, -7.5, -46, 3.0], [26, -10, 34, 2.2],
+    [-36, -3.5, -14, 2.8], [6, -12, 50, 3.4], [-12, -7.5, -46, 3.0], [26, -10, 46, 2.2],
   ];
   const mesh = new THREE.InstancedMesh(geometry, material, spots.length);
   mesh.name = 'clouds';

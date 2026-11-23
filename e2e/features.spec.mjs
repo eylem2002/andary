@@ -185,6 +185,81 @@ test('a Codex crew says so on the crews board', async ({ page }) => {
   await expect(page.locator('[data-testid="crew"]').first().getByTestId('crew-agent')).toBeHidden();
 });
 
+test('you choose your character in the "You" dialog: tiles by keyboard, outfits, Random, Undo, names and Save', async ({ page }) => {
+  await openDemo(page);
+  // The demo is a small team town: you and Lina, both at home.
+  await page.waitForFunction(() => /** @type {any} */ (window).__andary.world.hasAgent('person:Lina') && /** @type {any} */ (window).__andary.world.hasAgent('person:You'));
+  await page.getByTestId('settings-button').click();
+  await page.getByTestId('open-character').click();
+  const dialog = page.getByRole('dialog', { name: 'You' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('select')).toHaveCount(0);
+  const preview = dialog.getByRole('img', { name: /^Preview of your character/ });
+  await expect(preview).toHaveAttribute('aria-label', /short hair/);
+
+  // Tabs move with the arrow keys; each choice is a radio group of named picture tiles.
+  await dialog.getByRole('tab', { name: 'Body' }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(dialog.getByRole('tab', { name: 'Hair' })).toHaveAttribute('aria-selected', 'true');
+  await dialog.getByRole('radio', { name: 'Curly', exact: true }).check();
+  await expect(preview).toHaveAttribute('aria-label', /curly hair/);
+  await dialog.getByRole('tab', { name: 'Body' }).click();
+  const skin = dialog.getByRole('group', { name: /^Skin/ });
+  await skin.getByRole('radio', { name: 'Peach' }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(skin.getByRole('radio', { name: 'Sand' })).toBeChecked();
+  await expect(preview).toHaveAttribute('aria-label', /sand skin/);
+  await expect(dialog.getByText('Skin: Sand')).toBeVisible();
+
+  await dialog.getByRole('tab', { name: 'Clothes' }).click();
+  await dialog.getByRole('button', { name: 'Wizard' }).click();
+  await expect(preview).toHaveAttribute('aria-label', /plum kimono/);
+  await dialog.getByTestId('character-undo').click();
+  await expect(preview).not.toHaveAttribute('aria-label', /kimono/);
+  await dialog.getByTestId('character-random').click();
+  await expect(dialog.getByTestId('character-status')).toContainText('New look:');
+  await dialog.getByRole('tab', { name: 'Accessories' }).click();
+  await dialog.getByRole('group', { name: /^Hat/ }).getByRole('radio', { name: 'Beanie' }).check();
+  await dialog.getByRole('group', { name: /^Extra/ }).getByRole('radio', { name: 'Cape' }).check();
+  await dialog.getByRole('group', { name: /^Pet/ }).getByRole('radio', { name: 'Dog' }).check();
+  await dialog.getByRole('tab', { name: 'Home and names' }).click();
+  // Lina's colour is hers: it cannot be chosen, and it says whose it is.
+  await expect(dialog.getByRole('radio', { name: "Raspberry (Lina's)" })).toBeDisabled();
+  await dialog.getByLabel('Your character\'s name').fill('Captain  <b>Sam</b>');
+  await dialog.getByLabel('One name for all your agents').fill('Pixel');
+  await dialog.getByTestId('character-save').click();
+  await expect(dialog).toBeHidden();
+  const spec = await page.evaluate(() => {
+    const calls = /** @type {any} */ (window).__andary.world.calls.filter((/** @type {any} */ c) => c.method === 'updateAgent' && c.args[0] === 'person:You');
+    return calls.at(-1)?.args[1];
+  });
+  expect(spec.person).toMatchObject({ hat: 'beanie', extra: 'cape', pet: 'dog' });
+  expect(spec.name).toBe('Captain bSamb');
+  // Your crews' agents take your one name; their role stays in their details.
+  await expect(page.getByTestId('agent-row').filter({ hasText: 'Pixel' }).first()).toBeVisible();
+  // Kept in this browser, so the next visit (or the host after a reset) gets it back.
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('andary:profile') ?? 'null')?.look.extra)).toBe('cape');
+});
+
+test('the "You" dialog fits a phone, with 44 px tiles', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile', 'phone layout');
+  await openDemo(page);
+  await page.getByTestId('settings-button').click();
+  await page.getByTestId('open-character').click();
+  const dialog = page.getByRole('dialog', { name: 'You' });
+  await expect(dialog).toBeVisible();
+  const viewport = /** @type {{ width: number }} */ (page.viewportSize());
+  const box = /** @type {{ x: number, width: number }} */ (await dialog.boundingBox());
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  const swatch = /** @type {{ width: number, height: number }} */ (await dialog.locator('.hud-tile').first().boundingBox());
+  expect(swatch.width).toBeGreaterThanOrEqual(44);
+  expect(swatch.height).toBeGreaterThanOrEqual(44);
+  await dialog.getByTestId('character-save').scrollIntoViewIfNeeded();
+  await dialog.getByTestId('character-save').click();
+  await expect(dialog).toBeHidden();
+});
+
 test('a lead\'s turn ends with a receipt in its details and in the activity log', async ({ page }) => {
   await openDemo(page);
   const key = await expect

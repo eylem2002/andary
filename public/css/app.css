@@ -2848,6 +2848,221 @@ body {
   font-size: 13px;
 }
 
+/* The "You" dialog: a live preview beside the sections; stacked on a phone, preview on top. */
+.hud-character {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 8px 28px;
+  align-items: start;
+}
+
+.hud-character__stage {
+  position: sticky;
+  top: 0;
+  padding: 12px;
+  border-radius: 11px;
+  background: var(--stage);
+  text-align: center;
+}
+
+.hud-character__preview {
+  aspect-ratio: 144 / 216;
+  max-height: 46dvh;
+  margin: 0 auto;
+}
+
+.hud-character__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.hud-character__caption {
+  margin-top: 6px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.hud-character__undo {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.hud-character__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 12px 0 4px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.hud-character__tab {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: none;
+  font-weight: 700;
+}
+
+.hud-character__tab[aria-selected="true"] {
+  border-bottom-color: var(--sign);
+  color: var(--ink);
+}
+
+.hud-character__tab[aria-selected="false"] {
+  color: var(--ink-2);
+}
+
+.hud-character__outfits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.hud-tiles {
+  min-width: 0;
+  margin: 0;
+  padding: 10px 0;
+  border: 0;
+}
+
+.hud-tiles > legend {
+  float: left;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.hud-tiles__choice {
+  color: var(--ink-2);
+  font-weight: 400;
+}
+
+.hud-tiles__list {
+  clear: both;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
+  gap: 6px;
+}
+
+.hud-tiles__list--swatches {
+  grid-template-columns: repeat(auto-fill, 44px);
+  gap: 4px;
+}
+
+/* A tile: the option drawn on the character, its name below; the radio itself is hidden. */
+.hud-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 4px;
+  border: 2px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.hud-tile--button {
+  width: 76px;
+  color: inherit;
+}
+
+.hud-tile__input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.hud-tile__art {
+  display: block;
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  background: var(--stage);
+}
+
+.hud-tile--button .hud-tile__art {
+  height: 84px;
+}
+
+.hud-tile__name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+}
+
+.hud-tiles__list--swatches .hud-tile {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.hud-tiles__list--swatches .hud-tile__name {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.hud-tile__art--swatch {
+  width: 44px;
+  height: 44px;
+  border: 8px solid var(--paper);
+  border-radius: 50%;
+  background: var(--swatch, var(--ink-2));
+  box-shadow: inset 0 0 0 1px var(--edge);
+}
+
+.hud-tile:has(.hud-tile__input:checked) {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
+.hud-tiles__list--swatches .hud-tile:has(.hud-tile__input:checked) .hud-tile__art--swatch {
+  border-color: var(--ink);
+  border-width: 3px;
+}
+
+.hud-tile:has(.hud-tile__input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.hud-tile:has(.hud-tile__input:disabled) {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .hud-character {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hud-character__stage {
+    z-index: 1;
+    padding: 8px;
+  }
+
+  .hud-character__preview {
+    max-height: 22dvh;
+  }
+}
+
 /* Usage: today's total, fourteen days of bars, the crews in town. */
 .hud-usage__total {
   margin-top: 4px;

@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { runHookScript } from '../../server/hook-runner.mjs';
 import { memberKey, teamSecret, viewToken } from '../../server/team.mjs';
+import { addPerson, updateRoster } from '../../server/people.mjs';
 import { noteHeader, noteText } from '../../public/js/core/notes.js';
 import { closeBrowser, connectBrowser, hookPayload, postHook, rawRequest, startTown, waitForMessage } from './helpers.mjs';
 
@@ -183,10 +184,14 @@ describe('notes in a team town', () => {
     const host = await startTown({ args: ['--team', '--host', '127.0.0.1'] });
     try {
       const secret = /** @type {string} */ (teamSecret(host.home, { create: false }));
+      // Lina is on the roster, so her key (signed with her nonce) is the host's to accept.
+      const added = updateRoster(host.home, (roster) => addPerson(roster, 'Lina'));
+      assert.ok(added.ok);
+      const nonce = /** @type {any} */ (added.roster).people.Lina.nonce;
       const owner = await connectBrowser(host);
       await waitForMessage(owner, (m) => m?.t === 'hello');
       const batch = JSON.stringify({ v: 1, events: [{ ts: Date.now(), event: hookPayload('PostToolUse', { session_id: 's9', tool_name: 'Read', tool_input: {}, tool_response: {} }) }] });
-      const team = await rawRequest(host.port, { method: 'POST', path: '/api/team', headers: { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(batch)), 'x-andary-team': memberKey(secret, 'Lina') }, body: batch });
+      const team = await rawRequest(host.port, { method: 'POST', path: '/api/team', headers: { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(batch)), 'x-andary-team': memberKey(secret, 'Lina', nonce) }, body: batch });
       assert.equal(team.status, 200);
       assert.equal(JSON.parse(team.text).notes, undefined, 'a teammate\'s relay is answered with nothing for its agents');
 

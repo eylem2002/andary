@@ -7,7 +7,8 @@ import { browserRole } from '../../../server/auth.mjs';
 import { createHub } from '../../../server/browsers.mjs';
 import { parseShareTo, parseTeamHosts, parseTeamUrl } from '../../../server/cli/options.mjs';
 import { allowedHostHeaders } from '../../../server/security.mjs';
-import { TEAM_HEADER, cleanMemberName, createTeamHost, createTeamRelay, lanAddresses, memberKey, teamSecret, verifyMemberKey, viewToken } from '../../../server/team.mjs';
+import { TEAM_HEADER, cleanMemberName, createTeamHost, createTeamRelay, lanAddresses, memberKey, personToken, teamSecret, verifyMemberKey, verifyPersonToken, viewToken } from '../../../server/team.mjs';
+import { createPeople, readRoster, writeRoster } from '../../../server/people.mjs';
 
 // A made-up team secret for these tests only.
 const SECRET = 'test-only-'.repeat(4);
@@ -36,6 +37,30 @@ test('a member key names its member and only works with its own secret', () => {
   assert.equal(viewToken(SECRET), viewToken(SECRET));
 });
 
+test('a personal link names its person, and is never a member key (nor the other way round)', () => {
+  const link = personToken(SECRET, 'Lina');
+  assert.equal(verifyPersonToken(SECRET, link), 'Lina');
+  assert.equal(verifyPersonToken(SECRET, personToken(SECRET, 'Zeynep Ç.')), 'Zeynep Ç.');
+  assert.equal(verifyMemberKey(SECRET, link), null, 'a leaked link cannot post events');
+  assert.equal(verifyPersonToken(SECRET, memberKey(SECRET, 'Lina')), null, 'a leaked key cannot drive a character');
+  assert.equal(verifyPersonToken('another-secret-that-is-long-enough-12', link), null);
+});
+
+test('keys and links work only while their name is on the roster', () => {
+  const home = join(temp, 'roster');
+  const people = createPeople({ home, host: 'Sam' });
+  writeRoster(home, { ...readRoster(home), people: { ...readRoster(home).people, Lina: { slot: 1, color: 1, nonce: '', profile: null } } });
+  const team = createTeamHost({ secret: SECRET, people });
+  assert.equal(team.memberOf(memberKey(SECRET, 'Lina')), 'Lina');
+  assert.equal(team.personOf(personToken(SECRET, 'Lina')), 'Lina');
+  assert.equal(team.memberOf(memberKey(SECRET, 'Omar')), null, 'a valid key for someone not invited');
+  assert.equal(team.personOf(memberKey(SECRET, 'Lina')), null);
+  const { Lina: _gone, ...rest } = readRoster(home).people;
+  writeRoster(home, { ...readRoster(home), people: rest });
+  assert.equal(team.memberOf(memberKey(SECRET, 'Lina')), null, 'removed: the key stops working');
+  assert.equal(team.personOf(personToken(SECRET, 'Lina')), null, 'removed: the link stops working');
+});
+
 test('the team secret is made once, kept private, and replaced by a reset', () => {
   const home = join(temp, 'home');
   assert.equal(teamSecret(home, { create: false }), null);
@@ -51,7 +76,8 @@ test('the team secret is made once, kept private, and replaced by a reset', () =
 test('the team host rate-limits each member and announces each new member once', () => {
   /** @type {string[][]} */
   const announced = [];
-  const team = createTeamHost({ secret: SECRET, onMember: (members) => announced.push(members), ratePerSecond: 1, burst: 3 });
+  const people = createPeople({ home: join(temp, 'limits'), host: null });
+  const team = createTeamHost({ secret: SECRET, people, onMember: (members) => announced.push(members), ratePerSecond: 1, burst: 3 });
   assert.equal(team.view, viewToken(SECRET));
   assert.equal(team.limiter('Lina').take(3), true);
   assert.equal(team.limiter('Lina').take(1), false);
@@ -106,12 +132,14 @@ test('--share-to and --team-key go together and must look right', () => {
   assert.throws(() => parseTeamUrl('http://user:pass@host:1', '--url'), /team town's address/);
 });
 
-test('browsers are the owner, a viewer, or nobody', () => {
+test('browsers are the owner, a person, a viewer, or nobody', () => {
   const req = (/** @type {string} */ protocols) => /** @type {any} */ ({ headers: { 'sec-websocket-protocol': protocols } });
-  assert.equal(browserRole(req('andary, andary.token.owner-token'), 'owner-token', 'view-token'), 'owner');
-  assert.equal(browserRole(req('andary, andary.view.view-token'), 'owner-token', 'view-token'), 'viewer');
+  const team = { view: 'view-token', personOf: (/** @type {string|null} */ t) => verifyPersonToken(SECRET, t) };
+  assert.equal(browserRole(req('andary, andary.token.owner-token'), 'owner-token', team)?.role, 'owner');
+  assert.deepEqual(browserRole(req(`andary, andary.person.${personToken(SECRET, 'j.doe')}`), 'owner-token', team), { role: 'person', person: 'j.doe' });
+  assert.equal(browserRole(req('andary, andary.view.view-token'), 'owner-token', team)?.role, 'viewer');
   assert.equal(browserRole(req('andary, andary.view.view-token'), 'owner-token', null), null);
-  assert.equal(browserRole(req('andary, andary.view.wrong'), 'owner-token', 'view-token'), null);
+  assert.equal(browserRole(req('andary, andary.view.wrong'), 'owner-token', team), null);
 });
 
 test('viewers can never take the owner\'s last connections', () => {
@@ -132,6 +160,15 @@ test('viewers can never take the owner\'s last connections', () => {
   assert.equal(hub.owners, 1);
   hub.broadcastOwners({ t: 'approval' });
   assert.deepEqual(fakes.map((f) => f.sent.length), [0, 0, 1]);
+  hub.add(fake(), 'person', 'Lina');
+  assert.equal(hub.full('person', 'Lina'), false, 'people may use the owner\'s reserve');
+  hub.add(fake(), 'person', 'Lina');
+  assert.equal(hub.full('person', 'Lina'), true, 'two connections per person');
+  assert.equal(hub.full('person', 'Omar'), false);
+  assert.equal(hub.online('Lina'), true);
+  assert.equal(hub.online('Omar'), false);
+  hub.add(fake(), 'person', 'Omar');
+  assert.equal(hub.full('person', 'Rui'), true, 'six of six places taken');
 });
 
 test('a team host on every interface also answers to its network addresses', () => {

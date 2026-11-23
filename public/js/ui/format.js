@@ -171,6 +171,15 @@ export function roleLabel(agent) {
   return type ? `${type.charAt(0).toUpperCase()}${type.slice(1)} subagent` : 'Subagent';
 }
 
+/**
+ * An agent's name with its role name when its person renamed their agents ("Pixel 2 · Scout 1"),
+ * so the meaning is not lost; just the name otherwise.
+ * @param {{ name: string, roleName?: string }} agent
+ */
+export function nameWithRole(agent) {
+  return agent.roleName && agent.roleName !== agent.name ? `${agent.name} · ${agent.roleName}` : agent.name;
+}
+
 /** True for text that is a shell command ("$ npm test", "PS> dir"), shown in the mono face. */
 export function isCommandText(text) {
   return typeof text === 'string' && (text.startsWith('$ ') || text.startsWith('PS> '));

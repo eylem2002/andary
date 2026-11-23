@@ -11,6 +11,7 @@ import { attachKeyboard, attachPointer } from './agents/input.js';
 import { truncateText } from './agents/bubbles.js';
 import { safeColor } from './agents/color.js';
 import { isPlaceNames } from '../core/place-names.js';
+import { HOUSE_STYLES } from '../core/profile.js';
 
 const LABEL =
   'Andary: a 3D view of your agents at work. Arrow keys pan, plus and minus zoom, Q and E rotate, Escape deselects.';
@@ -463,6 +464,20 @@ class World {
   /** @param {string} id */
   removeWorktree(id) {
     if (typeof id === 'string' && id) this.envCall('removeWorktree', id);
+  }
+
+  /**
+   * Who lives in a home of the residential quarter; null: nobody.
+   * @param {number} slot 0–5
+   * @param {{name: string, color: string, style: string, lights?: boolean}|null} home
+   */
+  setHome(slot, home) {
+    if (!Number.isInteger(slot)) return;
+    const ok = home && typeof home.name === 'string' && HOUSE_STYLES.includes(/** @type {any} */ (home.style));
+    const clean = ok
+      ? { name: truncateText(home.name, 24), color: Number.parseInt(safeColor(home.color, '#2457d6').slice(1), 16), style: home.style, lights: home.lights === true }
+      : null;
+    this.envCall('setHome', slot, clean);
   }
 
   // ── World API: agents ───────────────────────────────────────────────────────

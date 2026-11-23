@@ -34,6 +34,10 @@
  * @property {(event: 'select'|'hover', cb: (sel: Selection|null) => void) => () => void} on
  * @property {(sel: Selection|null) => void} select
  * @property {(id: string) => boolean} hasAgent
+ * @property {(spec: object) => void} [addAgent]       a person of a team town (ui/town-people.js)
+ * @property {(id: string, patch: object) => void} [updateAgent]
+ * @property {(id: string, opts?: object) => Promise<void>|void} [removeAgent]
+ * @property {(slot: number, home: {name: string, color: string, style: string, lights?: boolean}|null) => void} [setHome]
  */
 
 /**
@@ -51,6 +55,7 @@
  * @property {(speed: 1|2|4) => void} setSpeed
  * @property {() => boolean} notifyTest   asks the server for a test phone notification
  * @property {(since: number) => boolean} requestDigest  asks what each crew did since a time (Catch me up); false when it cannot be asked
+ * @property {(profile: import('../core/profile.js').Profile) => boolean} [saveProfile]  saves this person's profile (the "You" dialog); false when it cannot be sent
  */
 
 /**
@@ -66,7 +71,9 @@
  * @property {boolean} demoForced          the URL asked for the demo (?demo=1), e.g. `andary demo`
  * @property {boolean} hosted              a demo on a static host, with no server to connect to
  * @property {boolean} worldFailed         the 3D town could not start (no WebGL); the panels stay
- * @property {{ remoteApprovals?: boolean, approvalTimeoutMs?: number, notify?: boolean, notifyLimits?: boolean, notifyUrl?: string|null, team?: { role: 'owner'|'viewer', members: string[] }|null }} serverSettings
+ * @property {{ remoteApprovals?: boolean, approvalTimeoutMs?: number, notify?: boolean, notifyLimits?: boolean, notifyUrl?: string|null, team?: { role: 'owner'|'person'|'viewer', members: string[] }|null }} serverSettings
+ * @property {import('./town-people.js').PersonView[]} people  a team town's people (§4.11), or the demo's
+ * @property {string|null} me   the person this browser plays, null when it plays nobody
  * @property {{ points: number, days: string[] }|null} progress  the town's growth (§4.9)
  * @property {import('../core/limits.js').AccountLimits[]} limits  plan limits from the andary-limits mod (§4.14)
  * @property {Selection|null} selection

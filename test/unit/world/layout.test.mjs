@@ -6,8 +6,8 @@ import {
 } from '../../../public/js/world/layout.js';
 import { BUILDING_KEYS } from '../../../public/js/core/catalog.js';
 
-test('map is a 26x26 rectangle', () => {
-  assert.equal(ROWS, 26);
+test('map is a 26 x 32 rectangle: the original 26 x 26 town and the residential quarter', () => {
+  assert.equal(ROWS, 32);
   assert.equal(COLS, 26);
   for (const row of MAP) assert.equal(row.length, COLS);
 });
@@ -56,13 +56,13 @@ test('cornersOnly keeps the ends and every turn', () => {
   assert.deepEqual(cornersOnly([[1, 1]]), [[1, 1]]);
 });
 
-test('tileToWorld and worldToTile round-trip and the map is centred', () => {
-  for (const [c, r] of [[0, 0], [12, 7], [25, 25]]) {
+test('tileToWorld and worldToTile round-trip, and the original town stays centred', () => {
+  for (const [c, r] of [[0, 0], [12, 7], [25, 25], [25, 31]]) {
     const { x, z } = tileToWorld(c, r);
     assert.deepEqual(worldToTile(x, z), [c, r]);
   }
   const first = tileToWorld(0, 0);
-  const last = tileToWorld(COLS - 1, ROWS - 1);
+  const last = tileToWorld(COLS - 1, 25);
   assert.equal(first.x + last.x, 0);
   assert.equal(first.z + last.z, 0);
   assert.equal(tileToWorld(1, 0).x - first.x, TILE);

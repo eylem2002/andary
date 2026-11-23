@@ -101,6 +101,16 @@
   filter: drop-shadow(0 1px 1px rgb(0 0 0 / 30%));
 }
 
+/* A person's pill: a little house before the name (they live in town). */
+.tt-pill__home {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.tt-pill__home[hidden] {
+  display: none;
+}
+
 .tt-pill__badge {
   margin-left: 1px;
   padding: 2px 5px 1px;
@@ -119,6 +129,7 @@
 }
 
 .tt-tag.is-compact .tt-pill__name,
+.tt-tag.is-compact .tt-pill__home,
 .tt-tag.is-compact .tt-pill__badge,
 .tt-tag.is-compact .tt-pill__cursor {
   display: none;

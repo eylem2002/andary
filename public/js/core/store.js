@@ -9,7 +9,7 @@
 import { ACHIEVEMENTS, achievementFor } from './achievements.js';
 import { BUILDINGS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
 import { LEAD_NAME, MAX_APPROVALS, MAX_RECENT, MAX_RETIRED, MAX_SPAWNS_PER_SESSION, boundedPush, createModel, helpersOf } from './store-model.js';
-import { agentFor, assignSpawn, attribute, dropAgent, place, pruneDoneHelpers, pruneEndedSessions, reconcileTeammate, repairGuesses, sessionFor, sessionStatus } from './crews.js';
+import { agentFor, assignSpawn, attribute, dropAgent, nameCrew, personColor, place, pruneDoneHelpers, pruneEndedSessions, reconcileTeammate, repairGuesses, sessionFor, sessionStatus } from './crews.js';
 import { recordChange, rememberFile } from './changes.js';
 import { hazardText } from './conflicts.js';
 import { NO_SESSION, normalize } from './events.js';
@@ -80,6 +80,8 @@ export { ACHIEVEMENTS };
  * @property {string} sessionId
  * @property {string|null} agentId
  * @property {string} name
+ * @property {string} [roleName]   the name its role gives it (Foreman, Scout 1, a teammate's name), when `name` is its person's agents name
+ * @property {string} [shownAs]    the name the store last gave it (core/crews.js nameCrew)
  * @property {'lead'|'subagent'|'teammate'} role
  * @property {string} type
  * @property {string} color
@@ -168,7 +170,7 @@ export { ACHIEVEMENTS };
 /** @typedef {{ date: string, tokens: number, costUsd: number }} UsageDay */
 /** @typedef {import('./notes.js').Note} Note */
 
-/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'note', note: Note}|{type: 'reset'}} StoreChange */
+/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'note', note: Note}|{type: 'people'}|{type: 'reset'}} StoreChange */
 
 /**
  * @typedef {object} Store
@@ -176,6 +178,7 @@ export { ACHIEVEMENTS };
  * @property {(event: TownEvent) => void} dispatch
  * @property {(approval: Approval) => void} setApproval
  * @property {(record: unknown, days?: unknown) => void} setUsage  one agent's usage totals, and the day totals
+ * @property {(people: unknown) => void} setPeople  a team town's people ({name, color, host}[], color an index into CREW_COLORS): their crews take their colour
  * @property {(note: unknown) => void} setNote  a note to an agent, as the server last told of it (§4.15)
  * @property {(listener: (change: StoreChange) => void) => () => void} subscribe
  * @property {() => StoreState} getState
@@ -604,6 +607,7 @@ function apply(m, input) {
   if (!s.member && dialogsAfterEvent(m.dialogs, e, a ? a.agentId : e.agentId)) m.state.dialogs = m.dialogs.list();
   const newlyStuck = followLoops(m, e, s, a);
   const hazards = followConflicts(m, e, s, a);
+  nameCrew(m, s, relabels);
   if (relabels.length) e.data.relabels = relabels;
   s.lastActivity = Math.max(s.lastActivity, e.ts);
   if (a) a.lastActivity = Math.max(a.lastActivity, e.ts);
@@ -946,6 +950,8 @@ export function createStore(options = {}) {
   /** @type {Set<(change: StoreChange) => void>} */
   const listeners = new Set();
   let m = createModel(localHour, maxLog);
+  /** Kept across resets: the people do not change when the history is replayed. */
+  let people = m.people;
 
   /** @param {StoreChange} change */
   function emit(change) {
@@ -1059,14 +1065,8 @@ export function createStore(options = {}) {
       if (note && noteChanged(m, note, now())) emit({ type: 'note', note });
     },
     setUsage(record, days) {
-      const usage = readUsage(record);
-      if (usage) {
-        m.state.usage[usage.key] = usage.value;
-        // The turn that ended last gets its cost as the transcript catches up.
-        m.receipts.priced(usage.sessionId, m.state.usage);
-        emit({ type: 'usage', agentKey: usage.key });
-      }
-      if (Array.isArray(days)) m.state.usageDays = readDays(days);
+      const key = applyUsage(m, record, days);
+      if (key) emit({ type: 'usage', agentKey: key });
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -1075,11 +1075,70 @@ export function createStore(options = {}) {
     getState() {
       return m.state;
     },
+    setPeople(list) {
+      people = readPeople(list);
+      if (recolorPeople(m, people)) emit({ type: 'people' });
+    },
     reset() {
-      m = createModel(localHour, maxLog);
+      m = Object.assign(createModel(localHour, maxLog), { people });
       emit({ type: 'reset' });
     },
   };
+}
+
+/**
+ * An agent's usage totals (and the last days'), from the server or the demo.
+ * @param {Model} m @param {unknown} record @param {unknown} [days]
+ * @returns {string|null} the agent whose totals changed
+ */
+function applyUsage(m, record, days) {
+  const usage = readUsage(record);
+  if (usage) {
+    m.state.usage[usage.key] = usage.value;
+    // The turn that ended last gets its cost as the transcript catches up.
+    m.receipts.priced(usage.sessionId, m.state.usage);
+  }
+  if (Array.isArray(days)) m.state.usageDays = readDays(days);
+  return usage ? usage.key : null;
+}
+
+/**
+ * New people for the model; a person who picked another colour or agents name takes their crews
+ * with them. True when a crew changed colour or a name.
+ * @param {Model} m @param {Model['people']} people
+ */
+function recolorPeople(m, people) {
+  m.people = people;
+  let changed = false;
+  for (const s of m.state.sessions) {
+    if (nameCrew(m, s, [])) changed = true;
+    const color = personColor(m, s.member ?? null);
+    if (!color || color === s.color) continue;
+    s.color = color;
+    for (const key of s.agentKeys) if (m.state.agents[key]) m.state.agents[key].color = color;
+    changed = true;
+  }
+  return changed;
+}
+
+/**
+ * A team town's people as the store keeps them: each name's colour and who hosts.
+ * @param {unknown} list
+ * @returns {{ host: string|null, colors: Map<string, string>, agents: Map<string, string> }}
+ */
+function readPeople(list) {
+  const colors = new Map();
+  const agents = new Map();
+  let host = null;
+  for (const person of Array.isArray(list) ? list : []) {
+    const color = isObject(person) && Number.isInteger(person.color) ? CREW_COLORS[/** @type {number} */ (person.color)] : undefined;
+    if (!isObject(person) || typeof person.name !== 'string' || !color) continue;
+    colors.set(person.name, color);
+    const profile = isObject(person.profile) ? person.profile : null;
+    if (typeof profile?.agents === 'string' && profile.agents) agents.set(person.name, clip(oneLine(profile.agents), 20));
+    if (person.host === true) host = person.name;
+  }
+  return { host, colors, agents };
 }
 
 /** Notes the store keeps; the oldest give way. */

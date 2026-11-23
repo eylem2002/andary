@@ -11,6 +11,9 @@ import { createCatchUp } from './catch-up.js';
 import { createCinema } from './cinema.js';
 import { createCrewsPanel } from './crews.js';
 import { createHelpDialog, createSettingsDialog, createSetupDialog } from './dialogs.js';
+import { createCharacterDialog, loadSavedProfile } from './character.js';
+import { createTownPeople } from './town-people.js';
+import { PERSON_COLOR_NAMES } from '../core/profile.js';
 import { goToNeed, handleShortcut, openDialog, panelsHidden, runAction, select, setFollow } from './hud-actions.js';
 import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
 import { createInspector } from './inspector.js';
@@ -48,6 +51,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
   const view = initialView(prefs);
   /** @type {{ world: World|null, frame: number, measureSheets: () => void, weather: ReturnType<typeof createWeatherDriver>|null }} */
   const shell = { world: null, frame: 0, measureSheets: () => {}, weather: null };
+  const townPeople = createTownPeople(() => shell.world);
   const announcer = createAnnouncer();
   announcer.setActivityEnabled(prefs.announce);
 
@@ -74,8 +78,8 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       for (const dialog of Object.values(ui.dialogs)) if (dialog.isOpen) dialog.close();
       ui.dialogs.diff.show(agentKey, changeId);
     },
-    // Someone watching a team town with its view link can answer nothing: nothing needs them.
-    needsYou: createNeedsYou({ viewOnly: () => view.serverSettings.team?.role === 'viewer', onChange: () => ctx.refresh() }),
+    // Someone watching a team town (its view link, or a teammate's personal link) can answer nothing: nothing needs them.
+    needsYou: createNeedsYou({ viewOnly: () => ['viewer', 'person'].includes(view.serverSettings.team?.role), onChange: () => ctx.refresh() }),
     goToNeed: (item) => goToNeed(hud, item),
     // The director camera and the catch-up need the finished context, so they are attached right below.
     cinema: /** @type {any} */ (null),
@@ -106,6 +110,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       if (view.progress) world.setLandmarks?.(unlockedAt(view.progress.points));
       world.on?.('select', (sel) => select(hud, sel, { from: 'world', camera: false }));
       applyWorldPrefs(prefs, world);
+      townPeople.redraw(view.people);
       if (failed) {
         view.worldFailed = true;
         ui.notices.showWorldFallback();
@@ -160,22 +165,9 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     },
     /** Plan limits (§4.14), from the server or the demo: every account's, as a whole. @param {unknown} limits */
     setLimits: (limits) => showLimits(ctx, limits),
-    /** @param {boolean} available */
-    setServerAvailable(available) {
-      view.serverAvailable = available;
-      ctx.refresh();
-    },
-    /** @param {boolean} forced the demo was asked for in the URL (?demo=1) */
-    setDemoForced(forced) {
-      view.demoForced = forced;
-      ctx.refresh();
-    },
-    /** @param {boolean} hosted a demo on a static host: the town fills the screen by default */
-    setHosted(hosted) {
-      view.hosted = hosted;
-      ctx.refresh();
-    },
-    /** @param {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'} name */
+    ...modeFlags(ctx),
+    ...peopleApi(hud, townPeople),
+    /** @param {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'character'} name */
     openDialog: (name) => openDialog(hud, name),
     /** Points a first-time visitor to the setup steps, unless they have seen them already. */
     offerSetup() {
@@ -197,6 +189,70 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       ctx.cinema.dispose();
       shell.weather?.dispose();
       shell.weather = null;
+    },
+  };
+}
+
+/**
+ * Facts about how the page runs, from main.js.
+ * @param {HudContext} ctx
+ */
+function modeFlags(ctx) {
+  const set = (/** @type {'serverAvailable'|'demoForced'|'hosted'} */ key, /** @type {boolean} */ on) => {
+    ctx.view[key] = on;
+    ctx.refresh();
+  };
+  return {
+    /** @param {boolean} available an Andary server answered */
+    setServerAvailable: (available) => set('serverAvailable', available),
+    /** @param {boolean} forced the demo was asked for in the URL (?demo=1) */
+    setDemoForced: (forced) => set('demoForced', forced),
+    /** @param {boolean} hosted a demo on a static host: the town fills the screen by default */
+    setHosted: (hosted) => set('hosted', hosted),
+  };
+}
+
+/**
+ * The HUD's side of a team town's people (§4.11), or the demo's.
+ * @param {{ ctx: HudContext, ui: ReturnType<typeof createParts> }} hud
+ * @param {ReturnType<typeof createTownPeople>} townPeople
+ */
+function peopleApi(hud, townPeople) {
+  const { ctx } = hud;
+  /** A profile this browser kept is offered to the host once per page, if the host forgot it (`team reset`). */
+  let restored = false;
+  return {
+    /**
+     * Who lives in town and who this browser plays: their homes and figures in the town, and the
+     * "You" dialog.
+     * @param {unknown[]} people @param {string|null} me
+     */
+    setPeople(people, me) {
+      ctx.view.people = /** @type {import('./town-people.js').PersonView[]} */ (people.filter((p) => p && typeof p === 'object'));
+      ctx.view.me = typeof me === 'string' ? me : null;
+      townPeople.sync(ctx.view.people);
+      hud.ui.dialogs.character.peopleChanged();
+      const mine = ctx.view.people.find((p) => p.name === ctx.view.me);
+      if (mine && !mine.profile && !restored) {
+        restored = true;
+        const saved = loadSavedProfile();
+        if (saved) ctx.controls.saveProfile?.(saved);
+      }
+      ctx.refresh();
+    },
+    /**
+     * The host saved this person's profile; another person may hold the colour they asked for.
+     * @param {{ color: number, asked: number }} saved
+     */
+    /** An error from the server: in the "You" dialog when it waits for a save, else a toast. @param {string} message */
+    serverError(message) {
+      if (hud.ui.dialogs.character.pending) hud.ui.dialogs.character.refused(message);
+      else ctx.toasts.show({ tone: 'error', icon: 'warning', title: message });
+    },
+    profileSaved({ color, asked }) {
+      hud.ui.dialogs.character.saved();
+      if (color === asked) return;
+      ctx.toasts.show({ icon: 'info', title: `${PERSON_COLOR_NAMES[asked] ?? 'That colour'} is taken`, body: `You are ${PERSON_COLOR_NAMES[color] ?? 'another colour'} instead.` });
     },
   };
 }
@@ -273,6 +329,8 @@ function initialView(prefs) {
     hosted: false,
     worldFailed: false,
     serverSettings: {},
+    people: [],
+    me: null,
     progress: null,
     limits: [],
     selection: null,
@@ -301,7 +359,7 @@ function createParts(ctx) {
     place: createBuildingCard(ctx),
     toolbar: createToolbar(ctx),
     notices: createNotices(ctx),
-    dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx), usage: createUsageDialog(ctx), leaderboard: createLeaderboard(ctx), catchUp: ctx.catchUp },
+    dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx), usage: createUsageDialog(ctx), leaderboard: createLeaderboard(ctx), catchUp: ctx.catchUp, character: createCharacterDialog(ctx) },
   };
 }
 

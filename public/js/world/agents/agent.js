@@ -15,7 +15,7 @@ const ACCEL = 14; // units/s², so walkers ease into their stride
 const TAU = Math.PI * 2;
 
 /** How far above the head bone each hat reaches (figure units), for pills and icons. */
-const HAT_TOP = { hardhat: 0.38, cap: 0.35, crown: 0.43, beret: 0.35, sunhat: 0.35, wizard: 0.66, none: 0.33 };
+const HAT_TOP = { hardhat: 0.38, cap: 0.35, crown: 0.43, beret: 0.35, sunhat: 0.35, wizard: 0.66, beanie: 0.4, bucket: 0.4, headband: 0.34, bandana: 0.36, flowers: 0.36, viking: 0.46, tophat: 0.62, chef: 0.58, halo: 0.5, none: 0.33 };
 
 /**
  * Appear/disappear animations. Each maps progress u (0..1) to scale, lift and extra spin.
@@ -67,6 +67,8 @@ export class Agent {
     this.look = look;
     /** @type {string|undefined} agent type (Explore, Plan, …), kept so restyles can re-derive the look */
     this.type = undefined;
+    /** A person's chosen look (core/profile.js PersonLook), for role 'person'. @type {unknown} */
+    this.person = undefined;
     const { mesh, bones } = createFigure(look);
     this.mesh = mesh;
     this.bones = bones;
