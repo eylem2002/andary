@@ -141,8 +141,8 @@ async function boot() {
 
   /** @param {{ hosted: boolean }} options  hosted: no server at all, so offer the setup steps */
   async function startDemo({ hosted }) {
-    const { createSimulation } = await import('./sim/simulation.js');
-    const demo = createDemo({ store, createSimulation, speed: prefs.speed, seed: seedParam(), onProgress: (progress) => hud.setProgress(progress), onDigest: (digest) => hud.setDigest(digest) });
+    const { createSimulation, demoBranch } = await import('./sim/simulation.js');
+    const demo = createDemo({ store, createSimulation, branchOf: demoBranch, speed: prefs.speed, seed: seedParam(), onProgress: (progress) => hud.setProgress(progress), onDigest: (digest) => hud.setDigest(digest) });
     // The demo is a small team town: you, and Lina with her crew. People first, so crews take their colours.
     const people = createDemoPeople({ onPeople: setPeople, onPresence: (moved) => hud.setPresence(moved), onSaid: (said) => hud.said(said), saved: loadSavedProfile() });
     people.start();

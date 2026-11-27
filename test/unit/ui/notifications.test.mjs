@@ -75,6 +75,16 @@ describe('what deserves a notification', () => {
     assert.deepEqual(limited.notes().map((n) => [n?.title, n?.body]), [['Crews stopped', 'Rate limited: 2 crews stopped.']]);
   });
 
+  test('a push while the tests were red names the crew, never the command', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' });
+    t.send('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command: 'npm test -- secret-suite' }, tool_use_id: 't1', error: 'Exit code 1\nFAIL test/a.test.ts', is_interrupt: false });
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'git push origin main' }, tool_use_id: 'p1', tool_response: { stdout: '' } });
+    const notes = t.notes().filter(Boolean);
+    assert.deepEqual(notes.map((n) => [n?.title, n?.body]), [['Pushed with failing tests', 'api-server (crew 1) pushed while its last test run failed.']]);
+    assert.doesNotMatch(JSON.stringify(notes), /secret-suite|origin main/);
+  });
+
   test('an agent that seems stuck names the crew, never the step', () => {
     const t = town();
     for (const id of ['t1', 't2', 't3']) {

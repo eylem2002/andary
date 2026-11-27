@@ -56,6 +56,8 @@ export function notificationFor(item, state, now) {
       // The item's own words name files and commands: these may show on a locked screen. Crews in
       // one folder share a project name, so the crew's number tells which.
       return note('Two agents in one folder', `${crew}${crewNumber(state, item)} may be undoing another agent's work.`);
+    case 'pushed':
+      return note('Pushed with failing tests', `${crew}${crewNumber(state, item)} pushed while its last test run failed.`);
     case 'finished':
       // With one crew at work you are probably at its terminal already.
       return activeCrews(state) > 1 ? note('Turn finished', `${crew} is waiting for your next prompt.`) : null;
@@ -104,9 +106,9 @@ const SETTLE_MS = 3000;
 /**
  * New items a screen reader hears of (approvals are announced with their cards). A stuck agent's
  * storm is in the town only, and two agents on the same files change their rows without a sound,
- * so both are announced too.
+ * so both are announced too, as is a push while the tests were red.
  */
-const ANNOUNCED = new Set(['question', 'plan', 'stopped', 'stuck', 'conflict']);
+const ANNOUNCED = new Set(['question', 'plan', 'stopped', 'stuck', 'conflict', 'pushed']);
 
 /**
  * Watches the store and the clock: keeps the title's count and the HUD current, notifies each new

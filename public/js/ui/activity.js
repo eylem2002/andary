@@ -45,6 +45,8 @@ const KIND_ICONS = {
   conflict: 'users',
   // A lead's turn ended: what it did (core/receipts.js).
   receipt: 'list',
+  // A push while the crew's last test run had failed (core/pushes.js).
+  pushed: 'warning',
 };
 
 /** The store marks log lines with emoji (a building's sign emoji for tool calls). */

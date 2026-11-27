@@ -910,6 +910,33 @@ body {
   -webkit-box-orient: vertical;
 }
 
+/* The crew's branch and working tree, under its goal. */
+.hud-line__git {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  margin: 3px 0 0 38px;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.hud-line__git-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-line__git-counts {
+  flex: none;
+}
+
+.hud-line__git .hud-icon {
+  flex: none;
+  color: var(--ink-3);
+}
+
 .hud-stations {
   position: relative;
   z-index: 1;
@@ -931,6 +958,14 @@ body {
 
 .hud-line__goal:not([hidden]) + .hud-stations::before {
   top: -62px;
+}
+
+.hud-line__git:not([hidden]) + .hud-stations::before {
+  top: -54px;
+}
+
+.hud-line__goal:not([hidden]) + .hud-line__git:not([hidden]) + .hud-stations::before {
+  top: -82px;
 }
 
 .hud-station {
@@ -3413,6 +3448,27 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* A push while the tests were red, a rate limit: set apart from what the crew did. */
+.hud-catchup__warn {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: fit-content;
+  margin-top: 4px;
+  padding: 2px 8px 2px 6px;
+  border-left: 3px solid var(--waiting);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--waiting) 14%, transparent);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.hud-catchup__warn .hud-icon {
+  flex: none;
+  color: var(--waiting);
+}
+
 .hud-catchup__note {
   margin-top: 12px;
   color: var(--ink-2);
@@ -4023,6 +4079,24 @@ body {
 
 .hud-receipt__row dd {
   margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The agent's session id and its Copy button, in "Where". */
+.hud-where {
+  display: grid;
+  gap: 3px;
+}
+
+.hud-where__session dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.hud-where__id {
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 

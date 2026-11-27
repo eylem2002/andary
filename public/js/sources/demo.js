@@ -5,12 +5,13 @@
 // stands still while the demo is paused). Like the server, an approval offers the permission
 // rules the server would offer, and "Allow always" hands the chosen one back with the allow. It
 // also plays the server's part for "Catch me up": the same counts (core/digest.js) of the story's
-// crews, though nobody is ever away in a demo.
+// crews, though nobody is ever away in a demo; and for each crew's branch line (demo-git.js).
 
 import { createDigest } from '../core/digest.js';
 import { normalizeAgentId } from '../core/ids.js';
 import { offerableSuggestions } from '../core/permission-rules.js';
 import { createDemoUsage } from './demo-usage.js';
+import { createDemoGit } from './demo-git.js';
 import { createDemoProgress } from './demo-progress.js';
 
 /** @typedef {import('../core/store.js').Approval} Approval */
@@ -32,7 +33,7 @@ export const DEMO_APPROVAL_MS = 25_000;
 
 /**
  * @typedef {object} DemoOptions
- * @property {{ ingest: (e: any) => any, setApproval: (a: Approval) => void, setUsage?: (u: unknown, days?: unknown) => void }} store
+ * @property {{ ingest: (e: any) => any, setApproval: (a: Approval) => void, setUsage?: (u: unknown, days?: unknown) => void, setGit?: (g: unknown) => void }} store
  * @property {(options: { seed?: number, speed?: number, emit: (payload: any) => any }) => { start(): void, stop(): void, setSpeed(n: number): void, running: boolean }} createSimulation
  * @property {number} [seed]
  * @property {number} [speed]
@@ -40,10 +41,11 @@ export const DEMO_APPROVAL_MS = 25_000;
  * @property {() => number} [now]
  * @property {(progress: { points: number, days: string[] }) => void} [onProgress]  the town's growth
  * @property {(digest: import('../core/digest.js').Digest) => void} [onDigest]  the answer to requestDigest()
+ * @property {(cwd: string) => string|null} [branchOf]  the story's branch for a crew's folder (its made-up git status)
  */
 
 /** @param {DemoOptions} options */
-export function createDemo({ store, createSimulation, seed, speed = 1, approvalMs = DEMO_APPROVAL_MS, now = Date.now, onProgress, onDigest = () => {} }) {
+export function createDemo({ store, createSimulation, seed, speed = 1, approvalMs = DEMO_APPROVAL_MS, now = Date.now, onProgress, onDigest = () => {}, branchOf = () => null }) {
   let sequence = 0;
   let currentSpeed = speed;
   let paused = false;
@@ -56,6 +58,7 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
   const usage = createDemoUsage(store, now);
   const progress = onProgress ? createDemoProgress(onProgress, now) : () => {};
   const digest = createDigest({ startedAt: now() });
+  const git = createDemoGit(store, now, branchOf);
 
   /** @param {any} payload */
   function emit(payload) {
@@ -63,6 +66,7 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
     const id = ++sequence;
     store.ingest({ id, ts, rx: ts, event: payload });
     usage(payload);
+    git(payload);
     progress(payload);
     digest.observe(payload, ts);
     if (payload?.hook_event_name === 'PermissionRequest') return hold(payload, id, ts);

@@ -18,6 +18,7 @@ import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { rulesText } from './permission-rules.js';
 import { noteStateText } from './notes.js';
 import { receiptLine } from './receipts.js';
+import { readGitStatus } from './git-status.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
 import { dialogsAfterApproval, dialogsAfterEvent } from './store-dialogs.js';
@@ -57,6 +58,7 @@ export { ACHIEVEMENTS };
  * @property {string} [endReason]
  * @property {string|null} [member]  the teammate whose session this is, in a team town
  * @property {'claude'|'codex'} [source]  the agent behind the session (§4.12)
+ * @property {string|null} [root]  the work tree its hooks were last stamped with (andary_root, §4.6), for its branch (§4.16)
  */
 
 /**
@@ -67,7 +69,7 @@ export { ACHIEVEMENTS };
  * @property {string} agentKey
  * @property {string} agentName
  * @property {string} color
- * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict' / 'receipt'
+ * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict' / 'receipt' / 'pushed'
  * @property {string} icon
  * @property {string} text
  * @property {'info'|'success'|'warn'|'error'} level
@@ -154,6 +156,8 @@ export { ACHIEVEMENTS };
  * @property {UsageDay[]} usageDays             the last 30 days, oldest first
  * @property {Note[]} notes                       the owner's notes to agents (§4.15), oldest first
  * @property {readonly import('./receipts.js').Receipt[]} receipts  a receipt per lead's turn that ended, newest last
+ * @property {import('./pushes.js').RedPush[]} redPushes  crews that pushed while their latest test run had failed, oldest first
+ * @property {Record<string, import('./git-status.js').GitStatus>} git  each repository's branch and changed files, by root (§4.16)
  */
 
 /**
@@ -170,7 +174,7 @@ export { ACHIEVEMENTS };
 /** @typedef {{ date: string, tokens: number, costUsd: number }} UsageDay */
 /** @typedef {import('./notes.js').Note} Note */
 
-/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'note', note: Note}|{type: 'people'}|{type: 'reset'}} StoreChange */
+/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'note', note: Note}|{type: 'people'}|{type: 'git', root: string}|{type: 'reset'}} StoreChange */
 
 /**
  * @typedef {object} Store
@@ -180,6 +184,7 @@ export { ACHIEVEMENTS };
  * @property {(record: unknown, days?: unknown) => void} setUsage  one agent's usage totals, and the day totals
  * @property {(people: unknown) => void} setPeople  a team town's people ({name, color, host}[], color an index into CREW_COLORS): their crews take their colour
  * @property {(note: unknown) => void} setNote  a note to an agent, as the server last told of it (§4.15)
+ * @property {(status: unknown) => void} setGit  a repository's branch and changed files, as the server last read them (§4.16)
  * @property {(listener: (change: StoreChange) => void) => () => void} subscribe
  * @property {() => StoreState} getState
  * @property {() => void} reset
@@ -616,7 +621,23 @@ function apply(m, input) {
   for (const change of newlyStuck) logStuck(m, e, s, change);
   for (const hazard of hazards) logHazard(m, e, s, hazard);
   if (a) followTurn(m, e, s, a);
+  followPushes(m, e, s, a);
   return e;
+}
+
+/**
+ * Keeps each crew's latest test run (pushes.js) and the work tree its hooks name (for its branch);
+ * a push while that run had failed gets a warning line in the activity log.
+ * @param {Model} m
+ * @param {TownEvent} e
+ * @param {Session} s
+ * @param {AgentState|undefined} a
+ */
+function followPushes(m, e, s, a) {
+  if (e.data.root) s.root = e.data.root;
+  const { changed, raised } = m.pushes.record(e, { member: Boolean(s.member) });
+  if (changed) m.state.redPushes = m.pushes.list();
+  if (raised) pushLog(m, { ...e, kind: 'pushed' }, s, a, { icon: '⚠️', text: `Pushed while the last test run failed (${raised.test})`, level: 'warn' });
 }
 
 /**
@@ -1034,9 +1055,7 @@ export function createStore(options = {}) {
       }
       return applied;
     },
-    dispatch(event) {
-      commit(event);
-    },
+    dispatch: (event) => void commit(event),
     setApproval(approval) {
       if (!isObject(approval) || (typeof approval.id !== 'string' && typeof approval.id !== 'number')) return;
       const list = m.state.approvals;
@@ -1064,6 +1083,7 @@ export function createStore(options = {}) {
       const note = readNote(raw);
       if (note && noteChanged(m, note, now())) emit({ type: 'note', note });
     },
+    setGit: (raw) => applyGit(m, raw, emit),
     setUsage(record, days) {
       const key = applyUsage(m, record, days);
       if (key) emit({ type: 'usage', agentKey: key });
@@ -1084,6 +1104,19 @@ export function createStore(options = {}) {
       emit({ type: 'reset' });
     },
   };
+}
+
+/**
+ * A repository's branch and changed files, from the server or the demo, or that it is gone (§4.16).
+ * @param {Model} m @param {unknown} raw @param {(change: StoreChange) => void} emit
+ */
+function applyGit(m, raw, emit) {
+  const status = readGitStatus(raw);
+  if (!status) return;
+  const { [status.root]: _old, ...rest } = m.state.git;
+  // A repository the server can no longer read: its line goes.
+  m.state.git = isObject(raw) && raw.gone === true ? rest : { ...rest, [status.root]: status };
+  emit({ type: 'git', root: status.root });
 }
 
 /**

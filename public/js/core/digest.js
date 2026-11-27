@@ -12,7 +12,8 @@
 //   PostToolUseFailure   a failed tool call, unless you interrupted it; a test run failing
 //   PostToolUse          a file changed (Edit, MultiEdit, Write, NotebookEdit, a Codex patch that
 //                        deletes one); a test run passing; each commit (not an amend); each push
-//                        (not a deletion, nor one that found everything up to date). From Codex,
+//                        (not a deletion, nor one that found everything up to date), and
+//                        whether the crew's latest test run had failed then. From Codex,
 //                        only when its adapter found the exit code (`andary_exit_known`)
 //   PermissionRequest    a permission asked for (a question or a plan to approve is not one)
 //   SubagentStart, SubagentStop   a helper started, a helper finished
@@ -62,12 +63,12 @@ const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 const FILE_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'apply_patch']);
 
 /** @typedef {'toolCalls'|'helpersStarted'|'helpersFinished'} BucketedName */
-/** @typedef {'turns'|'failures'|'asked'|'answered'|'commits'|'pushes'} TimedName */
+/** @typedef {'turns'|'failures'|'asked'|'answered'|'commits'|'pushes'|'redPushes'} TimedName */
 /** @typedef {BucketedName|TimedName} CountName */
 /** @type {readonly BucketedName[]} */
 const BUCKETED = Object.freeze(['toolCalls', 'helpersStarted', 'helpersFinished']);
 /** @type {readonly TimedName[]} */
-const TIMED = Object.freeze(['turns', 'failures', 'asked', 'answered', 'commits', 'pushes']);
+const TIMED = Object.freeze(['turns', 'failures', 'asked', 'answered', 'commits', 'pushes', 'redPushes']);
 
 /**
  * @typedef {object} Tally  what one hook adds to its crew's counts
@@ -109,6 +110,7 @@ const TIMED = Object.freeze(['turns', 'failures', 'asked', 'answered', 'commits'
  * @property {'passed'|'failed'|null} tests  the latest test run's result
  * @property {number} commits
  * @property {number} pushes
+ * @property {number} redPushes       pushes made while the crew's latest test run had failed
  * @property {boolean} allPushed      a push came after the latest commit
  * @property {number} files           distinct files changed
  * @property {number} asked           permissions asked for
@@ -164,11 +166,40 @@ const isNewCommit = (words) => gitAction(words) === 'commit' && !words.includes(
 /** A push that sends something rather than deleting (`--delete`, `-d`, `:branch`). @param {string[]} words */
 const isSendingPush = (words) => gitAction(words) === 'push' && !words.some((word) => word === '--delete' || word === '-d' || word.startsWith(':'));
 
-/** How many pushes said they had nothing to send. @param {Record<string, any>} event */
-function upToDate(event) {
-  const response = event.tool_response;
+/**
+ * How many pushes a shell call that went through sent: each push of its line that must have
+ * succeeded and sends something, less those its output says had nothing to send. The store's
+ * "pushed while the last test run failed" (core/pushes.js) counts them the same way.
+ * @param {{ words: string[], succeeded: boolean }[]} commands  the line's simple commands (core/shell.js)
+ * @param {unknown} response  the tool's response
+ */
+export function pushesSent(commands, response) {
+  return Math.max(0, commands.filter((c) => c.succeeded && isSendingPush(c.words)).length - upToDate(response));
+}
+
+/** How many pushes said they had nothing to send. @param {unknown} response */
+function upToDate(response) {
   const parts = typeof response === 'string' ? [response] : isObject(response) ? [response.stdout, response.stderr, response.output] : [];
   return parts.filter((part) => typeof part === 'string').join('\n').match(UP_TO_DATE)?.length ?? 0;
+}
+
+/**
+ * What a finished shell call proves of the tests it ran, the one reading Catch me up and the
+ * store's "pushed while the last test run failed" (core/pushes.js) share: 'passed' when every test
+ * run of the line must have succeeded for the line to (and each runs tests), 'failed' when the
+ * line's failure can only be a test run's and it was not a timeout (core/summaries.js), and null
+ * when it proves neither (no test run, one sent to the background, a pipe whose status is another
+ * command's, a run that lists tests, an interrupt, a Codex command without its exit code).
+ * @param {{ tool: string, command: unknown, background?: boolean, error?: string|null, interrupted?: boolean, exitUnknown?: boolean }} call
+ *   error: set (even '') when the call failed
+ * @returns {'passed'|'failed'|null}
+ */
+export function testOutcome({ tool, command, background = false, error = null, interrupted = false, exitUnknown = false }) {
+  if (!SHELL_TOOLS.has(tool) || background || interrupted) return null;
+  const tests = shellCommands(command, { powershell: tool === 'PowerShell' }).filter((c) => isTestRun(c.words));
+  if (!tests.length || tests.some((c) => runsNoTests(c.words))) return null;
+  if (error === null) return !exitUnknown && tests.every((c) => c.succeeded) ? 'passed' : null;
+  return tests.some((c) => c.decides) && classifyError(error, false, 'test') === 'tests' ? 'failed' : null;
 }
 
 /**
@@ -184,13 +215,12 @@ function ranTool(event) {
   if (file) return { file };
   if (event.andary_source === 'codex' && event.andary_exit_known !== true) return null;
   const commands = commandsOf(event);
-  const tests = commands.filter((c) => isTestRun(c.words));
   const done = commands.filter((c) => c.succeeded);
   /** @type {Tally} */
   const tally = {};
-  if (tests.length && tests.every((c) => c.succeeded && !runsNoTests(c.words))) tally.passed = true;
+  if (testOutcome({ tool: str(event.tool_name), command: event.tool_input?.command, background: event.tool_input?.run_in_background === true }) === 'passed') tally.passed = true;
   const commits = done.filter((c) => isNewCommit(c.words)).length;
-  const pushes = Math.max(0, done.filter((c) => isSendingPush(c.words)).length - upToDate(event));
+  const pushes = pushesSent(commands, event.tool_response);
   if (commits) tally.commits = commits;
   if (pushes) tally.pushes = pushes;
   return Object.keys(tally).length ? tally : null;
@@ -205,8 +235,7 @@ function ranTool(event) {
  */
 function failedTool(event) {
   if (event.is_interrupt === true) return null;
-  const tests = commandsOf(event).filter((c) => isTestRun(c.words));
-  const red = tests.some((c) => c.decides) && !tests.some((c) => runsNoTests(c.words)) && classifyError(str(event.error), false, 'test') === 'tests';
+  const red = testOutcome({ tool: str(event.tool_name), command: isObject(event.tool_input) ? event.tool_input.command : '', background: isObject(event.tool_input) && event.tool_input.run_in_background === true, error: str(event.error) }) === 'failed';
   return one('failures', red ? { passed: false } : {});
 }
 
@@ -244,7 +273,7 @@ const bucketStart = (at) => Math.floor(at / BUCKET_MS) * BUCKET_MS;
 const emptyBucket = (at) => ({ lastAt: at, toolCalls: 0, helpersStarted: 0, helpersFinished: 0 });
 
 /** @returns {Record<TimedName, number[]>} */
-const emptyTimes = () => ({ turns: [], failures: [], asked: [], answered: [], commits: [], pushes: [] });
+const emptyTimes = () => ({ turns: [], failures: [], asked: [], answered: [], commits: [], pushes: [], redPushes: [] });
 
 /** Keeps one more, the latest MAX_TIMES. @template T @param {T[]} list @param {T} item */
 function keep(list, item) {
@@ -407,6 +436,8 @@ export function createDigest({ startedAt = 0 } = {}) {
     if (tally.passed !== undefined) crew.test = { passed: tally.passed, at };
     if (tally.commits) addTimes(crew, 'commits', at, tally.commits);
     if (tally.pushes) addTimes(crew, 'pushes', at, tally.pushes);
+    // After the test result of the same line, so `npm test && git push` is not one.
+    if (tally.pushes && crew.test && !crew.test.passed) addTimes(crew, 'redPushes', at, tally.pushes);
   }
 
   return {

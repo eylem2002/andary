@@ -2,8 +2,9 @@
 // server decides when you were away and keeps the counts (server/digest.mjs; the demo plays its
 // part); this module asks for them through the source, offers the dialog in the masthead's "need
 // you" area when you come back, and shows one line per crew: crews that need you first, each
-// linking to its item as the "need you" button does, then the crews that did something, then the
-// quiet ones in one line.
+// linking to its item as the "need you" button does, then the crews that did something (those
+// with a warning first: a push while the tests were red, a rate limit), then the quiet ones in
+// one line.
 //
 // "Since you last looked" is kept in this browser (localStorage, per town): the end of the last
 // summary you saw, in the server's time, so it is compared with the server's times only. You saw
@@ -43,7 +44,7 @@ export const OFFER_MS = 30 * 60_000;
 /** A summary that has not come by then will not: the dialog says so. */
 const ANSWER_MS = 5000;
 /** The numbers a crew's summary carries (core/digest.js CrewDigest). */
-const COUNTS = Object.freeze(['turns', 'failures', 'commits', 'pushes', 'files', 'asked', 'answered', 'helpersStarted', 'helpersFinished', 'toolCalls']);
+const COUNTS = Object.freeze(['turns', 'failures', 'commits', 'pushes', 'redPushes', 'files', 'asked', 'answered', 'helpersStarted', 'helpersFinished', 'toolCalls']);
 
 /**
  * Where a catch-up starts: when you last looked or when you left, whichever is later (you saw what
@@ -122,6 +123,21 @@ export function crewWords(crew) {
   ].filter(Boolean);
   if (!parts.length && crew.toolCalls) parts.push(plural(crew.toolCalls, 'tool call'));
   return parts.join(', ');
+}
+
+/**
+ * What deserves a second look in a crew's period, each on a line of its own, set apart from what
+ * it did: a push while its latest test run had failed, and turns stopped by a rate limit.
+ * @param {CrewDigest} crew
+ * @returns {string[]}
+ */
+export function crewWarnings(crew) {
+  const warnings = [];
+  const red = crew.redPushes ?? 0;
+  if (red) warnings.push(red === 1 ? 'Pushed while the last test run failed' : `Pushed ${red} times while the last test run failed`);
+  const limited = crew.stops?.rate_limit ?? 0;
+  if (limited) warnings.push(limited === 1 ? 'Stopped: rate limited' : `Stopped ${limited} times: rate limited`);
+  return warnings;
 }
 
 /** Nothing came since you last looked, and the town remembers all of that time. @param {Reason} reason @param {Digest} digest */
@@ -214,6 +230,7 @@ export function readAway(raw) {
  * @property {string} name
  * @property {string} words      what it did; '' when nothing since then
  * @property {string|null} said  its latest finished turn's last message
+ * @property {string[]} warnings  what deserves a second look (crewWarnings)
  * @property {AttentionItem|null} item  what it needs you for, if anything
  * @property {number} number     its roundel's number; 0 once it has left town
  * @property {string} [color]
@@ -260,10 +277,12 @@ export function catchUpRows(state, digest, items) {
     const crew = crews.get(sessionId);
     const name = session ? sessionName(session) : crew ? crew.title || projectName(crew.cwd, sessionId) : sessionId;
     const here = session && session.status !== 'ended';
-    return { sessionId, name, words: crew ? crewWords(crew) : '', said: crew?.lastMessage ?? null, item, number: here ? session.number : 0, color: session?.color };
+    return { sessionId, name, words: crew ? crewWords(crew) : '', said: crew?.lastMessage ?? null, warnings: crew ? crewWarnings(crew) : [], item, number: here ? session.number : 0, color: session?.color };
   };
   const rows = [...needs].map(([sessionId, item]) => row(sessionId, item));
-  for (const crew of digest.crews) if (!needs.has(crew.sessionId)) rows.push(row(crew.sessionId, null));
+  const others = digest.crews.filter((crew) => !needs.has(crew.sessionId)).map((crew) => row(crew.sessionId, null));
+  // Crews with something to look at again come right after those that need you.
+  rows.push(...others.filter((r) => r.warnings.length), ...others.filter((r) => !r.warnings.length));
   const quiet = state.sessions.filter((s) => s.status !== 'ended' && !s.member && !needs.has(s.id) && !crews.has(s.id)).map(sessionName);
   return { rows, quiet };
 }
@@ -355,8 +374,9 @@ function rowElement(row, onGo) {
       icon('hourglass', { size: 16 }), h('span', { text: item.text }), h('span', { class: 'hud-sr', text: ', go there' }))
     : null;
   const said = row.said ? h('p', { class: 'hud-catchup__said', text: `Last turn: ${row.said}` }) : null;
-  return h('li', { class: 'hud-catchup__crew', 'data-testid': 'catch-up-crew', 'data-session-id': row.sessionId },
-    roundel(row.number, row.color), h('div', { class: 'hud-catchup__what' }, line, need, said));
+  const warnings = row.warnings.map((text) => h('p', { class: 'hud-catchup__warn', 'data-testid': 'catch-up-warning' }, icon('warning', { size: 16 }), h('span', { class: 'hud-sr', text: 'Check: ' }), h('span', { text })));
+  return h('li', { class: 'hud-catchup__crew', 'data-testid': 'catch-up-crew', 'data-session-id': row.sessionId, 'data-warn': row.warnings.length ? 'true' : null },
+    roundel(row.number, row.color), h('div', { class: 'hud-catchup__what' }, line, ...warnings, need, said));
 }
 
 /**
@@ -385,7 +405,7 @@ function createLines(onGo) {
      *   happened; none: the note when no crew did anything (emptyNote)
      */
     draw({ rows, quiet: names }, { fallback, said, none }) {
-      const key = JSON.stringify([rows.map((r) => [r.sessionId, r.name, r.words, r.said, r.item?.id, r.number]), names, said, none]);
+      const key = JSON.stringify([rows.map((r) => [r.sessionId, r.name, r.words, r.said, r.warnings, r.item?.id, r.number]), names, said, none]);
       if (key === drawn) return;
       drawn = key;
       const active = document.activeElement;

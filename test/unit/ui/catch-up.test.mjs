@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { createStore } from '../../../public/js/core/store.js';
-import { OFFER_MS, catchUpOffered, catchUpRows, catchUpStart, crewWords, emptyNote, nothingNew, periodText, readAway, readDigest } from '../../../public/js/ui/catch-up.js';
+import { OFFER_MS, catchUpOffered, catchUpRows, catchUpStart, crewWarnings, crewWords, emptyNote, nothingNew, periodText, readAway, readDigest } from '../../../public/js/ui/catch-up.js';
 import { createNeedsYou } from '../../../public/js/ui/needs-you.js';
 import { SESSION, envelope, hook } from '../core/helpers.mjs';
 
@@ -13,7 +13,7 @@ const QUIET = '9e2f1a4b-3c6d-4e55-8a31-2c9d8e7f6a51';
 
 /** A crew's summary with nothing in it but what a test gives. @param {Record<string, any>} [fields] @returns {any} */
 function crew(fields = {}) {
-  return { sessionId: SESSION, cwd: '/home/dev/code/api-server', title: null, lastAt: 0, turns: 0, lastMessage: null, stops: {}, failures: 0, tests: null, commits: 0, pushes: 0, allPushed: false, files: 0, asked: 0, answered: 0, helpersStarted: 0, helpersFinished: 0, toolCalls: 0, ...fields };
+  return { sessionId: SESSION, cwd: '/home/dev/code/api-server', title: null, lastAt: 0, turns: 0, lastMessage: null, stops: {}, failures: 0, tests: null, commits: 0, pushes: 0, redPushes: 0, allPushed: false, files: 0, asked: 0, answered: 0, helpersStarted: 0, helpersFinished: 0, toolCalls: 0, ...fields };
 }
 
 describe('a crew\'s line', () => {
@@ -139,6 +139,19 @@ describe('what comes from the network', () => {
   });
 });
 
+describe('what deserves a second look', () => {
+  test('a push while the tests were red and a rate limit, each on a line of its own', () => {
+    assert.deepEqual(crewWarnings(crew({ tests: 'failed', pushes: 1, redPushes: 1, stops: { rate_limit: 1 } })), ['Pushed while the last test run failed', 'Stopped: rate limited']);
+    assert.deepEqual(crewWarnings(crew({ redPushes: 2, stops: { rate_limit: 3, server_error: 1 } })), ['Pushed 2 times while the last test run failed', 'Stopped 3 times: rate limited']);
+    assert.deepEqual(crewWarnings(crew({ tests: 'failed', pushes: 1, stops: { server_error: 1 } })), []);
+  });
+
+  test('read from the network as a count', () => {
+    const digest = readDigest({ since: 0, until: 1, crews: [{ sessionId: 's', redPushes: 2 }, { sessionId: 't', redPushes: 'x' }] });
+    assert.deepEqual(digest?.crews.map((c) => c.redPushes), [2, 0]);
+  });
+});
+
 describe('the lines', () => {
   const T0 = 10_000_000;
   /** Your crews: one asks a question, one finished a turn, one is quiet; a teammate's crew too. */
@@ -180,6 +193,24 @@ describe('the lines', () => {
     assert.equal(rows[2].number, 0, 'a crew that has left town has no number');
     // Your quiet crews, never a teammate's: theirs are theirs.
     assert.deepEqual(quiet, ['docs-site']);
+  });
+
+  test('crews with a warning come right after those that need you', () => {
+    const state = town();
+    const items = createNeedsYou({ storage: null, now: () => T0 + 5000 }).items(state);
+    const digest = {
+      since: 0,
+      from: 0,
+      until: T0 + 5000,
+      limit: null,
+      crews: [
+        crew({ sessionId: 'calm', cwd: '/home/dev/code/calm', turns: 1, lastAt: T0 + 3000 }),
+        crew({ sessionId: OTHER, cwd: '/home/dev/code/web-app', turns: 1, tests: 'failed', pushes: 1, redPushes: 1, lastAt: T0 + 2000 }),
+        crew({ sessionId: SESSION, toolCalls: 3, lastAt: T0 + 1000 }),
+      ],
+    };
+    const { rows } = catchUpRows(state, digest, items);
+    assert.deepEqual(rows.map((r) => [r.name, r.warnings]), [['api-server', []], ['web-app', ['Pushed while the last test run failed']], ['calm', []]]);
   });
 
   test('a crew that needs you is listed even when it did nothing since you looked', () => {

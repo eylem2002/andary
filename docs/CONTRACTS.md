@@ -317,7 +317,7 @@ shows up as a crew of its own.
 Server → browser:
 
 ```js
-{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits }, history: Envelope[], approvals: Approval[], notes: Note[] /* §4.15; [] for a viewer */, usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null,
+{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits }, history: Envelope[], approvals: Approval[], notes: Note[] /* §4.15; [] for a viewer */, usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, git: GitStatus[] /* §4.16; [] for a viewer */, progress: { points, days }, notifyUrl: string|null, away: Away|null,
   people: Person[] /* §4.11, [] off a team host */, me: string|null /* the person this browser plays */ }
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
@@ -327,6 +327,7 @@ Server → browser:
 { t: 'usage', u: UsageRecord, days: UsageDay[] }   // §4.8, when an agent's totals change
 { t: 'progress', p: { points, days: string[] } }   // §4.9, when a point or a busy day is added
 { t: 'limits', limits: LimitsSnapshot }            // §4.14, owners only, after each report of the mod
+{ t: 'git', g: GitStatus }                         // §4.16, owners only, when a repository's branch or counts change
 { t: 'notify-test', ok: boolean }                  // §4.10, the answer to a test
 { t: 'away', away: Away }                          // §4.13, owners: an absence began or ended
 { t: 'digest', d: Digest }                         // §4.13, the answer to a digest request
@@ -1053,8 +1054,16 @@ it is kept in memory, never on disk (it holds your agents' last messages); a res
            crews: CrewDigest[] /* those that did something, the most recently active first */ }
   CrewDigest { sessionId, cwd, title: string|null, lastAt /* its latest hook */, turns, lastMessage: string|null,
                stops: Record<string, number>, failures, tests: 'passed'|'failed'|null, commits, pushes,
+               redPushes /* pushes while the crew's latest test result was a failure */,
                allPushed: boolean, files, asked, answered, helpersStarted, helpersFinished, toolCalls }
   ```
+
+  `redPushes` counts each push (as `pushes` counts them) that came while the crew's latest test
+  result (`tests`, kept for the day) was `'failed'`; a line that runs tests and pushes is read in
+  that order, so `npm test && git push` is never one. The dialog shows it, and turns stopped by a
+  rate limit (`stops.rate_limit`), as warning lines of their own under the crew's words
+  (`[data-testid="catch-up-warning"]`: "Pushed while the last test run failed", "Stopped: rate
+  limited"), and lists crews with a warning right after those that need you.
 
 ### 4.14 Plan limits: the andary-limits mod
 
@@ -1189,6 +1198,64 @@ Note = { id, status: 'queued'|'delivered'|'expired', sessionId, agentId: string|
   it with the reason (`[data-testid="send-note-status"]`), and no answer within 10 s gives it back.
   The demo has no notes.
 
+### 4.16 Branch and working tree per crew
+
+`server/git-status.mjs`, `public/js/core/git-status.js`. The browser cannot look at the disk, so
+the server asks git, read-only, for the repositories this computer's crews work in:
+
+```
+git --no-optional-locks -c core.fsmonitor=false -C <root> status --porcelain=v2 --branch --untracked-files=normal|no
+```
+
+- **When.** A local hook (never a teammate's: their folders are on their computer) that may have
+  changed the working tree or its branch: `SessionStart`, `UserPromptSubmit`, `Stop`,
+  `SubagentStop`, and `PostToolUse` / `PostToolUseFailure` of `Bash`, `PowerShell`, `Edit`,
+  `MultiEdit`, `Write`, `NotebookEdit` or `apply_patch`. `<root>` is the hook's `andary_root`
+  (§4.6), else the work tree of its `cwd` found the same way; a folder in no work tree asks for
+  nothing.
+- **How often.** At most once per 10 s per repository (`MIN_INTERVAL_MS`); a hook inside that time
+  asks for one more look when it is up, so the last word is never older than that. One look per
+  repository at a time, two git processes at once in all. At most 64 repositories are kept (the
+  one asked about longest ago goes).
+- **Safely.** `execFile` with an argument list, never a shell; the folder is one argument. No
+  optional locks (`--no-optional-locks`, `GIT_OPTIONAL_LOCKS=0`: not even the index's stat cache is
+  written), no file-system monitor (a program a repository's config could name), no terminal
+  prompt, `LC_ALL=C`, and none of the inherited variables that would point git at another
+  repository, index or config (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR`,
+  `GIT_OBJECT_DIRECTORY`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` with its keys and values…).
+  A look is stopped after 2 s and may print at most 1 MiB; one that timed out or printed more is
+  made again at once without untracked files (`untracked: null`), and that repository tries them
+  again 5 minutes later. A failing look (not a repository, a `safe.directory` refusal) sends
+  nothing, but a repository that had a line and can no longer be read sends
+  `{ t: 'git', g: { root, gone: true } }`, and its line goes. With no `git` on the PATH, the server says so once in its log and never
+  runs it again.
+- **What is sent.** Counts and names only, never a file name, to owners only, only when something
+  but `at` changed, and in their `hello`. Never relayed to a team host.
+
+  ```js
+  GitStatus { root /* forward slashes */, branch: string|null /* null when detached */, oid: string|null /* 7 hex, null before the first commit */,
+              upstream: string|null, ahead, behind /* 0 without an upstream */, changed /* tracked files changed, staged or not, and conflicts */,
+              untracked: number|null /* null when not counted */, worktree: string|null /* a linked worktree's folder name */, at }
+  ```
+
+  `worktree` is the folder's name when `<root>/.git` is a file pointing into another repository's
+  `worktrees/` (a submodule's points into `modules/` and is not one).
+- **Browser.** `store.setGit(status)` keeps the latest per root in `StoreState.git`; a crew's
+  repository is its `Session.root` (the `andary_root` its tool hooks last carried), else the
+  deepest one holding its folder (`gitOf`); `{ root, gone: true }` removes it. Its crew row (not a teammate's: a path like one here
+  is not this repository) shows `[data-testid="crew-git"]` under the goal,
+  in two parts (`gitParts`): the name, `[data-testid="crew-git-name"]` (the worktree's name when
+  it is one, then the branch, or "detached at 1a2b3c4"), cut with an ellipsis when long, and the
+  counts, `[data-testid="crew-git-counts"]` (`↑ahead ↓behind · N changed`, changed and new files,
+  or "clean"), never cut; with the same in words for screen readers (`gitSentence`). Control,
+  bidirectional and zero-width characters are dropped from names. The agent's details have a **Where** section (`[data-testid="agent-where"]`):
+  the crew's folder, the branch sentence (not for a teammate's crew), the model ("Opus 5.5
+  (claude-opus-5-5)"), and the session id (`[data-testid="agent-session-id"]`, without a
+  teammate's `name~` prefix) with **Copy** (`[data-testid="copy-session-id"]`, the clipboard, or
+  the id selected to copy by hand). The demo makes up the same for its crews
+  (`sources/demo-git.js`: the story's branch, its edits since the last commit, a commit one ahead,
+  a push none).
+
 ## 5. Browser: events, store, director
 
 `public/js/core/events.js` turns an Envelope into zero or more **TownEvents**:
@@ -1230,13 +1297,14 @@ Store {
   setApproval(approval: Approval): void          // from the server, or created by demo mode
   setUsage(record: UsageRecord|null, days?: UsageDay[]): void  // §4.8; null record: days only
   setNote(note: Note): void                      // §4.15, from the server; junk and repeats are ignored
+  setGit(status: GitStatus): void                // §4.16, from the server or the demo; junk is ignored
   subscribe(listener: (change: StoreChange) => void): () => void
   getState(): StoreState                         // plain objects; treat as read-only
   reset(): void
 }
 StoreChange = { type: 'event', event: TownEvent } | { type: 'approval', approval: Approval }
             | { type: 'achievement', achievement: Achievement } | { type: 'usage', agentKey: string }
-            | { type: 'note', note: Note } | { type: 'reset' }
+            | { type: 'note', note: Note } | { type: 'git', root: string } | { type: 'reset' }
 StoreState {
   sessions: Session[]                            // in order first seen
   agents: Record<agentKey, AgentState>
@@ -1250,13 +1318,17 @@ StoreState {
   usageDays: UsageDay[]
   notes: Note[]                                  // §4.15, oldest first
   receipts: Receipt[]                            // a receipt per lead's turn that ended, newest last, ≤ 60
+  redPushes: RedPush[]                           // crews that pushed while their latest test run had failed, oldest first
+  git: Record<root, GitStatus>                   // §4.16, each repository's branch and counts
 }
+RedPush { id /* sessionId@at: the same after a reload */, sessionId, agentKey /* who pushed */, at, test /* the failed run's command, ≤ 160 */, testAt, push /* the push's line, ≤ 160 */ }
 AgentUsage { tokens: { input, output, cacheRead, cacheWrite }, costUsd, unpriced: boolean, model: string|null,
              context: { tokens, at } | null /* §4.8: the newest reading; null when unknown */,
              compactedAt: number|null /* §4.8: when it last compacted */ }
 Session { id, number /* the crew's number: lowest free when it arrived, never changed */,
           project /* cwd basename */, cwd, title?, color, model?, permissionMode?,
           member?: string|null /* §4.11 */, source?: 'claude'|'codex' /* §4.12 */,
+          root?: string|null /* the andary_root its tool hooks last carried (§4.6), for its branch (§4.16) */,
           status: 'working'|'waiting'|'idle'|'ended', goal? /* latest prompt, trimmed */,
           startedAt, lastActivity, agentKeys: string[],
           todos: { text, status: 'pending'|'in_progress'|'completed' }[],
@@ -1326,8 +1398,8 @@ queued behind it starts none.
 
 ```js
 AttentionItem { id /* one per episode: dialog:agentKey:at:input, kind:agentKey:since, limit:since,
-                      conflict:<Hazard id> */,
-                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'finished',
+                      conflict:<Hazard id>, pushed:<RedPush id> */,
+                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'pushed'|'finished',
                 level: 'blocked'|'stopped'|'alert'|'ready', sessionId, agentKey,
                 agentKeys: string[] /* everyone it stands for */,
                 approvalId: string|null /* a request the town holds */, since, countedSince,
@@ -1346,9 +1418,13 @@ item for all their agents (two crews at least: a lead and its helper are one cre
 (below) is a `conflict` item of level `alert`, listed for every agent it names (`agentKeys`: the
 one who did it, then the others): a `write` or `git` hazard is counted and dismissable, an `edit`
 one is a note, neither counted nor dismissable. It is left out once `CONFLICT_MS` (30 minutes) old,
-or when the crew or agent that did it is gone or done; others that are, are left out of it. Ended
-sessions and teammates' crews are left out. `ui/needs-you.js` adds the viewer's dismissals (stops, stuck alerts, finished turns and
-conflicts, kept in `localStorage["andary:dismissed"]` for a day and shared with the town's other
+or when the crew or agent that did it is gone or done; others that are, are left out of it. A push
+while the crew's latest test run had failed (`StoreState.redPushes`, below) is a `pushed` item of
+level `alert` ("Pushed while the last test run failed: npm test"), counted and dismissable, for
+the agent that pushed; desktop notifications say "Pushed with failing tests" with the crew's name
+and number, never the command. Ended
+sessions and teammates' crews are left out. `ui/needs-you.js` adds the viewer's dismissals (stops, stuck alerts, finished turns,
+conflicts and pushes while red, kept in `localStorage["andary:dismissed"]` for a day and shared with the town's other
 tabs; someone watching a team town with its view link gets no items, as they can answer nothing)
 and drives the masthead button (its name: the visible words, then where a click goes), the `I`
 key, the page title, the crew rows, the inspector and the desktop notifications. A note
@@ -1515,6 +1591,19 @@ have changed 5 files" (two names, or the first and "N others").
   latest), 100 hazards (the oldest note gives way, a new note too, else the oldest alert), 50
   commands, 16 adds for each of 200 agents, 64 pathspecs a command; a command line is read up to
   20,000 characters.
+
+**Pushed while the last test run failed** (`core/pushes.js`, pure). The store runs
+`createPushChecks().record(event, { member })` after each event. A crew's latest test run is the
+last `Bash` or `PowerShell` call of any of its agents (lead or helper) that ran tests, read as a
+Catch me up reads it (`testOutcome` in `core/digest.js`, shared by both: `passed`, or `failed`
+only when the failure is proven and was not a timeout; a run that proves neither, such as
+`npm test | tail`, a background run or an interrupt, leaves the last proven result standing). A push is a `tool.end` of such a call whose line pushes
+something and must have succeeded, as Catch me up counts pushes (`pushesSent`: not a dry run, a
+deletion or "Everything up-to-date"; nothing from one sent to the background, nor from Codex
+without its exit code). A push while the crew's latest run is `failed` raises a `RedPush` (one per
+crew, the newest), with a `pushed` log line (level `warn`, "Pushed while the last test run failed
+(npm test)"); a push after a run that `passed` clears it, and so does the crew's `session.end`. A
+teammate's crew is not followed.
 
 **Turn receipts** (`core/receipts.js`, pure). The store runs `createReceipts().record(event, who,
 { costs: state.usage, cwd, member })` after each event and keeps its receipts on `StoreState.receipts`,
@@ -1882,6 +1971,9 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="usage-gauge"]` | the plan-limit gauge on the Usage button (`data-level`, `data-percent`); hidden without a reading |
 | `[data-testid="limit-gauge"][data-kind]` | one plan limit in the Usage dialog; `[data-testid="limits-note"]` says why there is none |
 | `[data-testid="agent-receipt"]` | in the inspector: the receipt of a lead's last turn |
+| `[data-testid="crew-git"]` | on a crew row: its branch and working tree (§4.16), hidden when the town knows no repository for it; `[data-testid="crew-git-name"]` (cut when long) and `[data-testid="crew-git-counts"]` (never cut) |
+| `[data-testid="agent-where"]` | in the inspector's **Where**: folder, branch, model; `[data-testid="agent-session-id"]` and `[data-testid="copy-session-id"]` |
+| `[data-testid="catch-up-warning"]` | in a Catch me up crew line: a push while the tests were red, or a rate limit (§4.13) |
 | `[data-testid="director-caption"]` | the director camera's caption (plain text, not a live region); shown while it has a shot, hidden while you hold the camera or an agent is selected |
 
 ### 8.2 URL options

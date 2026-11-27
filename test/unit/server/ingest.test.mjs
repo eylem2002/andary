@@ -10,7 +10,7 @@ const ingestAt = (/** @type {any} */ ctx, /** @type {any} */ body) => ingestHook
 /** A town context that records which observers saw what. */
 function fakeContext() {
   /** @type {Record<string, any[]>} */
-  const seen = { usage: [], growth: [], notify: [], broker: [], digest: [], relay: [], broadcast: [], history: [] };
+  const seen = { usage: [], growth: [], notify: [], broker: [], digest: [], relay: [], broadcast: [], history: [], git: [] };
   const ctx = {
     counts: { events: 0 },
     usage: { observe: (/** @type {any} */ e, /** @type {number} */ ts) => seen.usage.push({ ...e, observedTs: ts }) },
@@ -18,6 +18,7 @@ function fakeContext() {
     notifier: { observe: (/** @type {any} */ e, /** @type {number} */ ts) => seen.notify.push({ ...e, ts }) },
     broker: { observe: (/** @type {any} */ e, /** @type {number} */ ts) => seen.broker.push({ ...e, ts }) },
     digest: { observe: (/** @type {any} */ e, /** @type {number} */ at) => seen.digest.push({ event: e, at }) },
+    git: { observe: (/** @type {any} */ e) => seen.git.push(e) },
     relay: { send: (/** @type {any} */ envelope) => seen.relay.push(envelope) },
     history: { push: (/** @type {any} */ envelope) => seen.history.push(envelope) },
     recorder: null,
@@ -40,7 +41,7 @@ describe('ingest', () => {
     const { ctx, seen } = fakeContext();
     const [envelope] = ingestAt(ctx, { ts: 5, source: 'claude', event: { hook_event_name: 'Stop', session_id: 's', andary_member: 'Mallory' } });
     assert.deepEqual([envelope.id, envelope.ts, envelope.event.andary_member], [1, 5, undefined]);
-    for (const key of ['usage', 'growth', 'notify', 'broker', 'digest', 'relay', 'history', 'broadcast']) assert.equal(seen[key].length, 1, key);
+    for (const key of ['usage', 'growth', 'notify', 'broker', 'digest', 'git', 'relay', 'history', 'broadcast']) assert.equal(seen[key].length, 1, key);
     assert.equal(seen.broadcast[0].e.id, 1);
     // The usage reader gets the hook's start time: a compaction then drops older context readings.
     assert.equal(seen.usage[0].observedTs, 5);
@@ -162,7 +163,7 @@ describe('ingest', () => {
     assert.deepEqual(envelopes.map((e) => e.ts), [now - 1000, now - 60 * 60 * 1000, now]);
     assert.deepEqual(names(seen.growth), ['Stop', 'PreToolUse', 'PermissionRequest']);
     // Their crews' catch-up is theirs, and their prompts are not yours: no digest, no presence.
-    for (const key of ['usage', 'notify', 'broker', 'digest', 'relay']) assert.equal(seen[key].length, 0, key);
+    for (const key of ['usage', 'notify', 'broker', 'digest', 'git', 'relay']) assert.equal(seen[key].length, 0, key);
     assert.equal(seen.broadcast.length, 3);
   });
 });

@@ -106,7 +106,7 @@ export function socketUrl(pageUrl) {
 
 /**
  * @typedef {object} LiveOptions
- * @property {{ ingest: (e: any) => any, setApproval: (a: any) => void, setUsage?: (u: unknown, days?: unknown) => void, setNote?: (n: unknown) => void, reset: () => void }} store
+ * @property {{ ingest: (e: any) => any, setApproval: (a: any) => void, setUsage?: (u: unknown, days?: unknown) => void, setNote?: (n: unknown) => void, setGit?: (g: unknown) => void, reset: () => void }} store
  * @property {boolean} [authenticated]   false starts in "Sign in" and waits for a valid sign-in
  * @property {(status: LinkStatus) => void} [onStatus]
  * @property {(settings: object) => void} [onSettings]
@@ -147,6 +147,7 @@ const MESSAGES = Object.freeze({
   note: (m, to) => to.store.setNote?.(m.n),
   settings: (m, to) => to.onSettings(m.settings ?? {}),
   usage: (m, to) => to.store.setUsage?.(m.u, m.days),
+  git: (m, to) => to.store.setGit?.(m.g),
   progress: (m, to) => to.onProgress(m.p),
   limits: (m, to) => to.onLimits(m.limits),
   'notify-test': (m, to) => to.onNotifyTest(m.ok === true),
@@ -179,6 +180,14 @@ function said(kind, m, to) {
  */
 function applyNotes(store, notes) {
   if (Array.isArray(notes)) for (const note of notes) store.setNote?.(note);
+}
+
+/**
+ * Each repository's branch from hello (§4.16): owners only; a viewer, and an older server, send none.
+ * @param {LiveOptions['store']} store @param {unknown} git
+ */
+function applyGit(store, git) {
+  if (Array.isArray(git)) for (const status of git) store.setGit?.(status);
 }
 
 /** Where a server message goes when the page did not ask for it. */
@@ -287,6 +296,7 @@ export function connectLive({
     for (const envelope of message.history ?? []) ingest(envelope);
     for (const approval of message.approvals ?? []) store.setApproval(approval);
     applyNotes(store, message.notes);
+    applyGit(store, message.git);
     const usage = message.usage ?? {};
     for (const record of Array.isArray(usage.agents) ? usage.agents : []) store.setUsage?.(record);
     if (Array.isArray(usage.days)) store.setUsage?.(null, usage.days);

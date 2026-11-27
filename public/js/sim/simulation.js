@@ -8,11 +8,24 @@
 // where it left off. Answers to PermissionRequest are awaited even while paused.
 
 import { createClock } from './clock.js';
-import { MODELS, PROCEDURAL_PROJECTS, PROJECTS } from './corpus.js';
+import { HOME, MODELS, PROCEDURAL_PROJECTS, PROJECTS } from './corpus.js';
 import { Crew } from './crew.js';
 import { disbandTeam, teamRounds, workSession } from './procedural.js';
 import { createRandom } from './random.js';
 import { apiServerScenario, docsSiteScenario, webAppTeamScenario } from './scenarios.js';
+
+/**
+ * The story's branch for a crew's folder (`<HOME>/code/<project>`), or null: the demo's made-up
+ * git status (sources/demo-git.js) names it.
+ * @param {string} cwd
+ * @returns {string|null}
+ */
+export function demoBranch(cwd) {
+  const prefix = `${HOME}/code/`;
+  if (!cwd.startsWith(prefix)) return null;
+  const name = cwd.slice(prefix.length);
+  return Object.hasOwn(PROJECTS, name) ? PROJECTS[name].branch : null;
+}
 
 /** No decision on a PermissionRequest within this long (story time) → carry on as if allowed. */
 export const PERMISSION_TIMEOUT_MS = 25_000;

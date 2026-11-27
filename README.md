@@ -266,6 +266,25 @@ file is only a note under both rows, as an edit must match what is in the file. 
 hour, or until the agents finish. Andary compares paths as written: a symbolic link, or a disk that
 ignores case, can hide one.
 
+**Pushed while the last test run failed.** When a crew pushes with git while its latest test run
+(by the lead or a helper) had failed, the agent's row says so ("Pushed while the last test run
+failed: npm test"), the activity log gets a warning, and it counts in **need you** until you set it
+aside, the crew pushes again after a passing run, or the crew leaves. Only a failure the exit
+status proves counts (`npm test | tail` proves nothing), and `npm test && git push` never does.
+
+### Branch, worktree and where an agent works
+
+Under each crew's goal, a line says which branch it is on and how its working tree stands:
+`fix/cart-total ↑1 · 2 changed` (commits ahead `↑` and behind `↓` its upstream, then changed and new
+files, or "clean"), with a worktree's folder name first when the crew works in a linked worktree.
+Andary reads it with `git status` itself, read-only, at most once every 10 seconds per repository,
+after a step that may have changed it (an edit, a shell command, a turn ending); it never runs a
+shell, stops git after two seconds, and in a huge working tree stops counting new files (and says
+so). File names never leave the server, only the counts. An agent's details (**Where**) give the
+crew's folder, the branch in words, the model, and the session id with a **Copy** button (for
+`claude --resume <id>` or `codex resume <id>`). A teammate's crew in a team town shows no branch:
+their folders are on their computer.
+
 ### Turn receipts
 
 When a lead's turn ends, its details (**Last turn**) and the activity log get a receipt: the files
@@ -290,7 +309,8 @@ answer, in the town or in the terminal. Then, and when you open the town within 
 **Catch me up** button sits beside the "need you" one. It shows one line per crew, such as
 "api-server: 3 turns, tests passing, 1 commit pushed, 2 files changed", with what each one's
 latest turn said: crews that need you first (a click goes to what they need), quiet ones in a
-line at the end. Press `W` any time for what happened since you last looked. The server keeps
+line at the end. A push while the last test run failed and a turn stopped by a rate limit stand
+out on lines of their own, and those crews come right after the ones that need you. Press `W` any time for what happened since you last looked. The server keeps
 the counts for the last day, in memory only: a page reload loses nothing, a restart of Andary
 forgets them (the dialog then says it only remembers since the restart). A teammate's crews in a
 team town are theirs and left out.
@@ -477,6 +497,10 @@ Andary sees what your agents see, so it is locked down:
   sent; prompts and commands are never written to disk unless you pass `--record` (small state
   files in `~/.andary` keep usage totals with the transcript paths they came from, and the
   town's points);
+- to show each crew's branch, the server runs `git status` itself in the repositories your
+  local agents work in: without a shell, with no optional locks (nothing is written, not even
+  git's index cache) and no file-system monitor, stopped after two seconds; only the branch names
+  and counts reach your browser, never file names, and never a teammate's town;
 - a strict Content-Security-Policy, no third-party requests (fonts and three.js are bundled), and
   no event text is ever rendered as HTML;
 - the installer keeps a backup of every file it changes and writes through temporary files it

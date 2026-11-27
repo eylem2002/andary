@@ -100,6 +100,8 @@ const WAITED_WORDS = {
   stuck: (waited) => `stuck for ${waited}`,
   // Two agents on the same files: it happened that long ago, nobody waits.
   conflict: (waited) => `${waited} ago`,
+  // A push while the tests were red: it happened that long ago.
+  pushed: (waited) => `pushed ${waited} ago`,
 };
 
 /**
