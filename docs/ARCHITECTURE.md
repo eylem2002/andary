@@ -128,7 +128,7 @@ references may cross.
 | how another agent's events are translated | `server/adapters/` |
 | what happens to an event on the server | `server/ingest.mjs` |
 | when an agent waits for you, and what each hook proves | `public/js/core/dialogs.js` (`afterHook`), `server/hook-steps.mjs` |
-| when you were away, and what your crews did meanwhile (Catch me up) | `server/digest.mjs`, `public/js/core/digest.js`, `public/js/core/shell.js`, `public/js/ui/catch-up.js` |
+| when you were away, and what your crews did meanwhile (Catch me up) | `server/digest.mjs`, `public/js/core/digest.js`, `public/js/core/shell.js`, `public/js/ui/catch-up.js`, `public/js/ui/standup.js` |
 | who may connect, and what they may do | `server/auth.mjs`, `server/browsers.mjs`, `server/security.mjs` |
 | the team town | `server/team.mjs`, `ingestTeam` in `server/ingest.mjs` |
 | a team town's people: roster, personal links, profiles, homes, the "You" dialog | `server/people.mjs`, `public/js/core/profile.js`, `ui/character.js`, `ui/town-people.js`, `world/agents/looks.js` (with `figure-body.js`, `figure-hats.js`, `figure-person.js`) |
@@ -140,6 +140,8 @@ references may cross.
 | what needs you, and when an agent seems stuck | `public/js/core/dialogs.js`, `store-dialogs.js`, `waits.js`, `attention.js`, `loops.js`, `public/js/ui/needs-you.js` |
 | how a shell command line reads (segments, programs, redirections, folders) | `public/js/core/shell.js` |
 | what a lead's turn did (turn receipts: files, tests after the last edit, cost) | `public/js/core/receipts.js`, `public/js/core/shell.js`, `public/js/ui/inspector.js` |
+| what each crew changed since you last reviewed it (the review queue, `R`) | `public/js/core/review.js`, `public/js/ui/review.js` |
+| resuming and handing off a crew, and the standup export | `public/js/core/handoff.js`, `public/js/ui/handoff.js`, `public/js/ui/standup.js`, `public/js/ui/copy.js` |
 | two agents on the same files, and the git commands that put their work at risk | `public/js/core/conflicts.js`, `git-commands.js`, `paths.js`, `server/work-trees.mjs` |
 | who walks where, and what they say | `public/js/core/director.js`, `director-queue.js`, `humor.js` |
 | the HUD | `public/js/ui/` (`hud.js` composes it) |

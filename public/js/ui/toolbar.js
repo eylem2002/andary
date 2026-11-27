@@ -38,6 +38,7 @@ const TOOLS = [
   { id: 'toggle-sound', label: 'Sound', key: 'M', keyName: 'M', compact: true },
   { id: 'usage', label: 'Usage and cost', key: 'U', keyName: 'U', compact: true },
   { id: 'leaderboard', label: 'Leaderboard', key: 'L', keyName: 'L', compact: true },
+  { id: 'review', label: 'Review', key: 'R', keyName: 'R', compact: true },
   '|',
   { id: 'pause', label: 'Pause demo', key: 'Space', keyName: 'Space', only: 'demo', compact: true },
   { id: 'cycle-speed', label: 'Demo speed', only: 'demo', compact: true },
@@ -55,6 +56,8 @@ export function createToolbar(ctx) {
   const tips = {};
   // The Usage button's gauge: the most used plan limit, when the andary-limits mod reports them.
   const gauge = meter('usage-gauge');
+  // The Review button's badge: how many crews have turns you have not reviewed.
+  const badge = h('span', { class: 'hud-tool__badge', 'data-testid': 'review-count', 'aria-hidden': 'true', hidden: true });
   const children = TOOLS.map((tool) => (tool === '|' ? h('span', { class: 'hud-toolbar__sep', 'aria-hidden': 'true' }) : makeButton(tool)));
   const el = h('div', { class: 'hud hud-toolbar', role: 'toolbar', 'aria-label': 'Town controls' }, ...children);
 
@@ -67,7 +70,7 @@ export function createToolbar(ctx) {
       'data-tool': tool.id,
       'aria-keyshortcuts': tool.keyName,
       tabindex: '-1',
-    }, h('span', { class: 'hud-tool__face' }), tool.id === 'usage' ? gauge.el : null, tip));
+    }, h('span', { class: 'hud-tool__face' }), tool.id === 'usage' ? gauge.el : null, tool.id === 'review' ? badge : null, tip));
     button.addEventListener('click', () => {
       ctx.run(tool.id);
       setRoving(button);
@@ -142,6 +145,11 @@ export function createToolbar(ctx) {
     setText(/** @type {HTMLElement} */ (tips.usage.firstElementChild), usage.tip);
     gauge.update(usage.gauge);
     setButton('leaderboard', 'trophy', 'Leaderboard', null);
+    const toReview = ctx.review.count(ctx.store.getState());
+    setButton('review', 'review', toReview ? `Review: ${toReview} ${toReview === 1 ? 'crew has' : 'crews have'} turns to review` : 'Review: nothing to review', null);
+    setText(badge, String(toReview));
+    setHidden(badge, toReview === 0);
+    setText(/** @type {HTMLElement} */ (tips.review.firstElementChild), toReview ? `Review (${toReview})` : 'Review');
     // Keep the toolbar's one tab stop on a button that is actually shown in this layout.
     const current = Object.values(buttons).find((b) => b.getAttribute('tabindex') === '0');
     if (!current || current.hidden || (view.mobile && current.classList.contains('hud-tool--wide-only'))) setRoving(buttons.follow);

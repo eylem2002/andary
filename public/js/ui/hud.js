@@ -18,6 +18,7 @@ import { PERSON_COLOR_NAMES } from '../core/profile.js';
 import { goToNeed, handleShortcut, openDialog, panelsHidden, runAction, select, setFollow } from './hud-actions.js';
 import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
 import { createInspector } from './inspector.js';
+import { createReview } from './review.js';
 import { createWeatherDriver } from '../core/town-weather.js';
 import { MILESTONES, unlockedAt } from '../core/growth.js';
 import { readAccounts } from '../core/limits.js';
@@ -82,12 +83,14 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     // Someone watching a team town (its view link, or a teammate's personal link) can answer nothing: nothing needs them.
     needsYou: createNeedsYou({ viewOnly: () => ['viewer', 'person'].includes(view.serverSettings.team?.role), onChange: () => ctx.refresh() }),
     goToNeed: (item) => goToNeed(hud, item),
-    // The director camera and the catch-up need the finished context, so they are attached right below.
+    // The director camera, the catch-up and the review queue need the finished context, so they are attached right below.
     cinema: /** @type {any} */ (null),
     catchUp: /** @type {any} */ (null),
+    review: /** @type {any} */ (null),
   };
   ctx.cinema = createCinema(ctx);
   ctx.catchUp = createCatchUp(ctx);
+  ctx.review = createReview(ctx);
   const ui = createParts(ctx);
   const hud = { ctx, ui };
   const effects = createEffectQueue();
@@ -385,7 +388,7 @@ function createParts(ctx) {
     toolbar: createToolbar(ctx),
     notices: createNotices(ctx),
     walk: createWalk(ctx),
-    dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx), usage: createUsageDialog(ctx), leaderboard: createLeaderboard(ctx), catchUp: ctx.catchUp, character: createCharacterDialog(ctx) },
+    dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx), usage: createUsageDialog(ctx), leaderboard: createLeaderboard(ctx), catchUp: ctx.catchUp, review: ctx.review, character: createCharacterDialog(ctx) },
   };
 }
 
@@ -460,6 +463,7 @@ function flush(hud, shell, effects) {
   ui.dialogs.usage.render();
   ui.dialogs.leaderboard.render();
   ui.dialogs.catchUp.render();
+  ui.dialogs.review.render();
   playEffects(ctx, effects.take(), state);
   ui.activity.settle();
 }

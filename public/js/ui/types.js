@@ -117,6 +117,7 @@
  * @property {ReturnType<typeof import('./needs-you.js').createNeedsYou>} needsYou  what needs the viewer (core/attention.js)
  * @property {(item: import('../core/attention.js').AttentionItem) => void} goToNeed  goes to one thing that needs the viewer
  * @property {ReturnType<typeof import('./catch-up.js').createCatchUp>} catchUp  Catch me up: the dialog and the masthead's offer
+ * @property {ReturnType<typeof import('./review.js').createReview>} review  the review queue: the dialog and the toolbar's count
  */
 
 export {};

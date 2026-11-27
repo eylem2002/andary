@@ -1414,3 +1414,71 @@ section.
      backpack, cup, beard, earrings) plus 24 helpers in 55–57 draw calls, one per figure as
      before. Frame rate is not meaningful under the software renderer here; on a phone it is
      bound by those draw calls, unchanged from PR 1's 58–60.
+269. **The review queue rolls up the receipts the browser already keeps** (the latest 60 turns
+     across crews, `MAX_RECEIPTS`), not a new server-side store: a crew whose older turns fell off
+     that list shows only the ones still kept, and the dialog says the town remembers the latest 60.
+     The design suggested a server-side "reviewed at"; marks are kept in this browser instead
+     (localStorage, `andary:reviewed`, per town as the origin is, shared by its tabs), because a
+     review is one person's and nothing about it needs to leave the browser.
+270. **A review mark is the end of the crew's latest turn when you mark it**, in the receipts' own
+     clock (the hooks'), so it is never compared with the browser's clock. A turn that ends later
+     brings the crew back with only the turns after the mark. The demo's marks last as long as the
+     page (its story has its own clock).
+271. **The review's git commands are `git -C <cwd> diff 'HEAD@{<UTC time>}'` and
+     `git -C <cwd> status --short`.** The diff compares the commit the work tree was on at the mark
+     (or at the first unreviewed turn's start) with the work tree now. It is not a snapshot of the
+     work tree at the mark: changes left uncommitted before the mark show again, and untracked
+     files show only after `git add -N`; the card says so, and the status line lists them. The
+     town knows no branch or base commit (study items 2 and 3 are not built yet), and git's reflog
+     answers "where was HEAD then" locally. When the reflog does not reach back that far, git warns
+     and uses its oldest entry; a repository with no reflog at all (`core.logAllRefUpdates` off)
+     answers "unknown revision", and the card says `git diff HEAD` then shows the uncommitted work.
+     The time is written in UTC so the computer's time zone does not matter. A teammate's crew in
+     a team town gets the same commands with a note that they run on their computer.
+272. **Review warnings, in order**: the latest test run failed; each receipt's flag (said done
+     without a test after the edits, tests not re-run, a test that proves nothing), said once with
+     "(n turns)"; another crew edited files in the folder; turns that stopped on an error; turns
+     that were interrupted; failed calls. Crews with warnings come first, then the most recently
+     finished. "Pushed while red" and risky commands (study items 1 and 2) are not in receipts yet,
+     so they are not shown; nor are PR and CI status (item 3).
+273. **The Review button lives in the toolbar beside Usage and Leaderboard**, with a badge that
+     counts crews (not turns) waiting for review; the masthead is kept for what needs you now and
+     has no room on a phone. It shows whether or not anything waits, so `R` is discoverable.
+274. **A file in a review card opens the town's diff when one of the crew's agents still holds a
+     change to that path** (the newest; agents keep their last 20 changes); otherwise it is plain
+     text. The card never edits or stages anything.
+275. **The resume and handoff card is on a lead's details only** (a helper resumes with its lead's
+     session). The resume command is `cd <cwd> && claude --resume <id>`, or `codex resume <id>` for
+     a Codex session, each word single-quoted only when a shell would read it otherwise. A
+     teammate's crew in a team town gets no resume command (its session is on their computer) but
+     can still be handed off.
+276. **The handoff's "last messages" are the last words of the crew's three latest finished turns**
+     (receipts' `said`, ≤ 200 characters each, with when they ended in UTC and how long they took),
+     or the lead's last message when no turn has finished. "Open warnings" are what the crew needs
+     you for now plus the latest turn's review warnings. Files are those of every kept turn, merged
+     by path, at most 25 listed. No model summarises anything (the study's "would not build").
+277. **Copying is the only way out**: the handoff, the resume command, the git command and the
+     standup go to the clipboard from inside the click, as the setup dialog's copy buttons do.
+     When the browser refuses (permissions), the text is shown selected so it can be copied by
+     hand. The handoff and the standup can be read first in a "Show …" disclosure; the UI says
+     that the handoff quotes your prompt and the agent's words.
+278. **The standup export is Catch me up with a "Today" period**: midnight on the browser's clock,
+     moved onto the server's with hello's offset, asked of the same digest (so it covers at most
+     the day the server keeps, and only since it started). Its Markdown has a section per crew
+     (what it did, its latest turn's words, what it needs you for, and its estimated cost so far,
+     summed over its agents' usage, which is the session's total, not today's) and the quiet
+     crews. Looking at Today counts as a look, so "since I last looked" starts after it. PRs are not
+     listed: the town does not know them yet (study item 3).
+279. **Copied commands are written for a POSIX shell (bash, zsh, Git Bash)**, single-quoting a word
+     only when the shell would otherwise read it. A crew whose folder looks like Windows
+     (`C:\…`, `C:/…` or `\\server\share`) gets double quotes instead, which cmd and PowerShell
+     both read (a Windows path holds no `"`), and its resume command is `pushd "<folder>" && …`:
+     `pushd` changes the drive too in cmd and in PowerShell, and PowerShell 7 runs `&&`
+     (Windows PowerShell 5.1 does not; run the two parts on separate lines there).
+280. **A handoff's open warnings leave out a turn that merely finished** (the "need you" item for
+     a finished turn); what blocks, stopped or seems stuck, conflicts and notes stay. Commands and
+     paths in the handoff keep their spaces; only line breaks become spaces inside inline code.
+281. **Mark reviewed marks the turns the card showed** (its latest turn's end), so a turn that ends
+     while the dialog is open stays to review. Before writing, the browser reads the marks again
+     and keeps another tab's later marks; a mark never moves a crew's mark back. Another tab
+     clearing the town's storage clears this tab's marks too.

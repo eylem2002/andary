@@ -19,7 +19,7 @@ import { nextPlaceNames } from '../core/place-names.js';
  * @property {ReturnType<typeof import('./walk.js').createWalk>} walk
  */
 
-/** @typedef {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'catchUp'|'character'} DialogName */
+/** @typedef {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'catchUp'|'review'|'character'} DialogName */
 
 /** @typedef {{ ctx: HudContext, ui: HudParts }} Hud */
 
@@ -156,6 +156,7 @@ export function runAction(hud, action) {
     'cycle-speed': () => cycleSpeed(ctx),
     'needs-you': () => goToNextNeed(hud),
     'catch-up': () => openDialog(hud, 'catchUp'),
+    review: () => openDialog(hud, 'review'),
     help: () => openDialog(hud, 'help'),
     usage: () => openDialog(hud, 'usage'),
     leaderboard: () => openDialog(hud, 'leaderboard'),

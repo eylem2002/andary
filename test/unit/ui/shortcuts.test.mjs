@@ -28,6 +28,8 @@ describe('shortcutFor', () => {
       i: 'needs-you',
       w: 'catch-up',
       W: 'catch-up',
+      r: 'review',
+      R: 'review',
       '?': 'help',
     };
     for (const [key, action] of Object.entries(cases)) assert.equal(shortcutFor({ key }), action, key);
