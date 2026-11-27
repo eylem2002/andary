@@ -108,12 +108,15 @@ export function createHub(maxClients) {
 
 /**
  * @param {import('./app.mjs').TownContext} ctx
- * @returns {{ remoteApprovals: boolean, approvalTimeoutMs: number, notify: boolean, notifyLimits: boolean }}
+ * @returns {{ remoteApprovals: boolean, approvalTimeoutMs: number, notify: boolean, notifyLimits: boolean, gh: { on: boolean, available: boolean, hint: 'missing'|'signin'|null } }}
  */
 export function publicSettings(ctx) {
   // Whether phone notifications are on, never the topic: /api/hello answers without signing in.
-  return { remoteApprovals: ctx.settings.remoteApprovals, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: ctx.notifier.on, notifyLimits: ctx.notifier.limitNotes };
+  return { remoteApprovals: ctx.settings.remoteApprovals, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: ctx.notifier.on, notifyLimits: ctx.notifier.limitNotes, gh: ctx.prs.settings() };
 }
+
+/** What a viewer or a teammate learns of PR and CI status: nothing (it is the owner's). */
+const NO_GH = Object.freeze({ on: false, available: false, hint: null });
 
 /**
  * The team part of a browser's settings, null when this server is not a team host.
@@ -190,7 +193,7 @@ export function dropRemovedPeople(ctx) {
  * @param {BrowserRole} role
  */
 function settingsFor(ctx, role) {
-  const settings = role === 'owner' ? publicSettings(ctx) : { remoteApprovals: false, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: false, notifyLimits: false };
+  const settings = role === 'owner' ? publicSettings(ctx) : { remoteApprovals: false, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: false, notifyLimits: false, gh: NO_GH };
   return ctx.team ? { ...settings, team: teamSettings(ctx, role) } : settings;
 }
 
@@ -300,6 +303,8 @@ function attachBrowser(ctx, connection, role, person) {
     notes: owner ? ctx.notes.list() : [],
     usage: owner ? ctx.usage.snapshot() : { agents: [], days: [] },
     limits: owner ? ctx.limits.snapshot() : { accounts: [], contexts: {} },
+    // §4.16: each repository's pull request and CI, as the owner's gh last reported it.
+    prs: owner ? ctx.prs.list() : [],
     progress: ctx.progress.snapshot(),
     notifyUrl: owner ? ctx.notifier.url : null,
     // The latest time the owner was away: a page opened after one offers to catch up.
@@ -388,17 +393,23 @@ function handleBrowserMessage(ctx, connection, text) {
  * @param {any} settings
  */
 function applySettings(ctx, connection, settings) {
-  if (typeof settings?.remoteApprovals !== 'boolean') {
-    sendError(ctx, connection, 'settings.remoteApprovals must be true or false');
+  const remote = settings?.remoteApprovals;
+  const gh = settings?.gh;
+  if ((remote !== undefined && typeof remote !== 'boolean') || (gh !== undefined && typeof gh !== 'boolean') || (remote === undefined && gh === undefined)) {
+    sendError(ctx, connection, 'settings.remoteApprovals and settings.gh must be true or false');
     return;
   }
-  if (ctx.settings.remoteApprovals !== settings.remoteApprovals) {
-    ctx.settings.remoteApprovals = settings.remoteApprovals;
-    ctx.log(`Remote approvals turned ${settings.remoteApprovals ? 'on' : 'off'} from the town`);
+  if (typeof gh === 'boolean' && ctx.prs.settings().on !== gh) {
+    ctx.prs.setWanted(gh);
+    ctx.log(`PR and CI status turned ${gh ? 'on' : 'off'} from the town`);
+  }
+  if (typeof remote === 'boolean' && ctx.settings.remoteApprovals !== remote) {
+    ctx.settings.remoteApprovals = remote;
+    ctx.log(`Remote approvals turned ${remote ? 'on' : 'off'} from the town`);
   }
   ctx.hub.broadcastOwners({ t: 'settings', settings: publicSettings(ctx) });
   // Nobody may answer from the town any more: give waiting prompts back to the terminal.
-  if (!settings.remoteApprovals) ctx.broker.releaseAll();
+  if (remote === false) ctx.broker.releaseAll();
 }
 
 /**

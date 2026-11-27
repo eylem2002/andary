@@ -10,7 +10,8 @@ import { createWorkTrees } from './work-trees.mjs';
 import { createTownDigest } from './digest.mjs';
 import { createNoteDesk } from './notes.mjs';
 import { createLimitsTracker } from './limits.mjs';
-import { announcePeople, announcePresence, tellPerson, announceTeam, createHub, dropRemovedPeople, handleUpgrade } from './browsers.mjs';
+import { createPrWatch } from './pr-watch.mjs';
+import { announcePeople, announcePresence, publicSettings, tellPerson, announceTeam, createHub, dropRemovedPeople, handleUpgrade } from './browsers.mjs';
 import { createPresence } from './presence.mjs';
 import { createPeople } from './people.mjs';
 import { createTeamHost, createTeamRelay, lanAddresses, teamSecret } from './team.mjs';
@@ -37,6 +38,8 @@ const NOTE_SWEEP_MS = 15_000;
  * @property {boolean} [remoteApprovals]
  * @property {string|null} [notifyUrl]    ntfy topic URL for phone notifications (null: off)
  * @property {boolean} [notifyLimits]      a phone note when a plan limit reaches 90% (off by default)
+ * @property {boolean} [gh]                PR and CI status through the user's own gh (on by default when gh is on the PATH; --no-gh)
+ * @property {Partial<import('./pr-watch.mjs').PrWatchOptions>} [prWatch]  a fake gh and clock for tests; no CLI flag
  * @property {number} [notifyDelayMs]      how long a dialog's phone note waits (DIALOG_DELAY_MS); for tests, no CLI flag
  * @property {number} [awayMs]             how long without you counts as away (AWAY_MS); for tests, no CLI flag
  * @property {{ porchMs?: number, insideMs?: number }} [presenceMs]  a team town's porch and inside timers (presence.mjs); for tests, no CLI flag
@@ -72,6 +75,7 @@ const NOTE_SWEEP_MS = 15_000;
  * @property {import('./work-trees.mjs').WorkTrees} [workTrees]  where local hooks' work trees start (andary_root)
  * @property {ReturnType<typeof createTownDigest>} digest   what your crews did while you were away
  * @property {ReturnType<typeof createLimitsTracker>} limits  plan limits from the andary-limits mod
+ * @property {ReturnType<typeof createPrWatch>} prs  PR and CI status through the user's gh (§4.16)
  * @property {import('./notes.mjs').NoteDesk} notes  the owner's notes waiting for their agents' next step (§4.15)
  * @property {import('./rate-limit.mjs').TokenBucket} noteLimiter  notes from browsers, all together
  * @property {NodeJS.Timeout|null} [noteTimer]  expires notes that waited too long
@@ -105,6 +109,7 @@ const NOTE_SWEEP_MS = 15_000;
  *   answers to the tunnel's name (url null: the tunnel is down), records it in server.json, and
  *   returns the view link at that address
  * @property {() => number} browserCount
+ * @property {() => { on: boolean, available: boolean, hint: 'missing'|'signin'|null }} ghSettings  PR and CI status (§4.16)
  * @property {() => Promise<void>} stop
  */
 
@@ -176,6 +181,7 @@ export async function startTownServer(options = {}) {
     tunnelPort: tunnelSide.port,
     setTunnel: tunnelSetter(ctx, state, config, tunnelSide.port),
     browserCount: () => ctx.hub.size,
+    ghSettings: () => ctx.prs.settings(),
     stop: once(() => stopServer(ctx, [listener, ...tunnelSide.listeners], config)),
   };
 }
@@ -319,6 +325,15 @@ function createContext(config, options) {
         notifier.limitsChanged(account, snapshot.accounts.length);
       },
     }),
+    // Owners only, like costs: a repository's pull request is this computer's, never relayed.
+    prs: createPrWatch({
+      log: config.log,
+      ...options.prWatch,
+      wanted: options.gh ?? true,
+      onChange: (pr) => hub.broadcastOwners({ t: 'pr', pr }),
+      onSettings: () => hub.broadcastOwners({ t: 'settings', settings: publicSettings(ctx) }),
+      onFailing: () => notifier.ciFailed(),
+    }),
     progress: createProgress({
       stateFile: config.writeState ? join(config.home, 'progress.json') : null,
       onChange: (progress) => hub.broadcast({ t: 'progress', p: progress }),
@@ -401,6 +416,7 @@ async function stopServer(ctx, listeners, config) {
   // First, so no phone note goes out while the server stops: whoever stops it is at the computer.
   ctx.notifier.dispose();
   ctx.digest.dispose();
+  ctx.prs.dispose();
   ctx.broker.releaseAll();
   // Last events to the team host, but never hold up shutdown for long.
   if (ctx.relay) await Promise.race([ctx.relay.flush(), new Promise((resolve) => setTimeout(resolve, 1500).unref())]);

@@ -155,6 +155,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     /** @param {{ remoteApprovals?: boolean, approvalTimeoutMs?: number }} settings */
     setServerSettings(settings) {
       view.serverSettings = { ...view.serverSettings, ...settings };
+      offerGhHint(ctx);
       ctx.refresh();
     },
     /**
@@ -304,6 +305,22 @@ function showProgress({ ctx }, shell, raw) {
     ctx.announcer.polite(`The town grew: ${milestone.name} ${milestone.where}.`);
   }
   ctx.refresh();
+}
+
+/**
+ * PR and CI status could not ask gh (§4.16): it is not on the PATH, or not signed in. Said once
+ * per browser, quietly, and never as an error; Settings keeps saying it while it holds.
+ * @param {HudContext} ctx
+ */
+function offerGhHint(ctx) {
+  const hint = ctx.view.serverSettings.gh?.hint;
+  if (ctx.view.mode !== 'live' || !hint) return;
+  const seen = hint === 'missing' ? 'ghMissingSeen' : 'ghSigninSeen';
+  if (ctx.prefs[seen]) return;
+  ctx.setPrefs({ [seen]: true });
+  ctx.toasts.show(hint === 'missing'
+    ? { icon: 'info', title: 'PR and CI status needs gh', body: 'Install the GitHub CLI and sign in (gh auth login) to see a pushed branch\'s pull request and checks on its crew.' }
+    : { icon: 'info', title: 'gh is not signed in', body: 'Run gh auth login to see pull requests and CI on your crews. Andary never sees a token.' });
 }
 
 /**

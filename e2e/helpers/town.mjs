@@ -32,10 +32,12 @@ const START_TIMEOUT_MS = 15_000;
  */
 
 /**
- * @param {{ remoteApprovals?: boolean, args?: string[], env?: Record<string, string> }} [options]
+ * A town never asks the computer's own gh about pull requests unless a test says so (`gh: true`,
+ * usually with a fake gh first on the PATH in `env`).
+ * @param {{ remoteApprovals?: boolean, gh?: boolean, args?: string[], env?: Record<string, string> }} [options]
  * @returns {Promise<Town>}
  */
-export async function startTown({ remoteApprovals = false, args = [], env = {} } = {}) {
+export async function startTown({ remoteApprovals = false, gh = false, args = [], env = {} } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'andary-test-'));
   const home = join(root, 'home');
   const claudeDir = join(root, 'claude');
@@ -43,7 +45,7 @@ export async function startTown({ remoteApprovals = false, args = [], env = {} }
   /** @type {NodeJS.ProcessEnv} */
   const childEnv = { ...process.env, ANDARY_HOME: home, CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: join(root, 'codex'), ...env };
   delete childEnv.ANDARY_PORT;
-  const cliArgs = [CLI, 'start', '--port', '0', '--no-open', ...(remoteApprovals ? ['--remote-approvals'] : []), ...args];
+  const cliArgs = [CLI, 'start', '--port', '0', '--no-open', ...(remoteApprovals ? ['--remote-approvals'] : []), ...(gh ? [] : ['--no-gh']), ...args];
   const child = spawn(process.execPath, cliArgs, { cwd: root, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   child.stdout.setEncoding('utf8').on('data', (chunk) => {

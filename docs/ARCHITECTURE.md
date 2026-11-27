@@ -134,6 +134,7 @@ references may cross.
 | a team town's people: roster, personal links, profiles, homes, the "You" dialog | `server/people.mjs`, `public/js/core/profile.js`, `ui/character.js`, `ui/town-people.js`, `world/agents/looks.js` (with `figure-body.js`, `figure-hats.js`, `figure-person.js`) |
 | notes to agents, and Deny and stop | `server/notes.mjs`, `public/js/core/notes.js`, `hooks/hook.mjs` (`notesFrom`, `decisionFrom`), `public/js/ui/agent-note.js`, `public/js/ui/approvals.js` |
 | the team town on the internet (`--tunnel`) | `server/tunnel.mjs` (cloudflared), `server/tunnel-watchdog.mjs` (stops it with the town), `isTunnelled` in `server/auth.mjs`, `openTunnel` in `server/cli/start.mjs` |
+| PR and CI status through the user's gh | `server/pr-watch.mjs` (when and how gh runs), `server/programs.mjs` (finding gh), `public/js/core/pr-status.js` (pushes, gh's answer, words), `ui/crews.js` (the badge), `core/attention.js` (failing CI needs you), `sources/demo-prs.js` |
 | plan limits (the andary-limits mod) | `mods/andary-limits/`, `server/limits.mjs`, `public/js/core/limits.js`, `ui/limits.js` |
 | how a hook becomes town events | `public/js/core/events.js`, `summaries.js` |
 | crews, agents, the log | `public/js/core/store.js`, `crews.js` |

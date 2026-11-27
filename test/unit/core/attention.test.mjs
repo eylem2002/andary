@@ -511,3 +511,36 @@ describe('two agents on the same files (core/conflicts.js)', () => {
     assert.deepEqual(team.items(T0 + 2000), []);
   });
 });
+
+describe('CI failing on a pull request a crew pushed to (§4.16)', () => {
+  /** A status as the server sends it. @param {Record<string, any>} [extra] */
+  const prOf = (extra = {}) => ({
+    root: CWD, sessionIds: [SESSION], number: 12, url: 'https://github.com/acme/app/pull/12', state: 'OPEN', review: null, branch: 'feat/login', sha: 'abc',
+    checks: { state: 'failing', total: 3, failing: 1, pending: 0, failed: ['test'] }, at: T0, failingSince: T0 - 60_000, watching: false, ...extra,
+  });
+
+  test("counts on the lead of the crew that pushed, until set aside; the next head commit is a new item", () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' });
+    t.store.setPr(prOf());
+    const [item] = t.items();
+    assert.deepEqual([item.kind, item.level, item.agentKey, item.counted, item.dismissable, item.since], ['ci', 'alert', LEAD, true, true, T0 - 60_000]);
+    assert.equal(item.text, 'CI failed on feat/login (PR #12): test');
+    assert.deepEqual(t.items(T0, new Set([item.id])), []);
+    t.store.setPr(prOf({ sha: 'def' }));
+    assert.equal(t.items(T0, new Set([item.id])).length, 1);
+  });
+
+  test('not while running or passing, nor once merged or closed, nor for a crew that left or a teammate', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' });
+    for (const extra of [{ checks: { state: 'pending', total: 1, failing: 0, pending: 1, failed: [] }, failingSince: null }, { checks: { state: 'passing', total: 1, failing: 0, pending: 0, failed: [] }, failingSince: null }, { state: 'MERGED' }, { state: 'CLOSED' }, { sessionIds: ['someone-else'] }]) {
+      t.store.setPr(prOf(extra));
+      assert.deepEqual(t.items(), [], JSON.stringify(extra));
+    }
+    t.store.setPr(prOf());
+    assert.equal(t.items().length, 1);
+    t.send('SessionEnd', { reason: 'other' });
+    assert.deepEqual(t.items(), []);
+  });
+});

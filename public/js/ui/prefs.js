@@ -28,6 +28,8 @@ import { PLACE_NAMES } from '../core/place-names.js';
  * @property {'auto'|'always'|'off'} placeNames  labels on the buildings: names where they fit, always, or none (core/place-names.js)
  * @property {boolean} lookAsks      a teammate's "come look" shows a note (team towns)
  * @property {boolean} walkPad       the step pad in walk mode on phones
+ * @property {boolean} ghMissingSeen the one-time hint that PR and CI status needs gh was shown (§4.16)
+ * @property {boolean} ghSigninSeen  the one-time hint that gh is not signed in was shown
  */
 
 /** @type {Readonly<Prefs>} */
@@ -53,6 +55,8 @@ export const DEFAULT_PREFS = Object.freeze({
   placeNames: 'auto',
   lookAsks: true,
   walkPad: true,
+  ghMissingSeen: false,
+  ghSigninSeen: false,
 });
 
 export const STORAGE_KEY = PREFS_STORAGE_KEY;

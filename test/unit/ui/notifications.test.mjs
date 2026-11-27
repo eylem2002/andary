@@ -75,6 +75,15 @@ describe('what deserves a notification', () => {
     assert.deepEqual(limited.notes().map((n) => [n?.title, n?.body]), [['Crews stopped', 'Rate limited: 2 crews stopped.']]);
   });
 
+  test('failing CI names the crew, never the branch or the checks', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' });
+    t.store.setPr({ root: '/home/dev/code/api-server', sessionIds: [SESSION], number: 9, url: null, state: 'OPEN', review: null, branch: 'secret/branch', sha: 'a', checks: { state: 'failing', total: 1, failing: 1, pending: 0, failed: ['secret-check'] }, at: T0, failingSince: T0, watching: false });
+    const [note] = t.notes();
+    assert.deepEqual(note, { title: 'CI failed', body: 'CI failed on a pull request api-server (crew 1) pushed.', tag: t.items()[0].id });
+    assert.doesNotMatch(JSON.stringify(note), /secret/);
+  });
+
   test('an agent that seems stuck names the crew, never the step', () => {
     const t = town();
     for (const id of ['t1', 't2', 't3']) {

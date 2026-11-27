@@ -36,6 +36,8 @@ const START_HELP = `Options:
       --team-key <key>      Your key from "andary team invite" on the host (better: put it in
                             ANDARY_TEAM_KEY, so it stays out of ps and your shell history)
       --remote-approvals    Let the town answer your agents' permission prompts
+      --no-gh               No PR and CI status: by default, after a crew pushes, Andary asks
+                            your own GitHub CLI (gh pr view) about its pull request's checks
       --approval-timeout <s>
                             Seconds a prompt waits for the town before the terminal asks
                             (default 120, at most 140)

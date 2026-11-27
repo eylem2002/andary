@@ -10,10 +10,13 @@
 //   alert    two agents on the same files (core/conflicts.js): a Write over another agent's
 //            change, or a git command over its changes, counted until you set it aside; an Edit
 //            of such a file is a note that counts for nothing
+//   alert    CI failing on a pull request a crew pushed to (core/pr-status.js, through the owner's
+//            gh): on that crew's lead, counted until you set it aside; a new push is a new one
 //   ready    a lead finished its turn and nobody has answered: counted once Claude Code says so
 //            (idle_prompt, a minute later; Codex has no such signal: a minute too), for 30 minutes
 import { CONFLICT_MS, hazardText } from './conflicts.js';
 import { agentKeyOf } from './ids.js';
+import { ciEpisode, ciText } from './pr-status.js';
 
 /** @typedef {import('./store.js').StoreState} StoreState */
 /** @typedef {import('./store.js').AgentState} AgentState */
@@ -21,7 +24,7 @@ import { agentKeyOf } from './ids.js';
 /** @typedef {import('./store.js').Approval} Approval */
 /** @typedef {import('./dialogs.js').Dialog} Dialog */
 /** @typedef {import('./conflicts.js').Hazard} Hazard */
-/** @typedef {'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'finished'} AttentionKind */
+/** @typedef {'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'ci'|'finished'} AttentionKind */
 /** @typedef {'blocked'|'stopped'|'alert'|'ready'} AttentionLevel */
 
 /**
@@ -89,6 +92,7 @@ export function attentionItems(state, now, { dismissed } = {}) {
     const item = conflictItem(hazard, state, yours, now);
     if (item) items.push(item);
   }
+  items.push(...ciItems(state.prs ?? [], yours));
   // A dismissed item stays away until the situation changes (a new episode has a new id).
   return mergeSharedStops(items, limited)
     .filter((item) => !(item.dismissable && dismissed?.has(item.id)))
@@ -251,6 +255,40 @@ function conflictItem(hazard, state, yours, now) {
     counted: alert,
     dismissable: alert,
     crews: new Set([hazard.sessionId, ...others.map((other) => other.sessionId)]).size,
+    settled: true,
+  };
+}
+
+/** @param {readonly import('./pr-status.js').PrStatus[]} prs @param {Map<string, Session>} yours @returns {AttentionItem[]} */
+const ciItems = (prs, yours) => prs.flatMap((pr) => ciItem(pr, yours) ?? []);
+
+/**
+ * CI failing on an open pull request a crew pushed to: on the lead of the crew that pushed last and
+ * is still here, counted until set aside. The head commit is in its id, so the next push that
+ * fails again is a new item.
+ * @param {import('./pr-status.js').PrStatus} pr
+ * @param {Map<string, Session>} yours  your crews still in town
+ * @returns {AttentionItem|null}
+ */
+function ciItem(pr, yours) {
+  if (pr.checks.state !== 'failing' || pr.state !== 'OPEN' || pr.failingSince === null) return null;
+  const sessionId = [...pr.sessionIds].reverse().find((id) => yours.has(id));
+  if (sessionId === undefined) return null;
+  const agentKey = agentKeyOf(sessionId, null);
+  return {
+    id: ciEpisode(pr),
+    kind: 'ci',
+    level: 'alert',
+    sessionId,
+    agentKey,
+    agentKeys: [agentKey],
+    approvalId: null,
+    since: pr.failingSince,
+    countedSince: pr.failingSince,
+    text: ciText(pr),
+    counted: true,
+    dismissable: true,
+    crews: 1,
     settled: true,
   };
 }

@@ -2,7 +2,7 @@
 // own Claude Code" (setup commands to copy). Native <dialog> + showModal() gives focus trapping,
 // Escape to close and an inert background for free.
 import { BUILDINGS, BUILDING_KEYS } from '../core/catalog.js';
-import { h, setAttr, setHidden } from './dom.js';
+import { h, setAttr, setHidden, setText } from './dom.js';
 import { BUILDING_ICONS, icon } from './icons.js';
 import { kbd } from './parts.js';
 import { SHORTCUT_HELP } from './shortcuts.js';
@@ -101,6 +101,7 @@ export function createSettingsDialog(ctx) {
     h('p', { class: 'hud-setting__help', id: 'hud-set-remote-help', text: 'Claude Code waits up to two minutes for your answer here before asking in the terminal. Off: requests still show up here, but you answer them in the terminal.' }));
   setAttr(remote, 'aria-describedby', 'hud-set-remote-help');
   remote.addEventListener('change', () => ctx.controls.setRemoteApprovals(remote.checked));
+  const gh = ghBlock(ctx);
 
   const theme = choice('hud-set-theme', 'Theme', [['auto', 'Match the town and system'], ['light', 'Light'], ['dark', 'Dark']], ctx.prefs.theme, (value) => ctx.setPrefs({ theme: /** @type {any} */ (value) }));
   const motion = choice('hud-set-motion', 'Motion', [['system', 'Match system setting'], ['reduce', 'Reduce motion'], ['full', 'Full motion']], ctx.prefs.motion, (value) => ctx.setPrefs({ motion: /** @type {any} */ (value) }));
@@ -171,7 +172,7 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [you.el, walking.el, teamBlock, remoteBlock, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    body: [you.el, walking.el, teamBlock, remoteBlock, gh.el, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -199,6 +200,8 @@ export function createSettingsDialog(ctx) {
       you.sync();
       setHidden(walking.el, !ctx.view.people.some((p) => p.name === ctx.view.me));
       setHidden(remoteBlock, !live || viewer);
+      setHidden(gh.el, !live || viewer);
+      gh.sync();
       remote.checked = Boolean(ctx.view.serverSettings.remoteApprovals);
       remote.disabled = ctx.view.connection !== 'live';
       setHidden(setupButton, live || ctx.view.serverAvailable);
@@ -219,8 +222,38 @@ export function createSettingsDialog(ctx) {
     sync() {
       remote.checked = Boolean(ctx.view.serverSettings.remoteApprovals);
       remote.disabled = ctx.view.connection !== 'live';
+      gh.sync();
     },
   };
+}
+
+/**
+ * PR and CI status (§4.16): the server's switch, and what it needs when it cannot ask gh.
+ * @param {HudContext} ctx
+ */
+function ghBlock(ctx) {
+  const toggle = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-gh', 'data-testid': 'gh-toggle', role: 'switch' }));
+  const help = h('p', { class: 'hud-setting__help', id: 'hud-set-gh-help', 'data-testid': 'gh-help' });
+  setAttr(toggle, 'aria-describedby', 'hud-set-gh-help');
+  toggle.addEventListener('change', () => ctx.controls.setGh(toggle.checked));
+  const el = h('div', { class: 'hud-setting' }, settingRow('hud-set-gh', 'PR and CI status', toggle), help);
+  return {
+    el,
+    sync() {
+      const gh = ctx.view.serverSettings.gh ?? { on: false, available: false, hint: null };
+      toggle.checked = gh.on;
+      toggle.disabled = ctx.view.connection !== 'live';
+      setText(help, ghHelp(gh));
+    },
+  };
+}
+
+/** @param {{ on: boolean, available: boolean, hint: 'missing'|'signin'|null }} gh */
+function ghHelp(gh) {
+  if (gh.hint === 'signin') return 'Your GitHub CLI is not signed in: run gh auth login, and the next push shows its pull request here.';
+  if (!gh.available) return 'Needs the GitHub CLI (gh) on your PATH, signed in with gh auth login. Then turn this on.';
+  const how = 'After a crew pushes, Andary asks your own gh (gh pr view) about the pull request every few minutes until its checks finish, and shows its number and CI on the crew. Failing CI counts as needing you. Andary never sees a token.';
+  return gh.on ? how : `Off. ${how}`;
 }
 
 /**
