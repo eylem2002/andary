@@ -317,14 +317,16 @@ shows up as a crew of its own.
 Server → browser:
 
 ```js
-{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits }, history: Envelope[], approvals: Approval[], notes: Note[] /* §4.15; [] for a viewer */, usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null,
-  people: Person[] /* §4.11, [] off a team host */, me: string|null /* the person this browser plays */ }
+{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits, watch?: WatchSettings /* owners only, §5.1 */ }, history: Envelope[], approvals: Approval[], notes: Note[] /* §4.15; [] for a viewer */, usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null,
+  people: Person[] /* §4.11, [] off a team host */, me: string|null /* the person this browser plays */,
+  leftovers: Leftovers[] /* §4.16, owners only, [] for others */ }
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
 { t: 'note', n: Note }                  // §4.15, owners only: on queue and on every status change
 { t: 'note-reply', ref: string|null, ok: boolean, id?: string /* the queued note */, error?: string }   // §4.15, to the sender of a note only
 { t: 'settings', settings: {...} }
 { t: 'usage', u: UsageRecord, days: UsageDay[] }   // §4.8, when an agent's totals change
+{ t: 'leftovers', l: Leftovers }                  // §4.16, owners only: an ended session left something listening
 { t: 'progress', p: { points, days: string[] } }   // §4.9, when a point or a busy day is added
 { t: 'limits', limits: LimitsSnapshot }            // §4.14, owners only, after each report of the mod
 { t: 'notify-test', ok: boolean }                  // §4.10, the answer to a test
@@ -356,6 +358,9 @@ Browser → server:
 { t: 'decide', id, decision: 'allow'|'deny', message?: string /* ≤ 500 chars */, always?: number /* allow only: a suggestion's index */, stop?: true /* deny only: "Deny and stop" */ }
 { t: 'note', ref?: string /* the sender's own id, [\w-]{1,64}, echoed in note-reply */, sessionId, agentId?: string /* a helper; absent for the lead */, text: string /* ≤ 2,000 chars once cleaned */ }   // §4.15
 { t: 'settings', settings: { remoteApprovals: boolean } }
+{ t: 'settings', settings: { watch: WatchSettings } }   // §5.1: the cost and long-turn alerts' thresholds (owner only); each
+                                                        // field read on its own (out of range: its default), kept in
+                                                        // <ANDARY_HOME>/watch.json (0600), echoed to owners as settings.watch
 { t: 'notify-test' }   // sends a test phone notification (rate limits apply)
 { t: 'digest', since: number }   // §4.13: what each crew did since then (ms, the server's clock; 0: all kept)
 { t: 'profile', p: Profile }     // §4.11: the sender's own profile (a person, or the owner as the host); at most one per 10 s
@@ -710,6 +715,12 @@ the WebSocket `hello`. Only this computer's events count (§4.11).
   more the note names the account by its folder ("5-hour limit (.claude-work)"). Each kind of limit
   has its own 30 s turn (`limit-high:<kind>`) and the hour's limit counts them; a note the rate
   limits hold back goes out with a later report. `settings.notifyLimits` says whether it is on.
+- **Cost alerts** (§5.1, `core/watch.js`), only while their phone switch is on (`settings.watch.phone`,
+  off by default, set in the town's Settings): one note when an alert starts, from the same rules
+  and thresholds as the town's, which the notifier runs on this computer's events and usage
+  records with a memory of its own: "A crew spent $3.10 (estimate) in a few minutes with no files
+  changed.", "A crew's turn has cost $12.00 so far (estimate)." or "A crew started 12 helpers in one
+  turn." (priority default). Each kind has its own 30 s turn (`watch:<kind>`).
 - A finished turn posts nothing by itself. Stopping the server drops every note still waiting.
 
 This computer (`public/js/ui/notifications.js`), opt-in in Settings (`prefs.desktopNotify`, after
@@ -721,7 +732,8 @@ in one folder", "Turn finished"; a stuck crew's says "<crew> seems stuck: the sa
 failing." or, for rule 2, "<crew> seems stuck: it keeps repeating the same step."). Two agents on
 the same files (a Write over another agent's change, or a git command over others' changes)
 read "<crew> (crew 2) may be undoing another agent's work." (crews in one folder share a project
-name, so the number tells which); an Edit's note is not counted, so it never pops up. An item's id is the notification's tag, so no id holds a path or a command: a file goes in
+name, so the number tells which); an Edit's note is not counted, so it never pops up. A cost alert reads "Cost alert", "<crew>: <its words>." (dollars, tokens or a count of
+helpers; nothing of the project); a long turn's note is not counted, so it never pops up. An item's id is the notification's tag, so no id holds a path or a command: a file goes in
 hashed. An item the viewer could already see (the page in front, or notifications off) never pops
 up later, nor one that started to count more than two minutes ago (a reconnect or a page opened
 in the background); changes that arrive together (a reconnect's history) are checked once. A
@@ -1189,6 +1201,48 @@ Note = { id, status: 'queued'|'delivered'|'expired', sessionId, agentId: string|
   it with the reason (`[data-testid="send-note-status"]`), and no answer within 10 s gives it back.
   The demo has no notes.
 
+### 4.16 What a session left running
+
+`server/leftovers.mjs`, local events only. A `PostToolUse` of `Bash` or `PowerShell` whose command
+starts a server (`core/leftovers.js serverStart`, read with `core/shell.js`): a package script named
+`dev`, `start`, `serve`, `preview` or `develop` (and `dev:…` and the like) under npm, pnpm, yarn or
+bun; a known server (`vite`, `next dev|start`, `nuxt dev`, `astro dev`, `serve`, `http-server`,
+`python -m http.server`, `manage.py runserver`, `rails s`, `flask run`, `uvicorn`, `gunicorn`,
+`php -S`, `ng serve`, `hugo server`, `jekyll serve`, `json-server`, `wrangler dev`, `nodemon`…); or
+a program of yours sent to the background (`run_in_background`, `&`, `nohup`, `setsid`) that names
+its port only where it cannot mean anything else: `PORT=7070`, or a long `--port`/`--listen` given
+to a runtime (`node`, `python`, `deno`, `bun`, `ruby`, `java`, `go`, `dotnet`) or a `./` program.
+Short `-p`/`-l` count only for known servers (`ssh -p 2222`, `git log -p 20`, `npm test -- --port`
+never count). Its port is the one the line names, else the tool's fixed default (vite 5173, next
+3000, …); a package script's is never guessed (`null`). At most 20 per session, 200 sessions.
+
+On the session's `SessionEnd`, 1.5 s later and again 5 s after that (`CONFIRM_MS`), the server
+reads what listens on TCP, read-only: `lsof -nP -iTCP -sTCP:LISTEN -F pn` with each process's
+working folder (`lsof -a -d cwd`, or `/proc/<pid>/cwd` on Linux); `/proc/net/tcp` and `tcp6` on
+Linux without lsof (no process ids, no folders); `netstat -ano` on Windows (TCP rows, IPv4 and
+IPv6; a row with no foreign port is listening, whatever the localized state word); each with a 4 s
+timeout. A listener is the session's (`sure: true`) only when its working folder is inside the
+folder the command started in (its real path too): on the remembered port, or, for a package
+script's unknown port, on any port. A remembered port that listens where the folder cannot be read
+(no lsof, Windows, another user's process) is shown with `sure: false`: it may not be the
+session's. Only what the second look still finds, held by the same process, is reported. Never
+the server's own process. With any, it sends `{ t: 'leftovers', l }` to owners and keeps the last
+20 for later `hello`s.
+
+```js
+Leftovers = { sessionId, at /* server ms */, items: { command /* as written, secrets masked, ≤ 200 chars */, port,
+              pid: number|null, look: string /* shows who listens there now */,
+              kill: string|null /* stops the process seen; null unless sure and its id is known */, sure: boolean }[] }
+```
+
+`look` is `lsof -nP -iTCP:<port> -sTCP:LISTEN`, `ss -ltnp 'sport = :<port>'` without lsof, or
+`Get-NetTCPConnection -LocalPort <port> -State Listen` on Windows. `kill` is `kill <pid>` or
+`Stop-Process -Id <pid>`, for the process the check saw: a port another process takes later is
+never hit blindly, and the look comes first. Nothing is ever stopped by Andary. The store keeps
+them on `StoreState.leftovers` (last 20, read defensively, a repeat ignored; `kill` dropped unless
+`sure`) with a `leftover` log line per item; Crews shows them under the ended crew's line
+(`[data-testid="crew-leftovers"]`) with Copy buttons and Set aside, which lasts across reloads.
+
 ## 5. Browser: events, store, director
 
 `public/js/core/events.js` turns an Envelope into zero or more **TownEvents**:
@@ -1230,13 +1284,16 @@ Store {
   setApproval(approval: Approval): void          // from the server, or created by demo mode
   setUsage(record: UsageRecord|null, days?: UsageDay[]): void  // §4.8; null record: days only
   setNote(note: Note): void                      // §4.15, from the server; junk and repeats are ignored
+  setWatchSettings(settings: unknown): void      // the cost and long-turn thresholds (watch.js), kept across reset()
+  setLeftovers(found: Leftovers): void           // §4.16, from the server; junk and repeats are ignored
   subscribe(listener: (change: StoreChange) => void): () => void
   getState(): StoreState                         // plain objects; treat as read-only
   reset(): void
 }
 StoreChange = { type: 'event', event: TownEvent } | { type: 'approval', approval: Approval }
             | { type: 'achievement', achievement: Achievement } | { type: 'usage', agentKey: string }
-            | { type: 'note', note: Note } | { type: 'reset' }
+            | { type: 'note', note: Note } | { type: 'watch' } | { type: 'leftovers', sessionId }
+            | { type: 'reset' }
 StoreState {
   sessions: Session[]                            // in order first seen
   agents: Record<agentKey, AgentState>
@@ -1250,6 +1307,8 @@ StoreState {
   usageDays: UsageDay[]
   notes: Note[]                                  // §4.15, oldest first
   receipts: Receipt[]                            // a receipt per lead's turn that ended, newest last, ≤ 60
+  watch: { alerts: WatchAlert[], turns: Record<sessionId, WatchTurn>, settings: WatchSettings }  // below
+  leftovers: Leftovers[]                         // §4.16, oldest first, ≤ 20
 }
 AgentUsage { tokens: { input, output, cacheRead, cacheWrite }, costUsd, unpriced: boolean, model: string|null,
              context: { tokens, at } | null /* §4.8: the newest reading; null when unknown */,
@@ -1326,8 +1385,8 @@ queued behind it starts none.
 
 ```js
 AttentionItem { id /* one per episode: dialog:agentKey:at:input, kind:agentKey:since, limit:since,
-                      conflict:<Hazard id> */,
-                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'finished',
+                      conflict:<Hazard id>, cost:<WatchAlert id>, long:sessionId:turnStart */,
+                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'cost'|'long'|'finished',
                 level: 'blocked'|'stopped'|'alert'|'ready', sessionId, agentKey,
                 agentKeys: string[] /* everyone it stands for */,
                 approvalId: string|null /* a request the town holds */, since, countedSince,
@@ -1433,6 +1492,40 @@ time, `e.ts` in the town, `hookTime` on the server) or a fresh start, `reset(age
   the step run most recently shown, its count updated). Memory is bounded: 200 agents (the one
   quiet the longest goes first, its alert ending with it), 64 steps each (one that has not failed
   goes first, else the one run the longest ago), 12 failures per step.
+
+**Cost, helpers and long turns** (`core/watch.js`, pure, shared with the phone notes). The store
+feeds it each crew's steps (not a teammate's crew): your prompt to the lead (a new turn; the crew's
+alerts end), a file changed (`isEditCall`: `Edit`, `MultiEdit`, `Write`, `NotebookEdit`,
+`apply_patch`, or a shell command that writes, as the stuck rules read it), a helper starting
+(`subagent.start`), the lead's turn ending, the session ending, and each usage record (§4.8): what
+an agent spent since the watch last heard of it goes to its crew and its turn; its first total is
+never spending (the town may join mid-turn or reconnect). Codex reports no cost, so a Codex crew
+can only get the helpers alert.
+
+```js
+WatchSettings { burnUsd: 3, burnMinutes: 10, turnUsd: 10, helpers: 10, longMinutes: 30, quietMinutes: 20,
+                cooldownMinutes: 30, phone: false }   // defaults; 0 turns burnUsd, turnUsd, helpers or longMinutes off
+WatchAlert { id /* kind:sessionId:since */, kind: 'burn'|'turn-cost'|'fan-out', sessionId, since, text, usd, helpers }
+WatchTurn { start, sawStart, lastEditAt: number|null, open: boolean, helpers, usd, tokens }
+```
+
+- **burn**: the crew spent `burnUsd` or more (estimated) within the last `burnMinutes`, with no
+  file changed in that time: "$3.10 (estimate, 1.2M tokens) in the last 10 min, no files changed".
+- **turn-cost**: the turn so far cost `turnUsd` or more: "This turn has cost $10.40 (estimate,
+  3.1M tokens)" ("at least" for a turn whose prompt the town missed). Cost written after the
+  `Stop` still counts for that turn.
+- **fan-out**: the turn started `helpers` helpers or more: "Started 12 helpers this turn".
+
+A crew gets at most one alert of a kind per `cooldownMinutes`, and one turn-cost and one fan-out
+per turn; a newer alert replaces the older of its kind. Each is a `cost` item (level `alert`,
+counted, dismissable) on the crew's lead, with a `watch` log line (`warn`) when it starts; it ends
+when set aside, at your next prompt, or with the session. **long**: a lead's open turn running
+`longMinutes` or more with no edit for `quietMinutes`, while its crew is working (not waiting for
+you), is a `long` note on the lead (level `alert`, not counted, not dismissable; under what it does,
+like an edit's note): "Working 42 min, no edits for 25 min" or "…, no edits yet". The live town's
+settings are the server's (`settings.watch`, changed with `{t:'settings', settings:{watch}}`); the
+demo keeps them in `prefs.watch`. A page reload forgets the alerts (the usage history is not
+replayed); the phone note, if any, has gone out.
 
 **Same files** (`core/conflicts.js` with `core/git-commands.js` and `core/paths.js`, all pure;
 docs/design/agent-health.md §6). The store keeps their memory in its model, runs them after each
@@ -1874,6 +1967,8 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]`, and, when a rule can be saved, `[data-testid="approve-always"]` with the rule in `[data-testid="approve-always-rule"]`; `[data-testid="deny-stop"]` ("Deny and stop") with its line, or why the agent cannot be stopped, in `[data-testid="deny-stop-note"]`; a hint in `[data-testid="approval-hint"]` |
 | `[data-testid="remote-approvals-toggle"]` | checkbox/switch for remote approvals (live mode) |
 | `[data-testid="settings-button"]` | opens the settings dialog (holds the remote approvals switch) |
+| `[data-testid="watch-settings"]` | Settings: the cost and long-turn alerts; a number field per threshold (`watch-burnUsd`, `watch-burnMinutes`, `watch-turnUsd`, `watch-helpers`, `watch-longMinutes`, `watch-quietMinutes`, `watch-cooldownMinutes`) and `watch-phone` (with phone notes on) |
+| `[data-testid="crew-leftovers"]` | under an ended crew's line: what it left running (§4.16), one `[data-testid="leftover"][data-port][data-sure]` each with `leftover-copy` buttons (`leftover-unsure` when it may not be the session's), and `leftovers-dismiss` |
 | `[data-testid="walk-panel"]` | the Walk panel, shown in walk mode (§4.11) |
 | `[data-testid="walk-to"]` | its "Walk to…" list |
 | `[data-testid="walk-where"]` | its status line (a polite live region): where your character is going or is |

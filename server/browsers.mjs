@@ -7,9 +7,12 @@
 // settings or topic.
 import { WS_PROTOCOL, allowedHostsFor, browserRole, isTunnelled, offersAndaryProtocol } from './auth.mjs';
 import { validateProfile } from '../public/js/core/profile.js';
+import { isObject } from '../public/js/core/text.js';
+import { readWatchSettings } from '../public/js/core/watch.js';
 import { LOTS } from '../public/js/core/town-map.js';
 import { LIMITS } from './config.mjs';
 import { createTokenBucket } from './rate-limit.mjs';
+import { saveWatchSettings } from './watch-settings.mjs';
 import { isAllowedHost, isAllowedOrigin, isTunnelOrigin } from './security.mjs';
 import { acceptUpgrade, rejectUpgrade, validateUpgradeRequest } from './websocket.mjs';
 import { CLOSE_CODE } from './ws-frame.mjs';
@@ -116,6 +119,14 @@ export function publicSettings(ctx) {
 }
 
 /**
+ * The owner's settings: the public ones and the cost and long-turn alerts' (core/watch.js).
+ * @param {import('./app.mjs').TownContext} ctx
+ */
+function ownerSettings(ctx) {
+  return { ...publicSettings(ctx), watch: ctx.settings.watch };
+}
+
+/**
  * The team part of a browser's settings, null when this server is not a team host.
  * @param {import('./app.mjs').TownContext} ctx
  * @param {BrowserRole} role
@@ -190,7 +201,7 @@ export function dropRemovedPeople(ctx) {
  * @param {BrowserRole} role
  */
 function settingsFor(ctx, role) {
-  const settings = role === 'owner' ? publicSettings(ctx) : { remoteApprovals: false, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: false, notifyLimits: false };
+  const settings = role === 'owner' ? ownerSettings(ctx) : { remoteApprovals: false, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: false, notifyLimits: false };
   return ctx.team ? { ...settings, team: teamSettings(ctx, role) } : settings;
 }
 
@@ -302,6 +313,8 @@ function attachBrowser(ctx, connection, role, person) {
     limits: owner ? ctx.limits.snapshot() : { accounts: [], contexts: {} },
     progress: ctx.progress.snapshot(),
     notifyUrl: owner ? ctx.notifier.url : null,
+    // What ended sessions left running: your commands, owners only (§4.16).
+    leftovers: owner ? ctx.leftovers.snapshot() : [],
     // The latest time the owner was away: a page opened after one offers to catch up.
     away: owner ? ctx.digest.away() : null,
     people: peopleView(ctx),
@@ -388,15 +401,30 @@ function handleBrowserMessage(ctx, connection, text) {
  * @param {any} settings
  */
 function applySettings(ctx, connection, settings) {
-  if (typeof settings?.remoteApprovals !== 'boolean') {
+  const watch = isObject(settings) && 'watch' in settings;
+  if (typeof settings?.remoteApprovals !== 'boolean' && !watch) {
     sendError(ctx, connection, 'settings.remoteApprovals must be true or false');
+    return;
+  }
+  if (watch) {
+    if (!isObject(settings.watch)) {
+      sendError(ctx, connection, 'settings.watch must be an object');
+      return;
+    }
+    // Field by field: what is missing or out of range keeps its default.
+    ctx.settings.watch = readWatchSettings(settings.watch);
+    ctx.notifier.setWatch(ctx.settings.watch);
+    saveWatchSettings(ctx.settings.watchFile, ctx.settings.watch);
+  }
+  if (typeof settings.remoteApprovals !== 'boolean') {
+    ctx.hub.broadcastOwners({ t: 'settings', settings: ownerSettings(ctx) });
     return;
   }
   if (ctx.settings.remoteApprovals !== settings.remoteApprovals) {
     ctx.settings.remoteApprovals = settings.remoteApprovals;
     ctx.log(`Remote approvals turned ${settings.remoteApprovals ? 'on' : 'off'} from the town`);
   }
-  ctx.hub.broadcastOwners({ t: 'settings', settings: publicSettings(ctx) });
+  ctx.hub.broadcastOwners({ t: 'settings', settings: ownerSettings(ctx) });
   // Nobody may answer from the town any more: give waiting prompts back to the terminal.
   if (!settings.remoteApprovals) ctx.broker.releaseAll();
 }

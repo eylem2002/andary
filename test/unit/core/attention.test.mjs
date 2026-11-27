@@ -511,3 +511,76 @@ describe('two agents on the same files (core/conflicts.js)', () => {
     assert.deepEqual(team.items(T0 + 2000), []);
   });
 });
+
+describe('cost alerts and long turns (core/watch.js)', () => {
+  const MIN = 60_000;
+  /** @param {number} costUsd */
+  const usage = (costUsd, agentId = null) => ({ sessionId: SESSION, agentId, tokens: { input: 0, output: 0, cacheRead: costUsd * 100_000, cacheWrite: 0 }, costUsd });
+
+  test('spending fast with nothing changed: an alert on the lead, counted until set aside or the next prompt', () => {
+    let now = T0;
+    const store = createStore({ now: () => now });
+    store.ingest(envelope(hook('UserPromptSubmit', { prompt: 'Find the leak' }), T0));
+    store.setUsage(usage(2));
+    now = T0 + 4 * MIN;
+    store.setUsage(usage(5.5));
+    const items = attentionItems(store.getState(), now);
+    assert.deepEqual(items.map((i) => [i.kind, i.level, i.counted, i.dismissable, i.agentKey, i.text]), [
+      ['cost', 'alert', true, true, LEAD, '$3.50 (estimate, 350k tokens) in the last 10 min, no files changed'],
+    ]);
+    assert.equal(store.getState().log.filter((e) => e.kind === 'watch').length, 1, 'a line in the activity log');
+    assert.deepEqual(attentionItems(store.getState(), now, { dismissed: new Set([items[0].id]) }), []);
+    store.ingest(envelope(hook('UserPromptSubmit', { prompt: 'Stop and summarise' }), now));
+    assert.deepEqual(attentionItems(store.getState(), now), []);
+  });
+
+  test('the viewer\'s thresholds: a turn cost alert, kept after a reset (the history replayed)', () => {
+    let now = T0;
+    const store = createStore({ now: () => now });
+    store.setWatchSettings({ burnUsd: 0, turnUsd: 2 });
+    store.reset();
+    assert.equal(store.getState().watch.settings.turnUsd, 2);
+    store.ingest(envelope(hook('UserPromptSubmit', { prompt: 'Go' }), T0));
+    store.setUsage(usage(0));
+    now += MIN;
+    store.setUsage(usage(2.4));
+    assert.deepEqual(attentionItems(store.getState(), now).map((i) => i.text), ['This turn has cost $2.40 (estimate, 240k tokens)']);
+  });
+
+  test('a teammate\'s crew in a team town is never watched', () => {
+    let now = T0;
+    const store = createStore({ now: () => now });
+    store.ingest(envelope({ ...hook('UserPromptSubmit', { prompt: 'Go' }), andary_member: 'lina' }, T0));
+    const id = store.getState().sessions[0].id;
+    store.setUsage({ ...usage(0), sessionId: id });
+    now += MIN;
+    store.setUsage({ ...usage(50), sessionId: id });
+    assert.deepEqual(store.getState().watch.alerts, []);
+  });
+
+  test('a long turn with no edits is a note on the lead: it counts for nothing and ends with an edit', () => {
+    const t = town();
+    t.send('UserPromptSubmit', { prompt: 'Investigate the flaky build' }, T0);
+    t.send('PreToolUse', { tool_name: 'Bash', tool_use_id: 'b1', tool_input: { command: 'npm run build' } }, T0 + 5 * MIN);
+    assert.deepEqual(t.items(T0 + 29 * MIN), []);
+    const [note] = t.items(T0 + 42 * MIN);
+    assert.deepEqual([note.kind, note.level, note.counted, note.dismissable, note.text], ['long', 'alert', false, false, 'Working 42 min, no edits yet']);
+    assert.deepEqual(countedItems(t.items(T0 + 42 * MIN)), []);
+    t.send('PostToolUse', { tool_name: 'Edit', tool_use_id: 'e1', tool_input: { file_path: `${CWD}/a.js`, old_string: 'a', new_string: 'b' }, tool_response: {} }, T0 + 43 * MIN);
+    assert.deepEqual(t.items(T0 + 50 * MIN), []);
+    assert.equal(t.items(T0 + 64 * MIN)[0]?.text, 'Working 1 h 04 min, no edits for 21 min');
+    // Waiting for your answer is not working: no note then.
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'rm -rf dist' } }, T0 + 64 * MIN);
+    assert.deepEqual(t.items(T0 + 65 * MIN).map((i) => i.kind), ['terminal']);
+  });
+
+  test('leftovers from the server: kept per ended session, with a log line each', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0);
+    t.send('SessionEnd', { reason: 'exit' }, T0 + MIN);
+    t.store.setLeftovers({ sessionId: SESSION, at: T0 + MIN + 1500, items: [{ command: 'npm run dev', port: 5173, pid: 4, look: 'lsof -nP -iTCP:5173 -sTCP:LISTEN', kill: 'kill 4', sure: true }] });
+    t.store.setLeftovers({ sessionId: SESSION, at: T0 + MIN + 1500, items: [{ command: 'npm run dev', port: 5173, pid: 4, look: 'lsof -nP -iTCP:5173 -sTCP:LISTEN', kill: 'kill 4', sure: true }] });
+    assert.deepEqual(t.store.getState().leftovers, [{ sessionId: SESSION, at: T0 + MIN + 1500, items: [{ command: 'npm run dev', port: 5173, pid: 4, look: 'lsof -nP -iTCP:5173 -sTCP:LISTEN', kill: 'kill 4', sure: true }] }]);
+    assert.deepEqual(t.store.getState().log.filter((e) => e.kind === 'leftover').map((e) => e.text), ['Left running: npm run dev (port 5173)']);
+  });
+});

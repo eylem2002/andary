@@ -4,6 +4,7 @@
 
 import { PREFS_STORAGE_KEY } from '../core/looks.js';
 import { PLACE_NAMES } from '../core/place-names.js';
+import { WATCH_DEFAULTS, readWatchSettings } from '../core/watch.js';
 
 /**
  * @typedef {object} Prefs
@@ -28,6 +29,7 @@ import { PLACE_NAMES } from '../core/place-names.js';
  * @property {'auto'|'always'|'off'} placeNames  labels on the buildings: names where they fit, always, or none (core/place-names.js)
  * @property {boolean} lookAsks      a teammate's "come look" shows a note (team towns)
  * @property {boolean} walkPad       the step pad in walk mode on phones
+ * @property {import('../core/watch.js').WatchSettings} watch  the cost and long-turn alerts' settings in the demo (the live town's are the server's)
  */
 
 /** @type {Readonly<Prefs>} */
@@ -53,6 +55,7 @@ export const DEFAULT_PREFS = Object.freeze({
   placeNames: 'auto',
   lookAsks: true,
   walkPad: true,
+  watch: WATCH_DEFAULTS,
 });
 
 export const STORAGE_KEY = PREFS_STORAGE_KEY;
@@ -89,6 +92,8 @@ export function parsePrefs(raw) {
   for (const key of /** @type {(keyof Prefs)[]} */ (Object.keys(DEFAULT_PREFS))) {
     if (isValid(key, data[key])) /** @type {any} */ (prefs)[key] = data[key];
   }
+  // Field by field: a bad threshold is its default, the others are kept.
+  prefs.watch = readWatchSettings(data.watch);
   return prefs;
 }
 

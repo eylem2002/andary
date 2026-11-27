@@ -10,10 +10,14 @@
 //   alert    two agents on the same files (core/conflicts.js): a Write over another agent's
 //            change, or a git command over its changes, counted until you set it aside; an Edit
 //            of such a file is a note that counts for nothing
+//   alert    a crew spends fast with no files changed, a turn costs more than you set, or a turn
+//            starts many helpers (core/watch.js): counted until you set it aside or prompt again
+//   alert    a lead working a long time with no edits (core/watch.js): a note that counts for nothing
 //   ready    a lead finished its turn and nobody has answered: counted once Claude Code says so
 //            (idle_prompt, a minute later; Codex has no such signal: a minute too), for 30 minutes
 import { CONFLICT_MS, hazardText } from './conflicts.js';
 import { agentKeyOf } from './ids.js';
+import { longTurnText } from './watch.js';
 
 /** @typedef {import('./store.js').StoreState} StoreState */
 /** @typedef {import('./store.js').AgentState} AgentState */
@@ -21,7 +25,7 @@ import { agentKeyOf } from './ids.js';
 /** @typedef {import('./store.js').Approval} Approval */
 /** @typedef {import('./dialogs.js').Dialog} Dialog */
 /** @typedef {import('./conflicts.js').Hazard} Hazard */
-/** @typedef {'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'finished'} AttentionKind */
+/** @typedef {'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'cost'|'long'|'finished'} AttentionKind */
 /** @typedef {'blocked'|'stopped'|'alert'|'ready'} AttentionLevel */
 
 /**
@@ -89,6 +93,7 @@ export function attentionItems(state, now, { dismissed } = {}) {
     const item = conflictItem(hazard, state, yours, now);
     if (item) items.push(item);
   }
+  items.push(...watchItems(state, yours, now));
   // A dismissed item stays away until the situation changes (a new episode has a new id).
   return mergeSharedStops(items, limited)
     .filter((item) => !(item.dismissable && dismissed?.has(item.id)))
@@ -253,6 +258,37 @@ function conflictItem(hazard, state, yours, now) {
     crews: new Set([hazard.sessionId, ...others.map((other) => other.sessionId)]).size,
     settled: true,
   };
+}
+
+/**
+ * The cost and helpers alerts (counted until set aside), and a note on a lead whose turn has run
+ * long with no edit (core/watch.js). Both stand on the crew's lead; a crew that waits for you on
+ * something else gets no long-turn note: it is not working.
+ * @param {StoreState} state
+ * @param {Map<string, Session>} yours
+ * @param {number} now
+ * @returns {AttentionItem[]}
+ */
+function watchItems(state, yours, now) {
+  const watch = state.watch;
+  if (!watch) return [];
+  /** @type {AttentionItem[]} */
+  const items = [];
+  /** @param {Session} session @param {Partial<AttentionItem> & { id: string, kind: AttentionKind, since: number, text: string }} what @returns {AttentionItem} */
+  const item = (session, what) => {
+    const lead = agentKeyOf(session.id, null);
+    return { level: 'alert', sessionId: session.id, agentKey: lead, agentKeys: [lead], approvalId: null, countedSince: what.since, counted: true, dismissable: true, crews: 1, settled: true, ...what };
+  };
+  for (const alert of watch.alerts) {
+    const session = yours.get(alert.sessionId);
+    if (session && state.agents[agentKeyOf(session.id, null)]) items.push(item(session, { id: `cost:${alert.id}`, kind: 'cost', since: alert.since, text: alert.text }));
+  }
+  for (const session of yours.values()) {
+    const turn = watch.turns[session.id];
+    const text = session.status === 'working' ? longTurnText(turn, watch.settings, now) : null;
+    if (turn && text) items.push(item(session, { id: `long:${session.id}:${turn.start}`, kind: 'long', since: turn.start, text, counted: false, dismissable: false }));
+  }
+  return items;
 }
 
 /**

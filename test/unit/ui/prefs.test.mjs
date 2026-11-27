@@ -71,3 +71,11 @@ describe('loadPrefs / savePrefs', () => {
     assert.deepEqual(loadPrefs(null), DEFAULT_PREFS);
   });
 });
+
+test('the demo\'s alert thresholds are read field by field', () => {
+  const prefs = parsePrefs(JSON.stringify({ watch: { burnUsd: 7, helpers: -1, phone: 'yes' } }));
+  assert.equal(prefs.watch.burnUsd, 7);
+  assert.equal(prefs.watch.helpers, DEFAULT_PREFS.watch.helpers);
+  assert.equal(prefs.watch.phone, false);
+  assert.deepEqual(parsePrefs('{"watch": 3}').watch, DEFAULT_PREFS.watch);
+});

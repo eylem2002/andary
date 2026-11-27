@@ -47,6 +47,8 @@ export function createNeedsYou({ storage = safeStorage(), now = Date.now, viewOn
       const kept = new Set([...dismissed].filter(([, until]) => until > at).map(([id]) => id));
       return attentionItems(state, at, { dismissed: kept });
     },
+    /** Whether the viewer set this aside (and has not forgotten it yet). @param {string} id */
+    isDismissed: (id) => (dismissed.get(id) ?? 0) > now(),
     /** @param {string} id */
     dismiss(id) {
       dismissed.set(id, now() + DISMISS_FOR_MS);
@@ -100,6 +102,8 @@ const WAITED_WORDS = {
   stuck: (waited) => `stuck for ${waited}`,
   // Two agents on the same files: it happened that long ago, nobody waits.
   conflict: (waited) => `${waited} ago`,
+  // A cost or helpers alert: it started that long ago.
+  cost: (waited) => `${waited} ago`,
 };
 
 /**

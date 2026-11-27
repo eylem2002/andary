@@ -13,7 +13,10 @@
 // note. A finished turn is no news by itself:
 // Claude Code's idle_prompt says so a minute later if nobody answered, and for Codex, which sends
 // no idle_prompt, that minute is counted here. An agent that seems stuck gets one note per
-// episode, from the very rules the town's alert follows (core/loops.js).
+// episode, from the very rules the town's alert follows (core/loops.js). With the phone switch of
+// the cost alerts on (Settings, core/watch.js), a crew that spends fast with nothing changed, a
+// turn over its cost or a turn that starts many helpers gets one note per alert, from the same
+// rules as the town's.
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,6 +24,7 @@ import { afterHook, createDialogs } from '../public/js/core/dialogs.js';
 import { HIGH_PERCENT, SAME_WINDOW_MS, limitName, resetWords, usedWords } from '../public/js/core/limits.js';
 import { agentKeyOf, normalizeAgentId } from '../public/js/core/ids.js';
 import { createLoops, stuckWords } from '../public/js/core/loops.js';
+import { createWatch, isEditCall, watchNoteText } from '../public/js/core/watch.js';
 import { clip, isObject, textOf } from '../public/js/core/text.js';
 import { hookStep, hookTime } from './hook-steps.mjs';
 import { MAX_STRING_CHARS } from './sanitize.mjs';
@@ -228,6 +232,71 @@ function loopChanges(loops, event, t) {
   return loops.record({ agent, folder: text(event.cwd), tool: text(event.tool_name), input, ok: event.hook_event_name === 'PostToolUse', error: errorText(event), at: t });
 }
 
+/**
+ * What a hook means for the cost and helpers alerts (core/watch.js), as the town's store reads it.
+ * A teammate's hook never comes here (POLICIES), and helpers' prompts are not the lead's.
+ * @param {Record<string, any>} event  a local town payload
+ * @param {number} at
+ * @returns {import('../public/js/core/watch.js').WatchStep[]}
+ */
+function watchStep(event, at) {
+  const sessionId = text(event.session_id);
+  const lead = normalizeAgentId(event.agent_id) === null;
+  switch (event.hook_event_name) {
+    case 'UserPromptSubmit':
+      return lead ? [{ type: 'prompt', sessionId, at }] : [];
+    case 'PostToolUse':
+      return isEditCall(text(event.tool_name), event.tool_input) ? [{ type: 'edit', sessionId, at }] : [];
+    case 'SubagentStart':
+      return [{ type: 'helper', sessionId, at }];
+    case 'Stop':
+    case 'StopFailure':
+      return lead ? [{ type: 'stop', sessionId, at }] : [];
+    case 'SessionEnd':
+      return [{ type: 'end', sessionId, at }];
+    default:
+      return [];
+  }
+}
+
+/**
+ * Forgets dialogs that had their note half an hour ago or more.
+ * @param {ReturnType<typeof createDialogs>} dialogs @param {Map<number, { due: number, noted: boolean }>} notes @param {number} t
+ */
+function forgetNoted(dialogs, notes, t) {
+  for (const dialog of [...dialogs.list()]) {
+    if (!notes.get(dialog.id)?.noted || t - dialog.at < NOTED_MAX_AGE_MS) continue;
+    dialogs.forget(dialog.id);
+    notes.delete(dialog.id);
+  }
+}
+
+/**
+ * The cost and helpers alerts' memory (the town keeps its own, from the same rules), and one note
+ * for each alert that starts while their phone switch is on; each kind has its own 30 s turn.
+ * @param {unknown} settings
+ * @param {(note: Note) => void} send
+ */
+function createWatchNotes(settings, send) {
+  const watch = createWatch({ settings });
+  /** @param {import('../public/js/core/watch.js').WatchAlert[]} started */
+  const noteAlerts = (started) => {
+    if (!watch.settings().phone) return;
+    for (const alert of started) send({ kind: `watch:${alert.kind}`, title: 'Andary', body: watchNoteText(alert), priority: 'default', tags: alert.kind === 'fan-out' ? 'busts_in_silhouette' : 'money_with_wings' });
+  };
+  return {
+    /** @param {Record<string, any>} event @param {number} at */
+    observe: (event, at) => noteAlerts(watchStep(event, at).flatMap((step) => watch.record(step))),
+    /** @param {import('./usage.mjs').UsageRecord} record @param {number} at */
+    usage(record, at) {
+      const tokens = record.tokens.input + record.tokens.output + record.tokens.cacheRead + record.tokens.cacheWrite;
+      noteAlerts(watch.record({ type: 'usage', sessionId: record.sessionId, agentKey: agentKeyOf(record.sessionId, record.agentId), costUsd: record.costUsd, tokens, at }));
+    },
+    /** @param {unknown} next */
+    set: (next) => watch.setSettings(next),
+  };
+}
+
 /** At most one note of a kind every 30 s, and 30 an hour; test notes never use up the hour. */
 function createRateLimit() {
   /** @type {Map<string, number>} */
@@ -419,12 +488,13 @@ function createPoster(url, fetchImpl, log) {
  * @property {number} [delayMs]  how long a dialog's note waits (DIALOG_DELAY_MS)
  * @property {boolean} [limitNotes]  a note when a plan limit reaches HIGH_PERCENT (off by default)
  * @property {string|null} [limitNotesFile]  where the windows that had their note are kept (null: memory only)
+ * @property {unknown} [watch]  the cost and helpers alerts' settings (core/watch.js); their phone switch is off by default
  * @property {(fn: () => void, ms: number) => any} [setTimer]
  * @property {(timer: any) => void} [clearTimer]
  */
 
 /** @param {NotifierOptions} options */
-export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.now, log = () => {}, delayMs = DIALOG_DELAY_MS, limitNotes = false, limitNotesFile = null, setTimer = setTimeout, clearTimer = clearTimeout }) {
+export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.now, log = () => {}, delayMs = DIALOG_DELAY_MS, limitNotes = false, limitNotesFile = null, watch: watchSettings, setTimer = setTimeout, clearTimer = clearTimeout }) {
   const rate = createRateLimit();
   const post = createPoster(url, fetchImpl, log);
   const dialogs = createDialogs({ max: MAX_DIALOGS });
@@ -433,6 +503,7 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
   const idle = createIdleWatch(setTimer, clearTimer, () => void send(noteOf('waiting')));
   /** The stuck rules' memory of this computer's agents (the town keeps its own, from the same rules). */
   const loops = createLoops();
+  const watchNotes = createWatchNotes(watchSettings, (note) => void send(note));
   const noteLimits = createLimitNotes({ admit: (note) => admit(note), post: (note) => void post(note), now, file: limitNotesFile });
   /** @type {any} */
   let timer = null;
@@ -499,15 +570,6 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
     schedule();
   }
 
-  /** Forgets dialogs that had their note half an hour ago or more. @param {number} t */
-  function forgetNoted(t) {
-    for (const dialog of [...dialogs.list()]) {
-      if (!notes.get(dialog.id)?.noted || t - dialog.at < NOTED_MAX_AGE_MS) continue;
-      dialogs.forget(dialog.id);
-      notes.delete(dialog.id);
-    }
-  }
-
   /**
    * Opens or closes the dialogs this event concerns. A dialog's note is due ten seconds after its
    * hook was sent.
@@ -559,13 +621,14 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
     observe(event, ts) {
       if (!url || disposed || !isObject(event)) return;
       const t = now();
-      forgetNoted(t);
+      forgetNoted(dialogs, notes, t);
       watchIdle(event);
       const at = hookTime(ts, t);
       track(event, at);
       // One note when an episode starts; a later one held back by the 30 s limit is dropped.
       const stuck = loopChanges(loops, event, at).find((change) => change.started)?.stuck;
       if (stuck) void send(stuckNote(stuck.rule));
+      watchNotes.observe(event, at);
       const note = noteFor(event);
       if (note) void send(note);
     },
@@ -591,6 +654,13 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
       for (const dialog of dialogs.decided(approval.id)) notes.delete(dialog.id);
       schedule();
     },
+    /**
+     * An agent's usage totals changed (server/usage.mjs): its crew's spending, for the cost alerts.
+     * @param {import('./usage.mjs').UsageRecord} record
+     */
+    usageChanged: (record) => (url && !disposed ? watchNotes.usage(record, now()) : undefined),
+    /** New settings for the cost and helpers alerts (Settings in the town). @param {unknown} settings */
+    setWatch: (settings) => watchNotes.set(settings),
     /** A test note, from the town's Settings. */
     test: () => send(noteOf('test')),
     /** Drops every note still waiting and sends none afterwards (server shutdown). */

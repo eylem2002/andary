@@ -106,7 +106,7 @@ export function socketUrl(pageUrl) {
 
 /**
  * @typedef {object} LiveOptions
- * @property {{ ingest: (e: any) => any, setApproval: (a: any) => void, setUsage?: (u: unknown, days?: unknown) => void, setNote?: (n: unknown) => void, reset: () => void }} store
+ * @property {{ ingest: (e: any) => any, setApproval: (a: any) => void, setUsage?: (u: unknown, days?: unknown) => void, setNote?: (n: unknown) => void, setLeftovers?: (l: unknown) => void, reset: () => void }} store
  * @property {boolean} [authenticated]   false starts in "Sign in" and waits for a valid sign-in
  * @property {(status: LinkStatus) => void} [onStatus]
  * @property {(settings: object) => void} [onSettings]
@@ -147,6 +147,7 @@ const MESSAGES = Object.freeze({
   note: (m, to) => to.store.setNote?.(m.n),
   settings: (m, to) => to.onSettings(m.settings ?? {}),
   usage: (m, to) => to.store.setUsage?.(m.u, m.days),
+  leftovers: (m, to) => to.store.setLeftovers?.(m.l),
   progress: (m, to) => to.onProgress(m.p),
   limits: (m, to) => to.onLimits(m.limits),
   'notify-test': (m, to) => to.onNotifyTest(m.ok === true),
@@ -171,6 +172,17 @@ const MESSAGES = Object.freeze({
 /** @param {'emote'|'phrase'} kind @param {Record<string, any>} m @param {Sinks} to */
 function said(kind, m, to) {
   if (typeof m.name === 'string' && Number.isInteger(m.id)) to.onSaid({ kind, name: m.name, id: m.id });
+}
+
+/**
+ * The hello's usage (every agent's totals, and the days') and what ended sessions left running.
+ * @param {LiveOptions['store']} store @param {Record<string, any>} message
+ */
+function applyUsage(store, message) {
+  const usage = message.usage ?? {};
+  for (const record of Array.isArray(usage.agents) ? usage.agents : []) store.setUsage?.(record);
+  if (Array.isArray(usage.days)) store.setUsage?.(null, usage.days);
+  for (const found of Array.isArray(message.leftovers) ? message.leftovers : []) store.setLeftovers?.(found);
 }
 
 /**
@@ -287,9 +299,7 @@ export function connectLive({
     for (const envelope of message.history ?? []) ingest(envelope);
     for (const approval of message.approvals ?? []) store.setApproval(approval);
     applyNotes(store, message.notes);
-    const usage = message.usage ?? {};
-    for (const record of Array.isArray(usage.agents) ? usage.agents : []) store.setUsage?.(record);
-    if (Array.isArray(usage.days)) store.setUsage?.(null, usage.days);
+    applyUsage(store, message);
     // Whole values, so nothing is left over from before a restart (a town that no longer hosts a team).
     sinks.onSettings({ ...(message.settings ?? {}), team: message.settings?.team ?? null, notifyUrl: typeof message.notifyUrl === 'string' ? message.notifyUrl : null });
     if (message.progress) sinks.onProgress(message.progress);
@@ -398,6 +408,10 @@ function requests(send) {
     /** @param {boolean} on */
     setRemoteApprovals(on) {
       return send({ t: 'settings', settings: { remoteApprovals: Boolean(on) } });
+    },
+    /** @param {import('../core/watch.js').WatchSettings} settings */
+    setWatch(settings) {
+      return send({ t: 'settings', settings: { watch: settings } });
     },
     /**
      * Saves this person's profile on the team host (§4.11); the answer comes to onProfile.

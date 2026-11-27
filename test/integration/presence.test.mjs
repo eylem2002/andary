@@ -87,4 +87,24 @@ describe('Team town presence', () => {
     assert.deepEqual([back.online, back.away, back.lights], [true, null, true]);
     await Promise.all([again, watcher].map(closeBrowser));
   });
+  it('the cost alerts\' settings and leftovers are the owner\'s: a teammate or a viewer gets neither and cannot change them', async () => {
+    const lina = await as('Lina');
+    const viewer = await connectBrowser(host, { protocols: `andary, andary.view.${viewToken(secret)}` });
+    const owner = await connectBrowser(host);
+    const [linaHello, viewerHello, ownerHello] = await Promise.all([lina, viewer, owner].map((c) => waitForMessage(c, (m) => m?.t === 'hello')));
+    for (const hello of [linaHello, viewerHello]) {
+      assert.equal('watch' in hello.settings, false);
+      assert.deepEqual(hello.leftovers, []);
+    }
+    assert.equal(ownerHello.settings.watch.helpers, 10);
+    lina.send(JSON.stringify({ t: 'settings', settings: { watch: { helpers: 2 } } }));
+    assert.match((await waitForMessage(lina, (m) => m?.t === 'error')).message, /Teammates can change their own character only/);
+    viewer.send(JSON.stringify({ t: 'settings', settings: { watch: { helpers: 2 } } }));
+    assert.match((await waitForMessage(viewer, (m) => m?.t === 'error')).message, /Viewers can only watch/);
+    // Only the owner's change is taken.
+    owner.send(JSON.stringify({ t: 'settings', settings: { watch: { helpers: 12 } } }));
+    const changed = await waitForMessage(owner, (m) => m?.t === 'settings' && m.settings.watch);
+    assert.equal(changed.settings.watch.helpers, 12);
+    await Promise.all([lina, viewer, owner].map(closeBrowser));
+  });
 });

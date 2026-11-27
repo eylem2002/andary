@@ -943,3 +943,44 @@ test('a limit note names the account when two or more report, and a restart send
   third.notifier.limitsChanged(work, 1);
   assert.match(third.posts[0].body, /^Claude's 5-hour limit is 99\.5% used\./);
 });
+
+/** An agent's usage totals, as server/usage.mjs reports them. @param {number} costUsd @param {string|null} [agentId] */
+const spentSoFar = (costUsd, agentId = null) => ({ sessionId: 's1', agentId, tokens: { input: 0, output: costUsd * 10_000, cacheRead: costUsd * 90_000, cacheWrite: 0 }, costUsd, unpriced: false, model: 'claude-opus-5-5', context: null, compactedAt: null });
+/** @param {any[]} posts */
+const costNotes = (posts) => posts.filter((post) => /spent|cost|helpers/.test(post.body));
+
+test('cost alerts send a phone note only with their phone switch on, naming nothing of the project', async () => {
+  const off = testNotifier();
+  off.notifier.usageChanged(spentSoFar(1));
+  await off.at(60_000);
+  off.notifier.usageChanged(spentSoFar(9));
+  await off.at(61_000);
+  assert.deepEqual(costNotes(off.posts), [], 'the phone switch is off by default');
+
+  const { notifier, posts, at } = testNotifier({ watch: { phone: true } });
+  notifier.usageChanged(spentSoFar(1));
+  await at(60_000);
+  notifier.usageChanged(spentSoFar(4.5));
+  await at(61_000);
+  assert.deepEqual(costNotes(posts).map((post) => [post.body, post.headers.Tags]), [['A crew spent $3.50 (estimate) in a few minutes with no files changed.', 'money_with_wings']]);
+  // Spending on, within the cooldown: no second note.
+  notifier.usageChanged(spentSoFar(9));
+  await at(120_000);
+  assert.equal(costNotes(posts).length, 1);
+  for (const word of ['secret', 'opus', 's1']) assert.ok(!JSON.stringify(costNotes(posts)).includes(word), word);
+});
+
+test('a turn that starts many helpers sends one note; the town\'s Settings change the thresholds', async () => {
+  const { notifier, posts, at } = testNotifier();
+  notifier.setWatch({ helpers: 3, phone: true });
+  notifier.observe(hook('UserPromptSubmit', { prompt: 'Refactor everything' }));
+  for (let i = 0; i < 5; i += 1) notifier.observe(hook('SubagentStart', { agent_id: `a${i}`, agent_type: 'Explore' }));
+  await at(1_000);
+  assert.deepEqual(costNotes(posts).map((post) => post.body), ['A crew started 3 helpers in one turn.']);
+  // An edit is progress: spending with one in the window is no burn.
+  notifier.usageChanged(spentSoFar(1));
+  notifier.observe(hook('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: '/work/secret-project/a.ts', old_string: 'a', new_string: 'b' }, tool_use_id: 'e1', tool_response: {} }));
+  notifier.usageChanged(spentSoFar(8));
+  await at(40_000);
+  assert.equal(costNotes(posts).length, 1);
+});

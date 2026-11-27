@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { WATCH_DEFAULTS } from '../../public/js/core/watch.js';
 import { after, before, describe, it } from 'node:test';
 import { closeBrowser, connectBrowser, hookPayload, postHook, startTown, waitForMessage } from './helpers.mjs';
 
@@ -54,7 +55,8 @@ describe('WebSocket protocol', () => {
     const hello = await waitForMessage(browser, (m) => m?.t === 'hello');
     assert.equal(hello.version.length > 0, true);
     assert.ok(Math.abs(hello.serverTime - Date.now()) < 5000);
-    assert.deepEqual(hello.settings, { remoteApprovals: false, approvalTimeoutMs: 120000, notify: false, notifyLimits: false });
+    assert.deepEqual(hello.settings, { remoteApprovals: false, approvalTimeoutMs: 120000, notify: false, notifyLimits: false, watch: WATCH_DEFAULTS });
+    assert.deepEqual(hello.leftovers, []);
     const names = hello.history.map((/** @type {any} */ e) => e.event.hook_event_name);
     assert.deepEqual(names.slice(0, 2), ['SessionStart', 'PermissionRequest']);
     for (const envelope of hello.history) {
@@ -81,7 +83,7 @@ describe('WebSocket protocol', () => {
     await waitForMessage(second, (m) => m?.t === 'hello');
     first.send(JSON.stringify({ t: 'settings', settings: { remoteApprovals: true } }));
     const update = await waitForMessage(second, (m) => m?.t === 'settings');
-    assert.deepEqual(update.settings, { remoteApprovals: true, approvalTimeoutMs: 120000, notify: false, notifyLimits: false });
+    assert.deepEqual(update.settings, { remoteApprovals: true, approvalTimeoutMs: 120000, notify: false, notifyLimits: false, watch: WATCH_DEFAULTS });
     first.send(JSON.stringify({ t: 'settings', settings: { remoteApprovals: false } }));
     await waitForMessage(second, (m) => m?.t === 'settings' && m.settings.remoteApprovals === false);
     await Promise.all([closeBrowser(first), closeBrowser(second)]);

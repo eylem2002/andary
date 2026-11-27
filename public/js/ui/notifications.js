@@ -1,6 +1,7 @@
 // Notifications on this computer while the town is in a background tab, following "needs you"
 // (core/attention.js): an agent asks for your permission, asks a question, has a plan for you, a
-// turn stopped, an agent seems stuck, two agents work on the same files, or a finished turn
+// turn stopped, an agent seems stuck, two agents work on the same files, a crew spends fast or
+// starts many helpers, or a finished turn
 // waited with nobody answering. Off until the viewer turns them on (the browser then asks for
 // permission); clicking one brings the town back. They name the crew (its title, or its project's
 // folder) and never show a command or a file, a request's, a stuck step's or another agent's:
@@ -56,6 +57,9 @@ export function notificationFor(item, state, now) {
       // The item's own words name files and commands: these may show on a locked screen. Crews in
       // one folder share a project name, so the crew's number tells which.
       return note('Two agents in one folder', `${crew}${crewNumber(state, item)} may be undoing another agent's work.`);
+    case 'cost':
+      // Dollars, tokens and a count of helpers: nothing of the project, safe on a locked screen.
+      return note('Cost alert', `${crew}: ${item.text}.`);
     case 'finished':
       // With one crew at work you are probably at its terminal already.
       return activeCrews(state) > 1 ? note('Turn finished', `${crew} is waiting for your next prompt.`) : null;
@@ -106,7 +110,7 @@ const SETTLE_MS = 3000;
  * storm is in the town only, and two agents on the same files change their rows without a sound,
  * so both are announced too.
  */
-const ANNOUNCED = new Set(['question', 'plan', 'stopped', 'stuck', 'conflict']);
+const ANNOUNCED = new Set(['question', 'plan', 'stopped', 'stuck', 'conflict', 'cost']);
 
 /**
  * Watches the store and the clock: keeps the title's count and the HUD current, notifies each new
