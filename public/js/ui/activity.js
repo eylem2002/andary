@@ -43,6 +43,8 @@ const KIND_ICONS = {
   stuck: 'repeat',
   // Two agents on the same files (core/conflicts.js).
   conflict: 'users',
+  // A risky call that ran without asking (core/risk-runs.js).
+  risk: 'warning',
   // A lead's turn ended: what it did (core/receipts.js).
   receipt: 'list',
 };

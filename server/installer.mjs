@@ -99,14 +99,42 @@ function hookEntry(command, registration) {
 }
 
 /**
+ * The command for one registration: with its own argument (`hold`) before the marker.
+ * @param {string} command
+ * @param {Registration} registration
+ */
+function commandFor(command, registration) {
+  if (!registration.argument) return command;
+  const at = command.search(/\s#\s*andary\s*$/);
+  return at < 0 ? `${command} ${registration.argument}` : `${command.slice(0, at)} ${registration.argument}${command.slice(at)}`;
+}
+
+/**
+ * One registration's matcher group: its matcher, if it has one, and its entry.
+ * @param {string} command
+ * @param {Registration} registration
+ * @returns {{ matcher?: string, hooks: Array<Record<string, any>> }}
+ */
+function groupFor(command, registration) {
+  return { ...(registration.matcher ? { matcher: registration.matcher } : {}), hooks: [hookEntry(commandFor(command, registration), registration)] };
+}
+
+/**
  * The `hooks` object Andary registers (also the content of the plugin's hooks/hooks.json).
- * Tool events have no matcher, so they match every tool.
+ * Tool events have no matcher, so they match every tool; the hold check (`hold`) runs for shell
+ * commands only, in a group of its own under PreToolUse.
  * @param {string} command
  * @param {HookClient} [client]
- * @returns {Record<string, Array<{ hooks: Array<Record<string, any>> }>>}
+ * @returns {Record<string, Array<{ matcher?: string, hooks: Array<Record<string, any>> }>>}
  */
 export function buildHooksConfig(command, client = CLIENTS.claude) {
-  return Object.fromEntries(client.registrations.map((r) => [r.event, [{ hooks: [hookEntry(command, r)] }]]));
+  /** @type {Record<string, Array<{ matcher?: string, hooks: Array<Record<string, any>> }>>} */
+  const config = {};
+  for (const registration of client.registrations) {
+    if (!Object.hasOwn(config, registration.event)) config[registration.event] = [];
+    config[registration.event].push(groupFor(command, registration));
+  }
+  return config;
 }
 
 /**
@@ -182,7 +210,7 @@ export function withAndaryHooks(settings, { command, hookPath, client = CLIENTS.
     if (!Array.isArray(groups)) {
       throw new SettingsError(`"hooks.${registration.event}" in the settings file is not a list; nothing was changed.`);
     }
-    hooks[registration.event] = [...groups, { hooks: [hookEntry(command, registration)] }];
+    hooks[registration.event] = [...groups, groupFor(command, registration)];
   }
   // Spreading keeps "hooks" at its old position when it already existed.
   return { ...settings, hooks };

@@ -67,11 +67,18 @@ const backupsOf = (/** @type {string} */ file) => readdirSync(join(file, '..')).
 describe('registration table', () => {
   it('matches CONTRACTS §4.1', () => {
     assert.equal(HOOK_REGISTRATIONS.filter((r) => r.async).length, 17);
-    assert.deepEqual(HOOK_REGISTRATIONS.at(-2), { event: 'PermissionRequest', timeout: 150 });
-    assert.deepEqual(HOOK_REGISTRATIONS.at(-1), { event: 'SessionEnd', timeout: 3 });
+    assert.deepEqual(HOOK_REGISTRATIONS.at(-3), { event: 'PermissionRequest', timeout: 150 });
+    assert.deepEqual(HOOK_REGISTRATIONS.at(-2), { event: 'SessionEnd', timeout: 3 });
+    assert.deepEqual(HOOK_REGISTRATIONS.at(-1), { event: 'PreToolUse', matcher: 'Bash|PowerShell', argument: 'hold', timeout: 5 });
     const config = buildHooksConfig('node "/h/hook.mjs" # andary');
-    assert.deepEqual(config.PreToolUse, [{ hooks: [{ type: 'command', command: 'node "/h/hook.mjs" # andary', async: true }] }]);
+    // Every tool, async; then the hold check for shell commands, synchronous, in a group of its own.
+    assert.deepEqual(config.PreToolUse, [
+      { hooks: [{ type: 'command', command: 'node "/h/hook.mjs" # andary', async: true }] },
+      { matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: 'node "/h/hook.mjs" hold # andary', timeout: 5 }] },
+    ]);
     assert.equal(config.PreToolUse[0].matcher, undefined);
+    assert.deepEqual(Object.keys(buildHooksConfig('node "/h/hook.mjs" codex # andary', CLIENTS.codex)).filter((event) => event === 'PreToolUse'), ['PreToolUse']);
+    assert.equal(buildHooksConfig('x # andary', CLIENTS.codex).PreToolUse.length, 1, 'Codex is never held');
     for (const event of ['WorktreeCreate', 'WorktreeRemove', 'MessageDisplay', 'ConfigChange', 'FileChanged', 'Setup']) {
       assert.equal(config[event], undefined, event);
     }
@@ -106,7 +113,8 @@ describe('install', () => {
     assert.ok(written);
     assert.equal(backupPath, null);
     const settings = readJson(userSettings);
-    assert.deepEqual(Object.keys(settings.hooks), HOOK_REGISTRATIONS.map((r) => r.event));
+    assert.deepEqual(Object.keys(settings.hooks), [...new Set(HOOK_REGISTRATIONS.map((r) => r.event))]);
+    assert.match(settings.hooks.PreToolUse[1].hooks[0].command, / hold # andary$/);
     assert.equal(settings.hooks.PermissionRequest[0].hooks[0].timeout, 150);
     assert.equal(settings.hooks.SessionEnd[0].hooks[0].timeout, 3);
     assert.equal(settings.hooks.SessionEnd[0].hooks[0].async, undefined);
@@ -161,7 +169,8 @@ describe('install', () => {
     const { plan } = run('install');
     assert.equal(plan.removed, 2);
     const settings = readJson(userSettings);
-    assert.equal(settings.hooks.PreToolUse.length, 1);
+    // Ours: every tool (async), and the hold check for shell commands.
+    assert.equal(settings.hooks.PreToolUse.length, 2);
     assert.equal(settings.hooks.Stop.length, 1);
     // The command names the forwarder with forward slashes on every system.
     assert.match(settings.hooks.Stop[0].hooks[0].command, new RegExp(home.replaceAll('\\', '/').replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')));

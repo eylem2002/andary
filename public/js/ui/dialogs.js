@@ -93,14 +93,33 @@ export function createHelpDialog(ctx) {
   };
 }
 
+/**
+ * "Always hold risky commands for me" (server/hold.mjs): off by default, and it says what it is not.
+ * @param {HudContext} ctx
+ */
+function holdSwitch(ctx) {
+  const input = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-hold', 'data-testid': 'hold-risky-toggle', role: 'switch', 'aria-describedby': 'hud-set-hold-help' }));
+  input.addEventListener('change', () => ctx.controls.setHoldRisky?.(input.checked));
+  const block = h('div', { class: 'hud-setting' },
+    settingRow('hud-set-hold', 'Always hold risky commands for me', input),
+    h('p', { class: 'hud-setting__help', id: 'hud-set-hold-help', text: 'Claude Code asks you before a risky shell command (rm -r, a force push, git reset --hard, curl | sh…) even when an allow rule would let it run. Needs the hooks of this version (run andary install again) and new sessions. A second look, not a sandbox: what Andary does not recognise still runs.' }));
+  return { input, block };
+}
+
 /** @param {HudContext} ctx */
 export function createSettingsDialog(ctx) {
+  const syncSwitches = () => {
+    remote.checked = Boolean(ctx.view.serverSettings.remoteApprovals);
+    hold.input.checked = Boolean(ctx.view.serverSettings.holdRisky);
+    remote.disabled = hold.input.disabled = ctx.view.connection !== 'live';
+  };
   const remote = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-remote', 'data-testid': 'remote-approvals-toggle', role: 'switch' }));
   const remoteBlock = h('div', { class: 'hud-setting' },
     settingRow('hud-set-remote', 'Remote approvals', remote),
     h('p', { class: 'hud-setting__help', id: 'hud-set-remote-help', text: 'Claude Code waits up to two minutes for your answer here before asking in the terminal. Off: requests still show up here, but you answer them in the terminal.' }));
   setAttr(remote, 'aria-describedby', 'hud-set-remote-help');
   remote.addEventListener('change', () => ctx.controls.setRemoteApprovals(remote.checked));
+  const hold = holdSwitch(ctx);
 
   const theme = choice('hud-set-theme', 'Theme', [['auto', 'Match the town and system'], ['light', 'Light'], ['dark', 'Dark']], ctx.prefs.theme, (value) => ctx.setPrefs({ theme: /** @type {any} */ (value) }));
   const motion = choice('hud-set-motion', 'Motion', [['system', 'Match system setting'], ['reduce', 'Reduce motion'], ['full', 'Full motion']], ctx.prefs.motion, (value) => ctx.setPrefs({ motion: /** @type {any} */ (value) }));
@@ -171,7 +190,7 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [you.el, walking.el, teamBlock, remoteBlock, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    body: [you.el, walking.el, teamBlock, remoteBlock, hold.block, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -199,8 +218,8 @@ export function createSettingsDialog(ctx) {
       you.sync();
       setHidden(walking.el, !ctx.view.people.some((p) => p.name === ctx.view.me));
       setHidden(remoteBlock, !live || viewer);
-      remote.checked = Boolean(ctx.view.serverSettings.remoteApprovals);
-      remote.disabled = ctx.view.connection !== 'live';
+      setHidden(hold.block, !live || viewer);
+      syncSwitches();
       setHidden(setupButton, live || ctx.view.serverAvailable);
       setHidden(leaveButton, live || !(ctx.view.serverAvailable || ctx.view.demoForced));
       theme.set(ctx.prefs.theme);
@@ -215,11 +234,8 @@ export function createSettingsDialog(ctx) {
       setHidden(notify.phone, !live || viewer);
       dialog.open();
     },
-    /** Keeps the switch in step when the server reports a settings change. */
-    sync() {
-      remote.checked = Boolean(ctx.view.serverSettings.remoteApprovals);
-      remote.disabled = ctx.view.connection !== 'live';
-    },
+    /** Keeps the switches in step when the server reports a settings change. */
+    sync: syncSwitches,
   };
 }
 

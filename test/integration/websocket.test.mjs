@@ -54,7 +54,7 @@ describe('WebSocket protocol', () => {
     const hello = await waitForMessage(browser, (m) => m?.t === 'hello');
     assert.equal(hello.version.length > 0, true);
     assert.ok(Math.abs(hello.serverTime - Date.now()) < 5000);
-    assert.deepEqual(hello.settings, { remoteApprovals: false, approvalTimeoutMs: 120000, notify: false, notifyLimits: false });
+    assert.deepEqual(hello.settings, { remoteApprovals: false, approvalTimeoutMs: 120000, notify: false, notifyLimits: false, holdRisky: false });
     const names = hello.history.map((/** @type {any} */ e) => e.event.hook_event_name);
     assert.deepEqual(names.slice(0, 2), ['SessionStart', 'PermissionRequest']);
     for (const envelope of hello.history) {
@@ -81,7 +81,7 @@ describe('WebSocket protocol', () => {
     await waitForMessage(second, (m) => m?.t === 'hello');
     first.send(JSON.stringify({ t: 'settings', settings: { remoteApprovals: true } }));
     const update = await waitForMessage(second, (m) => m?.t === 'settings');
-    assert.deepEqual(update.settings, { remoteApprovals: true, approvalTimeoutMs: 120000, notify: false, notifyLimits: false });
+    assert.deepEqual(update.settings, { remoteApprovals: true, approvalTimeoutMs: 120000, notify: false, notifyLimits: false, holdRisky: false });
     first.send(JSON.stringify({ t: 'settings', settings: { remoteApprovals: false } }));
     await waitForMessage(second, (m) => m?.t === 'settings' && m.settings.remoteApprovals === false);
     await Promise.all([closeBrowser(first), closeBrowser(second)]);
@@ -97,7 +97,7 @@ describe('WebSocket protocol', () => {
     browser.send(JSON.stringify({ t: 'ping' }));
     await new Promise((resolve) => setTimeout(resolve, 200));
     const errors = browser.messages.filter((m) => m?.t === 'error').map((m) => m.message);
-    assert.deepEqual(errors, ['Messages must be JSON', 'Unknown message type', 'settings.remoteApprovals must be true or false', 'Unknown approval']);
+    assert.deepEqual(errors, ['Messages must be JSON', 'Unknown message type', 'settings.remoteApprovals and settings.holdRisky must be true or false', 'Unknown approval']);
     assert.ok(browser.isOpen);
     await closeBrowser(browser);
   });

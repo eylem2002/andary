@@ -12,6 +12,12 @@
 // because `andary install` copies it to <ANDARY_HOME>/hook.mjs and the plugin runs it in
 // place from its own folder.
 //
+// Run with the argument `hold` (synchronously, before Bash and PowerShell calls), it forwards
+// nothing: when "Always hold risky commands for me" is on (the file `hold-risky` beside
+// server.json) it asks the server whether this command is risky, and prints a PreToolUse `ask`
+// with the server's reason if so, so Claude Code asks you even under an allow rule. With the file
+// absent it exits at once.
+//
 // The decision is rebuilt, never copied: an allow, or a deny with a message. An allow may also
 // save one permission rule ("Allow always"), but only a rule Claude Code itself suggested in this
 // very hook's input, only an allow rule for this project (only you) or this session that allows
@@ -29,8 +35,14 @@ import { fileURLToPath } from 'node:url';
 // work below can delay. Two hooks started a millisecond apart keep their order this way (the
 // clock read here would not: Node's start-up time varies by more than that).
 const ts = Math.floor(performance.timeOrigin);
-/** Who runs this hook: Codex passes `codex`; Claude Code passes nothing. */
+/** Who runs this hook: Codex passes `codex`; Claude Code passes nothing (or `hold`). */
 const SOURCE = process.argv[2] === 'codex' ? 'codex' : null;
+/** Run as the hold check before a shell command (`hold`): asks the server, forwards nothing. */
+const HOLD = process.argv[2] === 'hold';
+/** Beside server.json while "Always hold risky commands for me" is on (server/hold.mjs). */
+const HOLD_FILE = 'hold-risky';
+/** The longest reason printed with an `ask` (the server sends no more). */
+const MAX_HOLD_REASON_CHARS = 300;
 const EVENT_TIMEOUT_MS = 1500;
 const APPROVAL_GRACE_MS = 5000;
 const STDIN_TIMEOUT_MS = 3000;
@@ -248,16 +260,17 @@ function serverProves(state, timeoutMs) {
  * @param {string} body
  * @param {string} nonce sent so the server can sign this very answer
  * @param {number} timeoutMs
+ * @param {string} [path]  /api/hook, or /api/hold for the hold check
  * @returns {Promise<{ text: string, signature: string } | null>}
  */
-function post(state, body, nonce, timeoutMs) {
+function post(state, body, nonce, timeoutMs, path = '/api/hook') {
   const host = connectHost(state.host);
   return new Promise((resolveText) => {
     const req = request(
       {
         host,
         port: state.port,
-        path: '/api/hook',
+        path,
         method: 'POST',
         agent: false,
         headers: {
@@ -476,10 +489,48 @@ function notesFrom(state, nonce, reply, hook) {
   return JSON.stringify({ hookSpecificOutput: { hookEventName: hook, additionalContext } });
 }
 
+/**
+ * The hold check's answer from a signed reply: a PreToolUse `ask` with the server's reason,
+ * rebuilt; '' for anything else (the call goes on as it would have).
+ * @param {State} state
+ * @param {string} nonce
+ * @param {{ text: string, signature: string } | null} reply
+ * @returns {string}
+ */
+function holdFrom(state, nonce, reply) {
+  if (!reply || !signedByServer(state, nonce, reply)) return '';
+  let specific;
+  try {
+    specific = JSON.parse(reply.text)?.output?.hookSpecificOutput;
+  } catch {
+    return '';
+  }
+  if (specific?.hookEventName !== 'PreToolUse' || specific.permissionDecision !== 'ask' || typeof specific.permissionDecisionReason !== 'string') return '';
+  const permissionDecisionReason = specific.permissionDecisionReason.slice(0, MAX_HOLD_REASON_CHARS);
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason } });
+}
+
+/**
+ * The hold check (`hook.mjs hold`): asks the server whether this call is a risky command to hold.
+ * @param {State} state
+ * @param {Record<string, any>} event
+ */
+async function holdCheck(state, event) {
+  setTimeout(() => finish(), 2 * EVENT_TIMEOUT_MS + 1000).unref();
+  if (!(await serverProves(state, EVENT_TIMEOUT_MS))) return '';
+  const nonce = randomBytes(16).toString('base64url');
+  const reply = await post(state, buildBody(event), nonce, EVENT_TIMEOUT_MS, '/api/hold');
+  return holdFrom(state, nonce, reply);
+}
+
 async function main() {
-  const state = readState(locateHome());
+  const home = locateHome();
+  // Holding is off (the usual case): nothing to ask, and nothing to send.
+  if (HOLD && !existsSync(join(home, HOLD_FILE))) return '';
+  const state = readState(home);
   if (!state || !serverAlive(state.pid)) return '';
   const event = parsePayload(await readStdin());
+  if (HOLD) return holdCheck(state, event);
   const isPermission = event.hook_event_name === 'PermissionRequest';
   const approvalMs = Number.isFinite(state.approvalTimeoutMs) ? Number(state.approvalTimeoutMs) : 120_000;
   const timeoutMs = isPermission ? approvalMs + APPROVAL_GRACE_MS : EVENT_TIMEOUT_MS;

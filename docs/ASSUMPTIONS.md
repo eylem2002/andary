@@ -1414,3 +1414,58 @@ section.
      backpack, cup, beard, earrings) plus 24 helpers in 55–57 draw calls, one per figure as
      before. Frame rate is not meaningful under the software renderer here; on a phone it is
      bound by those draw calls, unchanged from PR 1's 58–60.
+
+## Risk marks and approval batching (feat/risk-approvals)
+
+269. **The risk list is short and named, not a sandbox.** `core/risk.js` marks only what the study
+     listed (recursive deletes, force pushes and remote branch deletes, `reset --hard`, `checkout .`,
+     `restore`, `clean -f`, `branch -D`, `stash drop|clear`, `filter-branch`, `sudo`, `chmod -R`,
+     downloaded scripts, dropping database data, writes outside the project, secrets files). Each
+     false alarm teaches people to ignore the band, so anything ambiguous is left out: `rm` of a
+     file inside the project, `git push` without force, `truncate -s`, `find -delete`, and `xargs
+     rm` are not marked. Aliases, scripts, `eval` and variables are not followed.
+270. **"Outside the project" means outside the work tree the call runs in**, as the git hazards
+     judge it (the top found on disk by the server, else the crew's folder). `~`, `$HOME` and
+     `%USERPROFILE%` paths are always outside; other variables are not judged; `/dev`, `/tmp`,
+     `/var/tmp` and macOS's temp folders are never "outside" (writing scratch files there is
+     ordinary). Reading a file outside the project is not marked; writing or deleting one is.
+271. **A secrets file is named by its file name**: `.env` and `.env.*` (but `.env.example`,
+     `.sample`, `.template`, `.dist`, `.default(s)`, `.schema`), private key and keystore
+     extensions, SSH private keys, `.netrc`, `.npmrc`, `.pypirc`, `.git-credentials`,
+     `credentials.json`, `.htpasswd`, and anything under `.aws/`, `.ssh/`, `.gnupg/`. A word that
+     only looks like one (`grep ".env" file`) is marked too; that is rare and the band says why.
+272. **"Ran without asking" is judged from the hooks, by tool and input.** A PermissionRequest
+     carries no `tool_use_id`, so the store marks a call as asked by its agent, tool and exact
+     input; a risky call that ends (it ran, or ran and failed, not an interrupt) without such a mark
+     counts. It cannot tell an allow rule from a permission mode (`acceptEdits`,
+     `bypassPermissions`) or a hook that allowed it: all of them "ran without asking you". It counts
+     for half an hour, or until set aside, like a conflict. No phone note is sent for it in this
+     change (the study said "can"); the desktop notification and screen-reader announcement are.
+273. **The hold check is a second, synchronous PreToolUse hook for Bash and PowerShell only.** The
+     ordinary PreToolUse hook stays async, so nothing else waits. With the setting off (the
+     default) the forwarder exits after one file lookup, before reading server.json, so the cost
+     is one Node start per shell command. File tools are not held: a synchronous hook on every Read
+     and Edit would slow every agent for a rare case. Codex is not held: its PreToolUse hook has no
+     `ask`. Hooks installed by an earlier version have no hold check until `andary install` runs
+     again (Settings says so).
+274. **The hold setting lives in a file** (`<ANDARY_HOME>/hold-risky`, mode 0600) rather than in
+     server.json or the browser: it outlasts a restart, any of the owner's browsers can change it,
+     and the forwarder can tell it is off without asking the server. A server started without
+     writing server.json (tests) keeps it in memory.
+275. **Requests are grouped when tool and input are identical** (keys in any order), across crews
+     and also within one crew. Only requests the town can answer (pending and held) are grouped; one
+     waiting in the terminal keeps its own card. The card shows the request that runs out first,
+     every box starts ticked, and an answer goes to the ticked ones; when the folders differ, each
+     row names its folder, and the band lists every reason any of them has. "Allow always" saves a
+     rule for one agent's project or session, so it shows only when exactly one box is ticked.
+     "Deny and stop" shows only when every ticked agent can be stopped.
+276. **Answered, expired and terminal-answered cards fold into "Earlier (n)"**, closed by default,
+     under the live ones (at most 30 cards in all, as before). A card you just answered stays in
+     place, with its result, while it has focus (a click or a key leaves focus on it), and folds
+     away once focus leaves it, so the result is read and keyboard focus is never lost. A card that
+     leaves while focused for another reason hands focus to the next waiting card, else to the
+     "Earlier" summary.
+277. **The demo holds a countdown while a waiting card is in view**: the Approvals tab selected, the
+     boards on screen (on a phone, the sheet open) and the page visible. The story goes on meanwhile;
+     only the 25 s timeout stands still, as when the demo is paused. Live requests keep the
+     server's timeout: Claude Code itself gives up on the hook after 150 s.

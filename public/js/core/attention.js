@@ -10,10 +10,13 @@
 //   alert    two agents on the same files (core/conflicts.js): a Write over another agent's
 //            change, or a git command over its changes, counted until you set it aside; an Edit
 //            of such a file is a note that counts for nothing
+//   alert    a risky command ran without asking you (core/risk-runs.js: an allow rule or a mode
+//            let it through): counted until you set it aside, for half an hour
 //   ready    a lead finished its turn and nobody has answered: counted once Claude Code says so
 //            (idle_prompt, a minute later; Codex has no such signal: a minute too), for 30 minutes
 import { CONFLICT_MS, hazardText } from './conflicts.js';
 import { agentKeyOf } from './ids.js';
+import { riskRunText } from './risk-runs.js';
 
 /** @typedef {import('./store.js').StoreState} StoreState */
 /** @typedef {import('./store.js').AgentState} AgentState */
@@ -21,7 +24,7 @@ import { agentKeyOf } from './ids.js';
 /** @typedef {import('./store.js').Approval} Approval */
 /** @typedef {import('./dialogs.js').Dialog} Dialog */
 /** @typedef {import('./conflicts.js').Hazard} Hazard */
-/** @typedef {'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'finished'} AttentionKind */
+/** @typedef {'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'risk'|'finished'} AttentionKind */
 /** @typedef {'blocked'|'stopped'|'alert'|'ready'} AttentionLevel */
 
 /**
@@ -49,6 +52,8 @@ export const READY_MS = 30 * 60_000;
  * Claude Code's minute. The phone's Codex note waits as long (server/notify.mjs CODEX_IDLE_MS).
  */
 export const CODEX_IDLE_MS = 60_000;
+/** A risky command that ran without asking counts this long, unless set aside sooner. */
+export const RISK_MS = 30 * 60_000;
 /** Turns stopped by the same limit within this window are one item. */
 const SHARED_STOP_MS = 10 * 60_000;
 /**
@@ -89,6 +94,7 @@ export function attentionItems(state, now, { dismissed } = {}) {
     const item = conflictItem(hazard, state, yours, now);
     if (item) items.push(item);
   }
+  items.push(...riskItems(state, yours, now));
   // A dismissed item stays away until the situation changes (a new episode has a new id).
   return mergeSharedStops(items, limited)
     .filter((item) => !(item.dismissable && dismissed?.has(item.id)))
@@ -251,6 +257,39 @@ function conflictItem(hazard, state, yours, now) {
     counted: alert,
     dismissable: alert,
     crews: new Set([hazard.sessionId, ...others.map((other) => other.sessionId)]).size,
+    settled: true,
+  };
+}
+
+/**
+ * Risky commands of your crews that ran without asking in the last half hour.
+ * @param {StoreState} state @param {Map<string, Session>} yours @param {number} now
+ * @returns {AttentionItem[]}
+ */
+function riskItems(state, yours, now) {
+  return (state.risks ?? []).filter((run) => yours.has(run.sessionId) && now - run.at < RISK_MS).map(riskItem);
+}
+
+/**
+ * A risky command that ran without asking: a notice, counted until set aside.
+ * @param {import('./risk-runs.js').RiskRun} run
+ * @returns {AttentionItem}
+ */
+function riskItem(run) {
+  return {
+    id: run.id,
+    kind: 'risk',
+    level: 'alert',
+    sessionId: run.sessionId,
+    agentKey: run.agentKey,
+    agentKeys: [run.agentKey],
+    approvalId: null,
+    since: run.at,
+    countedSince: run.at,
+    text: riskRunText(run),
+    counted: true,
+    dismissable: true,
+    crews: 1,
     settled: true,
   };
 }

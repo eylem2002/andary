@@ -113,6 +113,47 @@ describe('demo mode', () => {
     assert.equal(store.approvals.at(-1).id, id);
   });
 
+  test('a card in view holds the countdown while the story goes on; out of view it runs again', async () => {
+    const store = fakeStore();
+    const { sim, create } = fakeSimulation();
+    const demo = createDemo({ store, createSimulation: create });
+    demo.start();
+    const answer = sim.emit(permission);
+    mock.timers.tick(5_000);
+    demo.holdApprovals(true);
+    assert.equal(store.approvals.at(-1).expiresAt, null, 'no countdown while the card is read');
+    assert.equal(sim.running, true, 'the story itself goes on');
+    // A request that arrives while a card is in view waits too.
+    const second = sim.emit({ ...permission, tool_input: { command: 'rm -rf dist' } });
+    assert.equal(store.approvals.at(-1).expiresAt, null);
+    mock.timers.tick(DEMO_APPROVAL_MS * 4);
+    assert.ok(store.approvals.filter((a) => a.status === 'expired').length === 0, 'nothing expires meanwhile');
+    // Pausing and resuming the story while the card is in view keeps the countdowns held.
+    demo.setPaused(true);
+    demo.setPaused(false);
+    assert.equal(store.approvals.at(-1).expiresAt, null);
+    demo.holdApprovals(false);
+    const first = store.approvals.findLast((a) => a.id === 'demo-1');
+    assert.equal(first.expiresAt - Date.now(), DEMO_APPROVAL_MS - 5_000, 'the time left is kept');
+    mock.timers.tick(DEMO_APPROVAL_MS);
+    assert.deepEqual(await answer, {});
+    assert.deepEqual(await second, {});
+  });
+
+  test('a card in view and a pause both hold: the countdown runs again only when neither does', () => {
+    const store = fakeStore();
+    const { sim, create } = fakeSimulation();
+    const demo = createDemo({ store, createSimulation: create });
+    demo.start();
+    sim.emit(permission);
+    demo.setPaused(true);
+    demo.holdApprovals(true);
+    demo.holdApprovals(false);
+    assert.equal(store.approvals.at(-1).expiresAt, null, 'still paused');
+    demo.setPaused(false);
+    assert.ok(store.approvals.at(-1).expiresAt > Date.now());
+  });
+
   test('a permission request offers the rules the server would offer', () => {
     const store = fakeStore();
     const { sim, create } = fakeSimulation();

@@ -9,6 +9,9 @@
 // and the button, so a tap that misses Allow lands on words; the button has no key of its own.
 // Beside Deny, "Deny and stop" also stops a Claude Code agent (`interrupt`); it has no key of its
 // own either, and a card that cannot stop its agent (Codex, an older hook) says why instead.
+// A risky request (core/risk.js) gets a red band naming why. Requests that ask exactly the same
+// thing from several crews share one card with a checkbox per request (approval-groups.js), all
+// ticked: Allow and Deny answer the ticked ones. Answered and expired cards fold into "Earlier".
 import { h, renderList, setAttr, setHidden, setText } from './dom.js';
 import { icon } from './icons.js';
 import { approvalChange, describeApproval, formatCountdown } from './format.js';
@@ -16,10 +19,12 @@ import { alwaysLine, approvalHint, offeredSuggestion, savedText } from './approv
 import { diffView } from './diff-view.js';
 import { diffStats } from './diff.js';
 import { approvalAgentKey, crewNumber, findSession, kbd, roundel, updateRoundel } from './parts.js';
+import { approvalSections, differentFolders, groupReasons } from './approval-groups.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
 /** @typedef {import('./types.js').Approval} Approval */
+/** @typedef {import('./approval-groups.js').ApprovalEntry} ApprovalEntry */
 
 const MAX_CARDS = 30;
 /** The longest deny reason sent (the server keeps 500 characters). */
@@ -172,6 +177,14 @@ function buildCard(id, approvalId) {
   const detail = h('code', { class: 'hud-approval__detail hud-mono', id: `${id}-detail` });
   // What the request cannot say that allowing it grants (a Codex command may leave its sandbox).
   const grants = h('p', { class: 'hud-approval__grants', id: `${id}-grants`, 'data-testid': 'approval-grants' });
+  // Why this one deserves a second look (core/risk.js), on a red band under the heading.
+  const riskWords = h('span', { class: 'hud-approval__risk-words' });
+  const risk = h('p', { class: 'hud-approval__risk', id: `${id}-risk`, 'data-testid': 'approval-risk', hidden: true },
+    icon('warning', { size: 16 }), h('span', {}, h('strong', { text: 'Risky: ' }), riskWords));
+  // The requests a card stands for when several crews ask the same thing: one checkbox each.
+  const crewsLegend = h('legend', { class: 'hud-approval__crews-legend' });
+  const crewsList = h('ul', { class: 'hud-approval__crews-list' });
+  const crews = h('fieldset', { class: 'hud-approval__crews', 'data-testid': 'approval-crews', hidden: true }, crewsLegend, crewsList);
   const changeNote = h('p', { class: 'hud-approval__change-note' });
   const changeBody = h('div', { class: 'hud-approval__change-body' });
   const change = h('div', { class: 'hud-approval__change', 'data-testid': 'approval-change' }, changeNote, changeBody);
@@ -193,11 +206,11 @@ function buildCard(id, approvalId) {
   const terminal = h('p', { class: 'hud-approval__terminal' }, icon('terminal', { size: 16 }), h('span', { text: 'Answer in your terminal.' }));
   const hint = h('p', { class: 'hud-approval__hint', 'data-testid': 'approval-hint' });
   const result = h('p', { class: 'hud-approval__result' });
-  const card = h('article', { class: 'hud-approval', 'data-testid': 'approval-card', 'data-approval-id': approvalId, 'aria-labelledby': `${id}-who`, 'aria-describedby': `${id}-detail ${id}-grants` },
+  const card = h('article', { class: 'hud-approval', 'data-testid': 'approval-card', 'data-approval-id': approvalId, 'aria-labelledby': `${id}-who`, 'aria-describedby': `${id}-risk ${id}-detail ${id}-grants` },
     h('header', { class: 'hud-approval__head' }, mark, h('div', {}, who, h('p', { class: 'hud-approval__meta' }, crew, tool))),
-    h('pre', { class: 'hud-approval__code' }, detail), grants, change, timer, reasonRow, actions, terminal, hint, result);
+    risk, h('pre', { class: 'hud-approval__code' }, detail), grants, change, crews, timer, reasonRow, actions, terminal, hint, result);
   const item = h('li', { class: 'hud-approvals__item' }, card);
-  const parts = { mark, who, crew, tool, detail, grants, change, changeNote, changeBody, changeKey: '', reason, reasonRow, timer, bar, countdown, actions, allow, deny, stop, stopNote, stopRow,
+  const parts = { mark, who, crew, tool, detail, grants, risk, riskWords, riskKey: '', crews, crewsLegend, crewsList, members: /** @type {Approval[]} */ ([]), change, changeNote, changeBody, changeKey: '', reason, reasonRow, timer, bar, countdown, actions, allow, deny, stop, stopNote, stopRow,
     always, alwaysRow, alwaysNote, offer: null, offerKey: '', terminal, hint, hintKey: '', result, card, index: -1, armedAt: 0, armTimer: 0 };
   return { item, parts };
 }
@@ -215,19 +228,21 @@ function buildAlways(id) {
 
 /**
  * The "Allow always" row on a card that can be answered here. The rule shown is the one a click
- * saves: both come from `p.offer`, set here.
+ * saves: both come from `p.offer`, set here. A card for several requests offers it only while one
+ * of them is ticked: a rule is saved for one agent's project or session.
  * @param {any} p the card's parts
- * @param {Approval} approval
+ * @param {Approval|null} approval  the one ticked request, or null
  * @param {boolean} busy an answer is being sent
  */
 function showOffer(p, approval, busy) {
-  p.offer = approval.status === 'pending' && approval.held ? offeredSuggestion(approval) : null;
+  p.offer = approval && approval.status === 'pending' && approval.held ? offeredSuggestion(approval) : null;
+  p.offerFor = p.offer ? approval : null;
   // The row is about to disappear under keyboard focus: keep it on the card.
   if (!p.offer && p.alwaysRow.contains(document.activeElement)) p.card.focus();
   setHidden(p.alwaysRow, !p.offer);
   p.always.disabled = busy;
   // A request's offer never changes, so its line is written once.
-  const key = p.offer ? `${approval.id} ${p.offer.index}` : '';
+  const key = p.offer && approval ? `${approval.id} ${p.offer.index}` : '';
   if (!p.offer || p.offerKey === key) return;
   p.offerKey = key;
   p.alwaysNote.replaceChildren(...alwaysLine(p.offer).map((part) => ('code' in part ? h('code', { class: 'hud-mono', text: part.code }) : part.text)));
@@ -251,19 +266,83 @@ function showHint(p, approval, state) {
 }
 
 /**
- * "Deny and stop" on a card that can be answered here: the button when the agent can be stopped,
- * otherwise the line that says why not (Codex, an older hook); its description says what it does.
+ * "Deny and stop" on a card that can be answered here: the button when every ticked request's
+ * agent can be stopped, otherwise the line that says why not (Codex, an older hook); its
+ * description says what it does.
  * @param {any} p the card's parts
- * @param {Approval} approval
+ * @param {Approval[]} ticked  the requests an answer goes to
  * @param {boolean} busy an answer is being sent
  */
-function showStop(p, approval, busy) {
-  const canStop = approval.canStop === true;
+function showStop(p, ticked, busy) {
+  const canStop = ticked.length > 0 && ticked.every((one) => one.canStop === true);
+  const stopNote = ticked.find((one) => one.canStop !== true)?.stopNote ?? '';
   if (!canStop && document.activeElement === p.stop) p.card.focus();
-  setHidden(p.stopRow, !canStop && !approval.stopNote);
+  setHidden(p.stopRow, !canStop && !stopNote);
   setHidden(p.stop, !canStop);
   p.stop.disabled = busy;
-  setText(p.stopNote, canStop ? 'Deny and stop also ends the agent’s turn: it stops and waits for you in the terminal.' : (approval.stopNote ? `${approval.stopNote}.` : ''));
+  setText(p.stopNote, canStop ? 'Deny and stop also ends the agent’s turn: it stops and waits for you in the terminal.' : (stopNote ? `${stopNote}.` : ''));
+}
+
+/**
+ * The red band of a risky request: why, in a few words (core/risk.js), for every request the
+ * card stands for. Written again only when the reasons change.
+ * @param {any} p the card's parts
+ * @param {Approval[]} members
+ * @param {StoreState} state
+ */
+function showRisk(p, members, state) {
+  const reasons = groupReasons(members, state);
+  const key = reasons.join('\n');
+  setAttr(p.card, 'data-risky', reasons.length ? 'true' : null);
+  if (p.riskKey === key) return;
+  p.riskKey = key;
+  setText(p.riskWords, reasons.join('; '));
+  setHidden(p.risk, !reasons.length);
+}
+
+/**
+ * The checkbox per request on a card that stands for several (the same request from more than
+ * one crew, or twice from one): who asks, in which crew and, when they differ, in which folder.
+ * @param {any} p the card's parts
+ * @param {Approval[]} members
+ * @param {StoreState} state
+ * @param {{ unticked: Set<string>, onToggle: () => void }} ticks
+ */
+function showMembers(p, members, state, ticks) {
+  const many = members.length > 1 && members.every((one) => one.status === 'pending' && one.held);
+  setHidden(p.crews, !many);
+  if (!many) {
+    p.crewsList.replaceChildren();
+    p.crewsKey = '';
+    return;
+  }
+  const folders = differentFolders(members);
+  const crews = new Set(members.map((one) => one.sessionId)).size;
+  setText(p.crewsLegend, crews > 1 ? `${crews} crews ask for this. Your answer goes to the ticked ones:` : `Asked ${members.length} times. Your answer goes to the ticked ones:`);
+  const key = members.map((one) => one.id).join(' ');
+  if (p.crewsKey !== key) {
+    p.crewsKey = key;
+    p.crewsList.replaceChildren(...members.map((one) => memberRow(one, state, folders, ticks)));
+  }
+  for (const box of p.crewsList.querySelectorAll('input')) box.checked = !ticks.unticked.has(box.value);
+}
+
+/**
+ * @param {Approval} approval @param {StoreState} state @param {boolean} folders
+ * @param {{ unticked: Set<string>, onToggle: () => void }} ticks
+ */
+function memberRow(approval, state, folders, ticks) {
+  const session = findSession(state, approval.sessionId);
+  const agent = state.agents[approvalAgentKey(approval)];
+  const box = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', value: approval.id, 'data-testid': 'approval-crew-check' }));
+  box.addEventListener('change', () => {
+    if (box.checked) ticks.unticked.delete(approval.id);
+    else ticks.unticked.add(approval.id);
+    ticks.onToggle();
+  });
+  const crew = session ? `Crew ${crewNumber(state, approval.sessionId)}, ${session.project}` : 'A crew';
+  const where = folders ? h('code', { class: 'hud-mono hud-approval__crew-folder', text: approval.cwd || '(folder unknown)' }) : null;
+  return h('li', {}, h('label', { class: 'hud-approval__crew-row' }, box, h('span', { text: `${crew}: ${agent?.name ?? 'an agent'}` }), where));
 }
 
 /**
@@ -271,10 +350,12 @@ function showStop(p, approval, busy) {
  * @param {'allow'|'deny'} decision
  * @param {number|undefined} always
  * @param {boolean} [stop]
+ * @param {number} [count]  how many requests the answer went to
  */
-function sentWords(decision, always, stop = false) {
-  if (decision === 'deny') return stop ? 'Denied, and asked the agent to stop.' : 'Denied.';
-  return always === undefined ? 'Allowed.' : 'Allowed, and asked to save the rule.';
+function sentWords(decision, always, stop = false, count = 1) {
+  const many = count > 1 ? ` ${count} requests.` : '';
+  if (decision === 'deny') return stop ? `Denied, and asked the agent to stop.${many}` : `Denied.${many}`;
+  return always === undefined ? `Allowed.${many}` : 'Allowed, and asked to save the rule.';
 }
 
 /**
@@ -316,6 +397,99 @@ function showChange(p, approval) {
   p.changeBody.replaceChildren(...change.hunks.map((hunk, index) => diffView(hunk, { index, count: change.hunks.length, exact: true, compact: true })));
 }
 
+/**
+ * Keeps the card under keyboard focus where it is once its request is settled (answered here,
+ * say): its result shows, and focus stays on it until the viewer moves on. Only then does it
+ * fold into "Earlier".
+ * @param {HTMLElement} list
+ * @param {WeakMap<HTMLElement, any>} parts
+ * @param {{ live: ApprovalEntry[], earlier: Approval[] }} sections
+ */
+function keepFocused(list, parts, { live, earlier }) {
+  const item = /** @type {HTMLElement|null} */ ([...list.children].find((child) => child.contains(document.activeElement)) ?? null);
+  const key = item?.dataset.key;
+  if (!item || !key || live.some((entry) => entry.key === key)) return { live, earlier };
+  const members = /** @type {Approval[]} */ (parts.get(item)?.members ?? []);
+  const ids = new Set(members.map((one) => one.id));
+  const settled = earlier.filter((one) => ids.has(one.id));
+  if (!settled.length) return { live, earlier };
+  const index = Math.min([...list.children].indexOf(item), live.length);
+  const kept = { key, lead: settled[0], members: settled };
+  return { live: [...live.slice(0, index), kept, ...live.slice(index)], earlier: earlier.filter((one) => !ids.has(one.id)) };
+}
+
+/** "Earlier (n)": the settled requests, folded under the live ones. */
+function buildEarlier() {
+  const earlierList = h('ol', { class: 'hud-approvals__list hud-approvals__list--earlier' });
+  const earlierCount = h('span', {});
+  const earlier = h('details', { class: 'hud-approvals__earlier', 'data-testid': 'approvals-earlier', hidden: true },
+    h('summary', { class: 'hud-approvals__earlier-title' }, earlierCount), earlierList);
+  return { earlier, earlierList, earlierCount };
+}
+
+/**
+ * How a card answers: the ticked requests of a card (its only one, for a card of one) each get
+ * the decision; "Allow always" goes to the one request whose rule the card shows.
+ * @param {HudContext} ctx
+ * @param {Map<string, string>} sending  decisions sent but not yet confirmed
+ * @param {(members: Approval[]) => Approval[]} tickedOf
+ */
+function createDecide(ctx, sending, tickedOf) {
+  /**
+   * @param {any} p the card's parts
+   * @param {'allow'|'deny'} decision
+   * @param {string} [reason] sent with a denial only
+   * @param {number} [always] with an allow: the index of the suggestion to save (one request only)
+   * @param {boolean} [stop] with a denial: stop the agent too
+   */
+  return function decide(p, decision, reason = '', always = undefined, stop = false) {
+    const ticked = tickedOf(p.members);
+    const targets = always === undefined ? ticked : ticked.filter((one) => one === p.offerFor);
+    const open = targets.filter((one) => !sending.has(one.id) && one.status === 'pending' && one.held);
+    if (!open.length || open.length < targets.length || (stop && open.some((one) => one.canStop !== true))) return;
+    const message = decision === 'deny' ? reason.trim().slice(0, MAX_REASON_CHARS) : '';
+    let sent = 0;
+    for (const approval of open) {
+      if (!ctx.controls.decide(approval.id, decision, message || undefined, always, stop || undefined)) break;
+      sending.set(approval.id, decision);
+      sent += 1;
+    }
+    if (sent < open.length) ctx.toasts.show({ tone: 'error', icon: 'warning', title: 'Not connected to Andary', body: 'Answer this request in your terminal.' });
+    if (!sent) return;
+    ctx.announcer.polite(sentWords(decision, always, stop, sent));
+    ctx.refresh();
+  };
+}
+
+/**
+ * A card's answers: its buttons (after the answer delay), Enter in the reason field, and A / D.
+ * @param {any} p the card's parts
+ * @param {ReturnType<typeof createDecide>} decide
+ */
+function wireCard(p, decide) {
+  p.allow.addEventListener('click', (event) => clickCounts(event, p) && decide(p, 'allow'));
+  p.always.addEventListener('click', (event) => clickCounts(event, p) && p.offer && decide(p, 'allow', '', p.offer.index));
+  p.deny.addEventListener('click', (event) => clickCounts(event, p) && decide(p, 'deny', p.reason.value));
+  p.stop.addEventListener('click', (event) => clickCounts(event, p) && decide(p, 'deny', p.reason.value, undefined, true));
+  // Enter in the reason field denies with that reason; typing there never answers by itself.
+  p.reason.addEventListener('keydown', (event) => {
+    event.stopPropagation();
+    if (event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      decide(p, 'deny', p.reason.value);
+    }
+  });
+  p.card.addEventListener('keydown', (event) => {
+    const key = event.key.toLowerCase();
+    if ((key !== 'a' && key !== 'd') || event.ctrlKey || event.metaKey || event.altKey) return;
+    // A / D answer from the card and its buttons, not while reading the change.
+    if (p.change.contains(/** @type {Node} */ (event.target))) return;
+    event.preventDefault();
+    event.stopPropagation();
+    decide(p, key === 'a' ? 'allow' : 'deny', p.reason.value);
+  });
+}
+
 /** @param {HudContext} ctx */
 export function createApprovalsPanel(ctx) {
   const noteText = h('p', { class: 'hud-note__text' });
@@ -327,70 +501,49 @@ export function createApprovalsPanel(ctx) {
 
   /** Decisions sent but not yet confirmed by an approval update. @type {Map<string, string>} */
   const sending = new Map();
+  /** Requests the viewer unticked on a shared card: an answer leaves them waiting. @type {Set<string>} */
+  const unticked = new Set();
+  const ticks = { unticked, onToggle: () => ctx.refresh() };
+  const { earlier, earlierList, earlierCount } = buildEarlier();
+  el.append(earlier);
   /** @type {WeakMap<HTMLElement, any>} */
   const parts = new WeakMap();
   const moves = watchMoves(list, parts);
 
-  /**
-   * @param {Approval} approval
-   * @param {'allow'|'deny'} decision
-   * @param {string} [reason] sent with a denial only
-   * @param {number} [always] with an allow: the index of the suggestion to save
-   * @param {boolean} [stop] with a denial: stop the agent too
-   */
-  function decide(approval, decision, reason = '', always = undefined, stop = false) {
-    if (sending.has(approval.id) || approval.status !== 'pending' || !approval.held || (stop && approval.canStop !== true)) return;
-    const message = decision === 'deny' ? reason.trim().slice(0, MAX_REASON_CHARS) : '';
-    if (!ctx.controls.decide(approval.id, decision, message || undefined, always, stop || undefined)) {
-      ctx.toasts.show({ tone: 'error', icon: 'warning', title: 'Not connected to Andary', body: 'Answer this request in your terminal.' });
-      return;
-    }
-    sending.set(approval.id, decision);
-    ctx.announcer.polite(sentWords(decision, always, stop));
-    ctx.refresh();
-  }
+  /** The requests an answer goes to: those still ticked. @param {Approval[]} members */
+  const tickedOf = (members) => (members.length > 1 ? members.filter((one) => !unticked.has(one.id)) : members);
+  const decide = createDecide(ctx, sending, tickedOf);
 
   let cards = 0;
 
-  /** @param {Approval} first */
+  /** @param {ApprovalEntry} first */
   function createCard(first) {
-    const { item, parts: p } = buildCard(`hud-approval-${++cards}`, first.id);
+    const { item, parts: p } = buildCard(`hud-approval-${++cards}`, first.lead.id);
     parts.set(item, p);
     moves.watch(item);
-    p.allow.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'allow'));
-    p.always.addEventListener('click', (event) => clickCounts(event, p) && p.offer && decide(p.approval, 'allow', '', p.offer.index));
-    p.deny.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'deny', p.reason.value));
-    p.stop.addEventListener('click', (event) => clickCounts(event, p) && decide(p.approval, 'deny', p.reason.value, undefined, true));
-    // Enter in the reason field denies with that reason; typing there never answers by itself.
-    p.reason.addEventListener('keydown', (event) => {
-      event.stopPropagation();
-      if (event.key === 'Enter' && !event.isComposing) {
-        event.preventDefault();
-        decide(p.approval, 'deny', p.reason.value);
-      }
-    });
-    p.card.addEventListener('keydown', (event) => {
-      const key = event.key.toLowerCase();
-      if ((key !== 'a' && key !== 'd') || event.ctrlKey || event.metaKey || event.altKey) return;
-      // A / D answer from the card and its buttons, not while reading the change.
-      if (p.change.contains(/** @type {Node} */ (event.target))) return;
-      event.preventDefault();
-      event.stopPropagation();
-      decide(p.approval, key === 'a' ? 'allow' : 'deny', p.reason.value);
-    });
+    wireCard(p, decide);
     return item;
   }
 
-  /** @param {HTMLElement} item @param {Approval} approval @param {StoreState} state @param {number} index */
-  function updateCard(item, approval, state, index) {
+  /**
+   * @param {HTMLElement} item @param {ApprovalEntry} entry @param {StoreState} state @param {number} index
+   */
+  function updateCard(item, { lead: approval, members }, state, index) {
     const p = parts.get(item);
     p.approval = approval;
+    p.members = members;
+    setAttr(p.card, 'data-approval-id', approval.id);
+    setAttr(p.card, 'data-approval-ids', members.map((one) => one.id).join(' '));
     armCard(p, index);
-    if (approval.status !== 'pending') sending.delete(approval.id);
+    for (const one of members) if (one.status !== 'pending') sending.delete(one.id);
+    const ticked = tickedOf(members);
+    const busy = ticked.some((one) => sending.has(one.id));
     describeRequest(p, approval, state);
-    showAnswerState(p, approval);
-    showOffer(p, approval, sending.has(approval.id));
-    showStop(p, approval, sending.has(approval.id));
+    showRisk(p, members, state);
+    showMembers(p, members, state, ticks);
+    showAnswerState(p, approval, busy, ticked.length);
+    showOffer(p, ticked.length === 1 ? ticked[0] : null, busy);
+    showStop(p, ticked, busy);
     showHint(p, approval, state);
     tickCard(item, Date.now());
   }
@@ -399,11 +552,12 @@ export function createApprovalsPanel(ctx) {
    * Which of the buttons, countdown, terminal hint and result line a card shows.
    * @param {any} p the card's parts
    * @param {Approval} approval
+   * @param {boolean} busy  an answer to a ticked request is being sent
+   * @param {number} ticked  how many requests an answer goes to
    */
-  function showAnswerState(p, approval) {
+  function showAnswerState(p, approval, busy, ticked) {
     const pending = approval.status === 'pending';
     const answerable = pending && approval.held;
-    const busy = sending.has(approval.id);
     setAttr(p.card, 'data-status', approval.status);
     setAttr(p.card, 'tabindex', answerable ? '0' : '-1');
     // The buttons are about to disappear: keep keyboard focus on the card instead of losing it.
@@ -416,8 +570,10 @@ export function createApprovalsPanel(ctx) {
     setHidden(p.terminal, !pending || approval.held);
     // The server says why it left a request to the terminal (e.g. it could not be shown in full).
     setText(p.terminal.lastElementChild, pending && approval.message ? `Answer in your terminal. ${approval.message}.` : 'Answer in your terminal.');
-    p.allow.disabled = busy;
-    p.deny.disabled = busy;
+    // A button about to be disabled would drop keyboard focus: keep it on the card.
+    if (busy && p.actions.contains(document.activeElement)) p.card.focus();
+    p.allow.disabled = busy || ticked === 0;
+    p.deny.disabled = busy || ticked === 0;
     setText(p.result, busy ? 'Sending your answer…' : resultText(approval, ctx.view.mode));
     setHidden(p.result, pending && !busy);
   }
@@ -437,12 +593,29 @@ export function createApprovalsPanel(ctx) {
 
   /** @param {StoreState} state */
   function render(state) {
-    const shown = state.approvals.slice(0, MAX_CARDS);
-    renderList(list, shown, (approval) => approval.id, createCard, (item, approval, index) => updateCard(item, approval, state, index));
+    const focused = list.contains(document.activeElement);
+    const { live, earlier: settled } = keepFocused(list, parts, approvalSections(state.approvals));
+    const shown = live.slice(0, MAX_CARDS);
+    renderList(list, shown, (entry) => entry.key, createCard, (item, entry, index) => updateCard(item, entry, state, index));
+    const old = settled.slice(0, Math.max(0, MAX_CARDS - shown.length)).map((approval) => ({ key: approval.id, lead: approval, members: [approval] }));
+    renderList(earlierList, old, (entry) => entry.key, createCard, (item, entry, index) => updateCard(item, entry, state, index));
+    setText(earlierCount, `Earlier (${settled.length})`);
+    setHidden(earlier, !settled.length);
+    // Ticks of requests no longer waiting are forgotten.
+    const waiting = new Set(live.flatMap((entry) => entry.members.map((one) => one.id)));
+    for (const id of unticked) if (!waiting.has(id)) unticked.delete(id);
     moves.sweep();
-    setHidden(empty, shown.some((approval) => approval.status === 'pending'));
+    setHidden(empty, shown.length > 0);
     renderNote();
+    // A card that left under keyboard focus (it went to the terminal and was answered there):
+    // focus goes on to the next one.
+    if (focused && !list.contains(document.activeElement) && !focusCard(list, null)) earlier.querySelector('summary')?.focus();
   }
+  // An answered card stays in place while it has focus; once focus leaves it, it folds away.
+  list.addEventListener('focusout', (event) => {
+    const card = /** @type {HTMLElement|null} */ (/** @type {HTMLElement} */ (event.target).closest?.('.hud-approval') ?? null);
+    if (card && card.dataset.status !== 'pending' && !card.contains(/** @type {Node|null} */ (event.relatedTarget))) ctx.refresh();
+  });
 
   function renderNote() {
     const { mode, serverSettings } = ctx.view;
@@ -462,6 +635,9 @@ export function createApprovalsPanel(ctx) {
     for (const item of list.children) tickCard(/** @type {HTMLElement} */ (item), now);
   }
 
+  /** Whether a card waits for an answer here (the demo holds its countdowns while one shows). */
+  const answerable = () => Boolean(list.querySelector('.hud-approval[data-status="pending"][tabindex="0"]'));
+
   return {
     el,
     render,
@@ -472,6 +648,7 @@ export function createApprovalsPanel(ctx) {
     focusApproval: (id) => focusCard(list, id),
     /** The side boards came back on screen: no card takes a click at once. */
     shown: () => moves.restartAll(),
+    answerable,
   };
 }
 
@@ -482,7 +659,8 @@ export function createApprovalsPanel(ctx) {
  * @returns {boolean} whether a card took the focus
  */
 function focusCard(list, id) {
-  const wanted = id ? list.querySelector(`.hud-approval[data-approval-id="${CSS.escape(id)}"]`) : null;
+  // A request may share a card with others that ask the same thing.
+  const wanted = id ? list.querySelector(`.hud-approval[data-approval-ids~="${CSS.escape(id)}"]`) : null;
   // A card asked for by name may be far down the list: bring it just into view, then focus it.
   wanted?.scrollIntoView({ block: 'nearest' });
   const card = /** @type {HTMLElement|null} */ (wanted ?? list.querySelector('.hud-approval[data-status="pending"][tabindex="0"]'));

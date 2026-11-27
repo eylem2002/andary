@@ -50,8 +50,8 @@ const MOBILE_QUERY = '(max-width: 640px)';
 export function createHud({ store, prefs: initialPrefs, controls }) {
   const prefs = { ...initialPrefs };
   const view = initialView(prefs);
-  /** @type {{ world: World|null, frame: number, measureSheets: () => void, weather: ReturnType<typeof createWeatherDriver>|null }} */
-  const shell = { world: null, frame: 0, measureSheets: () => {}, weather: null };
+  /** @type {{ world: World|null, frame: number, measureSheets: () => void, weather: ReturnType<typeof createWeatherDriver>|null, cardInView: boolean }} */
+  const shell = { world: null, frame: 0, measureSheets: () => {}, weather: null, cardInView: false };
   const townPeople = createTownPeople(() => shell.world);
   const announcer = createAnnouncer();
   announcer.setActivityEnabled(prefs.announce);
@@ -436,7 +436,7 @@ function openBoard(ui, view) {
 /**
  * One render of everything from the current state.
  * @param {{ ctx: HudContext, ui: Parts }} hud
- * @param {{ frame: number, measureSheets: () => void }} shell
+ * @param {{ frame: number, measureSheets: () => void, cardInView: boolean }} shell
  * @param {ReturnType<typeof createEffectQueue>} effects
  */
 function flush(hud, shell, effects) {
@@ -450,6 +450,7 @@ function flush(hud, shell, effects) {
   ctx.announcer.activity(added.filter((entry) => Date.now() - entry.ts < FRESH_MS));
   ui.approvals.render(state);
   ui.board.setPendingApprovals(pendingCount(state));
+  holdWhileShown(ctx, ui, shell);
   ui.inspector.render(state);
   ui.place.render(state);
   ui.toolbar.render();
@@ -462,6 +463,22 @@ function flush(hud, shell, effects) {
   ui.dialogs.catchUp.render();
   playEffects(ctx, effects.take(), state);
   ui.activity.settle();
+}
+
+/**
+ * Tells the demo whether a card waiting for an answer is in view (the Approvals tab open, the
+ * boards on screen, the page visible): its countdowns hold meanwhile, so a first-time visitor has
+ * time to read one. Live requests keep the server's timeout.
+ * @param {HudContext} ctx
+ * @param {Parts} ui
+ * @param {{ cardInView: boolean }} shell  what the demo was last told
+ */
+function holdWhileShown(ctx, ui, shell) {
+  const sheetAway = ctx.view.mobile && !ctx.view.sheetOpen;
+  const inView = ctx.view.mode === 'demo' && ctx.view.tab === 'approvals' && !panelsHidden(ctx) && !sheetAway && !document.hidden && ui.approvals.answerable();
+  if (inView === shell.cardInView) return;
+  shell.cardInView = inView;
+  ctx.controls.holdApprovals?.(inView);
 }
 
 /**

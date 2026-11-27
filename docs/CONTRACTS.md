@@ -33,6 +33,7 @@ server/ingest.mjs            The one pipeline every event enters through, with a
 server/adapters/             Source adapters: Claude Code (as is) and Codex → the town's event contract
 server/clients.mjs           What differs between the agents Andary connects to (hooks file, events)
 server/notes.mjs             The owner's notes waiting for their agents' next step (§4.15)
+server/hold.mjs              "Always hold risky commands for me": its file, and the hold check's answer (§4.3 step 4b)
 server/cli/                  One module per CLI command, plus argument parsing
 hooks/hook.mjs               Hook forwarder copied to ~/.andary/hook.mjs by `install` (Claude Code and Codex)
 hooks/hooks.json             Hook config used when Andary is installed as a Claude Code plugin
@@ -50,6 +51,8 @@ public/js/core/              Pure logic, no DOM, no I/O: events (normalize), sto
                              "Allow always" may save), loops (when an agent seems stuck), shell
                              (shell command lines read as a shell reads them, for every rule),
                              conflicts (two agents on the same files, + git-commands, paths),
+                             risk (risk marks on a call; shared with the server), risk-runs
+                             (risky calls that ran without asking),
                              digest (what each crew did, for Catch me up), receipts (what each
                              lead's turn did), notes (notes to agents: which hooks carry them,
                              how they are cleaned), town-map (the town
@@ -120,10 +123,13 @@ reports to the town. `--scope project` writes `<dir>/.claude/settings.json`, `--
 | SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure, PermissionDenied, Notification, SubagentStart, SubagentStop, Stop, StopFailure, TaskCreated, TaskCompleted, TeammateIdle, PreCompact, PostCompact, PostModelSwitch | `"async": true` | Observation only; never slows Claude down |
 | PermissionRequest | synchronous, `"timeout": 150` | Can return an allow/deny decision from the town |
 | SessionEnd | synchronous, `"timeout": 3` | Async hooks may be killed while the session exits |
+| PreToolUse, matcher `Bash\|PowerShell`, argument `hold` | synchronous, `"timeout": 5` | "Always hold risky commands for me" (§4.3 step 4b); exits at once while it is off |
 
 Each entry is `{"type": "command", "command": "node \"<home>/hook.mjs\" # andary"}` (forward
 slashes in the path on every OS). The `# andary` marker lets `uninstall` remove exactly our
-entries. Tool events use no matcher (match everything).
+entries. Tool events use no matcher (match everything), except the hold check: a second matcher
+group under `PreToolUse`, `{"matcher":"Bash|PowerShell","hooks":[{"type":"command","command":"node \"<home>/hook.mjs\" hold # andary","timeout":5}]}`.
+Codex gets no hold check (its PreToolUse hook cannot ask).
 
 Deliberately **not** registered: `WorktreeCreate`/`WorktreeRemove` (a hook there replaces git's
 worktree behaviour), `MessageDisplay` (fires per streamed text chunk, 10 s timeout), `Elicitation*`,
@@ -248,6 +254,18 @@ shows up as a crew of its own.
    the forwarder runs as (letters, digits, `.`, `_`, `-`, at most 40; else `the owner`). If any note
    fails, nothing is printed. The reply's own `output` is never printed for these hooks. Nothing
    else is ever printed.
+4b. Run with the argument `hold` (the hold check, §4.1): forwards nothing. Unless
+   `<ANDARY_HOME>/hold-risky` exists ("Always hold risky commands for me", `server/hold.mjs`) it
+   exits at once, before reading server.json. Otherwise, after the proof of step 3a, it posts the
+   same body to `POST /api/hold` (same headers, 1.5 s). The server answers `{"output":null}`, or,
+   when the setting is on and the call is a risky Bash or PowerShell command from Claude Code
+   (`public/js/core/risk.js`, judged against the top of the hook folder's work tree, §4.6),
+   `{"output":{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"Andary holds risky commands for you: <reasons>"}}}`
+   (≤ 300 characters), signed as in step 5. Only a signed `ask` with a string reason is printed,
+   rebuilt with the reason cut at 300 characters; Claude Code then shows its permission prompt
+   even under an allow rule, and that prompt's PermissionRequest reaches the town as usual.
+   `/api/hold` ingests nothing, answers 401 without the hook secret, shares the hook rate limit,
+   and is not reachable through a tunnel.
 6. **Always exits 0** and never prints anything else. Any error → exit 0 silently.
 
 ### 4.4 Server (`server/`)
@@ -275,7 +293,7 @@ shows up as a crew of its own.
   exception). The UI token never counts for them; `GET
   /?token=…` answers a `403` page; only `/api/health`, `/api/hello` and `/api/team` answer, every
   other `/api/` route `403 {"error":"Not available through the tunnel"}`; their `/api/hello`
-  reports `remoteApprovals`, `notify` and `notifyLimits` as `false`, and leaves out `version` and
+  reports `remoteApprovals`, `notify`, `notifyLimits` and `holdRisky` as `false`, and leaves out `version` and
   `settings.approvalTimeoutMs` unless the request carries the view token (`x-andary-view`) or a
   member key (`x-andary-team`).
 - Routes:
@@ -317,7 +335,7 @@ shows up as a crew of its own.
 Server → browser:
 
 ```js
-{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits }, history: Envelope[], approvals: Approval[], notes: Note[] /* §4.15; [] for a viewer */, usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null,
+{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits, holdRisky }, history: Envelope[], approvals: Approval[], notes: Note[] /* §4.15; [] for a viewer */, usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null,
   people: Person[] /* §4.11, [] off a team host */, me: string|null /* the person this browser plays */ }
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
@@ -355,7 +373,7 @@ Browser → server:
 ```js
 { t: 'decide', id, decision: 'allow'|'deny', message?: string /* ≤ 500 chars */, always?: number /* allow only: a suggestion's index */, stop?: true /* deny only: "Deny and stop" */ }
 { t: 'note', ref?: string /* the sender's own id, [\w-]{1,64}, echoed in note-reply */, sessionId, agentId?: string /* a helper; absent for the lead */, text: string /* ≤ 2,000 chars once cleaned */ }   // §4.15
-{ t: 'settings', settings: { remoteApprovals: boolean } }
+{ t: 'settings', settings: { remoteApprovals?: boolean, holdRisky?: boolean /* at least one */ } }
 { t: 'notify-test' }   // sends a test phone notification (rate limits apply)
 { t: 'digest', since: number }   // §4.13: what each crew did since then (ms, the server's clock; 0: all kept)
 { t: 'profile', p: Profile }     // §4.11: the sender's own profile (a person, or the owner as the host); at most one per 10 s
@@ -364,6 +382,11 @@ Browser → server:
 { t: 'look', to: string, at: { agent }|{ building } }   // §4.11: asks a teammate to come look (one per 30 s per pair)
 { t: 'ping' }
 ```
+
+`holdRisky` ("Always hold risky commands for me", off by default) is kept as the file
+`<ANDARY_HOME>/hold-risky` (mode 0600; removed when turned off), read at start, so it outlasts a
+restart; a server that writes no server.json keeps it in memory only. A viewer or teammate always
+sees it `false` and cannot change it.
 
 Approval flow: on `PermissionRequest` the server creates an Approval. If `remoteApprovals` is on
 and at least one browser is connected, the HTTP response to the hook is **held** (`held: true`)
@@ -1243,6 +1266,7 @@ StoreState {
   approvals: Approval[]                          // pending first, then most recent
   dialogs: Dialog[]                              // open: asked and not answered yet, oldest first
   hazards: Hazard[]                              // two agents on the same files now, oldest first
+  risks: RiskRun[]                               // risky calls that ran without asking you, oldest first, ≤ 50
   log: LogEntry[]                                // newest last, capped at maxLog
   stats: { events, toolCalls, failures, approvals, subagents, byBuilding: Record<BuildingKey, number> }
   achievements: Achievement[]
@@ -1326,8 +1350,8 @@ queued behind it starts none.
 
 ```js
 AttentionItem { id /* one per episode: dialog:agentKey:at:input, kind:agentKey:since, limit:since,
-                      conflict:<Hazard id> */,
-                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'finished',
+                      conflict:<Hazard id>, risk:agentKey:at */,
+                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'risk'|'finished',
                 level: 'blocked'|'stopped'|'alert'|'ready', sessionId, agentKey,
                 agentKeys: string[] /* everyone it stands for */,
                 approvalId: string|null /* a request the town holds */, since, countedSince,
@@ -1355,7 +1379,42 @@ key, the page title, the crew rows, the inspector and the desktop notifications.
 (`isNote`: an alert that is not counted) never takes the place of what an agent does: the crew row
 shows it on a line of its own under it (`[data-testid="agent-note"]`), the inspector under its Now
 line. A crew row says how long: "waiting for 4m 05s", "finished 4m 05s ago", "stuck for 4m 05s",
-and "4m 05s ago" for a conflict.
+and "4m 05s ago" for a conflict or a risky run.
+
+**Risk marks** (`core/risk.js`, pure, shared with the server): `riskOf(toolName, input, place?)
+→ { reasons: string[] } | null`, at most four reasons, each once, deletions and history first.
+`place` is `{ folder, sessionFolder, root }` as for git hazards; "outside the project" is outside
+`workTreeOf(...)` (a path under `~` or `$HOME` always is; one under another variable, `/dev`, or a
+temp folder never is; with no folder known no path is judged). Shell commands (Bash, PowerShell,
+read by `core/shell.js`): `rm -r`/`Remove-Item -Recurse` "deletes recursively"; `rm` of a path
+outside "deletes outside the project: <path>"; `git push` with `--force`, `-f`, `--force-with-lease`,
+`--mirror` or a `+ref` "rewrites remote history (force push)", with `--delete`, `-d` or `:ref`
+"deletes a remote branch" (not with `--dry-run`/`-n`); `git reset --hard`, `checkout .`/`--`/`-f`,
+`restore` (not `--staged` alone), `switch -f`/`--discard-changes` "throws away uncommitted changes
+(…)"; `git clean -f` (not `-n`) "deletes untracked files (clean -f)"; `git branch -D` "force-deletes
+a branch"; `git stash drop|clear` "drops stashed work"; `git filter-branch|filter-repo` "rewrites
+history"; `sudo`/`doas` "runs as root (sudo)"; `chmod|chown|chgrp -R` "changes permissions
+recursively"; a `curl`/`wget`/`iwr` piped into a shell or interpreter, or a shell fed `<(curl …)`
+or `$(curl …)`, "runs a downloaded script"; SQL `DROP DATABASE|SCHEMA|TABLE`/`TRUNCATE TABLE`,
+`dropdb`, `FLUSHALL|FLUSHDB`, `db:drop`, `db:reset`, `db:schema:load`, `migrate reset` "drops
+database data"; a write redirect, `tee`, or `cp`/`mv`'s destination outside "writes outside the
+project: <path>"; a secrets file named as an argument "reads <name>" (a write redirect, `tee`, or
+`cp`/`mv`'s destination: "writes <name>"; `rm`: "deletes <name>"). Secrets files: `.env` and
+`.env.*` (not `.example`, `.sample`, `.template`, `.dist`, `.default(s)`, `.schema`), `*.pem`,
+`*.key`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, `id_rsa|dsa|ecdsa|ed25519`, `.netrc`, `.npmrc`,
+`.pypirc`, `.git-credentials`, `credentials.json`, `.htpasswd`, and anything under `.aws/`, `.ssh/`
+or `.gnupg/`. `Read` of a secrets file "reads <name>"; `Write`, `Edit`, `MultiEdit`,
+`NotebookEdit` "edits <name>" or "writes outside the project: <path>"; Codex's `apply_patch` the
+same for each `*** Add|Update|Delete File:` it names. Other tools: null. Never throws.
+
+**Risky runs** (`core/risk-runs.js`): the store marks each `permission.request` as asked (by its
+agent, tool and input; the request carries no `tool_use_id`), and a `tool.end` or `tool.fail` (not
+an interrupt) of a call that did not ask, and is risky, is a `RiskRun { id: 'risk:<agentKey>:<ts>',
+sessionId, agentKey, at, tool, what /* the command or file, ≤ 120 chars */, reasons }` on
+`StoreState.risks`, with a `risk` log line (`warn`, "Ran without asking: <what> (<first reason>)").
+A call that asked uses its mark up. A crew leaving takes its runs with it; a teammate's crew has
+none. `attentionItems` lists each of your crews' runs younger than `RISK_MS` (30 minutes) as a
+`risk` item: level `alert`, counted, dismissable, settled.
 
 **Shell** (`core/shell.js`, pure, shared with the server): the one reader of Bash and
 PowerShell command lines. `readShell(command, { powershell?, folder?, root?, resolve? }) →
@@ -1815,7 +1874,10 @@ export function createSimulation({ seed?: number, speed?: number,
 
 `emit` receives raw hook payloads exactly as Claude Code would send them (§4.2). For
 `PermissionRequest` the simulation awaits the promise and continues according to the decision
-(no decision within 25 s at speed 1 → treated as allow). An allow with `updatedPermissions` saved
+(no decision within 25 s at speed 1 → treated as allow). The demo source (`sources/demo.js`)
+holds that countdown while the story is paused and while the HUD reports a card waiting for an
+answer in view (`holdApprovals(true)`: the Approvals tab open, the boards on screen, the page
+visible); the story itself goes on. An allow with `updatedPermissions` saved
 the request's suggested rule: like Claude Code, the project's crews do not ask for it again.
 
 ### 7.1 Implementation notes (simulation)
@@ -1871,7 +1933,7 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="catch-up"]` | the Catch me up dialog: `[data-testid="catch-up-period"]`, one `[data-testid="catch-up-crew"][data-session-id]` per crew (with `[data-testid="catch-up-need"]` when it needs you), `[data-testid="catch-up-quiet"]` |
 | `[data-testid="activity-log"]` | log; children `[data-testid="log-entry"]` |
 | `[data-testid="tasks-panel"]` | goals/tasks; children `[data-testid="task-item"]` |
-| `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id]` with buttons `[data-testid="approve"]` and `[data-testid="deny"]`, and, when a rule can be saved, `[data-testid="approve-always"]` with the rule in `[data-testid="approve-always-rule"]`; `[data-testid="deny-stop"]` ("Deny and stop") with its line, or why the agent cannot be stopped, in `[data-testid="deny-stop-note"]`; a hint in `[data-testid="approval-hint"]` |
+| `[data-testid="approvals"]` | approvals panel; children `[data-testid="approval-card"][data-approval-id][data-approval-ids]` (`data-approval-ids`: every request a shared card stands for; `data-risky="true"` with its band `[data-testid="approval-risk"]`; a shared card's checkboxes `[data-testid="approval-crew-check"]` in `[data-testid="approval-crews"]`), settled cards folded in `[data-testid="approvals-earlier"]` ("Earlier (n)"), with buttons `[data-testid="approve"]` and `[data-testid="deny"]`, and, when a rule can be saved, `[data-testid="approve-always"]` with the rule in `[data-testid="approve-always-rule"]`; `[data-testid="deny-stop"]` ("Deny and stop") with its line, or why the agent cannot be stopped, in `[data-testid="deny-stop-note"]`; a hint in `[data-testid="approval-hint"]` |
 | `[data-testid="remote-approvals-toggle"]` | checkbox/switch for remote approvals (live mode) |
 | `[data-testid="settings-button"]` | opens the settings dialog (holds the remote approvals switch) |
 | `[data-testid="walk-panel"]` | the Walk panel, shown in walk mode (§4.11) |

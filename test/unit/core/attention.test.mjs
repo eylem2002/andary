@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { CODEX_IDLE_MS, READY_MS, STALE_DIALOG_MS, attentionItems, countedItems } from '../../../public/js/core/attention.js';
+import { CODEX_IDLE_MS, READY_MS, RISK_MS, STALE_DIALOG_MS, attentionItems, countedItems } from '../../../public/js/core/attention.js';
 import { CONFLICT_MS } from '../../../public/js/core/conflicts.js';
 import { createStore } from '../../../public/js/core/store.js';
 import { CODEX_IDLE_MS as PHONE_CODEX_IDLE_MS } from '../../../server/notify.mjs';
@@ -509,5 +509,55 @@ describe('two agents on the same files (core/conflicts.js)', () => {
     team.store.ingest(envelope({ ...hook('PostToolUse', edit), andary_member: 'sam', session_id: 'sam~s1' }, T0));
     team.send('PostToolUse', write, T0 + 1000, other);
     assert.deepEqual(team.items(T0 + 2000), []);
+  });
+});
+
+describe('risky commands that ran without asking', () => {
+  /** @param {ReturnType<typeof town>} t @param {string} command @param {number} ts */
+  const ran = (t, command, ts) => {
+    t.send('PreToolUse', { tool_name: 'Bash', tool_input: { command }, tool_use_id: `u${ts}` }, ts);
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command }, tool_use_id: `u${ts}`, tool_response: {} }, ts + 10);
+  };
+
+  test('an allow rule let `git reset --hard` through: a notice that counts until set aside', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    ran(t, 'git reset --hard origin/main', T0);
+    const [item] = t.items(T0 + 20);
+    assert.deepEqual([item.kind, item.level, item.counted, item.dismissable], ['risk', 'alert', true, true]);
+    assert.equal(item.text, 'Ran without asking: git reset --hard origin/main (throws away uncommitted changes (reset --hard))');
+    assert.equal(countedItems(t.items(T0 + 20)).length, 1);
+    assert.deepEqual(t.items(T0 + 20, new Set([item.id])), [], 'set aside, it is gone');
+    assert.deepEqual(t.items(T0 + RISK_MS + 20), [], 'and it lapses after half an hour');
+    const log = t.store.getState().log.filter((entry) => entry.kind === 'risk');
+    assert.equal(log.length, 1);
+    assert.equal(log[0].level, 'warn');
+  });
+
+  test('a risky command you were asked about is no notice; the same one run later without asking is', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'rm -rf dist' } }, T0);
+    ran(t, 'rm -rf dist', T0 + 100);
+    assert.deepEqual(t.items(T0 + 200).filter((item) => item.kind === 'risk'), []);
+    ran(t, 'rm -rf dist', T0 + 500);
+    assert.deepEqual(t.items(T0 + 600).filter((item) => item.kind === 'risk').map((item) => item.text), ['Ran without asking: rm -rf dist (deletes recursively)']);
+  });
+
+  test('an ordinary command, or a risky one that was interrupted, is no notice', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    ran(t, 'npm test', T0);
+    t.send('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command: 'rm -rf build' }, tool_use_id: 'x', error: 'Interrupted', is_interrupt: true }, T0 + 50);
+    assert.deepEqual(t.items(T0 + 100).filter((item) => item.kind === 'risk'), []);
+  });
+
+  test('a crew that left takes its notices with it', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    ran(t, 'git push --force', T0);
+    t.send('SessionEnd', { reason: 'other' }, T0 + 100);
+    assert.deepEqual(t.items(T0 + 200).filter((item) => item.kind === 'risk'), []);
+    assert.deepEqual(t.store.getState().risks, []);
   });
 });

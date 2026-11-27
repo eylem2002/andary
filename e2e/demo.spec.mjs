@@ -167,6 +167,24 @@ test('a demo permission request can be allowed always, and the card names the ru
   await expect(page.getByTestId('activity-log')).toContainText(`Allowed; asked to save ${rule}`);
 });
 
+test('a demo request waits while its card is in view, and its countdown runs again once it is not', async ({ page }) => {
+  await page.goto(demoUrl('&world=fake'));
+  await openTab(page, 'Approvals');
+  const pending = page.locator('[data-testid="approval-card"][data-status="pending"]').first();
+  await pending.waitFor({ state: 'visible', timeout: 60_000 });
+  const id = await pending.getAttribute('data-approval-id');
+  const card = page.locator(`[data-testid="approval-card"][data-approval-id="${id}"]`);
+  await expect(card.locator('.hud-approval__timer')).toBeHidden();
+  // At 4× the demo's 25 s of story time pass in about 6 s: the card in view still waits.
+  await page.waitForTimeout(8000);
+  await expect(card).toHaveAttribute('data-status', 'pending');
+  // Out of view, the time it had left runs out and the demo carries on.
+  await openTab(page, 'Activity');
+  await expect(card).toHaveAttribute('data-status', 'expired', { timeout: 30_000 });
+  await openTab(page, 'Approvals');
+  await expect(page.getByTestId('approvals-earlier').locator('summary')).toHaveText(/^Earlier \(\d+\)$/);
+});
+
 test('a click on Allow always right after its card appears does not count', async ({ page }) => {
   await page.goto(demoUrl('&world=fake'));
   // The Approvals tab is open before any request, so a card is on screen the moment it arrives.

@@ -2,7 +2,8 @@
 // payloads to the store exactly as the server would (wrapped as envelopes). A PermissionRequest becomes a held approval that the HUD
 // can answer; the simulation waits on it and continues with the decision, or after 25 seconds of
 // story time without one (so the card's countdown runs faster at 2× and 4×, like the story, and
-// stands still while the demo is paused). Like the server, an approval offers the permission
+// stands still while the demo is paused, and while a card waiting for you shows in the Approvals
+// panel, so a first-time visitor has time to read one). Like the server, an approval offers the permission
 // rules the server would offer, and "Allow always" hands the chosen one back with the allow. It
 // also plays the server's part for "Catch me up": the same counts (core/digest.js) of the story's
 // crews, though nobody is ever away in a demo.
@@ -47,6 +48,9 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
   let sequence = 0;
   let currentSpeed = speed;
   let paused = false;
+  /** A card waiting for an answer shows in the Approvals panel: countdowns hold, the story goes on. */
+  let viewing = false;
+  const frozen = () => paused || viewing;
   /**
    * Requests waiting for an answer, with the payload that asked. `left` is set while the demo is
    * paused: the time the request still had when the story stopped.
@@ -88,9 +92,9 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
       suggestions: offerableSuggestions(payload.permission_suggestions),
     };
     return new Promise((resolve) => {
-      const entry = { approval, payload, resolve, timer: undefined, left: paused ? wait : undefined };
+      const entry = { approval, payload, resolve, timer: undefined, left: frozen() ? wait : undefined };
       waiting.set(approval.id, entry);
-      if (paused) store.setApproval({ ...approval, expiresAt: null });
+      if (frozen()) store.setApproval({ ...approval, expiresAt: null });
       else {
         store.setApproval(approval);
         entry.timer = setTimeout(() => settle(approval.id, 'expired', 'timeout'), wait);
@@ -99,8 +103,9 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
   }
 
   /**
-   * Pausing the demo stops the countdown of every waiting request as well (WCAG 2.2.1): the card
-   * hides its timer, and the request keeps the time it had left for when the story resumes.
+   * Pausing the demo stops the countdown of every waiting request as well (WCAG 2.2.1), and so
+   * does a card showing in the Approvals panel: the card hides its timer, and the request keeps
+   * the time it had left for when the story resumes or the card is out of sight.
    */
   function freezeApprovals() {
     for (const entry of waiting.values()) {
@@ -157,9 +162,20 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
         simulation.stop();
         freezeApprovals();
       } else {
-        resumeApprovals();
+        if (!viewing) resumeApprovals();
         simulation.start();
       }
+    },
+    /**
+     * A card waiting for an answer shows in the Approvals panel (true) or no longer does: the
+     * countdowns hold while it shows; the story itself goes on.
+     * @param {boolean} on
+     */
+    holdApprovals(on) {
+      if (viewing === on) return;
+      viewing = on;
+      if (on) freezeApprovals();
+      else if (!paused) resumeApprovals();
     },
     /** @param {number} value */
     setSpeed(value) {

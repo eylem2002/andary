@@ -7,6 +7,7 @@ import { createUsageTracker } from './usage.mjs';
 import { createProgress } from './progress.mjs';
 import { createNotifier } from './notify.mjs';
 import { createWorkTrees } from './work-trees.mjs';
+import { holdFilePath, readHoldRisky } from './hold.mjs';
 import { createTownDigest } from './digest.mjs';
 import { createNoteDesk } from './notes.mjs';
 import { createLimitsTracker } from './limits.mjs';
@@ -60,7 +61,8 @@ const NOTE_SWEEP_MS = 15_000;
  * @property {string} secret
  * @property {string} uiToken
  * @property {string} responseKey     signs /api/hook replies (see auth.signHookReply)
- * @property {{ remoteApprovals: boolean, approvalTimeoutMs: number }} settings
+ * @property {{ remoteApprovals: boolean, approvalTimeoutMs: number, holdRisky: boolean }} settings
+ * @property {string|null} holdFile   where "Always hold risky commands for me" is kept (server/hold.mjs); null when nothing is written
  * @property {Set<string>} allowedHosts
  * @property {Set<string>} tunnelHosts    the Host names a tunnelled request may use (ADR 0019)
  * @property {Record<string, string>} headers
@@ -273,6 +275,8 @@ function createContext(config, options) {
     limitNotes: Boolean(options.notifyLimits),
     limitNotesFile: config.writeState ? join(config.home, 'limit-notes.json') : null,
   });
+  // "Always hold risky commands for me" outlasts a restart: it is a file beside server.json.
+  const holdFile = config.writeState ? holdFilePath(config.home) : null;
   // Your absences are yours: only signed-in browsers hear of them.
   const digest = createTownDigest({ awayMs: options.awayMs, onAway: (away) => hub.broadcastOwners({ t: 'away', away }) });
   /** @type {TownContext} */
@@ -281,7 +285,8 @@ function createContext(config, options) {
     secret: generateToken(),
     uiToken: generateToken(),
     responseKey: generateToken(),
-    settings: { remoteApprovals: Boolean(options.remoteApprovals), approvalTimeoutMs: config.approvalTimeoutMs },
+    settings: { remoteApprovals: Boolean(options.remoteApprovals), approvalTimeoutMs: config.approvalTimeoutMs, holdRisky: readHoldRisky(holdFile) },
+    holdFile,
     allowedHosts: new Set(),
     tunnelHosts: new Set(),
     headers: securityHeaders(buildCsp(computeImportMapHashes(config.publicDir))),
