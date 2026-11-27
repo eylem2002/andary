@@ -118,7 +118,9 @@ export function riskOf(toolName, input, place = {}) {
     else if (tool === 'apply_patch') reasons = patchRisks(input, where);
     const unique = [...new Set(reasons)].slice(0, MAX_REASONS);
     if (!unique.length) return null;
-    return unique.every((reason) => reason.startsWith(REBUILDABLE_REASON)) ? { reasons: unique, quiet: true } : { reasons: unique };
+    if (unique.every((reason) => reason.startsWith(REBUILDABLE_REASON))) return { reasons: unique, quiet: true };
+    // A red band: a rebuildable folder there is simply a recursive delete, said first.
+    return { reasons: order([...new Set(unique.map((reason) => (reason.startsWith(REBUILDABLE_REASON) ? 'deletes recursively' : reason)))]) };
   } catch {
     return null;
   }
@@ -174,8 +176,11 @@ function inside(path, folder) {
  */
 function rebuildable(written, folder, root) {
   const text = written.trim().replace(/\\/g, '/');
-  // A variable, a command substitution or %VAR% anywhere can lead anywhere: no quiet note then.
-  if (!text || /^~|[$`]|%[^%]*%/.test(text)) return '';
+  // A variable, a command substitution, %VAR%, a brace expansion or an extended glob anywhere can
+  // lead anywhere, and so can a glob in a part that starts with a dot (`.?`, `..*`, `.[.]` may match
+  // `..`): no quiet note then.
+  if (!text || /^~|[$`{}]|%[^%]*%|[!@+*?]\(/.test(text)) return '';
+  if (text.split('/').some((part) => part.startsWith('.') && /[*?[]/.test(part))) return '';
   const path = folder || root ? normalizePath(text, folder ?? root) : '';
   const base = root || folder || '';
   let rest;
@@ -251,9 +256,9 @@ function shellRisks(command, where, powershell) {
   return order(reasons);
 }
 
-/** Most serious first: deletions and history, then the rest in the order found. @param {string[]} reasons */
+/** Most serious first: deletions, then history and lost work, then the rest in the order found. @param {string[]} reasons */
 function order(reasons) {
-  const rank = (/** @type {string} */ reason) => (/^(?:deletes|rewrites|force|throws|drops)/.test(reason) ? 0 : /^runs/.test(reason) ? 1 : 2);
+  const rank = (/** @type {string} */ reason) => (/^deletes/.test(reason) ? 0 : /^(?:rewrites|force|throws|drops)/.test(reason) ? 1 : /^runs/.test(reason) ? 2 : 3);
   return reasons.map((reason, i) => ({ reason, i })).sort((a, b) => rank(a.reason) - rank(b.reason) || a.i - b.i).map(({ reason }) => reason);
 }
 

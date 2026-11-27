@@ -1480,7 +1480,8 @@ section.
      on the card.
 279. **Deleting a folder the project rebuilds is a quieter note.** `rm -rf node_modules`, `dist`,
      `.next`, `coverage`, `.cache` or `__pycache__` (or anything inside them) inside the project,
-     with no variable, substitution or `%VAR%` in the path, shows "Note: deletes a rebuildable folder (dist)" without the red border,
+     with no variable, substitution, `%VAR%`, brace expansion, extended glob, or glob in a part that
+     starts with a dot (`.?`, `..*`, `.[.]` can match `..`) in the path, shows "Note: deletes a rebuildable folder (dist)" without the red border,
      is never "ran without asking", and is never held. Outside the project, or mixed with any other
      target, it stays "deletes recursively".
 280. **`find -delete` reads as "deletes recursively"**: it deletes everything it matches across a

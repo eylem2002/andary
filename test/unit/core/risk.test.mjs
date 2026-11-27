@@ -72,6 +72,17 @@ const TABLE = [
   ['rm -rf node_modules/$X', ['deletes recursively']],
   ['rm -rf dist/..${IFS}..', ['deletes recursively']],
   ['rm -rf node_modules/%USERPROFILE%', ['deletes recursively']],
+  // Brace expansion, extended globs, and a glob in a part that starts with a dot (it may match ..).
+  ['rm -rf node_modules/{a,../../other}', ['deletes recursively']],
+  ['rm -rf dist/{x,../../src}', ['deletes recursively']],
+  ['rm -rf dist/{..,..}/src', ['deletes recursively']],
+  ['rm -rf node_modules/.?/src', ['deletes recursively']],
+  ['rm -rf node_modules/..*/src', ['deletes recursively']],
+  ['rm -rf node_modules/.[.]/src', ['deletes recursively']],
+  ['rm -rf node_modules/!(x)', ['deletes recursively']],
+  ['rm -rf dist/*.map', ['deletes a rebuildable folder (dist)']],
+  // On a red band a rebuildable folder is just a recursive delete, said first.
+  ['git push -f && rm -rf dist', ['deletes recursively', 'rewrites remote history (force push)']],
   ['rm -rf dist src', ['deletes recursively']],
   ['rm -rf ../other/dist', ['deletes recursively', 'deletes outside the project: /home/me/other/dist']],
   ['rm -f dist/app.js', []],

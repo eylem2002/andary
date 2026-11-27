@@ -1399,9 +1399,10 @@ temp folder never is; with no folder known no path is judged). Shell commands (B
 read by `core/shell.js`; `xargs` runs the command after its own options): `rm -r`/`Remove-Item
 -Recurse`/`del /s`/`rd /s` "deletes recursively" (cmd's `/s`, `/q` are options, never paths), but
 when every target is inside a folder the project rebuilds (`node_modules`, `dist`, `.next`,
-`coverage`, `.cache`, `__pycache__`, inside the project, with no `$`, backtick or `%…%` anywhere in
-the target) "deletes a rebuildable folder
-(<names>)" and the risk is `quiet: true` (a softer note on the card, no risky run, never held);
+`coverage`, `.cache`, `__pycache__`, inside the project, with no `$`, backtick, `%…%`, brace,
+extended glob, or glob in a part that starts with a dot anywhere in the target) "deletes a rebuildable folder
+(<names>)" and the risk is `quiet: true` (a softer note on the card, no risky run, never held;
+when any other reason makes the band red, that reason reads "deletes recursively");
 `eval "$(curl …)"` is a downloaded script too; `find … -delete` "deletes recursively (find -delete)" and `find … -exec|-execdir rm -r`
 "deletes recursively (find -exec rm)"; `rm` of a path outside "deletes outside the project: <path>"
 (paths on a Windows drive compare without regard to case); `git push` with `--force`, `-f`, `--force-with-lease`,

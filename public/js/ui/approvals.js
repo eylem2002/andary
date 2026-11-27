@@ -71,19 +71,24 @@ function restartDelay(p) {
   clearTimeout(p.armTimer);
   p.armTimer = setTimeout(() => {
     for (const button of [p.allow, p.always, p.deny, p.stop]) setAttr(button, 'aria-disabled', null);
-    setHidden(p.wait, true);
   }, ANSWER_DELAY_MS);
 }
 
 /**
- * An answer the card did not take, because it just appeared or changed: it says so, until it
- * takes answers again.
+ * An answer the card did not take, because it just appeared or changed: it says so, for a few
+ * seconds.
  * @param {any} p the card's parts
  */
 function notYet(p) {
   setText(p.wait, 'Not yet: this card just appeared or changed. Read it, then answer again.');
   setHidden(p.wait, false);
+  // Long enough to be read, whenever the card takes answers again.
+  clearTimeout(p.waitTimer);
+  p.waitTimer = setTimeout(() => setHidden(p.wait, true), WAIT_NOTE_MS);
 }
+
+/** How long "Not yet" stays on a card. */
+const WAIT_NOTE_MS = 3000;
 
 /**
  * Restarts a card's answer delay whenever it moves on the page, whatever moved it: a card above
