@@ -578,9 +578,9 @@ describe('cost alerts and long turns (core/watch.js)', () => {
     const t = town();
     t.send('SessionStart', { source: 'startup' }, T0);
     t.send('SessionEnd', { reason: 'exit' }, T0 + MIN);
-    t.store.setLeftovers({ sessionId: SESSION, at: T0 + MIN + 1500, items: [{ command: 'npm run dev', port: 5173, pid: 4, kill: 'kill 4' }] });
-    t.store.setLeftovers({ sessionId: SESSION, at: T0 + MIN + 1500, items: [{ command: 'npm run dev', port: 5173, pid: 4, kill: 'kill 4' }] });
-    assert.deepEqual(t.store.getState().leftovers, [{ sessionId: SESSION, at: T0 + MIN + 1500, items: [{ command: 'npm run dev', port: 5173, pid: 4, kill: 'kill 4' }] }]);
+    t.store.setLeftovers({ sessionId: SESSION, at: T0 + MIN + 1500, items: [{ command: 'npm run dev', port: 5173, pid: 4, look: 'lsof -nP -iTCP:5173 -sTCP:LISTEN', kill: 'kill 4', sure: true }] });
+    t.store.setLeftovers({ sessionId: SESSION, at: T0 + MIN + 1500, items: [{ command: 'npm run dev', port: 5173, pid: 4, look: 'lsof -nP -iTCP:5173 -sTCP:LISTEN', kill: 'kill 4', sure: true }] });
+    assert.deepEqual(t.store.getState().leftovers, [{ sessionId: SESSION, at: T0 + MIN + 1500, items: [{ command: 'npm run dev', port: 5173, pid: 4, look: 'lsof -nP -iTCP:5173 -sTCP:LISTEN', kill: 'kill 4', sure: true }] }]);
     assert.deepEqual(t.store.getState().log.filter((e) => e.kind === 'leftover').map((e) => e.text), ['Left running: npm run dev (port 5173)']);
   });
 });

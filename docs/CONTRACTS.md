@@ -1209,30 +1209,39 @@ starts a server (`core/leftovers.js serverStart`, read with `core/shell.js`): a 
 bun; a known server (`vite`, `next dev|start`, `nuxt dev`, `astro dev`, `serve`, `http-server`,
 `python -m http.server`, `manage.py runserver`, `rails s`, `flask run`, `uvicorn`, `gunicorn`,
 `php -S`, `ng serve`, `hugo server`, `jekyll serve`, `json-server`, `wrangler dev`, `nodemon`…); or
-anything sent to the background (`run_in_background`, `&`, `nohup`, `setsid`) that names a port.
-Its port is the one the line names (`--port 4000`, `-p`, `PORT=4000`, `host:port`, http.server's
-positional port), else the tool's fixed default (vite 5173, next 3000, …); a package script's is
-never guessed (`null`). At most 20 per session, 200 sessions.
+a program of yours sent to the background (`run_in_background`, `&`, `nohup`, `setsid`) that names
+its port only where it cannot mean anything else: `PORT=7070`, or a long `--port`/`--listen` given
+to a runtime (`node`, `python`, `deno`, `bun`, `ruby`, `java`, `go`, `dotnet`) or a `./` program.
+Short `-p`/`-l` count only for known servers (`ssh -p 2222`, `git log -p 20`, `npm test -- --port`
+never count). Its port is the one the line names, else the tool's fixed default (vite 5173, next
+3000, …); a package script's is never guessed (`null`). At most 20 per session, 200 sessions.
 
-On the session's `SessionEnd`, 1.5 s later, the server reads once what listens on TCP, read-only:
-`lsof -nP -iTCP -sTCP:LISTEN -F pn` with each process's working folder (`lsof -a -d cwd`, or
-`/proc/<pid>/cwd` on Linux); `/proc/net/tcp` and `tcp6` on Linux without lsof (no process ids);
-`netstat -ano -p tcp` on Windows; each with a 2 s timeout. A remembered port that listens is a
-leftover; for an unknown port, every port listened on from inside the command's folder is. Never
+On the session's `SessionEnd`, 1.5 s later and again 5 s after that (`CONFIRM_MS`), the server
+reads what listens on TCP, read-only: `lsof -nP -iTCP -sTCP:LISTEN -F pn` with each process's
+working folder (`lsof -a -d cwd`, or `/proc/<pid>/cwd` on Linux); `/proc/net/tcp` and `tcp6` on
+Linux without lsof (no process ids, no folders); `netstat -ano` on Windows (TCP rows, IPv4 and
+IPv6; a row with no foreign port is listening, whatever the localized state word); each with a 4 s
+timeout. A listener is the session's (`sure: true`) only when its working folder is inside the
+folder the command started in (its real path too): on the remembered port, or, for a package
+script's unknown port, on any port. A remembered port that listens where the folder cannot be read
+(no lsof, Windows, another user's process) is shown with `sure: false`: it may not be the
+session's. Only what the second look still finds, held by the same process, is reported. Never
 the server's own process. With any, it sends `{ t: 'leftovers', l }` to owners and keeps the last
 20 for later `hello`s.
 
 ```js
 Leftovers = { sessionId, at /* server ms */, items: { command /* as written, secrets masked, ≤ 200 chars */, port,
-              pid: number|null, kill: string /* a command to copy */ }[] }
+              pid: number|null, look: string /* shows who listens there now */,
+              kill: string|null /* stops the process seen; null unless sure and its id is known */, sure: boolean }[] }
 ```
 
-`kill` finds the process again by its port when it runs, so a process that took an old id is
-never hit: `kill $(lsof -t -iTCP:<port> -sTCP:LISTEN)`; on Windows `Stop-Process -Id
-(Get-NetTCPConnection -LocalPort <port> -State Listen).OwningProcess`; with no lsof, `kill <pid>`.
-Nothing is ever stopped by Andary. The store keeps them on `StoreState.leftovers` (last 20, read
-defensively, a repeat ignored) with a `leftover` log line per item; Crews shows them under the
-ended crew's line (`[data-testid="crew-leftovers"]`) with a Copy button per command and Set aside.
+`look` is `lsof -nP -iTCP:<port> -sTCP:LISTEN`, `ss -ltnp 'sport = :<port>'` without lsof, or
+`Get-NetTCPConnection -LocalPort <port> -State Listen` on Windows. `kill` is `kill <pid>` or
+`Stop-Process -Id <pid>`, for the process the check saw: a port another process takes later is
+never hit blindly, and the look comes first. Nothing is ever stopped by Andary. The store keeps
+them on `StoreState.leftovers` (last 20, read defensively, a repeat ignored; `kill` dropped unless
+`sure`) with a `leftover` log line per item; Crews shows them under the ended crew's line
+(`[data-testid="crew-leftovers"]`) with Copy buttons and Set aside, which lasts across reloads.
 
 ## 5. Browser: events, store, director
 
@@ -1959,7 +1968,7 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="remote-approvals-toggle"]` | checkbox/switch for remote approvals (live mode) |
 | `[data-testid="settings-button"]` | opens the settings dialog (holds the remote approvals switch) |
 | `[data-testid="watch-settings"]` | Settings: the cost and long-turn alerts; a number field per threshold (`watch-burnUsd`, `watch-burnMinutes`, `watch-turnUsd`, `watch-helpers`, `watch-longMinutes`, `watch-quietMinutes`, `watch-cooldownMinutes`) and `watch-phone` (with phone notes on) |
-| `[data-testid="crew-leftovers"]` | under an ended crew's line: what it left running (§4.16), one `[data-testid="leftover"][data-port]` each with `leftover-copy`, and `leftovers-dismiss` |
+| `[data-testid="crew-leftovers"]` | under an ended crew's line: what it left running (§4.16), one `[data-testid="leftover"][data-port][data-sure]` each with `leftover-copy` buttons (`leftover-unsure` when it may not be the session's), and `leftovers-dismiss` |
 | `[data-testid="walk-panel"]` | the Walk panel, shown in walk mode (§4.11) |
 | `[data-testid="walk-to"]` | its "Walk to…" list |
 | `[data-testid="walk-where"]` | its status line (a polite live region): where your character is going or is |

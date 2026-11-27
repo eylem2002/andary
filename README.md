@@ -261,13 +261,15 @@ with no files changed."; off by default). On a Pro or Max plan the dollars are a
 not a bill. Codex reports no cost, so its crews get the helpers alert only. A page reload forgets
 an alert.
 
-**Left running.** When a session ends, Andary looks once whether a dev server it started is still
-listening: `npm run dev`, `vite`, `python -m http.server 8000`, `rails s` and the like, or anything
-sent to the background with a port. It reads which ports listen (lsof; `/proc/net/tcp` on Linux
-without it; netstat on Windows) and shows what it finds under the ended crew's line: "`npm run dev`
-on port 5173", with a command to copy that would stop it (`kill $(lsof -t -iTCP:5173
--sTCP:LISTEN)`). Andary never stops anything itself. A package script's port is never guessed: it
-is found by the listening process's working folder being the script's.
+**Left running.** When a session ends, Andary checks, twice a few seconds apart, whether a dev server
+it started is still listening: `npm run dev`, `vite`, `python -m http.server 8000`, `rails s` and the
+like, or a program of yours sent to the background with its port. It reads which ports listen and
+from which folder (lsof; `/proc/net/tcp` on Linux without it; netstat on Windows). A listener counts
+only if it runs from the folder the command started in, so your own server on the same port is
+left out. It shows what it finds under the ended crew's line: "`npm run dev` on port 5173", a
+command to look first (`lsof -nP -iTCP:5173 -sTCP:LISTEN`) and one that stops the process it saw
+(`kill 4242`). Where the system does not say a listener's folder, the port is shown as one that may
+not be the session's, with the look command only. Andary never stops anything itself.
 
 **Two agents on the same files.** Several sessions in one repository can undo each other's work.
 When an agent writes a whole file over a change another agent made in the last half hour, or runs

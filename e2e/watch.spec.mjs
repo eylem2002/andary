@@ -1,7 +1,9 @@
 // Cost alerts and leftovers end to end (core/watch.js, server/leftovers.mjs): a real server
 // reading a real transcript, the real hook forwarder, and the HUD in a browser.
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { startTown } from './helpers/town.mjs';
@@ -71,30 +73,62 @@ test('a crew spending fast with no files changed: an alert on its row that count
   await expect(page.getByTestId('waiting-for-you')).toHaveAttribute('aria-label', '1 needs you. Next: Started 4 helpers this turn');
 });
 
-test('a dev server a session left running: its ended crew shows it with a command to copy, and nothing is stopped', async ({ page }) => {
-  const server = createServer(() => {});
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(undefined)));
-  const port = /** @type {import('node:net').AddressInfo} */ (server.address()).port;
+/**
+ * A dev server of the session's own: a child process listening from `folder`.
+ * @param {string} folder
+ * @returns {Promise<{ port: number, pid: number, stop: () => void }>}
+ */
+async function devServer(folder) {
+  const child = spawn(process.execPath, ['-e', "const s=require('http').createServer(()=>{}).listen(0,'127.0.0.1',()=>console.log('listening on '+s.address().port))"], { cwd: folder, stdio: ['ignore', 'pipe', 'ignore'], env: { PATH: process.env.PATH ?? '' } });
+  let out = '';
+  const port = await new Promise((resolve) => child.stdout.on('data', (chunk) => {
+    out += chunk;
+    const found = /listening on (\d+)/.exec(out);
+    if (found) resolve(Number(found[1]));
+  }));
+  return { port: /** @type {number} */ (port), pid: /** @type {number} */ (child.pid), stop: () => child.kill() };
+}
+
+test('a dev server a session left running: its ended crew shows it with commands to copy; a port someone else holds is not shown', async ({ page }) => {
+  const folder = mkdtempSync(join(tmpdir(), 'andary-e2e-app-'));
+  const dev = await devServer(folder);
+  // Your own server, from another folder, on a port the session also asked for.
+  const yours = createServer(() => {});
+  await new Promise((resolve) => yours.listen(0, '127.0.0.1', () => resolve(undefined)));
+  const taken = /** @type {import('node:net').AddressInfo} */ (yours.address()).port;
   try {
     await signIn(page);
-    await town.sendHook(hook('SessionStart', { source: 'startup' }));
-    await town.sendHook(hook('PostToolUse', { tool_name: 'Bash', tool_use_id: 'b1', tool_input: { command: `node dev-server.js --port ${port}`, run_in_background: true }, tool_response: {} }));
-    await town.sendHook(hook('SessionEnd', { reason: 'prompt_input_exit' }));
+    const send = (/** @type {string} */ name, /** @type {Record<string, unknown>} */ extra = {}) => town.sendHook(hook(name, { cwd: folder, ...extra }));
+    await send('SessionStart', { source: 'startup' });
+    await send('PostToolUse', { tool_name: 'Bash', tool_use_id: 'b1', tool_input: { command: `node dev-server.js --port ${dev.port}`, run_in_background: true }, tool_response: {} });
+    await send('PostToolUse', { tool_name: 'Bash', tool_use_id: 'b2', tool_input: { command: `npx vite --port ${taken}`, run_in_background: true }, tool_response: {} });
+    await send('SessionEnd', { reason: 'prompt_input_exit' });
     const crew = page.locator('[data-testid="crew"][data-session-id="e2e-watch"]');
     const block = crew.getByTestId('crew-leftovers');
-    await expect(block).toBeVisible({ timeout: 10_000 });
-    await expect(block.getByTestId('leftover')).toHaveAttribute('data-port', String(port));
-    await expect(block).toContainText(`node dev-server.js --port ${port}`);
-    await expect(block).toContainText(`kill $(lsof -t -iTCP:${port} -sTCP:LISTEN)`);
+    // Looked at 1.5 s after the end, and again 5 s later to confirm.
+    await expect(block).toBeVisible({ timeout: 20_000 });
+    await expect(block.getByTestId('leftover')).toHaveCount(1);
+    await expect(block.getByTestId('leftover')).toHaveAttribute('data-port', String(dev.port));
+    await expect(block.getByTestId('leftover')).toHaveAttribute('data-sure', 'true');
+    await expect(block).toContainText(`node dev-server.js --port ${dev.port}`);
+    await expect(block).toContainText(`lsof -nP -iTCP:${dev.port} -sTCP:LISTEN`);
+    await expect(block).toContainText(`kill ${dev.pid}`);
     await expect(block).toContainText('Andary never stops anything itself');
-    await expect(page.getByTestId('log-entry').filter({ hasText: `Left running: node dev-server.js --port ${port} (port ${port})` })).toHaveCount(1);
-    expect(server.listening).toBe(true);
+    await expect(page.getByTestId('log-entry').filter({ hasText: `Left running: node dev-server.js --port ${dev.port} (port ${dev.port})` })).toHaveCount(1);
+    expect(yours.listening).toBe(true);
     // A reload keeps it: the server sends it with the hello.
     await page.reload();
     await expect(block).toBeVisible();
     await block.getByTestId('leftovers-dismiss').click();
     await expect(block).toBeHidden();
+    // Set aside stays set aside after a reload.
+    await page.reload();
+    await expect(page.getByTestId('connection-status')).toContainText('Live');
+    await expect(page.getByTestId('log-entry').filter({ hasText: 'Left running' })).toHaveCount(1);
+    await expect(block).toBeHidden();
   } finally {
-    server.close();
+    dev.stop();
+    yours.close();
+    rmSync(folder, { recursive: true, force: true });
   }
 });

@@ -3,7 +3,7 @@
 // no edits gets a note on its row, how long a crew waits between two alerts of a kind, and
 // whether the server's phone notes (andary start --notify) include them. In the live town the
 // server keeps them (its phone notes follow them too); in the demo, this browser does.
-import { readWatchSettings } from '../core/watch.js';
+import { WATCH_RANGES, readWatchSettings } from '../core/watch.js';
 import { h, setAttr, setHidden } from './dom.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
@@ -29,13 +29,20 @@ export function currentWatch(ctx) {
   return readWatchSettings(ctx.view.mode === 'live' ? ctx.view.serverSettings.watch : ctx.prefs.watch);
 }
 
+/** @param {keyof WatchSettings} key @param {number} value */
+function clampTo(key, value) {
+  const [min, max] = WATCH_RANGES[/** @type {keyof typeof WATCH_RANGES} */ (key)];
+  return Math.min(max, Math.max(min, value));
+}
+
 /** @param {HudContext} ctx */
 export function watchBlock(ctx) {
   /** @type {Map<keyof WatchSettings, HTMLInputElement>} */
   const inputs = new Map();
   const rows = FIELDS.map(([key, label, unit, step]) => {
     const id = `hud-set-watch-${key}`;
-    const input = /** @type {HTMLInputElement} */ (h('input', { type: 'number', class: 'hud-input hud-watch__number', id, min: '0', step, inputmode: 'decimal', 'data-testid': `watch-${key}` }));
+    const [min, max] = WATCH_RANGES[/** @type {keyof typeof WATCH_RANGES} */ (key)];
+    const input = /** @type {HTMLInputElement} */ (h('input', { type: 'number', class: 'hud-input hud-watch__number', id, min: String(min), max: String(max), step, inputmode: 'decimal', 'data-testid': `watch-${key}` }));
     input.addEventListener('change', () => apply());
     inputs.set(key, input);
     return h('div', { class: 'hud-setting__row hud-watch__row' },
@@ -55,7 +62,8 @@ export function watchBlock(ctx) {
   function apply() {
     /** @type {Record<string, unknown>} */
     const raw = { ...currentWatch(ctx), phone: phone.checked };
-    for (const [key, input] of inputs) if (input.value !== '') raw[key] = Number(input.value);
+    // A number out of range takes the nearest allowed one, not the default.
+    for (const [key, input] of inputs) if (input.value !== '' && Number.isFinite(Number(input.value))) raw[key] = clampTo(key, Number(input.value));
     const settings = readWatchSettings(raw);
     if (ctx.view.mode === 'live') ctx.controls.setWatch(settings);
     else {

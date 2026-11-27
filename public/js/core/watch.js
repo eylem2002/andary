@@ -31,8 +31,8 @@ import { isObject } from './text.js';
 /** @type {Readonly<WatchSettings>} */
 export const WATCH_DEFAULTS = Object.freeze({ burnUsd: 3, burnMinutes: 10, turnUsd: 10, helpers: 10, longMinutes: 30, quietMinutes: 20, cooldownMinutes: 30, phone: false });
 
-/** Each number's allowed range; a value outside it falls back to the default. */
-const RANGES = Object.freeze({
+/** Each number's allowed range; a value outside it falls back to the default (Settings clamps first). */
+export const WATCH_RANGES = Object.freeze({
   burnUsd: [0, 1000],
   burnMinutes: [1, 120],
   turnUsd: [0, 1000],
@@ -52,7 +52,7 @@ export function readWatchSettings(raw) {
   const data = isObject(raw) ? raw : {};
   /** @type {any} */
   const settings = { ...WATCH_DEFAULTS };
-  for (const [key, [min, max]] of Object.entries(RANGES)) {
+  for (const [key, [min, max]] of Object.entries(WATCH_RANGES)) {
     const value = data[key];
     if (typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max) settings[key] = Math.round(value * 100) / 100;
   }

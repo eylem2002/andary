@@ -1441,20 +1441,30 @@ section.
      stuck (as the study asks): it shows under the lead's row and never counts in "need you" or
      pops up. Only while the crew is working: a lead waiting for your permission already counts.
      A turn whose prompt the town missed says "at least".
-276. **Leftovers are looked for once, 1.5 s after `SessionEnd`, and only for sessions whose shell
-     calls started a server.** A crashed session sends no `SessionEnd` and is not looked at.
-     Claude Code may stop its own background shells when it exits; then nothing is found, which
-     is right. A finished `PostToolUse` is required: a foreground server that the tool's timeout
-     killed is not a candidate.
-277. **A package script's port is never guessed.** `npm run dev` may serve anywhere; instead every
-     port listened on by a process whose working folder is inside the command's folder counts.
-     This can include a server you started yourself in the same project; the command and port
-     are shown, and nothing is stopped, so you decide. Fixed defaults (vite 5173, next 3000, …)
-     are used only for tools whose default port is fixed.
-278. **The kill command finds the process by its port when you run it** (`kill $(lsof -t
-     -iTCP:5173 -sTCP:LISTEN)`, or `Stop-Process … Get-NetTCPConnection` on Windows) rather than
-     naming a process id, so a reused id is never hit; `kill <pid>` only where lsof is missing.
-     There is no kill button anywhere.
+276. **Leftovers are looked for 1.5 s after `SessionEnd` and again 5 s later, only for sessions
+     whose shell calls started a server**, and only what the same process still holds the second
+     time counts (a server shutting down, or a port taken meanwhile, is left out). A crashed session
+     sends no `SessionEnd` and is not looked at. Claude Code may stop its own background shells
+     when it exits; then nothing is found, which is right. A finished `PostToolUse` is required: a
+     foreground server that the tool's timeout killed is not a candidate.
+277. **A listener is the session's only if it runs from inside the command's folder**, for a
+     remembered port too: your own vite on 5173 while the session's moved to 5174 is not shown. A
+     package script's port is never guessed: every port listened on from inside its folder counts,
+     which can include a server you started yourself in that same folder; the command, the port
+     and the process are shown, and nothing is stopped, so you decide. Where the folder cannot be
+     read (Linux without lsof, Windows, another user's process), a remembered port that listens is
+     shown as "may not be this session's" with a command to look and none to stop it. Short `-p` and
+     `-l` count only for known servers; a background command of another kind needs `PORT=` or a long
+     `--port` given to a runtime or a `./` program.
+278. **Look first, then stop the process seen**: the town shows a command that lists who listens
+     on the port now (`lsof -nP -iTCP:5173 -sTCP:LISTEN`, `ss -ltnp 'sport = :5173'` without lsof,
+     `Get-NetTCPConnection` on Windows) and one that stops the process the check saw by its id
+     (`kill <pid>`, `Stop-Process -Id <pid>`), never one that kills whatever holds the port when you
+     run it. The id was confirmed twice a few seconds apart; reuse after that is the reason to look
+     first. Without a process id there is no stop command. There is no kill button anywhere.
 279. **Leftovers are owners-only and local-only**: commands and ports of your own computer never
      go to a teammate or a viewer, and a teammate's sessions are never probed (their processes are
      on their computer).
+280. **Settings clamp a number out of range to the nearest allowed value** (the fields carry their
+     min and max), rather than falling back to the default; a value that reaches the server out of
+     range some other way still falls back to the default there.

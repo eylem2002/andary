@@ -1,5 +1,6 @@
 // What an ended crew left running (CONTRACTS §4.16), under its line in Crews: each server still
-// listening, the command that started it, and a command to copy that would stop it. Andary never
+// listening, the command that started it, a command to look at it first and one that would stop
+// the process the check saw (none when it cannot tell the process is the session's). Andary never
 // stops anything itself, and says so. "Set aside" hides the block, like any other set-aside item.
 import { copyCommand } from './dialogs.js';
 import { h, setHidden } from './dom.js';
@@ -52,15 +53,30 @@ export function createLeftoversBlock(ctx) {
 }
 
 /**
+ * A command with its Copy button.
+ * @param {HudContext} ctx @param {string} command @param {string} label  the button's name
+ */
+function commandRow(ctx, command, label) {
+  const code = h('code', { class: 'hud-mono hud-steps__code', text: command });
+  const copy = h('button', { type: 'button', class: 'hud-btn hud-btn--small', 'data-testid': 'leftover-copy', 'aria-label': label }, icon('copy', { size: 16 }), h('span', { text: 'Copy' }));
+  copy.addEventListener('click', () => copyCommand(command, code, copy, ctx));
+  return h('div', { class: 'hud-steps__command' }, code, copy);
+}
+
+/**
+ * One leftover: what started it and where it listens, a command to look first, and one to stop
+ * the process the check saw, or, when it cannot be told to be the session's, only the look.
  * @param {HudContext} ctx
  * @param {import('../core/leftovers.js').Leftover} item
  */
 function itemRow(ctx, item) {
-  const code = h('code', { class: 'hud-mono hud-steps__code', text: item.kill });
-  const copy = h('button', { type: 'button', class: 'hud-btn hud-btn--small', 'data-testid': 'leftover-copy', 'aria-label': `Copy the command that stops port ${item.port}` }, icon('copy', { size: 16 }), h('span', { text: 'Copy' }));
-  copy.addEventListener('click', () => copyCommand(item.kill, code, copy, ctx));
   const pid = item.pid ? `, process ${item.pid}` : '';
-  return h('li', { class: 'hud-leftovers__item', 'data-testid': 'leftover', 'data-port': String(item.port) },
+  const rows = [
     h('p', {}, h('code', { class: 'hud-mono', text: item.command }), h('span', { text: ` on port ${item.port}${pid}` })),
-    h('div', { class: 'hud-steps__command' }, code, copy));
+  ];
+  if (!item.sure) rows.push(h('p', { class: 'hud-leftovers__note', 'data-testid': 'leftover-unsure', text: `Something listens on port ${item.port}, but Andary cannot tell whether it is this session's. Look before you stop anything:` }));
+  else rows.push(h('p', { class: 'hud-leftovers__note', text: 'Look first, then stop it:' }));
+  rows.push(commandRow(ctx, item.look, `Copy the command that shows what listens on port ${item.port}`));
+  if (item.kill) rows.push(commandRow(ctx, item.kill, `Copy the command that stops process ${item.pid ?? ''} on port ${item.port}`));
+  return h('li', { class: 'hud-leftovers__item', 'data-testid': 'leftover', 'data-port': String(item.port), 'data-sure': String(item.sure) }, ...rows);
 }
