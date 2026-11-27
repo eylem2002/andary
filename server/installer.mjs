@@ -11,6 +11,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   statSync,
@@ -19,7 +20,7 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { CLIENTS } from './clients.mjs';
-import { HOOK_SOURCE } from './config.mjs';
+import { HOOK_SOURCE, resolveClaudeConfigDir } from './config.mjs';
 import { ensureHome } from './state-file.mjs';
 import { isObject } from '../public/js/core/text.js';
 
@@ -294,12 +295,6 @@ function saveRecord(home, key, shape) {
 }
 
 /**
- * Events that have at least one Andary entry.
- * @param {Record<string, any>} settings
- * @param {string} [hookPath]
- * @returns {string[]}
- */
-/**
  * The registrations a settings file holds, as `event` or `event argument` for one with an
  * argument of its own (the hold check: `PreToolUse hold`), so an install from before the hold
  * check does not pass for a whole one.
@@ -329,6 +324,12 @@ function registrationKey(registration) {
   return registration.argument ? `${registration.event} ${registration.argument}` : registration.event;
 }
 
+/**
+ * Events that have at least one Andary entry.
+ * @param {Record<string, any>} settings
+ * @param {string} [hookPath]
+ * @returns {string[]}
+ */
 function registeredEvents(settings, hookPath) {
   if (!isObject(settings.hooks)) return [];
   return Object.entries(settings.hooks)
@@ -616,12 +617,54 @@ function inspectScope(client, scope, settingsPath, hookPath) {
 
 /**
  * Whether Claude Code runs the hold check ("Always hold risky commands for me", server/hold.mjs)
- * for sessions started here: a settings file registers it, or the plugin (whose hooks.json has it)
- * is enabled.
+ * for sessions started here: a settings file registers it, or the plugin is enabled and the copy
+ * Claude Code installed of it (under <config>/plugins) registers it. An older plugin copy, or
+ * one that cannot be found, does not count.
  * @param {{ dir: string, env: NodeJS.ProcessEnv, home: string }} where
  * @returns {boolean}
  */
 export function holdCheckInstalled({ dir, env, home }) {
   const { scopes, plugin } = inspectInstallations({ dir, env, home, clients: [CLIENTS.claude] });
-  return plugin || scopes.some((scope) => scope.events.length > 0 && !scope.holdMissing);
+  if (scopes.some((scope) => scope.events.length > 0 && !scope.holdMissing)) return true;
+  return plugin && pluginHasHoldCheck(join(resolveClaudeConfigDir(env), 'plugins'));
+}
+
+/** Folders looked into for the plugin's installed copies, and how deep. */
+const PLUGIN_SCAN = Object.freeze({ maxFolders: 400, maxDepth: 6 });
+
+/**
+ * Whether an installed copy of the Andary plugin registers the hold check: a hooks/hooks.json
+ * under a folder named andary whose commands include `hold # andary`.
+ * @param {string} root  Claude Code's plugins folder
+ */
+function pluginHasHoldCheck(root) {
+  /** @type {Array<[string, number]>} */
+  const queue = [[root, 0]];
+  let seen = 0;
+  while (queue.length && seen < PLUGIN_SCAN.maxFolders) {
+    const [folder, depth] = /** @type {[string, number]} */ (queue.shift());
+    seen += 1;
+    let names;
+    try {
+      names = readdirSync(folder, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of names) {
+      if (!entry.isDirectory()) continue;
+      const path = join(folder, entry.name);
+      if (entry.name === 'hooks' && /[\\/]andary(?:[\\/]|$)/.test(folder) && hookFileHolds(join(path, 'hooks.json'))) return true;
+      if (depth < PLUGIN_SCAN.maxDepth && !entry.name.startsWith('.') && entry.name !== 'node_modules') queue.push([path, depth + 1]);
+    }
+  }
+  return false;
+}
+
+/** @param {string} file */
+function hookFileHolds(file) {
+  try {
+    return /\shold\s+#\s*andary"/.test(readFileSync(file, 'utf8'));
+  } catch {
+    return false;
+  }
 }

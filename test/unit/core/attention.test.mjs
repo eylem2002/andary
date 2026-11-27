@@ -601,3 +601,29 @@ describe('risky runs: which call asked', () => {
     assert.deepEqual(t.items(T0 + 100).filter((item) => item.kind === 'risk'), []);
   });
 });
+
+describe('risky runs: one request for a whole patch', () => {
+  test('every file of a Codex patch that asked once is covered by that one request', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    const patch = '*** Begin Patch\n*** Add File: ../other/notes.txt\n*** Add File: .env\n*** Add File: /home/dev/.bashrc\n*** End Patch';
+    t.send('PermissionRequest', { tool_name: 'apply_patch', tool_input: { command: patch }, andary_key: 'k-three' }, T0);
+    for (const [i, file] of ['/home/dev/code/other/notes.txt', '/home/dev/code/api-server/.env', '/home/dev/.bashrc'].entries()) {
+      const id = i === 0 ? 'call-1' : `call-1#${i + 1}`;
+      t.send('PostToolUse', { tool_name: 'Write', tool_input: { file_path: file, content: 'x' }, tool_use_id: id, andary_key: 'k-three', andary_tool: 'apply_patch', tool_response: {} }, T0 + 100 + i);
+    }
+    assert.deepEqual(t.items(T0 + 200).filter((item) => item.kind === 'risk'), []);
+    // The same patch again, as a call of its own that did not ask: it counts.
+    t.send('PostToolUse', { tool_name: 'Write', tool_input: { file_path: '/home/dev/code/api-server/.env', content: 'x' }, tool_use_id: 'call-2', andary_key: 'k-three', andary_tool: 'apply_patch', tool_response: {} }, T0 + 300);
+    assert.equal(t.items(T0 + 400).filter((item) => item.kind === 'risk').length, 1);
+  });
+
+  test('two risky runs in the same millisecond are two notices', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'git push -f' }, tool_use_id: 'a', tool_response: {} }, T0);
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'git reset --hard' }, tool_use_id: 'b', tool_response: {} }, T0);
+    const ids = t.items(T0 + 10).filter((item) => item.kind === 'risk').map((item) => item.id);
+    assert.equal(new Set(ids).size, 2);
+  });
+});

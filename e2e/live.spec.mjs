@@ -267,8 +267,12 @@ test('a click meant for one request cannot answer another that just slid under t
   await page.waitForTimeout(300);
   for (const card of await cards.all()) await expect(card).toHaveAttribute('data-status', 'pending');
   // Once the list has been still for a moment, a deliberate click answers the card it lands on.
+  // (The refused click says "Not yet" on its card, which may move the other one: wait for both.)
+  for (const card of await cards.all()) await expect(card.getByTestId('deny')).not.toHaveAttribute('aria-disabled', 'true');
   await page.locator(`[data-testid="approval-card"]:not([data-approval-id="${firstId}"])`).getByTestId('deny').click();
-  await page.locator(`[data-testid="approval-card"][data-approval-id="${firstId}"]`).getByTestId('deny').click();
+  const firstDeny = page.locator(`[data-testid="approval-card"][data-approval-id="${firstId}"]`).getByTestId('deny');
+  await expect(firstDeny).not.toHaveAttribute('aria-disabled', 'true');
+  await firstDeny.click();
   for (const pending of [first, second]) expect(JSON.parse((await pending).stdout).hookSpecificOutput.decision.behavior).toBe('deny');
 });
 

@@ -63,7 +63,7 @@ const NOTE_SWEEP_MS = 15_000;
  * @property {string} uiToken
  * @property {string} responseKey     signs /api/hook replies (see auth.signHookReply)
  * @property {{ remoteApprovals: boolean, approvalTimeoutMs: number, holdRisky: boolean }} settings
- * @property {() => boolean} holdCheckMissing  Claude Code's hooks here have no hold check (installed before it)
+ * @property {(refresh?: boolean) => boolean} holdCheckMissing  Claude Code's hooks here have no hold check (installed before it); cached 30 s
  * @property {string|null} holdFile   where "Always hold risky commands for me" is kept (server/hold.mjs); null when nothing is written
  * @property {Set<string>} allowedHosts
  * @property {Set<string>} tunnelHosts    the Host names a tunnelled request may use (ADR 0019)
@@ -263,6 +263,31 @@ function createHttpServer(ctx, tls, { tunnelled = false } = {}) {
   );
 }
 
+/** How long whether the hold check is installed is kept before the files are read again. */
+const HOLD_CHECK_TTL_MS = 30_000;
+
+/**
+ * Whether Claude Code's hooks here lack the hold check, read from the settings files at most every
+ * 30 s (an `andary install` shows up within that), or at once when asked to refresh (the setting
+ * was just switched).
+ * @param {string} home
+ * @returns {(refresh?: boolean) => boolean}
+ */
+function cachedHoldCheck(home) {
+  let at = -Infinity;
+  let missing = false;
+  return (refresh = false) => {
+    if (!refresh && Date.now() - at < HOLD_CHECK_TTL_MS) return missing;
+    try {
+      missing = !holdCheckInstalled({ dir: process.cwd(), env: process.env, home });
+    } catch {
+      missing = false;
+    }
+    at = Date.now();
+    return missing;
+  };
+}
+
 /**
  * @param {{ home: string, publicDir: string, approvalTimeoutMs: number, writeState: boolean, log: (message: string) => void }} config
  * @param {ServerOptions} options
@@ -289,13 +314,7 @@ function createContext(config, options) {
     responseKey: generateToken(),
     settings: { remoteApprovals: Boolean(options.remoteApprovals), approvalTimeoutMs: config.approvalTimeoutMs, holdRisky: readHoldRisky(holdFile) },
     holdFile,
-    holdCheckMissing: () => {
-      try {
-        return !holdCheckInstalled({ dir: process.cwd(), env: process.env, home: config.home });
-      } catch {
-        return false;
-      }
-    },
+    holdCheckMissing: cachedHoldCheck(config.home),
     allowedHosts: new Set(),
     tunnelHosts: new Set(),
     headers: securityHeaders(buildCsp(computeImportMapHashes(config.publicDir))),

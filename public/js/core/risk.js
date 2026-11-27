@@ -68,7 +68,7 @@ const REMOVERS = new Set(['rm', 'remove-item', 'ri', 'del', 'erase', 'rd', 'rmdi
 /** cmd.exe's removers, whose options are `/s`, `/q`: never a path. */
 const CMD_REMOVERS = new Set(['del', 'erase', 'rd', 'rmdir']);
 /** Folders a project rebuilds (dependencies, build output, caches): deleting one inside the project is ordinary. */
-const REBUILDABLE = new Set(['node_modules', 'dist', 'build', '.next', 'target', 'coverage', '.cache', '__pycache__']);
+const REBUILDABLE = new Set(['node_modules', 'dist', '.next', 'coverage', '.cache', '__pycache__']);
 const REBUILDABLE_REASON = 'deletes a rebuildable folder';
 /** PowerShell cmdlets that write a file, and their parameters that name it. */
 const PS_WRITERS = new Set(['out-file', 'set-content', 'add-content', 'sc', 'ac']);
@@ -174,7 +174,8 @@ function inside(path, folder) {
  */
 function rebuildable(written, folder, root) {
   const text = written.trim().replace(/\\/g, '/');
-  if (!text || /^[~$%]/.test(text)) return '';
+  // A variable, a command substitution or %VAR% anywhere can lead anywhere: no quiet note then.
+  if (!text || /^~|[$`]|%[^%]*%/.test(text)) return '';
   const path = folder || root ? normalizePath(text, folder ?? root) : '';
   const base = root || folder || '';
   let rest;
@@ -454,8 +455,8 @@ function pushRisks(args) {
   return reasons;
 }
 
-/** A shell given a download to run: `bash <(curl …)`, `sh -c "$(curl …)"`. */
-const SHELL_FED = /\b(?:sh|bash|zsh|dash|ksh)\b[^|;&\n]*?(?:<\(|\$\(|`)\s*(?:curl|wget)\b|(?:^|[\s;&|(])(?:source|\.)\s+<\(\s*(?:curl|wget)\b/;
+/** A shell given a download to run: `bash <(curl …)`, `sh -c "$(curl …)"`, `source <(curl …)`, `eval "$(curl …)"`. */
+const SHELL_FED = /\b(?:sh|bash|zsh|dash|ksh)\b[^|;&\n]*?(?:<\(|\$\(|`)\s*(?:curl|wget)\b|(?:^|[\s;&|(])(?:source|\.)\s+<\(\s*(?:curl|wget)\b|\beval\b[^|;&\n]*?(?:\$\(|`)\s*(?:curl|wget)\b/;
 /** PowerShell running what it downloads: `iex (iwr …)`, `Invoke-Expression (New-Object Net.WebClient).DownloadString(…)`. */
 const PS_RUNS = /\b(?:iex|invoke-expression)\b/i;
 const PS_DOWNLOADS = /\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b|\.downloadstring\s*\(/i;

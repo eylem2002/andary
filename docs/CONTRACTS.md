@@ -389,7 +389,8 @@ Browser → server:
 
 `holdCheckMissing` is true while `holdRisky` is on and no Claude Code settings file the server can
 see (user, and the project and local scopes of its working folder) registers the hold check, and
-the plugin is not enabled: the Settings switch then says to run `andary install` again. `andary
+no installed copy of an enabled plugin (a `hooks/hooks.json` under an `andary` folder in
+`<claude config>/plugins`) does; read at most every 30 s, and again when the switch changes: the Settings switch then says to run `andary install` again. `andary
 status` and `doctor` count an install without the hold check as incomplete ("installed, but the
 hold check is missing"): registrations are compared as (event, argument) pairs.
 `holdRisky` ("Always hold risky commands for me", off by default) is kept as the file
@@ -1397,10 +1398,11 @@ and "4m 05s ago" for a conflict or a risky run.
 temp folder never is; with no folder known no path is judged). Shell commands (Bash, PowerShell,
 read by `core/shell.js`; `xargs` runs the command after its own options): `rm -r`/`Remove-Item
 -Recurse`/`del /s`/`rd /s` "deletes recursively" (cmd's `/s`, `/q` are options, never paths), but
-when every target is inside a folder the project rebuilds (`node_modules`, `dist`, `build`, `.next`,
-`target`, `coverage`, `.cache`, `__pycache__`, inside the project) "deletes a rebuildable folder
+when every target is inside a folder the project rebuilds (`node_modules`, `dist`, `.next`,
+`coverage`, `.cache`, `__pycache__`, inside the project, with no `$`, backtick or `%…%` anywhere in
+the target) "deletes a rebuildable folder
 (<names>)" and the risk is `quiet: true` (a softer note on the card, no risky run, never held);
-`find … -delete` "deletes recursively (find -delete)" and `find … -exec|-execdir rm -r`
+`eval "$(curl …)"` is a downloaded script too; `find … -delete` "deletes recursively (find -delete)" and `find … -exec|-execdir rm -r`
 "deletes recursively (find -exec rm)"; `rm` of a path outside "deletes outside the project: <path>"
 (paths on a Windows drive compare without regard to case); `git push` with `--force`, `-f`, `--force-with-lease`,
 `--mirror` or a `+ref` "rewrites remote history (force push)", with `--delete`, `-d` or `:ref`
@@ -1431,10 +1433,11 @@ same for each `*** Add|Update|Delete File:` it names. Other tools: null. Never t
 agent and its call key, `callKey`/`andary_key`, which a Codex patch keeps when it becomes an Edit or
 Write; without one by tool and input with keys in order: the request carries no `tool_use_id`); a
 `permission.denied`, or a request denied in the town, takes the mark away; and a `tool.end` or
-`tool.fail` (not an interrupt) of a call that did not ask, and is risky (not `quiet`), is a `RiskRun { id: 'risk:<agentKey>:<ts>',
+`tool.fail` (not an interrupt) of a call that did not ask, and is risky (not `quiet`), is a `RiskRun { id: 'risk:<agentKey>:<ts>:<tool_use_id>',
 sessionId, agentKey, at, tool, what /* the command or file, ≤ 120 chars */, reasons }` on
 `StoreState.risks`, with a `risk` log line (`warn`, "Ran without asking: <what> (<first reason>)").
-A call that asked uses its mark up. A crew leaving takes its runs with it; a teammate's crew has
+A call that asked uses its mark up; the other hooks of the same call (Codex splits one
+`apply_patch` into one per file, `id`, `id#2`, `id#3`…, sharing its key) are covered by it too. A crew leaving takes its runs with it; a teammate's crew has
 none. `attentionItems` lists each of your crews' runs younger than `RISK_MS` (30 minutes) as a
 `risk` item: level `alert`, counted, dismissable, settled.
 

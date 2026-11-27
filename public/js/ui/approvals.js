@@ -71,7 +71,18 @@ function restartDelay(p) {
   clearTimeout(p.armTimer);
   p.armTimer = setTimeout(() => {
     for (const button of [p.allow, p.always, p.deny, p.stop]) setAttr(button, 'aria-disabled', null);
+    setHidden(p.wait, true);
   }, ANSWER_DELAY_MS);
+}
+
+/**
+ * An answer the card did not take, because it just appeared or changed: it says so, until it
+ * takes answers again.
+ * @param {any} p the card's parts
+ */
+function notYet(p) {
+  setText(p.wait, 'Not yet: this card just appeared or changed. Read it, then answer again.');
+  setHidden(p.wait, false);
 }
 
 /**
@@ -131,7 +142,9 @@ function watchMoves(list, parts) {
  * @param {any} p the card's parts
  */
 function clickCounts(_event, p) {
-  return answerReady(p.armedAt, performance.now());
+  if (answerReady(p.armedAt, performance.now())) return true;
+  notYet(p);
+  return false;
 }
 
 /**
@@ -189,6 +202,8 @@ function buildCard(id, approvalId) {
   const crews = h('fieldset', { class: 'hud-approval__crews', 'data-testid': 'approval-crews', hidden: true }, crewsLegend, crewsList);
   // A request that left a shared card on its own (it ran out of time), said once on the card.
   const changed = h('p', { class: 'hud-approval__hint', 'data-testid': 'approval-changed', hidden: true });
+  // An answer given too soon after the card changed: said where the answer was given.
+  const wait = h('p', { class: 'hud-approval__hint', role: 'status', 'data-testid': 'approval-wait', hidden: true });
   const changeNote = h('p', { class: 'hud-approval__change-note' });
   const changeBody = h('div', { class: 'hud-approval__change-body' });
   const change = h('div', { class: 'hud-approval__change', 'data-testid': 'approval-change' }, changeNote, changeBody);
@@ -212,9 +227,9 @@ function buildCard(id, approvalId) {
   const result = h('p', { class: 'hud-approval__result' });
   const card = h('article', { class: 'hud-approval', 'data-testid': 'approval-card', 'data-approval-id': approvalId, 'aria-labelledby': `${id}-who`, 'aria-describedby': `${id}-risk ${id}-detail ${id}-grants` },
     h('header', { class: 'hud-approval__head' }, mark, h('div', {}, who, h('p', { class: 'hud-approval__meta' }, crew, tool))),
-    risk, h('pre', { class: 'hud-approval__code' }, detail), grants, change, crews, changed, timer, reasonRow, actions, terminal, hint, result);
+    risk, h('pre', { class: 'hud-approval__code' }, detail), grants, change, crews, changed, timer, reasonRow, wait, actions, terminal, hint, result);
   const item = h('li', { class: 'hud-approvals__item' }, card);
-  const parts = { mark, who, crew, tool, detail, grants, risk, riskLabel, riskWords, riskKey: '', crews, changed, crewsLegend, crewsList, members: /** @type {Approval[]} */ ([]), change, changeNote, changeBody, changeKey: '', reason, reasonRow, timer, bar, countdown, actions, allow, deny, stop, stopNote, stopRow,
+  const parts = { mark, who, crew, tool, detail, grants, risk, riskLabel, riskWords, riskKey: '', crews, changed, wait, crewsLegend, crewsList, members: /** @type {Approval[]} */ ([]), change, changeNote, changeBody, changeKey: '', reason, reasonRow, timer, bar, countdown, actions, allow, deny, stop, stopNote, stopRow,
     always, alwaysRow, alwaysNote, offer: null, offerKey: '', terminal, hint, hintKey: '', result, card, index: -1, armedAt: 0, armTimer: 0 };
   return { item, parts };
 }
@@ -316,7 +331,11 @@ function showRisk(p, members, state) {
  * @param {{ unticked: Set<string>, onToggle: () => void }} ticks
  */
 function showMembers(p, members, state, ticks) {
-  const many = members.length > 1 && members.every((one) => one.status === 'pending' && one.held);
+  // One request left unticked keeps its checkbox: it is answered only once ticked again (and the
+  // box stays while that request is the card's, so ticking it does not make it vanish).
+  const shownFor = members.map((one) => one.id).join(' ');
+  const choose = members.length > 1 || members.some((one) => ticks.unticked.has(one.id)) || p.crewsKey === shownFor;
+  const many = choose && members.every((one) => one.status === 'pending' && one.held);
   setHidden(p.crews, !many);
   if (!many) {
     p.crewsList.replaceChildren();
@@ -325,7 +344,8 @@ function showMembers(p, members, state, ticks) {
   }
   const folders = differentFolders(members);
   const crews = new Set(members.map((one) => one.sessionId)).size;
-  setText(p.crewsLegend, crews > 1 ? `${crews} crews ask for this. Your answer goes to the ticked ones:` : `Asked ${members.length} times. Your answer goes to the ticked ones:`);
+  const legend = members.length === 1 ? 'Not ticked: tick it to answer this request:' : crews > 1 ? `${crews} crews ask for this. Your answer goes to the ticked ones:` : `Asked ${members.length} times. Your answer goes to the ticked ones:`;
+  setText(p.crewsLegend, legend);
   const key = members.map((one) => one.id).join(' ');
   if (p.crewsKey !== key) {
     p.crewsKey = key;
@@ -439,10 +459,7 @@ function joined(ctx, p, { members, state, unticked }) {
   const ids = members.map((one) => one.id);
   const before = /** @type {Set<string>|undefined} */ (p.memberIds);
   p.memberIds = new Set(ids);
-  if (!before) {
-    p.shownAt = performance.now();
-    return;
-  }
+  if (!before) return;
   const newcomers = ids.filter((id) => !before.has(id));
   if (!newcomers.length && ids.length === before.size) return;
   restartDelay(p);
@@ -454,11 +471,11 @@ function joined(ctx, p, { members, state, unticked }) {
     ctx.announcer.polite(words);
   }
   if (!newcomers.length) return;
-  if (performance.now() - p.shownAt >= ANSWER_DELAY_MS) for (const id of newcomers) unticked.add(id);
+  // The card was already on screen: what joins it waits for a tick of its own.
+  for (const id of newcomers) unticked.add(id);
   const crews = new Set(members.map((one) => one.sessionId)).size;
-  const late = performance.now() - p.shownAt >= ANSWER_DELAY_MS;
   const words = crews > 1 ? `${crews} crews now ask for this.` : `This was asked ${members.length} times now.`;
-  ctx.announcer.polite(late ? `${words} The new request is not ticked.` : words);
+  ctx.announcer.polite(`${words} The new request is not ticked.`);
 }
 
 /** "Earlier (n)": the settled requests, folded under the live ones. */
@@ -525,12 +542,17 @@ function wireCard(p, decide) {
   p.card.addEventListener('keydown', (event) => {
     const key = event.key.toLowerCase();
     if ((key !== 'a' && key !== 'd') || event.ctrlKey || event.metaKey || event.altKey) return;
+    // A held key repeats: only the first press answers.
+    if (event.repeat) {
+      event.preventDefault();
+      return;
+    }
     // A / D answer from the card and its buttons, not while reading the change.
     if (p.change.contains(/** @type {Node} */ (event.target))) return;
     event.preventDefault();
     event.stopPropagation();
     // A card that just appeared, moved or changed takes no key answer either.
-    if (!answerReady(p.armedAt, performance.now())) return;
+    if (!clickCounts(/** @type {any} */ (event), p)) return;
     decide(p, key === 'a' ? 'allow' : 'deny', p.reason.value);
   });
 }
@@ -556,7 +578,7 @@ export function createApprovalsPanel(ctx) {
   const moves = watchMoves(list, parts);
 
   /** The requests an answer goes to: those still ticked. @param {Approval[]} members */
-  const tickedOf = (members) => (members.length > 1 ? members.filter((one) => !unticked.has(one.id)) : members);
+  const tickedOf = (members) => members.filter((one) => !unticked.has(one.id));
   const decide = createDecide(ctx, sending, tickedOf);
 
   let cards = 0;

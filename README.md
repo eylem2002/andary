@@ -206,11 +206,11 @@ push)", "throws away uncommitted changes (reset --hard)", "deletes untracked fil
 downloaded script" (`curl … | sh`), "drops database data" (`DROP TABLE`, `dropdb`, `db:drop`),
 "writes outside the project: ~/.zshrc", or "reads .env" (also `.pem` and `.key` files, `~/.aws`,
 `~/.ssh`, `.npmrc` and the like). Deleting a folder the project rebuilds (`node_modules`, `dist`,
-`build`…) inside the project gets a quieter note instead. The list is short on purpose. It is a reading aid, not a
+`.next`…) inside the project gets a quieter note instead. The list is short on purpose. It is a reading aid, not a
 sandbox: aliases, scripts and variables are not followed. **Identical requests from several
 crews** (four crews asking for the same `git push --force-with-lease`) share one card with a
 checkbox per crew, all ticked: **Allow** and **Deny** answer the ticked ones, and each crew's
-folder is named when they differ. A crew that joins a card you are reading starts unticked, and the
+folder is named when they differ. A crew that joins a card already on screen starts unticked, and the
 card takes no answer, by click or key, for a moment after it changes. **Allow always** works one
 crew at a time, so it shows once a single box is ticked. Answered and expired cards fold into **Earlier (n)** under the live ones (a
 card you just answered stays, with its result, until you move on from it). In

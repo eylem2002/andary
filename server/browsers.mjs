@@ -403,6 +403,8 @@ function applySettings(ctx, connection, settings) {
   }
   if (hold !== undefined && ctx.settings.holdRisky !== hold) {
     ctx.settings.holdRisky = hold;
+    // Read the hook files again now: the switch is where the warning shows.
+    ctx.holdCheckMissing?.(true);
     if (!writeHoldRisky(ctx.holdFile, hold)) ctx.log('Could not save "Always hold risky commands"; it holds until the server stops');
     ctx.log(`Holding risky commands turned ${hold ? 'on' : 'off'} from the town`);
   }

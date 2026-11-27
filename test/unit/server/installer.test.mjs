@@ -363,6 +363,18 @@ describe('inspection helpers', () => {
     assert.equal(holdCheckInstalled({ dir: join(dir, 'project'), env, home }), false);
   });
 
+  it('counts the plugin as holding only when its installed copy registers the hold check', () => {
+    writeJson(userSettings, { enabledPlugins: { 'andary@andary': true } });
+    const where = { dir: join(dir, 'project'), env, home };
+    assert.equal(holdCheckInstalled(where), false, 'no installed copy found');
+    const copy = (/** @type {string} */ version, /** @type {object} */ hooks) => writeJson(join(dir, 'claude', 'plugins', 'cache', 'andary', 'andary', version, 'hooks', 'hooks.json'), { hooks });
+    const plain = { PreToolUse: [{ hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/hook.mjs" # andary', async: true }] }] };
+    copy('0.1.0', plain);
+    assert.equal(holdCheckInstalled(where), false, 'an older copy has no hold check');
+    copy('0.2.0', buildHooksConfig('node "${CLAUDE_PLUGIN_ROOT}/hooks/hook.mjs" # andary'));
+    assert.equal(holdCheckInstalled(where), true);
+  });
+
   it('flags partial installs and unreadable files', () => {
     writeJson(userSettings, { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node x # andary' }] }] } });
     mkdirSync(join(dir, 'project', '.claude'), { recursive: true });

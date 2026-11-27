@@ -85,17 +85,23 @@ test('the same request from two crews shares one card; the answer goes to the ti
   await expect(card.getByTestId('approval-crews')).toContainText('/work/e2e-app');
   await expect(card.getByTestId('approval-crews')).toContainText('/work/e2e-api');
   await expect(card.getByTestId('approval-risk')).toHaveText('Risky: rewrites remote history (force push)');
-  await expect(checks.nth(0)).toBeChecked();
-  await expect(checks.nth(1)).toBeChecked();
-  // Leave the second crew's request waiting (the two may have arrived in either order).
-  await card.locator('label').filter({ hasText: '/work/e2e-api' }).getByTestId('approval-crew-check').uncheck();
+  // The request that came first is ticked; one that joined the card on screen starts unticked
+  // (the two may arrive in either order, a moment apart). Answer the first crew only.
+  const row = (/** @type {string} */ folder) => card.locator('label').filter({ hasText: folder }).getByTestId('approval-crew-check');
+  await row('/work/e2e-app').setChecked(true);
+  await row('/work/e2e-api').setChecked(false);
+  await expect(card.getByTestId('approve')).not.toHaveAttribute('aria-disabled', 'true');
   await card.getByTestId('approve').click();
   const settled = await Promise.race([first.then(() => 'first'), second.then(() => 'second')]);
   expect(settled).toBe('first');
   expect(JSON.parse((await first).stdout).hookSpecificOutput.decision.behavior).toBe('allow');
-  // The other request still waits on a card of its own, then is denied.
-  await expect(page.getByTestId('approval-crew-check')).toHaveCount(0);
+  // The other request still waits, unticked: it is answered only once ticked again.
   await expect(cards).toHaveCount(1);
+  await expect(checks).toHaveCount(1);
+  await expect(checks).not.toBeChecked();
+  await expect(cards.first().getByTestId('deny')).toBeDisabled();
+  await checks.check();
+  await expect(cards.first().getByTestId('deny')).not.toHaveAttribute('aria-disabled', 'true');
   await cards.first().getByTestId('deny').click();
   expect(JSON.parse((await second).stdout).hookSpecificOutput.decision.behavior).toBe('deny');
   await page.getByRole('tab', { name: /^Approvals/ }).focus();
@@ -143,6 +149,8 @@ test('a request that joins a card on screen waits a moment, unticked, and a key 
   await showApprovals(page);
   const card = page.locator('[data-testid="approval-card"][data-status="pending"]');
   const allow = card.getByTestId('approve');
+  // Both crews ticked by the viewer, who has read the card.
+  for (const box of await checks.all()) await box.setChecked(true);
   await expect(allow).not.toHaveAttribute('aria-disabled', 'true');
   await card.focus();
   // The viewer has read the card; a third crew asks the same thing just now.
@@ -161,7 +169,39 @@ test('a request that joins a card on screen waits a moment, unticked, and a key 
   const left = page.locator('[data-testid="approval-card"][data-status="pending"]');
   await expect(left).toHaveCount(1);
   await expect(left).toContainText('$ git push --force-with-lease');
+  // Still unticked: it is answered only once the viewer ticks it.
+  await expect(left.getByTestId('deny')).toBeDisabled();
+  await left.getByTestId('approval-crew-check').check();
   await expect(left.getByTestId('deny')).not.toHaveAttribute('aria-disabled', 'true');
   await left.getByTestId('deny').click();
   expect(JSON.parse((await third).stdout).hookSpecificOutput.decision.behavior).toBe('deny');
+});
+
+test('a request that joins a card in its first moment starts unticked, and a key pressed too soon says so', async ({ page }) => {
+  await signIn(page);
+  await turnOn(page, 'remote-approvals-toggle', 'remoteApprovals');
+  await showApprovals(page);
+  const input = { command: 'git reset --hard origin/main' };
+  const first = town.sendHook(hook('PermissionRequest', { tool_name: 'Bash', tool_input: input }));
+  const card = page.locator('[data-testid="approval-card"][data-status="pending"]');
+  await expect(card).toHaveCount(1);
+  // A second crew asks the same thing while the card is still new on screen.
+  const second = town.sendHook(hook('PermissionRequest', { session_id: 'e2e-prod', cwd: '/home/me/prod-repo', tool_name: 'Bash', tool_input: input }));
+  const newcomer = card.locator('label').filter({ hasText: '/home/me/prod-repo' }).getByTestId('approval-crew-check');
+  await expect(newcomer).toBeAttached();
+  await expect(newcomer).not.toBeChecked();
+  await card.focus();
+  await page.keyboard.press('a');
+  await expect(card.getByTestId('approval-wait')).toBeVisible();
+  await expect(card.getByTestId('approval-wait')).toContainText('Not yet');
+  await expect(card.getByTestId('approve')).not.toHaveAttribute('aria-disabled', 'true');
+  await expect(card.getByTestId('approval-wait')).toBeHidden();
+  await page.keyboard.press('a');
+  expect(JSON.parse((await first).stdout).hookSpecificOutput.decision.behavior).toBe('allow');
+  const left = page.locator('[data-testid="approval-card"][data-status="pending"]');
+  await expect(left).toHaveCount(1);
+  await left.getByTestId('approval-crew-check').check();
+  await expect(left.getByTestId('deny')).not.toHaveAttribute('aria-disabled', 'true');
+  await left.getByTestId('deny').click();
+  expect(JSON.parse((await second).stdout).hookSpecificOutput.decision.behavior).toBe('deny');
 });

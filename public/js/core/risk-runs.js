@@ -12,7 +12,7 @@ import { clip, oneLine } from './text.js';
 
 /**
  * @typedef {object} RiskRun
- * @property {string} id         one per run: `risk:<agent>:<when>`
+ * @property {string} id         one per run: `risk:<agent>:<when>:<tool_use_id>`
  * @property {string} sessionId
  * @property {string} agentKey
  * @property {number} at          when it ended
@@ -23,6 +23,8 @@ import { clip, oneLine } from './text.js';
 
 /** Asked-for calls remembered per agent; the oldest are forgotten. */
 const MAX_ASKED = 50;
+/** Used marks remembered, for the other files of a patch; the oldest are forgotten. */
+const MAX_USED = 200;
 /** Risky runs kept; the oldest are forgotten. */
 const MAX_RUNS = 50;
 /** A run's command or file is cut here. */
@@ -61,6 +63,13 @@ function whatOf(input) {
 export function createRiskRuns() {
   /** @type {Map<string, string[]>} agent → keys of calls that asked, oldest first */
   const asked = new Map();
+  /**
+   * Calls whose mark was used, by agent and key → the call's tool_use_id without its `#n` part:
+   * Codex splits one apply_patch into a hook per file (`id`, `id#2`, `id#3`…) that share the
+   * call's key, and every one of them asked with the one request.
+   * @type {Map<string, string>}
+   */
+  const used = new Map();
   /** @type {RiskRun[]} */
   let runs = [];
 
@@ -90,21 +99,30 @@ export function createRiskRuns() {
      * A call that ended (it ran): the run it makes when it is risky and did not ask, else null.
      * A call that asked uses up its mark, so the same command run again later without asking
      * still counts.
-     * @param {{ agent: string, session: string, key: string, tool: string, input: unknown, at: number, place: import('./risk.js').RiskPlace }} call
+     * @param {{ agent: string, session: string, key: string, toolUseId?: string|null, tool: string, input: unknown, at: number, place: import('./risk.js').RiskPlace }} call
      * @returns {RiskRun|null}
      */
-    ended({ agent, session, key, tool, input, at, place }) {
+    ended({ agent, session, key, toolUseId = null, tool, input, at, place }) {
       const keys = asked.get(agent);
       const mark = keys ? keys.lastIndexOf(key) : -1;
+      const call = toolUseId ? toolUseId.replace(/#\d+$/, '') : '';
+      const usedBy = `${agent}\n${key}`;
       if (keys && mark >= 0) {
         keys.splice(mark, 1);
+        if (call) {
+          used.delete(usedBy);
+          used.set(usedBy, call);
+          if (used.size > MAX_USED) used.delete(/** @type {string} */ (used.keys().next().value));
+        }
         return null;
       }
+      // Another file of the same patch: it asked with the first.
+      if (call && used.get(usedBy) === call) return null;
       const risk = riskOf(tool, input, place);
       // A rebuildable folder (rm -rf dist) is ordinary work: no notice.
       if (!risk || risk.quiet) return null;
       /** @type {RiskRun} */
-      const run = { id: `risk:${agent}:${at}`, sessionId: session, agentKey: agent, at, tool, what: whatOf(input), reasons: risk.reasons };
+      const run = { id: `risk:${agent}:${at}:${toolUseId ?? ''}`, sessionId: session, agentKey: agent, at, tool, what: whatOf(input), reasons: risk.reasons };
       runs = [...runs, run].slice(-MAX_RUNS);
       return run;
     },

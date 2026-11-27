@@ -1472,13 +1472,15 @@ section.
 278. **A card waits after any change, from the keyboard too.** A request that joins a card on
      screen, or leaves it, restarts the one-second answer delay, and the delay now applies to A / D,
      Enter in the reason field and Enter or Space on a button, not only to pointer clicks: an answer
-     must go to what the viewer read. A newcomer starts unticked once the card has been on screen
-     for the delay (one arriving within it is part of what the viewer first saw), and the card says
-     how many crews now ask. A request that leaves a shared card because it ran out of time is said
+     must go to what the viewer read. Every request that joins a card already on screen starts
+     unticked (only those that arrive with the card start ticked), and the card says how many crews
+     now ask. An answer given during the delay says "Not yet" on the card. A held key's repeats are
+     ignored. A request left alone on a card and unticked keeps its checkbox: it is answered only
+     once ticked again. A request that leaves a shared card because it ran out of time is said
      on the card.
 279. **Deleting a folder the project rebuilds is a quieter note.** `rm -rf node_modules`, `dist`,
-     `build`, `.next`, `target`, `coverage`, `.cache` or `__pycache__` (or anything inside them)
-     inside the project shows "Note: deletes a rebuildable folder (dist)" without the red border,
+     `.next`, `coverage`, `.cache` or `__pycache__` (or anything inside them) inside the project,
+     with no variable, substitution or `%VAR%` in the path, shows "Note: deletes a rebuildable folder (dist)" without the red border,
      is never "ran without asking", and is never held. Outside the project, or mixed with any other
      target, it stays "deletes recursively".
 280. **`find -delete` reads as "deletes recursively"**: it deletes everything it matches across a
@@ -1493,4 +1495,12 @@ section.
 283. **Whether the hold check is installed is read from the files the server can see**: the user
      settings and the project and local settings of the folder the server was started in, plus the
      plugin. A project installed elsewhere may still be missing it without the warning showing.
+284. **`build/` and `target/` get the full band.** They often hold sources, releases or hand-made
+     files, and Andary does not read `.gitignore`, so only folders that are almost always
+     generated get the quieter note.
+285. **The plugin counts as holding only when an installed copy registers the hold check.**
+     Andary looks for a `hooks/hooks.json` under an `andary` folder in Claude Code's plugins folder;
+     if any copy there has the hold check it counts (Claude Code may keep several versions; which
+     one a session uses is not read). The answer is kept for 30 seconds and read again when the
+     switch changes.
 

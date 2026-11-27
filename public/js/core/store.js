@@ -786,7 +786,7 @@ function followRisks(m, e, s, a) {
   if (e.kind === 'permission.request') m.risks.asked(a.key, key);
   if (e.kind === 'permission.denied') m.risks.refused(a.key, key);
   if (e.kind !== 'tool.end' && !(e.kind === 'tool.fail' && e.data.isInterrupt !== true)) return null;
-  const run = m.risks.ended({ agent: a.key, session: s.id, key, tool: e.data.tool, input: e.data.input, at: e.ts, place: placeOf(e, s) });
+  const run = m.risks.ended({ agent: a.key, session: s.id, key, toolUseId: e.data.toolUseId, tool: e.data.tool, input: e.data.input, at: e.ts, place: placeOf(e, s) });
   if (run) m.state.risks = m.risks.list();
   return run;
 }
