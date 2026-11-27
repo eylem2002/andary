@@ -33,16 +33,15 @@ describe('public endpoints', () => {
     const hello = JSON.parse((await rawRequest(town.port, { path: '/api/hello' })).text);
     assert.equal(hello.app, 'andary');
     assert.equal(hello.authenticated, false);
-    // PR and CI status is off in tests (--no-gh); whether gh is there depends on the computer.
-    const { gh, ...settings } = hello.settings;
-    assert.deepEqual(settings, { remoteApprovals: false, approvalTimeoutMs: 120000, notify: false, notifyLimits: false });
-    assert.deepEqual([gh.on, gh.hint], [false, null]);
+    // Whether gh is there and signed in is for a signed-in browser only (§4.16).
+    assert.deepEqual(hello.settings, { remoteApprovals: false, approvalTimeoutMs: 120000, notify: false, notifyLimits: false });
     assert.match(hello.version, /^\d+\.\d+\.\d+/);
   });
 
   it('reports authenticated: true with the sign-in header, and never for a cookie', async () => {
     const hello = await rawRequest(town.port, { path: '/api/hello', headers: { 'x-andary-token': town.uiToken } });
     assert.equal(JSON.parse(hello.text).authenticated, true);
+    assert.deepEqual(JSON.parse(hello.text).settings.gh.on, false, 'test towns start with --no-gh');
     const cookie = await rawRequest(town.port, { path: '/api/hello', headers: { cookie: `andary_ui=${town.uiToken}` } });
     assert.equal(JSON.parse(cookie.text).authenticated, false, 'a cookie for 127.0.0.1 reaches every port, so it signs nothing in');
   });

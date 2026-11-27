@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { GH_FIELDS } from '../../../public/js/core/pr-status.js';
-import { GH_TIMEOUT_MS, POLL_DELAYS_MS, WATCH_MS, classifyFailure, createPrWatch, nativeDir, runGh } from '../../../server/pr-watch.mjs';
+import { GH_TIMEOUT_MS, POLL_DELAYS_MS, WATCH_MS, classifyFailure, createPrWatch, ghArgs, linkHosts, nativeDir, runGh } from '../../../server/pr-watch.mjs';
 import { findProgram } from '../../../server/programs.mjs';
 import { createFakeClock } from '../core/helpers.mjs';
 
@@ -70,6 +70,7 @@ describe('createPrWatch', () => {
     assert.deepEqual([t.changes[0].number, t.changes[0].checks.state, t.changes[0].watching, t.changes[0].sessionIds], [42, 'pending', true, ['s1']]);
     await t.clock.advance(60 * 60_000);
     assert.deepEqual(t.runs.map((r) => r.at), [30_000, 90_000, 210_000], '30 s, then 1 and 2 minutes later');
+    assert.deepEqual(t.runs[1].args, ['pr', 'view', 'feat/x', '--json', GH_FIELDS], 'by name once gh named the branch: a checkout meanwhile changes nothing');
     assert.deepEqual([t.changes.at(-1).checks.state, t.changes.at(-1).watching], ['failing', false]);
     assert.equal(t.failing.length, 1, 'one phone note for the failure');
     assert.deepEqual(t.prs.list(), [t.changes.at(-1)]);
@@ -221,6 +222,56 @@ describe('createPrWatch', () => {
   });
 });
 
+describe('passing checks, switching off and stopping', () => {
+  it('passed is settled only on the second look in a row', async () => {
+    const t = watch({ answers: [answer('passing')] });
+    t.prs.pushed({ root: '/w/app', sessionId: 's1' });
+    await t.clock.advance(WATCH_MS);
+    assert.deepEqual(t.runs.map((r) => r.at), [30_000, 90_000]);
+    assert.deepEqual(t.changes.map((c) => c.watching), [true, false]);
+  });
+
+  it('a new push asks gh about the branch checked out now again', async () => {
+    const t = watch({ answers: [answer('pending')] });
+    t.prs.pushed({ root: '/w/app', sessionId: 's1' });
+    await t.clock.advance(30_000);
+    t.prs.pushed({ root: '/w/app', sessionId: 's1' });
+    await t.clock.advance(30_000);
+    assert.deepEqual(t.runs.map((r) => r.args.length), [4, 4]);
+  });
+
+  it('switched off while gh runs: its answer changes nothing and starts no timer', async () => {
+    /** @type {(value: any) => void} */
+    let finish = () => {};
+    const t = watch({ run: () => new Promise((resolve) => { finish = resolve; }) });
+    t.prs.pushed({ root: '/w/app', sessionId: 's1' });
+    await t.clock.advance(30_000);
+    t.prs.setWanted(false);
+    finish(answer('pending'));
+    await t.clock.advance(0);
+    assert.deepEqual(t.changes, []);
+    assert.equal(t.clock.pending, 0);
+  });
+
+  it('stopping the server aborts a gh still running', async () => {
+    /** @type {AbortSignal|undefined} */
+    let signal;
+    const t = watch({ run: (/** @type {string} */ _bin, /** @type {string[]} */ _args, /** @type {any} */ options) => new Promise(() => { signal = options.signal; }) });
+    t.prs.pushed({ root: '/w/app', sessionId: 's1' });
+    await t.clock.advance(30_000);
+    assert.equal(signal?.aborted, false);
+    t.prs.dispose();
+    assert.equal(signal?.aborted, true);
+  });
+
+  it("links may point at github.com, or at gh's own GH_HOST", () => {
+    assert.deepEqual(linkHosts(undefined), ['github.com']);
+    assert.deepEqual(linkHosts(' GHE.corp.example '), ['github.com', 'ghe.corp.example']);
+    assert.deepEqual(linkHosts('https://ghe.corp.example/'), ['github.com', 'ghe.corp.example']);
+    assert.deepEqual(ghArgs(''), ['pr', 'view', '--json', GH_FIELDS]);
+  });
+});
+
 describe('nativeDir', () => {
   it('gives Windows its own separators, drives and shares alike; elsewhere the folder as it is', () => {
     assert.equal(nativeDir('C:/w/app', 'win32'), 'C:\\w\\app');
@@ -269,6 +320,10 @@ describe('runGh', () => {
     assert.deepEqual(failed, { ok: false, code: 4, stderr: 'gh auth login', timedOut: false });
     const missing = /** @type {any} */ (await runGh('/no/such/gh', [], { cwd: process.cwd(), timeoutMs: 10_000 }));
     assert.deepEqual([missing.ok, missing.code], [false, 'ENOENT']);
+    const controller = new AbortController();
+    const pending = runGh(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], { cwd: process.cwd(), timeoutMs: 10_000, signal: controller.signal });
+    controller.abort();
+    assert.equal((await pending).ok, false, 'an abort ends it, as a failure');
     const slow = /** @type {any} */ (await runGh(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], { cwd: process.cwd(), timeoutMs: 200 }));
     assert.deepEqual([slow.ok, slow.timedOut], [false, true]);
   });

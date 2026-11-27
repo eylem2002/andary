@@ -467,7 +467,7 @@ test('a crew pushes: its pull request and CI show on its row, failing CI needs y
     await expect(toggle).toBeChecked();
     await expect(page.getByTestId('gh-help')).toContainText('Andary never sees a token');
     await toggle.uncheck();
-    await expect.poll(async () => (await (await fetch(`${town.baseUrl}/api/hello`)).json()).settings.gh.on).toBe(false);
+    await expect.poll(async () => (await (await fetch(`${town.baseUrl}/api/hello`, { headers: { 'x-andary-token': town.uiToken } })).json()).settings.gh?.on).toBe(false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

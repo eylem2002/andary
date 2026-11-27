@@ -1450,3 +1450,8 @@ section.
      the badge and the "need you" item can be seen without gh.
 278. **Only GitHub, only the owner's crews**: a teammate's pushes in a team town are theirs to follow
      with their own Andary; statuses are never relayed and viewers see none.
+279. **A push whose result the line does not show counts** (`git push | tail`, `git push; echo`):
+     a missed watch costs more than a few `gh` runs after a push that failed. A push on either
+     side of `||` or in a condition does not, unless the line proves it ran.
+280. **Pull request links go to github.com or gh's `GH_HOST` only.** A GitHub Enterprise host signed
+     in with `gh auth login --hostname` but not named in `GH_HOST` shows its badge without a link.

@@ -31,6 +31,8 @@ const PR_STATES = new Set(['OPEN', 'MERGED', 'CLOSED']);
 const REVIEWS = new Set(['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED']);
 const CHECK_STATES = new Set(['passing', 'failing', 'pending', 'none']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
+/** Git's options before the subcommand that take the next word, besides -C. */
+const GIT_VALUED = new Set(['-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env']);
 
 /**
  * @typedef {object} Checks
@@ -98,16 +100,35 @@ export function summarizeChecks(rollup) {
   return checks;
 }
 
-/** @param {unknown} url */
-const httpsUrl = (url) => (typeof url === 'string' && /^https:\/\/[^\s/]+\/\S*$/.test(url) && url.length <= 500 ? url : null);
+/** Hosts a pull request's link may point at, unless the server names more (gh's GH_HOST). */
+export const GITHUB_HOSTS = Object.freeze(['github.com']);
+
+/**
+ * A pull request's link, or null: https, at most 500 characters, nothing a URL parser would
+ * rewrite (no spaces, quotes or angle brackets), and, when `hosts` is given, on one of them.
+ * @param {unknown} url
+ * @param {readonly string[]|null} [hosts]
+ */
+function httpsUrl(url, hosts = null) {
+  if (typeof url !== 'string' || url.length > 500 || /[\s"'<>`\\]/.test(url)) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return null;
+    if (hosts && !hosts.includes(parsed.hostname.toLowerCase())) return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * `gh pr view --json GH_FIELDS` for a repository, as a PrStatus.
  * @param {unknown} json  its parsed output
- * @param {{ root: string, sessionIds: string[], at: number, previous?: PrStatus|null, watching?: boolean }} where
+ * @param {{ root: string, sessionIds: string[], at: number, previous?: PrStatus|null, watching?: boolean, hosts?: readonly string[] }} where
+ *   hosts: where its link may point (GITHUB_HOSTS by default)
  * @returns {PrStatus}
  */
-export function readGhView(json, { root, sessionIds, at, previous = null, watching = true }) {
+export function readGhView(json, { root, sessionIds, at, previous = null, watching = true, hosts = GITHUB_HOSTS }) {
   const view = isObject(json) ? json : {};
   const number = Number.isInteger(view.number) && view.number > 0 ? view.number : null;
   const checks = number === null ? noChecks() : summarizeChecks(view.statusCheckRollup);
@@ -118,7 +139,7 @@ export function readGhView(json, { root, sessionIds, at, previous = null, watchi
     root,
     sessionIds: sessionIds.slice(-MAX_PR_SESSIONS),
     number,
-    url: number === null ? null : httpsUrl(view.url),
+    url: number === null ? null : httpsUrl(view.url, hosts),
     state: PR_STATES.has(view.state) ? view.state : null,
     review: REVIEWS.has(view.reviewDecision) ? view.reviewDecision : null,
     branch: clip(oneLine(str(view.headRefName)), 200),
@@ -131,15 +152,19 @@ export function readGhView(json, { root, sessionIds, at, previous = null, watchi
 }
 
 /**
- * Whether there is nothing more to wait for: the pull request is closed or merged, or every
- * check has finished. A branch with no checks at all is settled once `gh` has said so a few times.
+ * Whether there is nothing more to wait for: the pull request is closed or merged, its checks
+ * failed with none still running, or they passed on two looks in a row at the same head commit
+ * (checks that start late, a second workflow, are not missed). A branch with no checks at all is
+ * settled once `gh` has said so a few times.
  * @param {PrStatus} pr
  * @param {number} polls  how many times `gh` answered for this push
+ * @param {PrStatus|null} [previous]  the look before
  */
-export function isSettled(pr, polls) {
+export function isSettled(pr, polls, previous = null) {
   if (pr.state === 'MERGED' || pr.state === 'CLOSED') return true;
   if (pr.checks.state === 'none') return pr.number !== null && polls >= 3;
-  return pr.checks.state !== 'pending';
+  if (pr.checks.state === 'passing') return previous?.checks.state === 'passing' && previous.sha === pr.sha && previous.number === pr.number;
+  return pr.checks.state === 'failing';
 }
 
 /**
@@ -267,9 +292,61 @@ const isSendingPush = (words) => gitAction(words) === 'push' && !words.some((wor
 const isPrCreate = (words) => words[0] === 'gh' && words[1] === 'pr' && words[2] === 'create';
 
 /**
- * The folders where a hook's shell command pushed a branch or opened a pull request, when the
- * command must have succeeded for its line to (PostToolUse only; a Codex command only when its exit
- * code was found). Each is where that command ran (after `cd`), or the hook's folder.
+ * Whether a command ran, as far as the line can tell, and was not known to fail: it is no
+ * condition (`if git push`), not on either side of `||` (its failure is allowed there, or it ran
+ * only after another failed), unless the line succeeding proves it succeeded. A command whose
+ * result the line does not show (`git push 2>&1 | tail -3`, `git push; echo done`) counts.
+ * @param {import('./shell.js').Segment[]} segments @param {number} i
+ */
+function mayHaveRun(segments, i) {
+  const segment = segments[i];
+  if (segment.succeeded) return true;
+  return !segment.condition && segment.separator !== '||' && segments[i - 1]?.separator !== '||';
+}
+
+/**
+ * Where a git command works: its folder, moved by each leading `-C <dir>` (relative to the one
+ * before). Null when a `-C` cannot be followed (`~`, a variable).
+ * @param {string[]} words  git's words
+ * @param {string} folder
+ * @returns {string|null}
+ */
+export function gitFolder(words, folder) {
+  let at = folder;
+  for (let i = 1; i < words.length && words[i].startsWith('-'); i += 1) {
+    if (words[i] !== '-C') {
+      // Git's other options that take the next word (core/shell.js reads them the same way).
+      if (GIT_VALUED.has(words[i])) i += 1;
+      continue;
+    }
+    const dir = words[i + 1];
+    if (dir === undefined || /^[~$%]/.test(dir)) return null;
+    at = joinFolder(at, dir);
+    i += 1;
+  }
+  return at;
+}
+
+/** A folder `dir` read from `from`, with forward slashes, `.` and `..` resolved. @param {string} from @param {string} dir */
+function joinFolder(from, dir) {
+  const target = dir.replace(/\\/g, '/');
+  const absolute = /^(?:\/|[A-Za-z]:\/)/.test(target);
+  const whole = absolute ? target : `${from.replace(/\\/g, '/').replace(/\/+$/, '')}/${target}`;
+  const drive = /^[A-Za-z]:/.exec(whole)?.[0] ?? '';
+  /** @type {string[]} */
+  const parts = [];
+  for (const part of whole.slice(drive.length).split('/')) {
+    if (part === '..') parts.pop();
+    else if (part && part !== '.') parts.push(part);
+  }
+  return `${drive}/${parts.join('/')}`;
+}
+
+/**
+ * The folders where a hook's shell command pushed a branch or opened a pull request (PostToolUse
+ * only; a Codex command only when its exit code was found), unless that command is known to have
+ * failed or ran only on a condition (mayHaveRun). Each is where that command ran (after `cd`, and
+ * git's own `-C`), or the hook's folder.
  * @param {unknown} event  a hook payload
  * @returns {string[]}
  */
@@ -281,8 +358,11 @@ export function pushSites(event) {
   const cwd = str(event.cwd);
   const { segments } = readShell(input.command, { folder: cwd || null, powershell: event.tool_name === 'PowerShell' });
   const sites = new Set();
-  for (const segment of segments) {
-    if (segment.succeeded && (isSendingPush(segment.words) || isPrCreate(segment.words))) sites.add(segment.folder ?? cwd);
-  }
-  return [...sites].filter(Boolean);
+  segments.forEach((segment, i) => {
+    const folder = segment.folder ?? cwd;
+    if (!mayHaveRun(segments, i)) return;
+    if (isSendingPush(segment.words)) sites.add(folder && gitFolder(segment.words, folder));
+    else if (isPrCreate(segment.words)) sites.add(folder);
+  });
+  return [...sites].filter((site) => typeof site === 'string' && site !== '');
 }

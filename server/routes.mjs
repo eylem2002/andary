@@ -186,7 +186,9 @@ const API_ROUTES = {
 function handleHello(ctx, req, res) {
   const authenticated = browserRole(req, ctx.uiToken, ctx.team) !== null;
   if (!isTunnelled(req)) {
-    sendJson(res, 200, { app: APP_ID, version: ctx.version, authenticated, settings: publicSettings(ctx) });
+    // Whether gh is installed and signed in is the owner's: only a signed-in browser learns it.
+    const { gh, ...settings } = publicSettings(ctx);
+    sendJson(res, 200, { app: APP_ID, version: ctx.version, authenticated, settings: authenticated ? { ...settings, gh } : settings });
     return;
   }
   const known = authenticated || Boolean(ctx.team?.memberOf(req.headers[TEAM_HEADER]));

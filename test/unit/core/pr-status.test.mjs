@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { badgeText, ciEpisode, ciText, isSettled, prLogDraft, prOfSession, pushSites, readGhView, readPrStatus, summarizeChecks } from '../../../public/js/core/pr-status.js';
+import { badgeText, ciEpisode, ciText, gitFolder, isSettled, prLogDraft, prOfSession, pushSites, readGhView, readPrStatus, summarizeChecks } from '../../../public/js/core/pr-status.js';
 
 const run = (/** @type {string} */ name, /** @type {string} */ conclusion, status = 'COMPLETED') => ({ __typename: 'CheckRun', name, status, conclusion });
 const context = (/** @type {string} */ name, /** @type {string} */ state) => ({ __typename: 'StatusContext', context: name, state });
@@ -45,6 +45,11 @@ describe('readGhView', () => {
   it('takes only an https link, and no pull request at all from an empty answer', () => {
     assert.equal(readGhView(ghView({ url: 'javascript:alert(1)' }), where).url, null);
     assert.equal(readGhView(ghView({ url: 'http://github.com/x' }), where).url, null);
+    assert.equal(readGhView(ghView({ url: 'https://evil.example/acme/app/pull/123' }), where).url, null, 'github.com only, by default');
+    assert.equal(readGhView(ghView({ url: 'https://ghe.corp/acme/app/pull/123' }), { ...where, hosts: ['github.com', 'ghe.corp'] }).url, 'https://ghe.corp/acme/app/pull/123');
+    for (const url of ['https://github.com/a"onmouseover=x', 'https://github.com/<b>', 'https://user:pw@github.com/x', 'https://github.com/a b', 'https://github.com\\@evil.example/']) {
+      assert.equal(readGhView(ghView({ url }), where).url, null, url);
+    }
     const none = readGhView({}, where);
     assert.deepEqual([none.number, none.url, none.checks.state], [null, null, 'none']);
   });
@@ -67,7 +72,11 @@ describe('isSettled', () => {
     const view = (/** @type {Record<string, unknown>} */ extra) => readGhView(ghView(extra), where);
     assert.equal(isSettled(view({ statusCheckRollup: [run('t', '', 'IN_PROGRESS')] }), 1), false);
     assert.equal(isSettled(view({ statusCheckRollup: [run('t', 'FAILURE')] }), 1), true);
-    assert.equal(isSettled(view({}), 1), true);
+    // Passed: only on two looks in a row at the same head commit, so a check that starts late is not missed.
+    assert.equal(isSettled(view({}), 1), false);
+    assert.equal(isSettled(view({}), 2, view({})), true);
+    assert.equal(isSettled(view({}), 2, view({ statusCheckRollup: [run('t', '', 'QUEUED')] })), false);
+    assert.equal(isSettled(view({}), 2, view({ headRefOid: 'older' })), false);
     assert.equal(isSettled(view({ state: 'MERGED', statusCheckRollup: [run('t', '', 'QUEUED')] }), 1), true);
     // No checks yet: they may not have started; after a few answers, there are none.
     assert.equal(isSettled(view({ statusCheckRollup: [] }), 1), false);
@@ -133,8 +142,23 @@ describe('pushSites', () => {
     assert.deepEqual(pushSites(ran('git push', { tool_name: 'PowerShell', cwd: 'C:\\w\\app' })), ['C:\\w\\app']);
   });
 
+  it("counts a push whose result the line does not show: piped without pipefail, or followed by ';'", () => {
+    assert.deepEqual(pushSites(ran('git push 2>&1 | tail -3')), ['/w/app']);
+    assert.deepEqual(pushSites(ran('git push; echo done')), ['/w/app']);
+    assert.deepEqual(pushSites(ran('git push origin main &')), ['/w/app']);
+  });
+
+  it("follows git's own -C to the repository it pushes", () => {
+    assert.deepEqual(pushSites(ran('git -C /other/repo push')), ['/other/repo']);
+    assert.deepEqual(pushSites(ran('cd ../web && git -C ../api push')), ['/w/api']);
+    assert.deepEqual(pushSites(ran('git -C C:\\w\\api push', { tool_name: 'PowerShell', cwd: 'C:\\w\\app' })), ['C:/w/api']);
+    assert.equal(gitFolder(['git', '-C', 'a', '-c', 'x=1', '-C', '../b', 'push'], '/w'), '/w/b');
+    assert.equal(gitFolder(['git', 'push', '-C', 'x'], '/w'), '/w', 'only before the subcommand');
+    assert.equal(gitFolder(['git', '-C', '$REPO', 'push'], '/w'), null);
+  });
+
   it('not a dry run, a deletion, a failure, a background run, or a line whose success proves nothing of it', () => {
-    for (const command of ['git push --dry-run', 'git push -n', 'git push origin --delete old', 'git push origin :old', 'git status', 'gh pr view', 'git push || true', 'echo git push']) {
+    for (const command of ['git push --dry-run', 'git push -n', 'git push origin --delete old', 'git push origin :old', 'git status', 'gh pr view', 'git push || true', 'true || git push', 'if git push; then echo ok; fi', 'echo git push', 'git -C ~/elsewhere push']) {
       assert.deepEqual(pushSites(ran(command)), [], command);
     }
     assert.deepEqual(pushSites(ran('git push', { hook_event_name: 'PostToolUseFailure' })), []);

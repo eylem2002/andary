@@ -1208,23 +1208,32 @@ PrStatus = { root /* the work tree's top, forward slashes (§4.6 andary_root) */
              at /* when gh answered */, failingSince: number|null /* first seen failing on this head commit */, watching: boolean }
 ```
 
-- **What starts it.** A local `PostToolUse` of Bash or PowerShell whose line must have succeeded
-  for a sending `git push` (not `--dry-run`/`-n`, `--delete`/`-d` or `:branch`) or a
-  `gh pr create` to have (`pushSites()`, core/shell.js; a Codex command only with
-  `andary_exit_known`; never a background run). The work tree is the top (work-trees.mjs) of the
-  folder the command ran in, after `cd`. A teammate's events never start it (ingest
+- **What starts it.** A local `PostToolUse` of Bash or PowerShell with a sending `git push` (not
+  `--dry-run`/`-n`, `--delete`/`-d` or `:branch`) or a `gh pr create` that may have run and was not
+  known to fail (`pushSites()`, core/shell.js): the line succeeding proves it, or its result does
+  not show (`git push 2>&1 | tail -3`, `git push; echo done`); never a condition (`if git push`)
+  or either side of `||` unless proven. A Codex command only with `andary_exit_known`; never a
+  background run. The work tree is the top (work-trees.mjs) of the folder the command ran in,
+  after `cd` and git's leading `-C <dir>` (`gitFolder()`; a `-C` to `~` or a variable is not
+  followed). A teammate's events never start it (ingest
   `POLICIES.team.prs` is false).
-- **What runs.** `gh pr view --json number,url,state,statusCheckRollup,reviewDecision,headRefName,headRefOid`
-  with the work tree as its folder (on Windows with backslashes), through `execFile` on gh's
+- **What runs.** `gh pr view [<branch>] --json number,url,state,statusCheckRollup,reviewDecision,headRefName,headRefOid`
+  (the branch once gh has named it for this push, so a checkout meanwhile does not swap pull
+  requests; a new push asks about the branch checked out again) with the work tree as its folder (on Windows with backslashes), through `execFile` on gh's
   absolute path (`findProgram`: `gh.exe` on Windows, never a `.cmd`, only absolute PATH entries;
-  no shell), a 15 s timeout, a 1 MiB output cap, `windowsHide`, and `GH_PROMPT_DISABLED=1`,
+  no shell), a 15 s timeout, a 1 MiB output cap, an abort signal (the server stopping ends it), `windowsHide`, and `GH_PROMPT_DISABLED=1`,
   `GH_NO_UPDATE_NOTIFIER=1`, `NO_COLOR=1`. At most two at once; 32 work trees remembered.
 - **When.** 30 s after the push, then after 1, 2 and 5 minutes, then every 5, until the checks
-  have all finished (failing counts as finished once none is pending), the pull request is merged
+  have all finished (failing once none is pending; passing on two looks in a row at the same head
+  commit, so a check that starts late is not missed), the pull request is merged
   or closed, no checks were reported three times, or an hour has passed. "No pull requests found"
   keeps looking (one may still be opened); a folder that is not a GitHub repository is dropped;
   three other failures in a row (a timeout, the network) end the watch until the next push, with
-  one log line. A work tree that is gone is dropped without running gh.
+  one log line. A work tree that is gone is dropped without running gh. An answer that arrives
+  after the switch was turned off, or after a newer push, changes nothing.
+- **Links.** `url` must parse as `https:` with no user or password, no spaces, quotes, angle
+  brackets or backslashes, at most 500 characters; the server also requires the host to be
+  `github.com` or gh's `GH_HOST` (`linkHosts`). Otherwise the badge has no link.
 - **Checks.** A check run that is not `COMPLETED` is pending; `FAILURE`, `TIMED_OUT`,
   `ACTION_REQUIRED` and `STARTUP_FAILURE` fail; `NEUTRAL`, `SKIPPED`, `CANCELLED` and `STALE` do
   not. A commit status fails on `FAILURE`/`ERROR` and is pending on `PENDING`/`EXPECTED`.
@@ -1236,7 +1245,7 @@ PrStatus = { root /* the work tree's top, forward slashes (§4.6 andary_root) */
 - **Setting.** `settings.gh = { on, available, hint }`: on by default when gh is on the PATH;
   `andary start --no-gh` starts it off; `{t:'settings', settings:{gh}}` from an owner turns it on
   (looking for gh again) or off (stopping every watch; what is known stays). Not kept across
-  restarts. Viewers and teammates always see `{ on: false, available: false, hint: null }`.
+  restarts. The unauthenticated `/api/hello` leaves `gh` out. Viewers and teammates always see `{ on: false, available: false, hint: null }`.
 - **Phone note.** When an open pull request's checks are first seen failing on a head commit,
   `notifier.ciFailed()` sends "CI failed on a branch a crew pushed." (kind `ci`, the 30 s and
   hourly limits apply): never the repository, branch or check.

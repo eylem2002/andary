@@ -12,7 +12,7 @@
 import { execFile } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { win32 } from 'node:path';
-import { GH_FIELDS, MAX_PR_SESSIONS, ciEpisode, isSettled, readGhView } from '../public/js/core/pr-status.js';
+import { GH_FIELDS, GITHUB_HOSTS, MAX_PR_SESSIONS, ciEpisode, isSettled, readGhView } from '../public/js/core/pr-status.js';
 import { findProgram } from './programs.mjs';
 
 /** @typedef {import('../public/js/core/pr-status.js').PrStatus} PrStatus */
@@ -42,7 +42,7 @@ const MAX_OUTPUT_BYTES = 1024 * 1024;
  */
 
 /**
- * @typedef {(bin: string, args: string[], options: { cwd: string, timeoutMs: number }) => Promise<GhResult>} GhRunner
+ * @typedef {(bin: string, args: string[], options: { cwd: string, timeoutMs: number, signal?: AbortSignal }) => Promise<GhResult>} GhRunner
  */
 
 /**
@@ -50,10 +50,10 @@ const MAX_OUTPUT_BYTES = 1024 * 1024;
  * prompts and no colours, a timeout and an output cap. It never throws.
  * @type {GhRunner}
  */
-export function runGh(bin, args, { cwd, timeoutMs }) {
+export function runGh(bin, args, { cwd, timeoutMs, signal }) {
   const env = { ...process.env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_SPINNER_DISABLED: '1', NO_COLOR: '1', CLICOLOR: '0' };
   return new Promise((resolve) => {
-    execFile(bin, args, { cwd, env, timeout: timeoutMs, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true, shell: false, encoding: 'utf8' }, (error, stdout, stderr) => {
+    execFile(bin, args, { cwd, env, signal, timeout: timeoutMs, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true, shell: false, encoding: 'utf8' }, (error, stdout, stderr) => {
       if (!error) resolve({ ok: true, stdout: String(stdout) });
       else resolve({ ok: false, code: /** @type {any} */ (error).code ?? null, stderr: String(stderr ?? ''), timedOut: Boolean(/** @type {any} */ (error).killed) });
     });
@@ -97,6 +97,7 @@ export function classifyFailure(result) {
  * @property {boolean} running
  * @property {PrStatus|null} status
  * @property {Set<string>} noted    CI episodes that had their phone note
+ * @property {string} branch        the branch gh named for this push: asked by name afterwards, so a checkout meanwhile does not swap pull requests
  */
 
 /**
@@ -126,6 +127,8 @@ export function classifyFailure(result) {
  * @property {Map<string, Repo>} repos  oldest push first
  * @property {number} running
  * @property {boolean} disposed
+ * @property {AbortController} abort  stops every gh still running when the server stops
+ * @property {readonly string[]} hosts  where a pull request's link may point: github.com, and gh's GH_HOST
  */
 
 /** @param {PrWatchOptions} [options] */
@@ -148,7 +151,7 @@ export function createPrWatch(options = {}) {
     ...options,
   };
   /** @type {Watch} */
-  const w = { o, wanted: o.wanted, bin: o.findGh(), hint: null, hinted: new Set(), repos: new Map(), running: 0, disposed: false };
+  const w = { o, wanted: o.wanted, bin: o.findGh(), hint: null, hinted: new Set(), repos: new Map(), running: 0, disposed: false, abort: new AbortController(), hosts: linkHosts(process.env.GH_HOST) };
   return {
     /** @returns {{ on: boolean, available: boolean, hint: GhHint }} */
     settings: () => ({ on: w.wanted && w.bin !== null, available: w.bin !== null, hint: w.hint }),
@@ -176,6 +179,7 @@ export function createPrWatch(options = {}) {
     list: () => [...w.repos.values()].flatMap((repo) => (repo.status ? [repo.status] : [])),
     dispose() {
       w.disposed = true;
+      w.abort.abort();
       for (const repo of w.repos.values()) if (repo.timer !== null) o.clearTimer(repo.timer);
     },
   };
@@ -194,12 +198,14 @@ function pushed(w, { root, sessionId }) {
     w.hint = null;
     w.o.onSettings();
   }
-  const repo = w.repos.get(root) ?? { root, sessionIds: [], startedAt: 0, polls: 0, errors: 0, timer: null, running: false, status: null, noted: new Set() };
+  const repo = w.repos.get(root) ?? { root, sessionIds: [], startedAt: 0, polls: 0, errors: 0, timer: null, running: false, status: null, noted: new Set(), branch: '' };
   w.repos.delete(root);
   w.repos.set(root, repo);
   if (w.repos.size > MAX_REPOS) forget(w, /** @type {Repo} */ (w.repos.values().next().value));
   repo.sessionIds = [...repo.sessionIds.filter((id) => id !== sessionId), sessionId].slice(-MAX_PR_SESSIONS);
   repo.startedAt = w.o.now();
+  // A new push may be from another branch: gh picks the one checked out now.
+  repo.branch = '';
   repo.polls = 0;
   repo.errors = 0;
   schedule(w, repo, w.o.delaysMs[0]);
@@ -270,12 +276,13 @@ async function look(w, repo) {
   repo.running = true;
   let result;
   try {
-    result = await w.o.run(w.bin, ['pr', 'view', '--json', GH_FIELDS], { cwd, timeoutMs: GH_TIMEOUT_MS });
+    result = await w.o.run(w.bin, ghArgs(repo.branch), { cwd, timeoutMs: GH_TIMEOUT_MS, signal: w.abort.signal });
   } finally {
     w.running -= 1;
     repo.running = false;
   }
-  if (w.disposed || w.repos.get(repo.root) !== repo) return;
+  // Turned off, or a newer push, while gh ran: this answer starts nothing.
+  if (w.disposed || !w.wanted || w.repos.get(repo.root) !== repo) return;
   if (result.ok) answered(w, repo, result.stdout);
   else failed(w, repo, result);
 }
@@ -296,8 +303,9 @@ function answered(w, repo, stdout) {
     w.hint = null;
     w.o.onSettings();
   }
-  const status = readGhView(json, { root: repo.root, sessionIds: repo.sessionIds, at: w.o.now(), previous: repo.status });
-  const delay = isSettled(status, repo.polls) ? null : nextDelay(w, repo);
+  const status = readGhView(json, { root: repo.root, sessionIds: repo.sessionIds, at: w.o.now(), previous: repo.status, hosts: w.hosts });
+  if (status.branch && !status.branch.startsWith('-')) repo.branch = status.branch;
+  const delay = isSettled(status, repo.polls, repo.status) ? null : nextDelay(w, repo);
   repo.status = { ...status, watching: delay !== null };
   w.o.onChange(repo.status);
   if (status.checks.state === 'failing' && status.state === 'OPEN' && !repo.noted.has(ciEpisode(status))) {
@@ -330,6 +338,24 @@ function failed(w, repo, result) {
   const delay = repo.errors >= MAX_ERRORS ? null : nextDelay(w, repo);
   if (delay === null) stop(w, repo);
   else schedule(w, repo, delay);
+}
+
+/**
+ * `gh pr view`'s arguments: the branch checked out now, or once gh has named it, that branch.
+ * @param {string} branch
+ */
+export function ghArgs(branch) {
+  return ['pr', 'view', ...(branch ? [branch] : []), '--json', GH_FIELDS];
+}
+
+/**
+ * Where a pull request's link may point: github.com, and the host gh is told to use (GH_HOST).
+ * @param {string|undefined} ghHost
+ * @returns {readonly string[]}
+ */
+export function linkHosts(ghHost) {
+  const host = typeof ghHost === 'string' ? ghHost.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, '') : '';
+  return host && host !== 'github.com' ? [...GITHUB_HOSTS, host] : GITHUB_HOSTS;
 }
 
 /** @param {string} dir */
