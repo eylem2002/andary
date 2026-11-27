@@ -8,6 +8,7 @@ import { createProgress } from './progress.mjs';
 import { createNotifier } from './notify.mjs';
 import { createWorkTrees } from './work-trees.mjs';
 import { holdFilePath, readHoldRisky } from './hold.mjs';
+import { holdCheckInstalled } from './installer.mjs';
 import { createTownDigest } from './digest.mjs';
 import { createNoteDesk } from './notes.mjs';
 import { createLimitsTracker } from './limits.mjs';
@@ -62,6 +63,7 @@ const NOTE_SWEEP_MS = 15_000;
  * @property {string} uiToken
  * @property {string} responseKey     signs /api/hook replies (see auth.signHookReply)
  * @property {{ remoteApprovals: boolean, approvalTimeoutMs: number, holdRisky: boolean }} settings
+ * @property {() => boolean} holdCheckMissing  Claude Code's hooks here have no hold check (installed before it)
  * @property {string|null} holdFile   where "Always hold risky commands for me" is kept (server/hold.mjs); null when nothing is written
  * @property {Set<string>} allowedHosts
  * @property {Set<string>} tunnelHosts    the Host names a tunnelled request may use (ADR 0019)
@@ -287,6 +289,13 @@ function createContext(config, options) {
     responseKey: generateToken(),
     settings: { remoteApprovals: Boolean(options.remoteApprovals), approvalTimeoutMs: config.approvalTimeoutMs, holdRisky: readHoldRisky(holdFile) },
     holdFile,
+    holdCheckMissing: () => {
+      try {
+        return !holdCheckInstalled({ dir: process.cwd(), env: process.env, home: config.home });
+      } catch {
+        return false;
+      }
+    },
     allowedHosts: new Set(),
     tunnelHosts: new Set(),
     headers: securityHeaders(buildCsp(computeImportMapHashes(config.publicDir))),

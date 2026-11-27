@@ -36,7 +36,7 @@
 // the browser cannot place (another variable) is not judged.
 // Pure and defensive: any input, bounded work, never throws. Shared with the server.
 import { baseName, isInside, normalizePath, onDrive, workTreeOf } from './paths.js';
-import { readShell } from './shell.js';
+import { programOf, readShell } from './shell.js';
 import { clip, isObject, str } from './text.js';
 
 /**
@@ -45,7 +45,12 @@ import { clip, isObject, str } from './text.js';
  * @typedef {{ folder?: unknown, sessionFolder?: unknown, root?: unknown }} RiskPlace
  */
 
-/** @typedef {{ reasons: string[] }} Risk  what makes a call risky, in a few words each, most serious first */
+/**
+ * What makes a call risky, in a few words each, most serious first. `quiet`: every reason is a
+ * delete of a folder the project rebuilds (node_modules, dist, build…, inside the project): the
+ * card shows a softer note, it never counts as "ran without asking", and it is never held.
+ * @typedef {{ reasons: string[], quiet?: true }} Risk
+ */
 
 /** Reasons kept for one call: the band stays one or two lines. */
 const MAX_REASONS = 4;
@@ -59,11 +64,23 @@ const FETCHERS = new Set(['curl', 'wget', 'iwr', 'irm', 'invoke-webrequest', 'in
 /** Programs that run a script they read from their input. */
 const RUNNERS = /^(?:sh|bash|zsh|dash|ksh|fish|pwsh|powershell|iex|invoke-expression|node|perl|ruby|php|python[\d.]*)$/;
 const COPIERS = new Set(['tee', 'cp', 'mv', 'copy-item', 'move-item']);
-const REMOVERS = new Set(['rm', 'remove-item', 'ri', 'del', 'erase', 'rd']);
+const REMOVERS = new Set(['rm', 'remove-item', 'ri', 'del', 'erase', 'rd', 'rmdir']);
+/** cmd.exe's removers, whose options are `/s`, `/q`: never a path. */
+const CMD_REMOVERS = new Set(['del', 'erase', 'rd', 'rmdir']);
+/** Folders a project rebuilds (dependencies, build output, caches): deleting one inside the project is ordinary. */
+const REBUILDABLE = new Set(['node_modules', 'dist', 'build', '.next', 'target', 'coverage', '.cache', '__pycache__']);
+const REBUILDABLE_REASON = 'deletes a rebuildable folder';
+/** PowerShell cmdlets that write a file, and their parameters that name it. */
+const PS_WRITERS = new Set(['out-file', 'set-content', 'add-content', 'sc', 'ac']);
+const PS_PATH_PARAMS = new Set(['-filepath', '-path', '-literalpath', '-pspath']);
+/** xargs's options that take the next word as their value. */
+const XARGS_VALUED = new Set(['-I', '-n', '-P', '-L', '-d', '-s', '-E', '-a', '--arg-file', '--delimiter', '--max-args', '--max-procs', '--max-lines', '--max-chars', '--replace', '--eof']);
+/** Database clients whose arguments (or input) may be SQL. */
+const SQL_CLIENTS = new Set(['psql', 'mysql', 'mariadb', 'sqlite3', 'sqlcmd', 'duckdb', 'clickhouse-client', 'cockroach']);
 const PERMISSIONS = new Set(['chmod', 'chown', 'chgrp']);
 const ROOT_WRAPPERS = new Set(['sudo', 'doas']);
 const WRITE_REDIRECTS = new Set(['>', '>>', '>|', '&>', '&>>']);
-/** SQL and tools that throw a database's data away. */
+/** SQL that throws a database's data away, given to a database client. */
 const DROPS_SQL = /\b(?:drop\s+(?:database|schema|table)|truncate\s+table)\b/i;
 const DROP_WORDS = new Set(['db:drop', 'db:reset', 'db:schema:load', 'flushall', 'flushdb']);
 /** Temporary and device paths: writing there is not writing outside the project. */
@@ -100,7 +117,8 @@ export function riskOf(toolName, input, place = {}) {
     else if (FILE_EDIT_TOOLS.has(tool)) reasons = fileRisks(isObject(input) ? input.file_path ?? input.notebook_path : '', where);
     else if (tool === 'apply_patch') reasons = patchRisks(input, where);
     const unique = [...new Set(reasons)].slice(0, MAX_REASONS);
-    return unique.length ? { reasons: unique } : null;
+    if (!unique.length) return null;
+    return unique.every((reason) => reason.startsWith(REBUILDABLE_REASON)) ? { reasons: unique, quiet: true } : { reasons: unique };
   } catch {
     return null;
   }
@@ -136,9 +154,38 @@ function outside(written, folder, root) {
   if (!text || text.startsWith('-') || !root) return '';
   if (HOME.test(text)) return clip(text, PATH_CHARS);
   const path = normalizePath(onDrive(text.replace(/\\/g, '/'), root), folder ?? '');
-  if (!path || SCRATCH.test(path) || isInside(path, root)) return '';
+  if (!path || SCRATCH.test(path) || inside(path, root)) return '';
   // Where it lands, as a path of its own: `cd .. && rm -r x` reads as /home/me/x, not x.
   return clip(path, PATH_CHARS);
+}
+
+/** A drive letter's path: Windows ignores case, so C:/Work/App and c:/work/app are one folder. */
+const ON_DRIVE = /^[A-Za-z]:\//;
+
+/** Whether a normalised path lies in a folder, without regard to case on a Windows drive. @param {string} path @param {string} folder */
+function inside(path, folder) {
+  return ON_DRIVE.test(path) && ON_DRIVE.test(folder) ? isInside(path.toLowerCase(), folder.toLowerCase()) : isInside(path, folder);
+}
+
+/**
+ * The rebuildable folder (node_modules, dist…) a delete target lies in, inside the project, or ''.
+ * Without a known project, a plain relative path (no `..`, `~` or variable) counts as inside it.
+ * @param {string} written @param {string|null} folder @param {string} root
+ */
+function rebuildable(written, folder, root) {
+  const text = written.trim().replace(/\\/g, '/');
+  if (!text || /^[~$%]/.test(text)) return '';
+  const path = folder || root ? normalizePath(text, folder ?? root) : '';
+  const base = root || folder || '';
+  let rest;
+  if (path && base) {
+    if (!inside(path, base) || path.length === base.length) return '';
+    rest = path.slice(base.length).split('/').filter(Boolean);
+  } else {
+    if (text.startsWith('/') || text.split('/').includes('..')) return '';
+    rest = text.split('/').filter((part) => part && part !== '.');
+  }
+  return rest.find((part) => REBUILDABLE.has(part)) ?? '';
 }
 
 /**
@@ -199,8 +246,7 @@ function shellRisks(command, where, powershell) {
     reasons.push(...segmentRisks(segment, context));
   }
   const text = typeof command === 'string' ? command : Array.isArray(command) ? command.join(' ') : '';
-  reasons.push(...pipedScripts(segments, text.slice(0, 20_000)));
-  if (DROPS_SQL.test(text.slice(0, 20_000))) reasons.push('drops database data');
+  reasons.push(...pipedScripts(segments, text.slice(0, 20_000)), ...pipedSql(segments));
   return order(reasons);
 }
 
@@ -222,23 +268,76 @@ function order(reasons) {
  * @returns {string[]}
  */
 function segmentRisks(segment, context) {
-  const [name, ...args] = segment.words;
+  const [name, ...args] = segment.words[0] === 'xargs' ? xargsCommand(segment.words.slice(1)) : segment.words;
   /** @type {string[]} */
   const reasons = [];
   if (ROOT_WRAPPERS.has(firstProgram(segment.argv))) reasons.push('runs as root (sudo)');
-  if (REMOVERS.has(name)) reasons.push(...removeRisks(args, context));
+  if (REMOVERS.has(name)) reasons.push(...removeRisks(name, args, context));
+  else if (name === 'find') reasons.push(...findRisks(args));
   else if (name === 'git') reasons.push(...gitRisks(args));
   else if (PERMISSIONS.has(name) && args.some(isRecursiveFlag)) reasons.push('changes permissions recursively');
-  else if (name === 'dropdb' || args.some((arg) => DROP_WORDS.has(arg.toLowerCase())) || (args[0] === 'migrate' && args[1] === 'reset')) reasons.push('drops database data');
-  const written = COPIERS.has(name) ? writtenPaths(name, args) : [];
-  reasons.push(...copyRisks(written, context));
+  else if (dropsData(name, args, segment)) reasons.push('drops database data');
+  const written = writtenPaths(name, args);
+  reasons.push(...copyRisks(written, context), ...redirectRisks(segment, context));
+  if (!REMOVERS.has(name)) for (const arg of args) reasons.push(...secretRisk(arg, written.includes(arg) ? 'writes' : 'reads'));
+  return reasons;
+}
+
+/**
+ * The command xargs runs, behind xargs's own options (`xargs -0 -n 1 rm -rf`).
+ * @param {string[]} args  xargs's arguments
+ */
+function xargsCommand(args) {
+  let i = 0;
+  while (i < args.length && args[i].startsWith('-')) i += XARGS_VALUED.has(args[i]) ? 2 : 1;
+  return programOf(args.slice(i));
+}
+
+/**
+ * `find … -delete`, and `find … -exec rm -r {} +`: deletes what it finds, folders and all.
+ * @param {string[]} args
+ */
+function findRisks(args) {
+  if (args.includes('-delete')) return ['deletes recursively (find -delete)'];
+  for (const [i, arg] of args.entries()) {
+    if (arg !== '-exec' && arg !== '-execdir' && arg !== '-ok' && arg !== '-okdir') continue;
+    const [program, ...rest] = programOf(args.slice(i + 1));
+    if (REMOVERS.has(program) && rest.some(isRecursiveFlag)) return ['deletes recursively (find -exec rm)'];
+  }
+  return [];
+}
+
+/**
+ * A database's data thrown away: dropdb, FLUSHALL, rails db:drop, migrate reset, or SQL that
+ * drops or truncates handed to a database client (an argument, a here-document, a here-string).
+ * `grep -r "DROP TABLE"` is not one.
+ * @param {string} name @param {string[]} args @param {import('./shell.js').Segment} segment
+ */
+function dropsData(name, args, segment) {
+  if (name === 'dropdb' || args.some((arg) => DROP_WORDS.has(arg.toLowerCase())) || (args[0] === 'migrate' && args[1] === 'reset')) return true;
+  if (!SQL_CLIENTS.has(name)) return false;
+  return args.some((arg) => DROPS_SQL.test(arg)) || segment.redirects.some((r) => DROPS_SQL.test(r.body ?? (r.op === '<<<' ? r.target : '')));
+}
+
+/** SQL echoed into a database client: `echo "DROP TABLE x" | psql`. @param {import('./shell.js').Segment[]} segments */
+function pipedSql(segments) {
+  for (const [i, segment] of segments.entries()) {
+    if (!DROPS_SQL.test(segment.text) || SQL_CLIENTS.has(segment.program)) continue;
+    if (segments.slice(i + 1).some((later) => later.pipeline === segment.pipeline && SQL_CLIENTS.has(later.program))) return ['drops database data'];
+  }
+  return [];
+}
+
+/** Files a command's write redirects name. @param {import('./shell.js').Segment} segment @param {Context} context */
+function redirectRisks(segment, context) {
+  /** @type {string[]} */
+  const reasons = [];
   for (const redirect of segment.redirects) {
     if (!WRITE_REDIRECTS.has(redirect.op) || /^\d*$|^-$/.test(redirect.target)) continue;
     const away = outside(redirect.target, context.folder, context.root);
     if (away) reasons.push(`writes outside the project: ${away}`);
     reasons.push(...secretRisk(redirect.target, 'writes'));
   }
-  if (!REMOVERS.has(name)) for (const arg of args) reasons.push(...secretRisk(arg, written.includes(arg) ? 'writes' : 'reads'));
   return reasons;
 }
 
@@ -253,25 +352,46 @@ function isRecursiveFlag(arg) {
   return /^--?recurs(?:e|ive)$/i.test(arg) || (/^-[a-zA-Z]{1,4}$/.test(arg) && /[rR]/.test(arg));
 }
 
-/** @param {string[]} args @param {Context} context */
-function removeRisks(args, context) {
+/**
+ * A delete: recursive, outside the project, of a secrets file, or of a folder the project
+ * rebuilds (quieter). cmd.exe's `del /s /q` takes `/s` as an option, not a drive.
+ * @param {string} name @param {string[]} args @param {Context} context
+ */
+function removeRisks(name, args, context) {
+  const cmd = CMD_REMOVERS.has(name);
+  const isOption = (/** @type {string} */ arg) => arg.startsWith('-') || (cmd && /^\/[a-zA-Z]$/.test(arg));
   const end = args.indexOf('--');
-  const options = (end < 0 ? args : args.slice(0, end)).filter((arg) => arg.startsWith('-'));
-  const targets = end < 0 ? args.filter((arg) => !arg.startsWith('-')) : [...args.slice(0, end).filter((arg) => !arg.startsWith('-')), ...args.slice(end + 1)];
+  const options = (end < 0 ? args : args.slice(0, end)).filter(isOption);
+  const targets = end < 0 ? args.filter((arg) => !isOption(arg)) : [...args.slice(0, end).filter((arg) => !isOption(arg)), ...args.slice(end + 1)];
+  const recursive = options.some((arg) => isRecursiveFlag(arg) || (cmd && /^\/s$/i.test(arg)));
   /** @type {string[]} */
   const reasons = [];
-  if (options.some(isRecursiveFlag)) reasons.push('deletes recursively');
+  /** @type {string[]} */
+  const ordinary = [];
   for (const target of targets.slice(0, 64)) {
     const away = outside(target, context.folder, context.root);
     if (away) reasons.push(`deletes outside the project: ${away}`);
     const secret = secretName(target);
     if (secret) reasons.push(`deletes ${secret}`);
+    const folder = away || secret ? '' : rebuildable(target, context.folder, context.root);
+    if (folder) ordinary.push(folder);
   }
-  return reasons;
+  if (recursive && targets.length && ordinary.length === Math.min(targets.length, 64)) return [...reasons, `${REBUILDABLE_REASON} (${[...new Set(ordinary)].join(', ')})`];
+  return recursive ? ['deletes recursively', ...reasons] : reasons;
 }
 
-/** Where cp, mv and tee write: tee's files, cp's and mv's last path. @param {string} name @param {string[]} args */
+/**
+ * Where a command writes: tee's files, cp's and mv's last path, and the file of PowerShell's
+ * Out-File, Set-Content and Add-Content (its -FilePath or -Path, else its first word).
+ * @param {string} name @param {string[]} args
+ */
 function writtenPaths(name, args) {
+  if (PS_WRITERS.has(name)) {
+    const at = args.findIndex((arg) => PS_PATH_PARAMS.has(arg.toLowerCase()));
+    const path = at >= 0 ? args[at + 1] : args.find((arg) => !arg.startsWith('-'));
+    return path ? [path] : [];
+  }
+  if (!COPIERS.has(name)) return [];
   const paths = args.filter((arg) => !arg.startsWith('-'));
   return name === 'tee' ? paths : paths.slice(-1);
 }
@@ -335,7 +455,10 @@ function pushRisks(args) {
 }
 
 /** A shell given a download to run: `bash <(curl …)`, `sh -c "$(curl …)"`. */
-const SHELL_FED = /\b(?:sh|bash|zsh|dash|ksh)\b[^|;&\n]*?(?:<\(|\$\(|`)\s*(?:curl|wget)\b/;
+const SHELL_FED = /\b(?:sh|bash|zsh|dash|ksh)\b[^|;&\n]*?(?:<\(|\$\(|`)\s*(?:curl|wget)\b|(?:^|[\s;&|(])(?:source|\.)\s+<\(\s*(?:curl|wget)\b/;
+/** PowerShell running what it downloads: `iex (iwr …)`, `Invoke-Expression (New-Object Net.WebClient).DownloadString(…)`. */
+const PS_RUNS = /\b(?:iex|invoke-expression)\b/i;
+const PS_DOWNLOADS = /\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b|\.downloadstring\s*\(/i;
 
 /**
  * A download piped into something that runs it: `curl … | sh`, `wget -O- … | bash`, `iwr … |
@@ -346,6 +469,7 @@ const SHELL_FED = /\b(?:sh|bash|zsh|dash|ksh)\b[^|;&\n]*?(?:<\(|\$\(|`)\s*(?:cur
  */
 function pipedScripts(segments, text) {
   if (SHELL_FED.test(text)) return ['runs a downloaded script'];
+  if (text.split(/\r?\n/).some((line) => PS_RUNS.test(line) && PS_DOWNLOADS.test(line))) return ['runs a downloaded script'];
   for (const [i, segment] of segments.entries()) {
     if (!FETCHERS.has(segment.program)) continue;
     const runner = segments.slice(i + 1).find((later) => later.pipeline === segment.pipeline && RUNNERS.test(later.program));

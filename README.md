@@ -205,12 +205,14 @@ push)", "throws away uncommitted changes (reset --hard)", "deletes untracked fil
 "force-deletes a branch", "runs as root (sudo)", "changes permissions recursively", "runs a
 downloaded script" (`curl … | sh`), "drops database data" (`DROP TABLE`, `dropdb`, `db:drop`),
 "writes outside the project: ~/.zshrc", or "reads .env" (also `.pem` and `.key` files, `~/.aws`,
-`~/.ssh`, `.npmrc` and the like). The list is short on purpose. It is a reading aid, not a
+`~/.ssh`, `.npmrc` and the like). Deleting a folder the project rebuilds (`node_modules`, `dist`,
+`build`…) inside the project gets a quieter note instead. The list is short on purpose. It is a reading aid, not a
 sandbox: aliases, scripts and variables are not followed. **Identical requests from several
 crews** (four crews asking for the same `git push --force-with-lease`) share one card with a
 checkbox per crew, all ticked: **Allow** and **Deny** answer the ticked ones, and each crew's
-folder is named when they differ. **Allow always** works one crew at a time, so it shows once a
-single box is ticked. Answered and expired cards fold into **Earlier (n)** under the live ones (a
+folder is named when they differ. A crew that joins a card you are reading starts unticked, and the
+card takes no answer, by click or key, for a moment after it changes. **Allow always** works one
+crew at a time, so it shows once a single box is ticked. Answered and expired cards fold into **Earlier (n)** under the live ones (a
 card you just answered stays, with its result, until you move on from it). In
 the demo, a card's countdown stops while the Approvals tab shows it, so there is time to read it.
 
@@ -218,7 +220,8 @@ the demo, a card's countdown stops while the Approvals tab shows it, so there is
 a risky shell command even when an allow rule, an earlier "don't ask again" or a permission mode
 would have let it run, and the prompt comes to the town like any other, with its band. It needs
 the hooks of this version (run `andary install` again, or update the plugin, then start new
-sessions) and lasts across restarts. Codex is not held: its hooks cannot ask. Even with it off, a
+sessions) and lasts across restarts; Settings and `andary doctor` warn while the hold check is
+missing. Nothing is held while Andary is not running. Codex is not held: its hooks cannot ask. Even with it off, a
 risky command that ran without asking you (an allow rule let it through) still counts in **need
 you** as "Ran without asking: git reset --hard (…)" until you set it aside, for half an hour, and
 the activity log keeps a line for it.

@@ -261,7 +261,11 @@ shows up as a crew of its own.
    when the setting is on and the call is a risky Bash or PowerShell command from Claude Code
    (`public/js/core/risk.js`, judged against the top of the hook folder's work tree, §4.6),
    `{"output":{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"Andary holds risky commands for you: <reasons>"}}}`
-   (≤ 300 characters), signed as in step 5. Only a signed `ask` with a string reason is printed,
+   (≤ 300 characters), signed as in step 5. A command longer than 20,000 characters, or one the
+   forwarder had to shorten (`truncated`), is held whatever it says ("the command is too long for
+   Andary to read in full"); a `quiet` risk (a rebuildable folder) never is. When a check gets no
+   answer (no proof, no reply), the forwarder touches `<ANDARY_HOME>/hold-backoff` and the checks
+   of the next 30 s exit at once. Only a signed `ask` with a string reason is printed,
    rebuilt with the reason cut at 300 characters; Claude Code then shows its permission prompt
    even under an allow rule, and that prompt's PermissionRequest reaches the town as usual.
    `/api/hold` ingests nothing, answers 401 without the hook secret, shares the hook rate limit,
@@ -335,7 +339,7 @@ shows up as a crew of its own.
 Server → browser:
 
 ```js
-{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits, holdRisky }, history: Envelope[], approvals: Approval[], notes: Note[] /* §4.15; [] for a viewer */, usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null,
+{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits, holdRisky, holdCheckMissing }, history: Envelope[], approvals: Approval[], notes: Note[] /* §4.15; [] for a viewer */, usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null,
   people: Person[] /* §4.11, [] off a team host */, me: string|null /* the person this browser plays */ }
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
@@ -383,6 +387,11 @@ Browser → server:
 { t: 'ping' }
 ```
 
+`holdCheckMissing` is true while `holdRisky` is on and no Claude Code settings file the server can
+see (user, and the project and local scopes of its working folder) registers the hold check, and
+the plugin is not enabled: the Settings switch then says to run `andary install` again. `andary
+status` and `doctor` count an install without the hold check as incomplete ("installed, but the
+hold check is missing"): registrations are compared as (event, argument) pairs.
 `holdRisky` ("Always hold risky commands for me", off by default) is kept as the file
 `<ANDARY_HOME>/hold-risky` (mode 0600; removed when turned off), read at start, so it outlasts a
 restart; a server that writes no server.json keeps it in memory only. A viewer or teammate always
@@ -1386,19 +1395,30 @@ and "4m 05s ago" for a conflict or a risky run.
 `place` is `{ folder, sessionFolder, root }` as for git hazards; "outside the project" is outside
 `workTreeOf(...)` (a path under `~` or `$HOME` always is; one under another variable, `/dev`, or a
 temp folder never is; with no folder known no path is judged). Shell commands (Bash, PowerShell,
-read by `core/shell.js`): `rm -r`/`Remove-Item -Recurse` "deletes recursively"; `rm` of a path
-outside "deletes outside the project: <path>"; `git push` with `--force`, `-f`, `--force-with-lease`,
+read by `core/shell.js`; `xargs` runs the command after its own options): `rm -r`/`Remove-Item
+-Recurse`/`del /s`/`rd /s` "deletes recursively" (cmd's `/s`, `/q` are options, never paths), but
+when every target is inside a folder the project rebuilds (`node_modules`, `dist`, `build`, `.next`,
+`target`, `coverage`, `.cache`, `__pycache__`, inside the project) "deletes a rebuildable folder
+(<names>)" and the risk is `quiet: true` (a softer note on the card, no risky run, never held);
+`find … -delete` "deletes recursively (find -delete)" and `find … -exec|-execdir rm -r`
+"deletes recursively (find -exec rm)"; `rm` of a path outside "deletes outside the project: <path>"
+(paths on a Windows drive compare without regard to case); `git push` with `--force`, `-f`, `--force-with-lease`,
 `--mirror` or a `+ref` "rewrites remote history (force push)", with `--delete`, `-d` or `:ref`
 "deletes a remote branch" (not with `--dry-run`/`-n`); `git reset --hard`, `checkout .`/`--`/`-f`,
 `restore` (not `--staged` alone), `switch -f`/`--discard-changes` "throws away uncommitted changes
 (…)"; `git clean -f` (not `-n`) "deletes untracked files (clean -f)"; `git branch -D` "force-deletes
 a branch"; `git stash drop|clear` "drops stashed work"; `git filter-branch|filter-repo` "rewrites
 history"; `sudo`/`doas` "runs as root (sudo)"; `chmod|chown|chgrp -R` "changes permissions
-recursively"; a `curl`/`wget`/`iwr` piped into a shell or interpreter, or a shell fed `<(curl …)`
-or `$(curl …)`, "runs a downloaded script"; SQL `DROP DATABASE|SCHEMA|TABLE`/`TRUNCATE TABLE`,
-`dropdb`, `FLUSHALL|FLUSHDB`, `db:drop`, `db:reset`, `db:schema:load`, `migrate reset` "drops
-database data"; a write redirect, `tee`, or `cp`/`mv`'s destination outside "writes outside the
-project: <path>"; a secrets file named as an argument "reads <name>" (a write redirect, `tee`, or
+recursively"; a `curl`/`wget`/`iwr` piped into a shell or interpreter, a shell fed `<(curl …)`
+or `$(curl …)`, `source <(curl …)` / `. <(wget …)`, or a PowerShell line with `iex`/
+`Invoke-Expression` and `iwr`/`irm`/`Invoke-WebRequest`/`Invoke-RestMethod`/`.DownloadString(`
+"runs a downloaded script"; SQL `DROP DATABASE|SCHEMA|TABLE`/`TRUNCATE TABLE` given to a database
+client (`psql`, `mysql`, `mariadb`, `sqlite3`, `sqlcmd`, `duckdb`, …) as an argument, a
+here-document, a here-string or piped in (`grep "DROP TABLE"` is not), `dropdb`,
+`FLUSHALL|FLUSHDB`, `db:drop`, `db:reset`, `db:schema:load`, `migrate reset` "drops database
+data"; a write redirect, `tee`, `cp`/`mv`'s destination, or the file of PowerShell's
+`Out-File`/`Set-Content`/`Add-Content` (`-FilePath`/`-Path`, else the first word) outside "writes
+outside the project: <path>"; a secrets file named as an argument "reads <name>" (a write redirect, `tee`, or
 `cp`/`mv`'s destination: "writes <name>"; `rm`: "deletes <name>"). Secrets files: `.env` and
 `.env.*` (not `.example`, `.sample`, `.template`, `.dist`, `.default(s)`, `.schema`), `*.pem`,
 `*.key`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, `id_rsa|dsa|ecdsa|ed25519`, `.netrc`, `.npmrc`,
@@ -1408,8 +1428,10 @@ or `.gnupg/`. `Read` of a secrets file "reads <name>"; `Write`, `Edit`, `MultiEd
 same for each `*** Add|Update|Delete File:` it names. Other tools: null. Never throws.
 
 **Risky runs** (`core/risk-runs.js`): the store marks each `permission.request` as asked (by its
-agent, tool and input; the request carries no `tool_use_id`), and a `tool.end` or `tool.fail` (not
-an interrupt) of a call that did not ask, and is risky, is a `RiskRun { id: 'risk:<agentKey>:<ts>',
+agent and its call key, `callKey`/`andary_key`, which a Codex patch keeps when it becomes an Edit or
+Write; without one by tool and input with keys in order: the request carries no `tool_use_id`); a
+`permission.denied`, or a request denied in the town, takes the mark away; and a `tool.end` or
+`tool.fail` (not an interrupt) of a call that did not ask, and is risky (not `quiet`), is a `RiskRun { id: 'risk:<agentKey>:<ts>',
 sessionId, agentKey, at, tool, what /* the command or file, ≤ 120 chars */, reasons }` on
 `StoreState.risks`, with a `risk` log line (`warn`, "Ran without asking: <what> (<first reason>)").
 A call that asked uses its mark up. A crew leaving takes its runs with it; a teammate's crew has

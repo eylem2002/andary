@@ -240,6 +240,8 @@ test('a file change is shown in full before it is approved, and a denial can say
   // Typed key by key: the A and D in it must not answer the card.
   await reason.pressSequentially('Use the staging config file instead');
   await expect(card).toHaveAttribute('data-status', 'pending');
+  // Enter answers once the card has stayed as it is for a moment, as a click does.
+  await expect(card.getByTestId('deny')).not.toHaveAttribute('aria-disabled', 'true');
   await reason.press('Enter');
   const output = JSON.parse((await pendingHook).stdout);
   expect(output.hookSpecificOutput.decision).toEqual({ behavior: 'deny', message: 'Denied from Andary: Use the staging config file instead' });

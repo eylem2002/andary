@@ -109,11 +109,13 @@ export function createHub(maxClients) {
 
 /**
  * @param {import('./app.mjs').TownContext} ctx
- * @returns {{ remoteApprovals: boolean, approvalTimeoutMs: number, notify: boolean, notifyLimits: boolean, holdRisky: boolean }}
+ * @returns {{ remoteApprovals: boolean, approvalTimeoutMs: number, notify: boolean, notifyLimits: boolean, holdRisky: boolean, holdCheckMissing: boolean }}
  */
 export function publicSettings(ctx) {
   // Whether phone notifications are on, never the topic: /api/hello answers without signing in.
-  return { remoteApprovals: ctx.settings.remoteApprovals, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: ctx.notifier.on, notifyLimits: ctx.notifier.limitNotes, holdRisky: ctx.settings.holdRisky };
+  // holdCheckMissing: holding is on, but Claude Code's hooks here have no hold check yet.
+  const holdCheckMissing = Boolean(ctx.settings.holdRisky && ctx.holdCheckMissing?.());
+  return { remoteApprovals: ctx.settings.remoteApprovals, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: ctx.notifier.on, notifyLimits: ctx.notifier.limitNotes, holdRisky: ctx.settings.holdRisky, holdCheckMissing };
 }
 
 /**
@@ -191,7 +193,7 @@ export function dropRemovedPeople(ctx) {
  * @param {BrowserRole} role
  */
 function settingsFor(ctx, role) {
-  const settings = role === 'owner' ? publicSettings(ctx) : { remoteApprovals: false, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: false, notifyLimits: false, holdRisky: false };
+  const settings = role === 'owner' ? publicSettings(ctx) : { remoteApprovals: false, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: false, notifyLimits: false, holdRisky: false, holdCheckMissing: false };
   return ctx.team ? { ...settings, team: teamSettings(ctx, role) } : settings;
 }
 

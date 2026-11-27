@@ -299,6 +299,36 @@ function saveRecord(home, key, shape) {
  * @param {string} [hookPath]
  * @returns {string[]}
  */
+/**
+ * The registrations a settings file holds, as `event` or `event argument` for one with an
+ * argument of its own (the hold check: `PreToolUse hold`), so an install from before the hold
+ * check does not pass for a whole one.
+ * @param {Record<string, any>} settings
+ * @param {string} hookPath
+ * @returns {Set<string>}
+ */
+function registeredKeys(settings, hookPath) {
+  /** @type {Set<string>} */
+  const keys = new Set();
+  if (!isObject(settings.hooks)) return keys;
+  for (const [event, groups] of Object.entries(settings.hooks)) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (!isObject(group) || !Array.isArray(group.hooks)) continue;
+      for (const entry of group.hooks) {
+        if (!isAndaryHook(entry, hookPath)) continue;
+        keys.add(/\shold\s+#\s*andary\s*$/.test(String(entry.command)) ? `${event} hold` : event);
+      }
+    }
+  }
+  return keys;
+}
+
+/** @param {Registration} registration */
+function registrationKey(registration) {
+  return registration.argument ? `${registration.event} ${registration.argument}` : registration.event;
+}
+
 function registeredEvents(settings, hookPath) {
   if (!isObject(settings.hooks)) return [];
   return Object.entries(settings.hooks)
@@ -530,7 +560,8 @@ export function refreshForwarder(home) {
  * @property {string} scope
  * @property {string} settingsPath
  * @property {string[]} events     events that have an Andary entry
- * @property {boolean} complete    all registrations present
+ * @property {boolean} complete    all registrations present (the hold check too)
+ * @property {boolean} holdMissing installed, but without the hold check ("Always hold risky commands")
  * @property {boolean} plugin      this file enables the Andary plugin
  * @property {boolean} limitsMod   this file enables the andary-limits mod (CONTRACTS §4.14)
  * @property {string|null} error   unreadable or malformed file
@@ -572,10 +603,25 @@ function inspectScope(client, scope, settingsPath, hookPath) {
   try {
     const { settings } = readSettingsFile(settingsPath);
     const events = registeredEvents(settings, hookPath);
-    const complete = client.registrations.every((r) => events.includes(r.event));
+    const keys = registeredKeys(settings, hookPath);
+    const missing = client.registrations.filter((r) => !keys.has(registrationKey(r)));
+    const complete = missing.length === 0;
+    const holdMissing = events.length > 0 && missing.some((r) => r.argument === 'hold');
     const claude = client.id === 'claude';
-    return { client, scope, settingsPath, events, complete, plugin: claude && pluginEnabledIn(settings), limitsMod: claude && enabledIn(settings, 'andary-limits'), error: null };
+    return { client, scope, settingsPath, events, complete, holdMissing, plugin: claude && pluginEnabledIn(settings), limitsMod: claude && enabledIn(settings, 'andary-limits'), error: null };
   } catch (error) {
-    return { client, scope, settingsPath, events: [], complete: false, plugin: false, limitsMod: false, error: error.message };
+    return { client, scope, settingsPath, events: [], complete: false, holdMissing: false, plugin: false, limitsMod: false, error: error.message };
   }
+}
+
+/**
+ * Whether Claude Code runs the hold check ("Always hold risky commands for me", server/hold.mjs)
+ * for sessions started here: a settings file registers it, or the plugin (whose hooks.json has it)
+ * is enabled.
+ * @param {{ dir: string, env: NodeJS.ProcessEnv, home: string }} where
+ * @returns {boolean}
+ */
+export function holdCheckInstalled({ dir, env, home }) {
+  const { scopes, plugin } = inspectInstallations({ dir, env, home, clients: [CLIENTS.claude] });
+  return plugin || scopes.some((scope) => scope.events.length > 0 && !scope.holdMissing);
 }

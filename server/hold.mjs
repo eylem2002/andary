@@ -13,6 +13,7 @@
 import { existsSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { riskOf } from '../public/js/core/risk.js';
+import { MAX_SHELL_CHARS } from '../public/js/core/shell.js';
 
 /** The file whose presence means "hold risky commands". */
 export const HOLD_FILE = 'hold-risky';
@@ -60,8 +61,13 @@ export function writeHoldRisky(file, on) {
  */
 export function holdOutput(event, { source, root }) {
   if (source === 'codex' || event.hook_event_name !== 'PreToolUse' || !HOLD_TOOLS.includes(event.tool_name)) return null;
+  const command = event.tool_input?.command;
+  // Longer than Andary reads (or cut on the way): what it cannot read in full, it holds.
+  const long = event.truncated === true || (typeof command === 'string' && command.length > MAX_SHELL_CHARS);
   const risk = riskOf(event.tool_name, event.tool_input, { folder: event.cwd, root });
-  if (!risk) return null;
-  const reason = `Andary holds risky commands for you: ${risk.reasons.join('; ')}`.slice(0, MAX_HOLD_REASON_CHARS);
+  // A rebuildable folder (rm -rf dist) is ordinary work: never held.
+  const reasons = long ? ['the command is too long for Andary to read in full'] : risk && !risk.quiet ? risk.reasons : [];
+  if (!reasons.length) return null;
+  const reason = `Andary holds risky commands for you: ${reasons.join('; ')}`.slice(0, MAX_HOLD_REASON_CHARS);
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: reason } };
 }

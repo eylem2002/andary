@@ -18,7 +18,7 @@ import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { rulesText } from './permission-rules.js';
 import { noteStateText } from './notes.js';
 import { receiptLine } from './receipts.js';
-import { riskRunText } from './risk-runs.js';
+import { riskCallKey, riskRunText } from './risk-runs.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
 import { dialogsAfterApproval, dialogsAfterEvent } from './store-dialogs.js';
@@ -782,9 +782,11 @@ function followRisks(m, e, s, a) {
     return null;
   }
   if (!a) return null;
-  if (e.kind === 'permission.request') m.risks.asked(a.key, e.data.tool, e.data.input);
+  const key = riskCallKey(e.data.callKey, e.data.tool, e.data.input);
+  if (e.kind === 'permission.request') m.risks.asked(a.key, key);
+  if (e.kind === 'permission.denied') m.risks.refused(a.key, key);
   if (e.kind !== 'tool.end' && !(e.kind === 'tool.fail' && e.data.isInterrupt !== true)) return null;
-  const run = m.risks.ended({ agent: a.key, session: s.id, tool: e.data.tool, input: e.data.input, at: e.ts, place: placeOf(e, s) });
+  const run = m.risks.ended({ agent: a.key, session: s.id, key, tool: e.data.tool, input: e.data.input, at: e.ts, place: placeOf(e, s) });
   if (run) m.state.risks = m.risks.list();
   return run;
 }
@@ -953,6 +955,8 @@ function approvalChanged(m, approval, ts) {
   }
   if (approval.status === 'denied') {
     m.awaiting.delete(key);
+    // A request refused in the town never runs: its mark for the risk rules goes.
+    m.risks.refused(key, riskCallKey(approval.callKey, tool, approval.toolInput));
     // A git command refused in the town runs nothing: its alert ends.
     if (m.conflicts.refused({ agent: key, callKey: typeof approval.callKey === 'string' ? approval.callKey : null })) m.state.hazards = m.conflicts.list();
   }

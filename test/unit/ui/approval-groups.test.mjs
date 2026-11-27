@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { approvalRisk, approvalSections, differentFolders, groupReasons, requestKey } from '../../../public/js/ui/approval-groups.js';
+import { approvalRisk, approvalSections, differentFolders, groupRisk, requestKey } from '../../../public/js/ui/approval-groups.js';
 
 /** @param {Record<string, unknown>} fields @returns {any} */
 const approval = (fields) => ({ id: 'a', status: 'pending', held: true, sessionId: 's1', agentId: null, toolName: 'Bash', toolInput: { command: 'git push --force-with-lease' }, cwd: '/w/app', createdAt: 1, expiresAt: 100, ...fields });
@@ -48,7 +48,8 @@ describe('approval cards', () => {
     assert.equal(approvalRisk(approval({ toolInput: { command: 'npm test' } }), state), null);
     const here = approval({ id: 'a', toolInput: { command: 'rm ../shared/x' } });
     const there = approval({ id: 'b', sessionId: 's2', cwd: '/w/api/src', toolInput: { command: 'rm ../shared/x' } });
-    assert.deepEqual(groupReasons([here, there], state), ['deletes outside the project: /w/shared/x']);
+    assert.deepEqual(groupRisk([here, there], state), { reasons: ['deletes outside the project: /w/shared/x'], quiet: false });
+    assert.deepEqual(groupRisk([approval({ toolInput: { command: 'rm -rf dist' } })], state), { reasons: ['deletes a rebuildable folder (dist)'], quiet: true });
     assert.equal(differentFolders([here, there]), true);
     assert.equal(differentFolders([here, approval({ id: 'c' })]), false);
   });

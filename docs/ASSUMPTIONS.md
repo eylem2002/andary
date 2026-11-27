@@ -1469,3 +1469,28 @@ section.
      boards on screen (on a phone, the sheet open) and the page visible. The story goes on meanwhile;
      only the 25 s timeout stands still, as when the demo is paused. Live requests keep the
      server's timeout: Claude Code itself gives up on the hook after 150 s.
+278. **A card waits after any change, from the keyboard too.** A request that joins a card on
+     screen, or leaves it, restarts the one-second answer delay, and the delay now applies to A / D,
+     Enter in the reason field and Enter or Space on a button, not only to pointer clicks: an answer
+     must go to what the viewer read. A newcomer starts unticked once the card has been on screen
+     for the delay (one arriving within it is part of what the viewer first saw), and the card says
+     how many crews now ask. A request that leaves a shared card because it ran out of time is said
+     on the card.
+279. **Deleting a folder the project rebuilds is a quieter note.** `rm -rf node_modules`, `dist`,
+     `build`, `.next`, `target`, `coverage`, `.cache` or `__pycache__` (or anything inside them)
+     inside the project shows "Note: deletes a rebuildable folder (dist)" without the red border,
+     is never "ran without asking", and is never held. Outside the project, or mixed with any other
+     target, it stays "deletes recursively".
+280. **`find -delete` reads as "deletes recursively"**: it deletes everything it matches across a
+     tree, as `rm -r` does. `find -exec rm` without `-r` does not.
+281. **SQL that drops data counts only when a database client gets it** (an argument, a
+     here-document or here-string, or piped in), so searching for "DROP TABLE" or writing it into a
+     file is not marked. `psql -f migration.sql` is not read.
+282. **The hold check holds what it cannot read**: a command over 20,000 characters, or one the
+     forwarder shortened, gets an `ask`. After a check gets no answer, the next ones skip asking for
+     30 seconds (a marker file beside server.json), so a stuck server slows commands once, not
+     every time; nothing is held while Andary is not running, and Settings says so.
+283. **Whether the hold check is installed is read from the files the server can see**: the user
+     settings and the project and local settings of the folder the server was started in, plus the
+     plugin. A project installed elsewhere may still be missing it without the warning showing.
+

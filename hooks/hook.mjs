@@ -25,7 +25,7 @@
 // body says this forwarder can do that (`caps`): the server offers "Allow always" only then, so an
 // older copy, which prints a plain allow, never leaves the town claiming a rule was saved.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { homedir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -41,6 +41,9 @@ const SOURCE = process.argv[2] === 'codex' ? 'codex' : null;
 const HOLD = process.argv[2] === 'hold';
 /** Beside server.json while "Always hold risky commands for me" is on (server/hold.mjs). */
 const HOLD_FILE = 'hold-risky';
+/** After a hold check that got no answer, the next ones skip asking this long (a stuck server must not slow every command). */
+const HOLD_BACKOFF_MS = 30_000;
+const HOLD_BACKOFF_FILE = 'hold-backoff';
 /** The longest reason printed with an `ask` (the server sends no more). */
 const MAX_HOLD_REASON_CHARS = 300;
 const EVENT_TIMEOUT_MS = 1500;
@@ -512,14 +515,28 @@ function holdFrom(state, nonce, reply) {
 
 /**
  * The hold check (`hook.mjs hold`): asks the server whether this call is a risky command to hold.
+ * After one that got no answer (the server is stuck or gone), the next ones skip asking for 30 s.
  * @param {State} state
  * @param {Record<string, any>} event
+ * @param {string} home
  */
-async function holdCheck(state, event) {
+async function holdCheck(state, event, home) {
+  const backoff = join(home, HOLD_BACKOFF_FILE);
+  try {
+    if (Date.now() - statSync(backoff).mtimeMs < HOLD_BACKOFF_MS) return '';
+  } catch {
+    // no recent failure
+  }
   setTimeout(() => finish(), 2 * EVENT_TIMEOUT_MS + 1000).unref();
-  if (!(await serverProves(state, EVENT_TIMEOUT_MS))) return '';
   const nonce = randomBytes(16).toString('base64url');
-  const reply = await post(state, buildBody(event), nonce, EVENT_TIMEOUT_MS, '/api/hold');
+  const reply = (await serverProves(state, EVENT_TIMEOUT_MS)) ? await post(state, buildBody(event), nonce, EVENT_TIMEOUT_MS, '/api/hold') : null;
+  if (!reply) {
+    try {
+      writeFileSync(backoff, '', { mode: 0o600 });
+    } catch {
+      // the next check simply asks again
+    }
+  }
   return holdFrom(state, nonce, reply);
 }
 
@@ -530,7 +547,7 @@ async function main() {
   const state = readState(home);
   if (!state || !serverAlive(state.pid)) return '';
   const event = parsePayload(await readStdin());
-  if (HOLD) return holdCheck(state, event);
+  if (HOLD) return holdCheck(state, event, home);
   const isPermission = event.hook_event_name === 'PermissionRequest';
   const approvalMs = Number.isFinite(state.approvalTimeoutMs) ? Number(state.approvalTimeoutMs) : 120_000;
   const timeoutMs = isPermission ? approvalMs + APPROVAL_GRACE_MS : EVENT_TIMEOUT_MS;

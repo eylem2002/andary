@@ -248,6 +248,8 @@ test.describe('keyboard', () => {
     await approvalsTab.click();
     const card = page.locator(`[data-approval-id="${id}"]`);
     await card.focus();
+    // Like a click, a key answers once the card has stayed as it is for a moment.
+    await expect(card.getByTestId('deny')).not.toHaveAttribute('aria-disabled', 'true');
     await page.keyboard.press('d');
     await expect(card).toHaveAttribute('data-status', 'denied');
     await expect(card).toContainText('Denied from the town');
@@ -261,6 +263,7 @@ test.describe('keyboard', () => {
     await page.keyboard.press('a');
     const card = page.locator(`[data-approval-id="${id}"]`);
     await card.getByTestId('approve-always').focus();
+    await expect(card.getByTestId('approve-always')).not.toHaveAttribute('aria-disabled', 'true');
     await page.keyboard.press('Enter');
     await expect(card).toHaveAttribute('data-status', 'allowed');
     await expect(card).toContainText('Allowed; asked Claude Code to save');

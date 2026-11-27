@@ -19,7 +19,7 @@ import { alwaysLine, approvalHint, offeredSuggestion, savedText } from './approv
 import { diffView } from './diff-view.js';
 import { diffStats } from './diff.js';
 import { approvalAgentKey, crewNumber, findSession, kbd, roundel, updateRoundel } from './parts.js';
-import { approvalSections, differentFolders, groupReasons } from './approval-groups.js';
+import { approvalSections, differentFolders, groupRisk } from './approval-groups.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -34,8 +34,9 @@ export const MAX_REASON_CHARS = 500;
  * New requests are listed first, so a card can slide under the pointer just as the viewer clicks
  * the one they read (and a settled card above can move away, or shrink when it goes back to the
  * terminal). A click on Allow, Allow always or Deny only counts once its card has stayed in place
- * on the page this long, like the input delay of browser permission prompts. Keyboard answers are
- * not delayed: focus stays on the card the viewer chose.
+ * on the page this long, like the input delay of browser permission prompts. Keys wait too (A / D,
+ * and Enter or Space on a button): a request that joins a card on screen changes what an answer
+ * goes to, so the card waits a moment after any change, however it is answered.
  */
 export const ANSWER_DELAY_MS = 1000;
 
@@ -124,13 +125,13 @@ function watchMoves(list, parts) {
 }
 
 /**
- * Whether a click on Allow, Allow always or Deny counts. event.detail is 0 for Enter / Space:
- * keyboard answers go to the focused card, so only pointer clicks wait for the delay.
- * @param {MouseEvent} event
+ * Whether a click on Allow, Allow always or Deny counts, from the pointer or the keyboard alike:
+ * only once the card has stayed as it is for the answer delay.
+ * @param {MouseEvent} _event
  * @param {any} p the card's parts
  */
-function clickCounts(event, p) {
-  return event.detail === 0 || answerReady(p.armedAt, performance.now());
+function clickCounts(_event, p) {
+  return answerReady(p.armedAt, performance.now());
 }
 
 /**
@@ -179,12 +180,15 @@ function buildCard(id, approvalId) {
   const grants = h('p', { class: 'hud-approval__grants', id: `${id}-grants`, 'data-testid': 'approval-grants' });
   // Why this one deserves a second look (core/risk.js), on a red band under the heading.
   const riskWords = h('span', { class: 'hud-approval__risk-words' });
+  const riskLabel = h('strong', { text: 'Risky: ' });
   const risk = h('p', { class: 'hud-approval__risk', id: `${id}-risk`, 'data-testid': 'approval-risk', hidden: true },
-    icon('warning', { size: 16 }), h('span', {}, h('strong', { text: 'Risky: ' }), riskWords));
+    icon('warning', { size: 16 }), h('span', {}, riskLabel, riskWords));
   // The requests a card stands for when several crews ask the same thing: one checkbox each.
   const crewsLegend = h('legend', { class: 'hud-approval__crews-legend' });
   const crewsList = h('ul', { class: 'hud-approval__crews-list' });
   const crews = h('fieldset', { class: 'hud-approval__crews', 'data-testid': 'approval-crews', hidden: true }, crewsLegend, crewsList);
+  // A request that left a shared card on its own (it ran out of time), said once on the card.
+  const changed = h('p', { class: 'hud-approval__hint', 'data-testid': 'approval-changed', hidden: true });
   const changeNote = h('p', { class: 'hud-approval__change-note' });
   const changeBody = h('div', { class: 'hud-approval__change-body' });
   const change = h('div', { class: 'hud-approval__change', 'data-testid': 'approval-change' }, changeNote, changeBody);
@@ -208,9 +212,9 @@ function buildCard(id, approvalId) {
   const result = h('p', { class: 'hud-approval__result' });
   const card = h('article', { class: 'hud-approval', 'data-testid': 'approval-card', 'data-approval-id': approvalId, 'aria-labelledby': `${id}-who`, 'aria-describedby': `${id}-risk ${id}-detail ${id}-grants` },
     h('header', { class: 'hud-approval__head' }, mark, h('div', {}, who, h('p', { class: 'hud-approval__meta' }, crew, tool))),
-    risk, h('pre', { class: 'hud-approval__code' }, detail), grants, change, crews, timer, reasonRow, actions, terminal, hint, result);
+    risk, h('pre', { class: 'hud-approval__code' }, detail), grants, change, crews, changed, timer, reasonRow, actions, terminal, hint, result);
   const item = h('li', { class: 'hud-approvals__item' }, card);
-  const parts = { mark, who, crew, tool, detail, grants, risk, riskWords, riskKey: '', crews, crewsLegend, crewsList, members: /** @type {Approval[]} */ ([]), change, changeNote, changeBody, changeKey: '', reason, reasonRow, timer, bar, countdown, actions, allow, deny, stop, stopNote, stopRow,
+  const parts = { mark, who, crew, tool, detail, grants, risk, riskLabel, riskWords, riskKey: '', crews, changed, crewsLegend, crewsList, members: /** @type {Approval[]} */ ([]), change, changeNote, changeBody, changeKey: '', reason, reasonRow, timer, bar, countdown, actions, allow, deny, stop, stopNote, stopRow,
     always, alwaysRow, alwaysNote, offer: null, offerKey: '', terminal, hint, hintKey: '', result, card, index: -1, armedAt: 0, armTimer: 0 };
   return { item, parts };
 }
@@ -291,11 +295,14 @@ function showStop(p, ticked, busy) {
  * @param {StoreState} state
  */
 function showRisk(p, members, state) {
-  const reasons = groupReasons(members, state);
-  const key = reasons.join('\n');
-  setAttr(p.card, 'data-risky', reasons.length ? 'true' : null);
+  const { reasons, quiet } = groupRisk(members, state);
+  const key = `${quiet}\n${reasons.join('\n')}`;
+  setAttr(p.card, 'data-risky', reasons.length ? (quiet ? 'quiet' : 'true') : null);
   if (p.riskKey === key) return;
   p.riskKey = key;
+  // A rebuildable folder (node_modules, dist…) is a note, not a red band.
+  p.risk.classList.toggle('hud-approval__risk--quiet', quiet);
+  setText(p.riskLabel, quiet ? 'Note: ' : 'Risky: ');
   setText(p.riskWords, reasons.join('; '));
   setHidden(p.risk, !reasons.length);
 }
@@ -418,6 +425,42 @@ function keepFocused(list, parts, { live, earlier }) {
   return { live: [...live.slice(0, index), kept, ...live.slice(index)], earlier: earlier.filter((one) => !ids.has(one.id)) };
 }
 
+/**
+ * Requests that joined a card already on screen: the card takes no answer for a moment (its
+ * buttons and A / D), says so, and a newcomer starts unticked once the card has been read, so
+ * an answer meant for the crews in view never goes to one that just arrived.
+ * A request that left it because it ran out of time is said on the card, so an answer that
+ * comes a moment later is not taken for one that reached it.
+ * @param {HudContext} ctx
+ * @param {any} p the card's parts
+ * @param {{ members: Approval[], state: StoreState, unticked: Set<string> }} card  its requests now; the town; the requests left unticked
+ */
+function joined(ctx, p, { members, state, unticked }) {
+  const ids = members.map((one) => one.id);
+  const before = /** @type {Set<string>|undefined} */ (p.memberIds);
+  p.memberIds = new Set(ids);
+  if (!before) {
+    p.shownAt = performance.now();
+    return;
+  }
+  const newcomers = ids.filter((id) => !before.has(id));
+  if (!newcomers.length && ids.length === before.size) return;
+  restartDelay(p);
+  const gone = [...before].filter((id) => !p.memberIds.has(id));
+  if (ids.length && gone.some((id) => state.approvals.find((one) => one.id === id)?.status === 'expired')) {
+    const words = 'One request on this card just ran out of time: its terminal asks instead.';
+    setText(p.changed, words);
+    setHidden(p.changed, false);
+    ctx.announcer.polite(words);
+  }
+  if (!newcomers.length) return;
+  if (performance.now() - p.shownAt >= ANSWER_DELAY_MS) for (const id of newcomers) unticked.add(id);
+  const crews = new Set(members.map((one) => one.sessionId)).size;
+  const late = performance.now() - p.shownAt >= ANSWER_DELAY_MS;
+  const words = crews > 1 ? `${crews} crews now ask for this.` : `This was asked ${members.length} times now.`;
+  ctx.announcer.polite(late ? `${words} The new request is not ticked.` : words);
+}
+
 /** "Earlier (n)": the settled requests, folded under the live ones. */
 function buildEarlier() {
   const earlierList = h('ol', { class: 'hud-approvals__list hud-approvals__list--earlier' });
@@ -476,7 +519,7 @@ function wireCard(p, decide) {
     event.stopPropagation();
     if (event.key === 'Enter' && !event.isComposing) {
       event.preventDefault();
-      decide(p, 'deny', p.reason.value);
+      if (clickCounts(/** @type {any} */ (event), p)) decide(p, 'deny', p.reason.value);
     }
   });
   p.card.addEventListener('keydown', (event) => {
@@ -486,6 +529,8 @@ function wireCard(p, decide) {
     if (p.change.contains(/** @type {Node} */ (event.target))) return;
     event.preventDefault();
     event.stopPropagation();
+    // A card that just appeared, moved or changed takes no key answer either.
+    if (!answerReady(p.armedAt, performance.now())) return;
     decide(p, key === 'a' ? 'allow' : 'deny', p.reason.value);
   });
 }
@@ -535,6 +580,7 @@ export function createApprovalsPanel(ctx) {
     setAttr(p.card, 'data-approval-id', approval.id);
     setAttr(p.card, 'data-approval-ids', members.map((one) => one.id).join(' '));
     armCard(p, index);
+    joined(ctx, p, { members, state, unticked });
     for (const one of members) if (one.status !== 'pending') sending.delete(one.id);
     const ticked = tickedOf(members);
     const busy = ticked.some((one) => sending.has(one.id));

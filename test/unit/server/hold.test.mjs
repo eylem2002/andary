@@ -10,7 +10,7 @@ const pre = (command, extra = {}) => ({ hook_event_name: 'PreToolUse', tool_name
 
 describe('holding risky commands', () => {
   it('asks before a risky shell command from Claude Code, with why', () => {
-    const output = holdOutput(pre('rm -rf build'), { source: 'claude', root: '/w/app' });
+    const output = holdOutput(pre('rm -rf src'), { source: 'claude', root: '/w/app' });
     assert.deepEqual(output, { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: 'Andary holds risky commands for you: deletes recursively' } });
   });
 
@@ -24,6 +24,13 @@ describe('holding risky commands', () => {
     assert.equal(holdOutput(pre('rm -rf x', { tool_name: 'Read' }), { source: 'claude', root: null }), null);
     assert.equal(holdOutput(pre('rm -rf x', { hook_event_name: 'PostToolUse' }), { source: 'claude', root: null }), null);
     assert.equal(holdOutput(pre('rm -rf x'), { source: 'codex', root: null }), null);
+  });
+
+  it('never holds a rebuildable folder, and holds a command too long to read', () => {
+    assert.equal(holdOutput(pre('rm -rf node_modules dist'), { source: 'claude', root: '/w/app' }), null);
+    const long = holdOutput(pre(`echo ${'x'.repeat(20_001)}`), { source: 'claude', root: null });
+    assert.match(long?.hookSpecificOutput.permissionDecisionReason ?? '', /too long for Andary to read in full/);
+    assert.match(holdOutput(pre('npm test', { truncated: true }), { source: 'claude', root: null })?.hookSpecificOutput.permissionDecisionReason ?? '', /too long/);
   });
 
   it('keeps its reason short', () => {

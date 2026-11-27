@@ -1,7 +1,9 @@
 // "Always hold risky commands for me" end to end: the switch from a browser, the file beside
 // server.json, the forwarder run as `hook.mjs hold`, and POST /api/hold (server/hold.mjs).
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { HOLD_FILE } from '../../server/hold.mjs';
@@ -74,7 +76,7 @@ describe('holding risky commands', () => {
     const codex = await postHold(bash('rm -rf build'), { source: 'codex' });
     assert.equal(codex.status, 200);
     assert.deepEqual(JSON.parse(codex.text), { output: null });
-    assert.match(JSON.parse((await postHold(bash('rm -rf build'))).text).output.hookSpecificOutput.permissionDecisionReason, /deletes recursively/);
+    assert.match(JSON.parse((await postHold(bash('rm -rf src'))).text).output.hookSpecificOutput.permissionDecisionReason, /deletes recursively/);
   });
 
   it('forwards nothing to the town: the ordinary PreToolUse hook reports the call', async () => {
@@ -82,6 +84,34 @@ describe('holding risky commands', () => {
     await town.sendHook(bash('rm -rf dist', { session_id: 'hold-quiet' }), { args: ['hold'] });
     await new Promise((resolve) => setTimeout(resolve, 200));
     assert.equal(browser.messages.filter((m) => m?.t === 'hook').length, before);
+  });
+
+  it('tells the town when the hold check is missing from Claude Code\'s hooks', async () => {
+    const hello = await (await fetch(`${town.baseUrl}/api/hello`)).json();
+    assert.equal(hello.settings.holdRisky, true);
+    assert.equal(hello.settings.holdCheckMissing, true, 'this town has no hooks installed');
+  });
+
+  it('after a hold check with no answer, skips asking for a while', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'tt-hold-backoff-'));
+    try {
+      // A server.json whose port nothing answers on: the check gets no proof.
+      const blocker = createServer().listen(0, '127.0.0.1');
+      await new Promise((resolve) => blocker.once('listening', resolve));
+      const { port } = /** @type {import('node:net').AddressInfo} */ (blocker.address());
+      await new Promise((resolve) => blocker.close(resolve));
+      const state = JSON.parse(readFileSync(join(town.home, 'server.json'), 'utf8'));
+      writeFileSync(join(home, 'server.json'), JSON.stringify({ ...state, port, pid: process.pid }));
+      writeFileSync(join(home, HOLD_FILE), '');
+      const env = { ...process.env, ANDARY_HOME: home };
+      assert.equal((await town.sendHook(bash('git push -f'), { args: ['hold'], env })).stdout, '');
+      assert.ok(existsSync(join(home, 'hold-backoff')), 'it remembers the failure');
+      const started = Date.now();
+      assert.equal((await town.sendHook(bash('git push -f'), { args: ['hold'], env })).stdout, '');
+      assert.ok(Date.now() - started < 1500, 'and does not wait for an answer again');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('needs the hook secret', async () => {

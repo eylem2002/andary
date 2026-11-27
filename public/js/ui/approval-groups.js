@@ -81,13 +81,15 @@ export function approvalRisk(approval, state) {
 }
 
 /**
- * Every reason any of a card's requests is risky, each once, in the order found.
+ * Every reason any of a card's requests is risky, each once, in the order found; `quiet` when
+ * every one is only the delete of a folder the project rebuilds (core/risk.js).
  * @param {Approval[]} members
  * @param {StoreState} state
- * @returns {string[]}
+ * @returns {{ reasons: string[], quiet: boolean }}
  */
-export function groupReasons(members, state) {
-  return [...new Set(members.flatMap((member) => approvalRisk(member, state)?.reasons ?? []))];
+export function groupRisk(members, state) {
+  const risks = members.map((member) => approvalRisk(member, state)).filter((risk) => risk !== null);
+  return { reasons: [...new Set(risks.flatMap((risk) => risk.reasons))], quiet: risks.length > 0 && risks.every((risk) => risk.quiet === true) };
 }
 
 /**

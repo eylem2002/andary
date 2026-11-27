@@ -102,8 +102,10 @@ function holdSwitch(ctx) {
   input.addEventListener('change', () => ctx.controls.setHoldRisky?.(input.checked));
   const block = h('div', { class: 'hud-setting' },
     settingRow('hud-set-hold', 'Always hold risky commands for me', input),
-    h('p', { class: 'hud-setting__help', id: 'hud-set-hold-help', text: 'Claude Code asks you before a risky shell command (rm -r, a force push, git reset --hard, curl | sh…) even when an allow rule would let it run. Needs the hooks of this version (run andary install again) and new sessions. A second look, not a sandbox: what Andary does not recognise still runs.' }));
-  return { input, block };
+    h('p', { class: 'hud-setting__help', id: 'hud-set-hold-help', text: 'Claude Code asks you before a risky shell command (rm -r, a force push, git reset --hard, curl | sh…) even when an allow rule would let it run. Needs the hooks of this version (run andary install again) and new sessions. Nothing is held while Andary is not running. A second look, not a sandbox: what Andary does not recognise still runs.' }));
+  const missing = h('p', { class: 'hud-setting__help hud-setting__warning', role: 'status', 'data-testid': 'hold-risky-missing', hidden: true, text: 'The hold check is missing from your Claude Code hooks, so nothing is held yet: run andary install again, then start new sessions.' });
+  block.append(missing);
+  return { input, block, missing };
 }
 
 /** @param {HudContext} ctx */
@@ -111,6 +113,7 @@ export function createSettingsDialog(ctx) {
   const syncSwitches = () => {
     remote.checked = Boolean(ctx.view.serverSettings.remoteApprovals);
     hold.input.checked = Boolean(ctx.view.serverSettings.holdRisky);
+    setHidden(hold.missing, !(ctx.view.serverSettings.holdRisky && ctx.view.serverSettings.holdCheckMissing));
     remote.disabled = hold.input.disabled = ctx.view.connection !== 'live';
   };
   const remote = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-remote', 'data-testid': 'remote-approvals-toggle', role: 'switch' }));

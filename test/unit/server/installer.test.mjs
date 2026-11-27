@@ -11,6 +11,7 @@ import {
   applyHooksChange,
   buildHooksConfig,
   forwarderPath,
+  holdCheckInstalled,
   hookCommand,
   inspectInstallations,
   isAndaryHook,
@@ -21,6 +22,7 @@ import {
   withoutAndaryHooks,
 } from '../../../server/installer.mjs';
 import { CLIENTS } from '../../../server/clients.mjs';
+import { describeScope } from '../../../server/cli/status.mjs';
 
 /** Claude Code's registrations, the installer's default client. */
 const HOOK_REGISTRATIONS = CLIENTS.claude.registrations;
@@ -344,6 +346,21 @@ describe('inspection helpers', () => {
     assert.equal(report.limitsMod, true);
     assert.equal(report.plugin, false, 'the mod is not the andary plugin');
     assert.equal(report.installed, false, 'it sends limits, not events');
+  });
+
+  it('an install from before the hold check is not a whole one, and says how to fix it', () => {
+    run('install');
+    assert.equal(holdCheckInstalled({ dir: join(dir, 'project'), env, home }), true);
+    const settings = readJson(userSettings);
+    settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter((/** @type {any} */ group) => !group.matcher);
+    writeJson(userSettings, settings);
+    const report = inspectInstallations({ dir: join(dir, 'project'), env, home });
+    const user = report.scopes.find((s) => s.client.id === 'claude' && s.scope === 'user');
+    assert.ok(user);
+    assert.equal(user.complete, false);
+    assert.equal(user.holdMissing, true);
+    assert.match(describeScope(user), /installed, but the hold check is missing .*; run install again$/);
+    assert.equal(holdCheckInstalled({ dir: join(dir, 'project'), env, home }), false);
   });
 
   it('flags partial installs and unreadable files', () => {

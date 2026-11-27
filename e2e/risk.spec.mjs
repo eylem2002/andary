@@ -118,6 +118,11 @@ test('"Always hold risky commands for me" makes the hold check ask, even under a
   const risky = hook('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'git push -f origin main' }, tool_use_id: 'toolu_hold' });
   expect((await town.sendHook(risky, { args: ['hold'] })).stdout).toBe('');
   await turnOn(page, 'hold-risky-toggle', 'holdRisky');
+  // This town's Claude Code has no Andary hooks at all: Settings says nothing is held yet.
+  await page.getByTestId('settings-button').click();
+  await expect(page.getByTestId('hold-risky-missing')).toBeVisible();
+  await expect(page.getByTestId('hold-risky-missing')).toContainText('run andary install again');
+  await page.keyboard.press('Escape');
   const output = JSON.parse((await town.sendHook(risky, { args: ['hold'] })).stdout);
   expect(output.hookSpecificOutput).toEqual({
     hookEventName: 'PreToolUse',
@@ -125,4 +130,38 @@ test('"Always hold risky commands for me" makes the hold check ask, even under a
     permissionDecisionReason: 'Andary holds risky commands for you: rewrites remote history (force push)',
   });
   expect((await town.sendHook(hook('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test' } }), { args: ['hold'] })).stdout).toBe('');
+});
+
+test('a request that joins a card on screen waits a moment, unticked, and a key answer then skips it', async ({ page }) => {
+  await signIn(page);
+  await turnOn(page, 'remote-approvals-toggle', 'remoteApprovals');
+  const input = { command: 'git push --force-with-lease' };
+  const first = town.sendHook(hook('PermissionRequest', { tool_name: 'Bash', tool_input: input }));
+  const second = town.sendHook(hook('PermissionRequest', { session_id: 'e2e-other', cwd: '/work/e2e-api', tool_name: 'Bash', tool_input: input }));
+  const checks = page.getByTestId('approval-crew-check');
+  await expect(checks).toHaveCount(2);
+  await showApprovals(page);
+  const card = page.locator('[data-testid="approval-card"][data-status="pending"]');
+  const allow = card.getByTestId('approve');
+  await expect(allow).not.toHaveAttribute('aria-disabled', 'true');
+  await card.focus();
+  // The viewer has read the card; a third crew asks the same thing just now.
+  const third = town.sendHook(hook('PermissionRequest', { session_id: 'e2e-prod', cwd: '/home/me/prod-repo', tool_name: 'Bash', tool_input: input }));
+  await expect(checks).toHaveCount(3);
+  await page.keyboard.press('a');
+  await page.waitForTimeout(300);
+  await expect(card).toHaveCount(1);
+  await expect(checks).toHaveCount(3, { timeout: 1000 });
+  const newcomer = card.locator('label').filter({ hasText: '/home/me/prod-repo' }).getByTestId('approval-crew-check');
+  await expect(newcomer).not.toBeChecked();
+  // Once the card has stayed as it is, A answers the crews that were ticked, not the newcomer.
+  await expect(allow).not.toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('a');
+  for (const pending of [first, second]) expect(JSON.parse((await pending).stdout).hookSpecificOutput.decision.behavior).toBe('allow');
+  const left = page.locator('[data-testid="approval-card"][data-status="pending"]');
+  await expect(left).toHaveCount(1);
+  await expect(left).toContainText('$ git push --force-with-lease');
+  await expect(left.getByTestId('deny')).not.toHaveAttribute('aria-disabled', 'true');
+  await left.getByTestId('deny').click();
+  expect(JSON.parse((await third).stdout).hookSpecificOutput.decision.behavior).toBe('deny');
 });

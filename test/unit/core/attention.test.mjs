@@ -537,11 +537,11 @@ describe('risky commands that ran without asking', () => {
   test('a risky command you were asked about is no notice; the same one run later without asking is', () => {
     const t = town();
     t.send('SessionStart', { source: 'startup' }, T0 - 1000);
-    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'rm -rf dist' } }, T0);
-    ran(t, 'rm -rf dist', T0 + 100);
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'rm -rf src' } }, T0);
+    ran(t, 'rm -rf src', T0 + 100);
     assert.deepEqual(t.items(T0 + 200).filter((item) => item.kind === 'risk'), []);
-    ran(t, 'rm -rf dist', T0 + 500);
-    assert.deepEqual(t.items(T0 + 600).filter((item) => item.kind === 'risk').map((item) => item.text), ['Ran without asking: rm -rf dist (deletes recursively)']);
+    ran(t, 'rm -rf src', T0 + 500);
+    assert.deepEqual(t.items(T0 + 600).filter((item) => item.kind === 'risk').map((item) => item.text), ['Ran without asking: rm -rf src (deletes recursively)']);
   });
 
   test('an ordinary command, or a risky one that was interrupted, is no notice', () => {
@@ -559,5 +559,45 @@ describe('risky commands that ran without asking', () => {
     t.send('SessionEnd', { reason: 'other' }, T0 + 100);
     assert.deepEqual(t.items(T0 + 200).filter((item) => item.kind === 'risk'), []);
     assert.deepEqual(t.store.getState().risks, []);
+  });
+});
+
+describe('risky runs: which call asked', () => {
+  test('the server\'s call key ties a request to its call, also when an adapter renamed the tool', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    const patch = '*** Begin Patch\n*** Add File: /home/dev/.bashrc\n+x\n*** End Patch';
+    t.send('PermissionRequest', { tool_name: 'apply_patch', tool_input: { command: patch }, andary_key: 'k-patch' }, T0);
+    // Codex's patch arrives as a Write of the file it adds, with the same key.
+    t.send('PostToolUse', { tool_name: 'Write', tool_input: { file_path: '/home/dev/.bashrc', content: 'x' }, tool_use_id: 'p1', andary_key: 'k-patch', andary_tool: 'apply_patch', tool_response: {} }, T0 + 100);
+    assert.deepEqual(t.items(T0 + 200).filter((item) => item.kind === 'risk'), []);
+  });
+
+  test('a refused request takes its mark away, so the same command run later without asking counts', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    const input = { command: 'git push --force' };
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: input }, T0);
+    t.send('PermissionDenied', { tool_name: 'Bash', tool_input: input, tool_use_id: 'd1', reason: 'no' }, T0 + 50);
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: input, tool_use_id: 'd2', tool_response: {} }, T0 + 500);
+    assert.equal(t.items(T0 + 600).filter((item) => item.kind === 'risk').length, 1);
+  });
+
+  test('a request denied in the town takes its mark away too', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    const input = { command: 'git reset --hard' };
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: input }, T0);
+    t.store.setApproval(approvalOf({ toolInput: input }));
+    t.store.setApproval(approvalOf({ toolInput: input, status: 'denied', decidedBy: 'town' }));
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: input, tool_use_id: 'd3', tool_response: {} }, T0 + 500);
+    assert.equal(t.items(T0 + 600).filter((item) => item.kind === 'risk').length, 1);
+  });
+
+  test('a rebuildable folder deleted without asking is no notice', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'rm -rf node_modules dist' }, tool_use_id: 'q1', tool_response: {} }, T0);
+    assert.deepEqual(t.items(T0 + 100).filter((item) => item.kind === 'risk'), []);
   });
 });

@@ -193,7 +193,7 @@ function handleHello(ctx, req, res) {
   }
   const known = authenticated || Boolean(ctx.team?.memberOf(req.headers[TEAM_HEADER]));
   const { approvalTimeoutMs } = publicSettings(ctx);
-  const settings = { remoteApprovals: false, notify: false, notifyLimits: false, holdRisky: false, ...(known ? { approvalTimeoutMs } : {}) };
+  const settings = { remoteApprovals: false, notify: false, notifyLimits: false, holdRisky: false, holdCheckMissing: false, ...(known ? { approvalTimeoutMs } : {}) };
   sendJson(res, 200, { app: APP_ID, ...(known ? { version: ctx.version } : {}), authenticated, settings });
 }
 
