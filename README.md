@@ -307,9 +307,15 @@ card per crew with finished turns you have not reviewed yet: what deserves a sec
 (the latest test run failed, "said done, but tests were not re-run", another crew edited the same
 folder, a turn stopped on an error, failed calls), then the files its turns changed with lines
 added and removed (a click opens the diff when the town still has it), the latest test and build,
-what the turns cost, and a git command to copy, such as
-`git -C ~/code/api diff 'HEAD@{2026-11-23T09:05:00Z}'`: what changed in that work tree since then,
-committed or not, read from git's own record of where the work tree was (its reflog). **Mark
+what the turns cost, and two git commands to copy. The first, such as
+`git -C ~/code/api diff 'HEAD@{2026-11-23T09:05:00Z}'`, compares the commit the work tree was on at
+your mark (git's own record of it, the reflog) with the work tree now: changes left uncommitted
+before the mark show again, and new files show only after `git add -N`. The second,
+`git -C ~/code/api status --short`, lists what is uncommitted, new files included. If git says
+"unknown revision", that repository keeps no reflog (`core.logAllRefUpdates` off, or a fresh
+clone with no moves since); `git diff HEAD` then shows the uncommitted work. The commands are
+written for bash, zsh or Git Bash; for a crew in a Windows folder (`C:\…`) they are quoted for cmd
+and PowerShell 7 instead, and the resume command uses `pushd`. **Mark
 reviewed** clears the card until the crew finishes another turn. Your marks stay in this browser
 (and its other tabs); nothing is sent anywhere. It covers the latest 60 turns the town keeps across
 crews. It is a list of what to look at, not a code editor.
@@ -317,7 +323,8 @@ crews. It is a list of what to look at, not a code editor.
 ### Resume and hand off
 
 A lead's details hold **Resume and hand off**: the command that resumes its session in its folder
-(`cd ~/code/api && claude --resume <id>`, or `codex resume <id>`) with a copy button, and **Copy
+(`cd ~/code/api && claude --resume <id>`, or `codex resume <id>`; `pushd "C:\…" && …` for a Windows
+folder, which cmd and PowerShell 7 both run) with a copy button, and **Copy
 handoff**: Markdown with the crew's goal, the files its turns changed, the latest test and build,
 open warnings, its to-dos and the last words of its latest turns, to paste into another agent, a
 pull request or a teammate's chat. It is built from what the town already holds, never written by

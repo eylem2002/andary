@@ -1642,25 +1642,27 @@ ReviewCrew { sessionId, name, cwd, source, member: string|null, turns, start /* 
              reviewedAt: number|null, warnings: string[] /* most serious first, each once */,
              files: ReviewFile[] /* merged by path, the latest turn's first, ≤ 20 */, moreFiles, shellEdits: boolean,
              test: ReceiptRun|null /* the latest */, build: ReceiptRun|null, costUsd: number|null, working: boolean,
-             diff /* git -C <cwd> diff 'HEAD@{<mark or first start, UTC>}' */ }
+             diff /* git -C <cwd> diff 'HEAD@{<mark or first start, UTC>}' */, status /* git -C <cwd> status --short */ }
 ```
 
 Warnings, in order: the latest test run failed; each receipt `flag` (said once, "(2 turns)" when it
 repeats); another crew edited files in the folder; turns stopped on an error; interrupted turns;
 failed calls. Crews with warnings come first, then the most recently finished. A mark
 (`reviewMark`) is the end of the crew's latest receipt when you mark it, in the receipts' own clock,
-so it is never compared with the browser's. The HUD keeps marks in `localStorage`
+so it is never compared with the browser's; Mark reviewed uses the end of the latest turn the card
+showed. Commands are quoted for a POSIX shell (`shellQuote`), or with double quotes when the folder
+looks like Windows (`isWindowsPath`: `C:\`, `C:/`, `\\server`), for cmd and PowerShell. The HUD keeps marks in `localStorage`
 (`andary:reviewed`, `{ [sessionId]: number }`, the newest 300; per town, as the origin is; shared
 by its tabs through the `storage` event); the demo keeps its own for the page's life. Nothing is
 sent to the server.
 
 **Resume and handoff** (`core/handoff.js`, pure). `resumeCommand(session)` is
-`cd <cwd> && claude --resume <id>` (`codex resume <id>` for a Codex session), each word quoted for
-a POSIX shell when it needs it (`shellQuote`), or null for the session `unknown`.
+`cd <cwd> && claude --resume <id>` (`codex resume <id>` for a Codex session; `pushd "<cwd>" && …`
+for a Windows folder), each word quoted as above, or null for the session `unknown`.
 `handoffMarkdown({ session, receipts, warnings, lastMessage })` writes: the agent and session id,
 the folder, the resume command, the goal (the latest prompt), files touched across the crew's kept
 receipts, the latest test and build, the open warnings (what needs you for the crew, and the latest
-receipt's warnings), the to-dos and tasks as checkboxes, and the last words of its three latest
+receipt's warnings; a turn that merely finished is not one), the to-dos and tasks as checkboxes, and the last words of its three latest
 turns (or the lead's last message). `standupMarkdown({ title, period, crews, quiet })` writes Catch
 me up's lines, each crew's cost so far (an estimate) included. No model writes any of it; the HUD
 puts it on the clipboard only.
@@ -1908,7 +1910,7 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn, a stop, a stuck alert or a conflict aside |
 | `[data-testid="catch-up-button"]` | the masthead's "Catch me up", offered after time away (`W` opens the dialog any time) |
 | `[data-testid="catch-up"]` | the Catch me up dialog: `[data-testid="catch-up-period"]`, one `[data-testid="catch-up-crew"][data-session-id]` per crew (with `[data-testid="catch-up-need"]` when it needs you), `[data-testid="catch-up-quiet"]`; the period buttons `[data-testid="catch-up-scope-looked"]` and `[data-testid="catch-up-scope-today"]` (`aria-pressed`), `[data-testid="catch-up-copy"]` copies the Markdown shown in `[data-testid="catch-up-markdown"]` |
-| `[data-testid="review"]` | the Review dialog (`R`, or the toolbar's `[data-tool="review"]`, whose badge `[data-testid="review-count"]` counts crews to review): one `[data-testid="review-crew"][data-session-id]` per crew with `[data-testid="review-period"]`, `[data-testid="review-warnings"]` (when it has any), `[data-testid="review-diff"]` with `[data-testid="review-copy-diff"]`, `[data-testid="review-mark"]` and `[data-testid="review-open"]`; `[data-testid="review-empty"]` when none |
+| `[data-testid="review"]` | the Review dialog (`R`, or the toolbar's `[data-tool="review"]`, whose badge `[data-testid="review-count"]` counts crews to review): one `[data-testid="review-crew"][data-session-id]` per crew with `[data-testid="review-period"]`, `[data-testid="review-warnings"]` (when it has any), `[data-testid="review-diff"]` with `[data-testid="review-copy-diff"]`, `[data-testid="review-status"]` with `[data-testid="review-copy-status"]`, `[data-testid="review-mark"]` and `[data-testid="review-open"]`; `[data-testid="review-empty"]` when none |
 | `[data-testid="handoff-resume"]` | in a lead's inspector: the resume command, copied by `[data-testid="handoff-copy-resume"]`; `[data-testid="handoff-copy"]` copies the handoff, shown in `[data-testid="handoff-preview"]` |
 | `[data-testid="activity-log"]` | log; children `[data-testid="log-entry"]` |
 | `[data-testid="tasks-panel"]` | goals/tasks; children `[data-testid="task-item"]` |

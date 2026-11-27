@@ -66,6 +66,7 @@ test('review queue: R lists crews with unreviewed turns, warnings first; copy th
   await expect(cards.nth(1)).toContainText('No warnings in these turns.');
   const diff = cards.nth(0).getByTestId('review-diff');
   await expect(diff).toHaveText(/^git -C \/work\/api-server diff 'HEAD@\{\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\}'$/);
+  await expect(cards.nth(0).getByTestId('review-status')).toHaveText('git -C /work/api-server status --short');
   await cards.nth(0).getByTestId('review-copy-diff').click();
   await expect.poll(() => clipboard(page)).toBe(await diff.textContent());
 

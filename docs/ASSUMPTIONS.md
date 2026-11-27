@@ -1424,13 +1424,17 @@ section.
      clock (the hooks'), so it is never compared with the browser's clock. A turn that ends later
      brings the crew back with only the turns after the mark. The demo's marks last as long as the
      page (its story has its own clock).
-271. **The review's git command is `git -C <cwd> diff 'HEAD@{<UTC time>}'`**: the commit the work
-     tree was on at the mark (or at the first unreviewed turn's start) against the work tree now,
-     so committed and uncommitted work both show. The town knows no branch or base commit (study
-     items 2 and 3 are not built yet), and git's reflog answers "where was HEAD then" locally.
-     When the reflog does not reach back that far, git warns and uses its oldest entry. The time
-     is written in UTC so the computer's time zone does not matter. A teammate's crew in a team
-     town gets the same command with a note that it runs on their computer.
+271. **The review's git commands are `git -C <cwd> diff 'HEAD@{<UTC time>}'` and
+     `git -C <cwd> status --short`.** The diff compares the commit the work tree was on at the mark
+     (or at the first unreviewed turn's start) with the work tree now. It is not a snapshot of the
+     work tree at the mark: changes left uncommitted before the mark show again, and untracked
+     files show only after `git add -N`; the card says so, and the status line lists them. The
+     town knows no branch or base commit (study items 2 and 3 are not built yet), and git's reflog
+     answers "where was HEAD then" locally. When the reflog does not reach back that far, git warns
+     and uses its oldest entry; a repository with no reflog at all (`core.logAllRefUpdates` off)
+     answers "unknown revision", and the card says `git diff HEAD` then shows the uncommitted work.
+     The time is written in UTC so the computer's time zone does not matter. A teammate's crew in
+     a team town gets the same commands with a note that they run on their computer.
 272. **Review warnings, in order**: the latest test run failed; each receipt's flag (said done
      without a test after the edits, tests not re-run, a test that proves nothing), said once with
      "(n turns)"; another crew edited files in the folder; turns that stopped on an error; turns
@@ -1465,3 +1469,16 @@ section.
      summed over its agents' usage, which is the session's total, not today's) and the quiet
      crews. Looking at Today counts as a look, so "since I last looked" starts after it. PRs are not
      listed: the town does not know them yet (study item 3).
+279. **Copied commands are written for a POSIX shell (bash, zsh, Git Bash)**, single-quoting a word
+     only when the shell would otherwise read it. A crew whose folder looks like Windows
+     (`C:\…`, `C:/…` or `\\server\share`) gets double quotes instead, which cmd and PowerShell
+     both read (a Windows path holds no `"`), and its resume command is `pushd "<folder>" && …`:
+     `pushd` changes the drive too in cmd and in PowerShell, and PowerShell 7 runs `&&`
+     (Windows PowerShell 5.1 does not; run the two parts on separate lines there).
+280. **A handoff's open warnings leave out a turn that merely finished** (the "need you" item for
+     a finished turn); what blocks, stopped or seems stuck, conflicts and notes stay. Commands and
+     paths in the handoff keep their spaces; only line breaks become spaces inside inline code.
+281. **Mark reviewed marks the turns the card showed** (its latest turn's end), so a turn that ends
+     while the dialog is open stays to review. Before writing, the browser reads the marks again
+     and keeps another tab's later marks; a mark never moves a crew's mark back. Another tab
+     clearing the town's storage clears this tab's marks too.

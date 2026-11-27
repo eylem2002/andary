@@ -13,7 +13,7 @@ import { icon } from './icons.js';
 import { roundel } from './parts.js';
 import { copyButton, copyText } from './copy.js';
 import { costWords, runWords } from '../core/receipts.js';
-import { reviewMark, reviewQueue } from '../core/review.js';
+import { reviewQueue } from '../core/review.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -55,8 +55,18 @@ export function readMarks(raw) {
  * @param {Readonly<Record<string, number>>} marks @param {string} sessionId @param {number} at
  */
 export function withMark(marks, sessionId, at) {
-  const next = Object.entries({ ...marks, [sessionId]: at }).sort((a, b) => b[1] - a[1]).slice(0, MAX_MARKS);
+  const next = Object.entries({ ...marks, [sessionId]: Math.max(marks[sessionId] ?? 0, at) }).sort((a, b) => b[1] - a[1]).slice(0, MAX_MARKS);
   return Object.fromEntries(next);
+}
+
+/**
+ * Two sets of marks as one, the later mark of a crew winning.
+ * @param {Readonly<Record<string, number>>} a @param {Readonly<Record<string, number>>} b
+ */
+export function mergeMarks(a, b) {
+  const out = { ...a };
+  for (const [id, at] of Object.entries(b)) out[id] = Math.max(out[id] ?? 0, at);
+  return out;
 }
 
 /**
@@ -75,7 +85,8 @@ function createMarks(storage, onChange) {
   };
   const marks = { live: read(), demo: /** @type {Record<string, number>} */ ({}) };
   globalThis.addEventListener?.('storage', (event) => {
-    if (event.key !== REVIEWED_KEY) return;
+    // A null key: another tab cleared this town's storage.
+    if (event.key !== REVIEWED_KEY && event.key !== null) return;
     marks.live = read();
     onChange();
   });
@@ -88,7 +99,8 @@ function createMarks(storage, onChange) {
         marks.demo = withMark(marks.demo, sessionId, at);
         return;
       }
-      marks.live = withMark(marks.live, sessionId, at);
+      // Another tab may have marked a crew since this one last read: keep its marks too.
+      marks.live = withMark(mergeMarks(marks.live, read()), sessionId, at);
       try {
         storage?.setItem(REVIEWED_KEY, JSON.stringify(marks.live));
       } catch {
@@ -153,17 +165,31 @@ function fileList(ctx, state, crew) {
 }
 
 /**
- * The git command that shows the change, to copy.
+ * A command to copy, on its own line.
+ * @param {HudContext} ctx @param {string} command @param {string} name  what it is, for the copy button @param {string} testId
+ */
+function commandLine(ctx, command, name, testId) {
+  const code = h('code', { class: 'hud-mono hud-steps__code', 'data-testid': testId, text: command });
+  const copy = copyButton('Copy', { 'data-testid': `review-copy-${testId.slice('review-'.length)}`, 'aria-label': `Copy ${name}` });
+  copy.addEventListener('click', () => copyText(ctx, { text: command, button: copy, shown: code, spoken: `Copied ${command}` }));
+  return h('div', { class: 'hud-steps__command' }, code, copy);
+}
+
+/**
+ * The git commands that show the change, to copy, and what they show and do not.
  * @param {HudContext} ctx @param {ReviewCrew} crew
  */
 function diffBlock(ctx, crew) {
-  const code = h('code', { class: 'hud-mono hud-steps__code', 'data-testid': 'review-diff', text: crew.diff });
-  const copy = copyButton('Copy', { 'data-testid': 'review-copy-diff', 'aria-label': `Copy the git command for ${crew.name}` });
-  copy.addEventListener('click', () => copyText(ctx, { text: crew.diff, button: copy, shown: code, spoken: `Copied ${crew.diff}` }));
-  const words = crew.member
-    ? `This crew's work tree is on ${crew.member}'s computer: they can run it there.`
-    : 'Shows what changed in its work tree since then, committed or not (git\'s reflog of where the work tree was).';
-  return [h('div', { class: 'hud-steps__command' }, code, copy), h('p', { class: 'hud-steps__note', text: words })];
+  const words = [
+    crew.member ? `This crew's work tree is on ${crew.member}'s computer: they can run these there.` : '',
+    'Compares the commit the work tree was on at your mark with the work tree now. Changes left uncommitted before the mark show again; new files show only after git add -N, and the status line lists them.',
+    'If git says "unknown revision", this repository keeps no reflog: git diff HEAD shows the uncommitted work.',
+  ].filter(Boolean);
+  return [
+    commandLine(ctx, crew.diff, `the git diff command for ${crew.name}`, 'review-diff'),
+    commandLine(ctx, crew.status, `the git status command for ${crew.name}`, 'review-status'),
+    ...words.map((text) => h('p', { class: 'hud-steps__note', text })),
+  ];
 }
 
 /**
@@ -214,9 +240,8 @@ export function createReview(ctx, { storage = safeStorage(), now = Date.now } = 
 
   /** @param {ReviewCrew} crew */
   function markReviewed(crew) {
-    const state = ctx.store.getState();
-    const at = reviewMark(state, crew.sessionId);
-    if (at === null) return;
+    // The turns you saw: a turn that ended while the card was open is not marked with them.
+    const at = crew.end;
     const cards = [...list.children];
     const index = cards.findIndex((card) => card.getAttribute('data-session-id') === crew.sessionId);
     marks.set(live(), crew.sessionId, at);

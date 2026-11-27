@@ -49,10 +49,12 @@ export const MAX_REVIEW_FILES = 20;
  * @property {number|null} costUsd    what the turns cost, as far as known (an estimate)
  * @property {boolean} working        the crew is working now: more may come
  * @property {string} diff            a git command that shows the change since then
+ * @property {string} status          a git command that lists what is uncommitted and untracked
  */
 
 /**
- * A word for a POSIX shell: as it is when it holds nothing a shell reads, else in single quotes.
+ * A word for a POSIX shell (bash, zsh, Git Bash): as it is when it holds nothing a shell reads,
+ * else in single quotes.
  * @param {string} text
  */
 export function shellQuote(text) {
@@ -60,17 +62,37 @@ export function shellQuote(text) {
   return `'${text.replace(/'/g, `'\\''`)}'`;
 }
 
+/** A Windows folder (`C:\…`, `C:/…` or `\\server\share`): its commands are for cmd or PowerShell. @param {string} path */
+export const isWindowsPath = (path) => /^[A-Za-z]:[\\/]|^\\\\/.test(path);
+
+/**
+ * A word quoted for the shell a folder's commands run in: double quotes on Windows (cmd and
+ * PowerShell both read them; a Windows path holds no `"`), else shellQuote.
+ * @param {string} text @param {boolean} windows
+ */
+export function quoteFor(text, windows) {
+  if (!windows) return shellQuote(text);
+  return /^[\w@%+=:,./\\-]+$/.test(text) && !text.includes('@{') ? text : `"${text.replace(/"/g, '')}"`;
+}
+
 /**
  * The git command that shows what changed in a work tree since a time: the commit the work tree
- * was on then (git's reflog, `HEAD@{…}`) against what is there now, commits and uncommitted
- * changes alike. Times are UTC, which git reads whatever the computer's time zone.
+ * was on then (git's reflog, `HEAD@{…}`) against the work tree now. Uncommitted edits made before
+ * that time show again, and new files show only once git knows them (`git add -N`). Times are UTC,
+ * which git reads whatever the computer's time zone.
  * @param {string} cwd
  * @param {number} since
  */
 export function diffCommand(cwd, since) {
+  const windows = isWindowsPath(cwd);
   const at = new Date(Math.max(0, Math.floor(since / 1000) * 1000)).toISOString().replace('.000Z', 'Z');
-  const where = cwd ? `-C ${shellQuote(cwd)} ` : '';
-  return `git ${where}diff ${shellQuote(`HEAD@{${at}}`)}`;
+  const where = cwd ? `-C ${quoteFor(cwd, windows)} ` : '';
+  return `git ${where}diff ${quoteFor(`HEAD@{${at}}`, windows)}`;
+}
+
+/** The git command that lists what is uncommitted and untracked in a work tree. @param {string} cwd */
+export function statusCommand(cwd) {
+  return `git ${cwd ? `-C ${quoteFor(cwd, isWindowsPath(cwd))} ` : ''}status --short`;
 }
 
 /** A crew's name, as the HUD writes it. @param {Session|undefined} session @param {string} sessionId */
@@ -177,6 +199,7 @@ function rollUp(session, sessionId, receipts, reviewedAt) {
     costUsd: costs.length ? costs.reduce((a, b) => a + /** @type {number} */ (b), 0) : null,
     working: session?.status === 'working',
     diff: diffCommand(cwd, reviewedAt ?? start),
+    status: statusCommand(cwd),
   };
 }
 

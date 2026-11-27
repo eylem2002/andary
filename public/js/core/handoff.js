@@ -4,7 +4,7 @@
 // comes from what the town already holds (the session, its turn receipts, its to-dos, what needs
 // you); nothing is summarised by a model, and nothing leaves the browser but through your clipboard.
 import { durationWords, runWords } from './receipts.js';
-import { shellQuote } from './review.js';
+import { isWindowsPath, quoteFor } from './review.js';
 import { oneLine } from './text.js';
 
 /** @typedef {import('./store.js').StoreState} StoreState */
@@ -22,7 +22,8 @@ const HANDOFF_FILES = 25;
  * @param {string} text
  */
 export function codeSpan(text) {
-  const value = oneLine(text);
+  // Only line breaks go: the spaces inside a command or a path are part of it.
+  const value = String(text ?? '').replace(/[\r\n]+/g, ' ');
   const longest = Math.max(0, ...(value.match(/`+/g) ?? []).map((run) => run.length));
   const fence = '`'.repeat(longest + 1);
   const pad = value.startsWith('`') || value.endsWith('`') ? ' ' : '';
@@ -31,13 +32,18 @@ export function codeSpan(text) {
 
 /**
  * The command that resumes a session where it ran: `claude --resume <id>`, or `codex resume <id>`
- * for Codex, after a `cd` into its folder. Null without a session id.
+ * for Codex, after a `cd` into its folder (`pushd "C:\\…"` for a Windows folder, which cmd and
+ * PowerShell 7 both run). Null without a session id.
  * @param {Pick<Session, 'id'|'cwd'|'source'>} session
  */
 export function resumeCommand(session) {
   if (!session.id || session.id === 'unknown') return null;
-  const resume = session.source === 'codex' ? `codex resume ${shellQuote(session.id)}` : `claude --resume ${shellQuote(session.id)}`;
-  return session.cwd ? `cd ${shellQuote(session.cwd)} && ${resume}` : resume;
+  const windows = isWindowsPath(session.cwd ?? '');
+  const id = quoteFor(session.id, windows);
+  const resume = session.source === 'codex' ? `codex resume ${id}` : `claude --resume ${id}`;
+  if (!session.cwd) return resume;
+  // pushd changes the drive too, in cmd and in PowerShell (7 also runs `&&`); cd is enough elsewhere.
+  return `${windows ? 'pushd' : 'cd'} ${quoteFor(session.cwd, windows)} && ${resume}`;
 }
 
 /** "- [x] text". @param {{ text?: string, subject?: string, status: string }} item */

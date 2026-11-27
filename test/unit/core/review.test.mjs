@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { createStore } from '../../../public/js/core/store.js';
-import { MAX_REVIEW_FILES, diffCommand, reviewMark, reviewQueue, reviewWarnings, shellQuote } from '../../../public/js/core/review.js';
+import { MAX_REVIEW_FILES, diffCommand, isWindowsPath, reviewMark, reviewQueue, reviewWarnings, shellQuote, statusCommand } from '../../../public/js/core/review.js';
 import { codeSpan, handoffMarkdown, resumeCommand, standupMarkdown } from '../../../public/js/core/handoff.js';
 import { CWD, FIXTURES, SESSION, envelope, hook } from './helpers.mjs';
 
@@ -129,8 +129,19 @@ describe('commands to copy', () => {
     assert.equal(shellQuote(''), "''");
   });
 
-  test('the diff command reads git\'s reflog at a UTC time', () => {
+  test('the diff command reads git\'s reflog at a UTC time; the status command lists what git does not compare', () => {
     assert.equal(diffCommand('/w/a b', Date.UTC(2026, 10, 23, 9, 5, 7, 900)), "git -C '/w/a b' diff 'HEAD@{2026-11-23T09:05:07Z}'");
+    assert.equal(statusCommand('/w/a b'), "git -C '/w/a b' status --short");
+    assert.equal(statusCommand(''), 'git status --short');
+  });
+
+  test('a Windows folder gets double quotes, which cmd and PowerShell both read', () => {
+    for (const path of ['C:\\code\\api', 'd:/code/api', '\\\\server\\share\\api']) assert.ok(isWindowsPath(path), path);
+    for (const path of ['/home/dev/api', 'code/api', '']) assert.ok(!isWindowsPath(path), path);
+    const at = Date.UTC(2026, 10, 23, 9, 5, 7);
+    assert.equal(diffCommand('C:\\Users\\Me\\my app', at), 'git -C "C:\\Users\\Me\\my app" diff "HEAD@{2026-11-23T09:05:07Z}"');
+    assert.equal(diffCommand('C:\\code\\api', at), 'git -C C:\\code\\api diff "HEAD@{2026-11-23T09:05:07Z}"');
+    assert.equal(statusCommand("C:\\it's here"), 'git -C "C:\\it\'s here" status --short');
   });
 
   test('resume: Claude Code and Codex, in the crew\'s folder', () => {
@@ -139,12 +150,16 @@ describe('commands to copy', () => {
     assert.equal(resumeCommand({ id: 'abc', cwd: '', source: undefined }), 'claude --resume abc');
     assert.equal(resumeCommand({ id: 'unknown', cwd: CWD, source: 'claude' }), null);
     assert.equal(resumeCommand({ id: 'a;b', cwd: CWD, source: 'claude' }), `cd ${CWD} && claude --resume 'a;b'`);
+    // Windows: pushd changes the drive too, in cmd and PowerShell 7.
+    assert.equal(resumeCommand({ id: SESSION, cwd: 'D:\\code\\my api', source: 'claude' }), `pushd "D:\\code\\my api" && claude --resume ${SESSION}`);
+    assert.equal(resumeCommand({ id: 'abc', cwd: 'C:\\code', source: 'codex' }), 'pushd C:\\code && codex resume abc');
   });
 
   test('inline code survives backquotes', () => {
     assert.equal(codeSpan('npm test'), '`npm test`');
     assert.equal(codeSpan('a `b` c'), '``a `b` c``');
     assert.equal(codeSpan('`x`'), '`` `x` ``');
+    assert.equal(codeSpan('cd \'/w/a  b\'\nls'), "`cd '/w/a  b' ls`", 'spaces inside a command stay; line breaks go');
   });
 });
 

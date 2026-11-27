@@ -2,7 +2,7 @@
 // defensively and bounded, a card's period in words, Catch me up's "Today" and its Markdown.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { crewPeriod, readMarks, withMark } from '../../../public/js/ui/review.js';
+import { crewPeriod, mergeMarks, readMarks, withMark } from '../../../public/js/ui/review.js';
 import { crewCost, standupText, startOfDay } from '../../../public/js/ui/standup.js';
 import { periodText } from '../../../public/js/ui/catch-up.js';
 
@@ -22,6 +22,8 @@ describe('review marks', () => {
     assert.equal(Object.keys(marks).length, 300);
     assert.ok(!('s1' in marks) && !('s5' in marks) && 's6' in marks && 's305' in marks);
     assert.equal(withMark({ a: 1 }, 'a', 9).a, 9, 'a newer mark replaces the old one');
+    assert.equal(withMark({ a: 9 }, 'a', 1).a, 9, 'an older mark never takes a crew back');
+    assert.deepEqual(mergeMarks({ a: 1, b: 5 }, { b: 3, c: 2 }), { a: 1, b: 5, c: 2 }, 'another tab\'s marks merge in, the later winning');
   });
 
   test('a card says how many turns since when', () => {

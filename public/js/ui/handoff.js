@@ -13,12 +13,15 @@ import { reviewWarnings } from '../core/review.js';
 /** @typedef {import('./types.js').AgentState} AgentState */
 
 /**
- * What a handoff lists as open: what the crew needs you for now, and what its latest turn left to
+ * What a handoff lists as open: what the crew needs you for now (not a turn that merely finished), and what its latest turn left to
  * look at again (a missing test, a failed one, another crew in the folder…), each once.
  * @param {HudContext} ctx @param {StoreState} state @param {Session} session
  */
 function openWarnings(ctx, state, session) {
-  const needs = ctx.needsYou.items(state).filter((item) => item.sessionId === session.id || item.agentKeys.some((key) => state.agents[key]?.sessionId === session.id)).map((item) => item.text);
+  // A finished turn waiting for your next prompt is no warning.
+  const needs = ctx.needsYou.items(state)
+    .filter((item) => item.kind !== 'finished' && (item.sessionId === session.id || item.agentKeys.some((key) => state.agents[key]?.sessionId === session.id)))
+    .map((item) => item.text);
   const latest = state.receipts.findLast((r) => r.sessionId === session.id);
   const turn = latest ? reviewWarnings([latest], latest.test) : [];
   return [...new Set([...needs, ...turn])];
@@ -48,9 +51,9 @@ export function createHandoffSection(ctx) {
   const details = /** @type {HTMLDetailsElement} */ (h('details', { class: 'hud-handoff__details' }, h('summary', { text: 'Show the handoff' }), preview));
   const el = h('div', { class: 'hud-handoff' },
     resumeRow,
+    h('p', { class: 'hud-handoff__note', text: 'The handoff quotes your prompt and the agent\'s words. It goes to your clipboard only.' }),
     h('div', { class: 'hud-handoff__actions' }, copyHandoff),
-    details,
-    h('p', { class: 'hud-handoff__note', text: 'The handoff quotes your prompt and the agent\'s words. It goes to your clipboard only.' }));
+    details);
   /** @type {Session|null} */
   let session = null;
 
