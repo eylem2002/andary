@@ -110,7 +110,7 @@ async function boot() {
   if (paused) world.world.setPaused(true);
   hud.attachWorld(world.world, { failed: world.failed });
   try {
-    createDirector({ world: world.world, store, backlog: backlog.stop() });
+    createDirector({ world: world.world, store, backlog: backlog.stop(), quiet: () => hud.quiet() });
   } catch (error) {
     console.error('Andary: the director could not start; the HUD still works.', error);
   }

@@ -1254,10 +1254,10 @@ StoreState {
 AgentUsage { tokens: { input, output, cacheRead, cacheWrite }, costUsd, unpriced: boolean, model: string|null,
              context: { tokens, at } | null /* §4.8: the newest reading; null when unknown */,
              compactedAt: number|null /* §4.8: when it last compacted */ }
-Session { id, number /* the crew's number: lowest free when it arrived, never changed */,
+Session { id, number /* the crew's number: the lowest no crew still in town holds when it arrived; kept while it works; free again once it ends (an ended crew is shown without it); a crew that comes back takes a free one if another crew holds its own */,
           project /* cwd basename */, cwd, title?, color, model?, permissionMode?,
           member?: string|null /* §4.11 */, source?: 'claude'|'codex' /* §4.12 */,
-          status: 'working'|'waiting'|'idle'|'ended', goal? /* latest prompt, trimmed */,
+          status: 'working'|'waiting'|'idle'|'ended', goal? /* latest meaningful prompt, trimmed: one that only says to go on ("continue", "yes", "2"; core/goals.js) keeps the goal before it, and is logged as "Prompt: …" */,
           startedAt, lastActivity, agentKeys: string[],
           todos: { text, status: 'pending'|'in_progress'|'completed' }[],
           tasks: { id, subject, status: 'pending'|'in_progress'|'completed', owner? }[] }
@@ -1618,7 +1618,7 @@ town too, named by its folder); then your other crews in one line ("Quiet: web-a
 docs-site."). Someone watching a team town with its view link is told that only the host can catch
 up.
 
-`director.js`: `createDirector({ world, store, backlog?, humor?, random? }) → { dispose() }`
+`director.js`: `createDirector({ world, store, backlog?, humor?, random?, quiet? }) → { dispose() }` (`quiet()` true: Quiet town, no quips; plain lines such as "On it: …" stay)
 subscribes to the store and drives the world. `recordChanges(store) → { stop() }` keeps the
 store's changes until the director starts: `main.js` starts the source, the store and the HUD
 first and builds the 3D world once their first content is drawn, then passes `stop()`'s backlog
@@ -1862,7 +1862,10 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="connection-status"]` | status pill; text contains `Live`, `Demo`, `Connecting`, `Offline` or `Sign in` |
 | `[data-testid="login-hint"]` | shown when a server is running but the browser has no valid token |
 | `[data-testid="demo-button"]` | starts the simulation (shown when there is nothing live to watch) |
-| `[data-testid="crew-list"]` | crews panel; children `[data-testid="crew"][data-session-id]` |
+| `[data-testid="crew-list"]` | crews panel; children `[data-testid="crew"][data-session-id]`, crews at work first (most urgent first), ended crews under `[data-testid="crews-ended-toggle"]` ("Ended (n)", `aria-expanded`); `[data-testid="crew-count"]` ("n active"), `[data-testid="crew-goal"]`, `[data-testid="crew-finished"]` ("+n finished" helpers) |
+| `[data-testid="palette"]` | the command palette (Ctrl-K, ⌘-K, or `[data-testid="palette-button"]`): `[data-testid="palette-input"]` (a combobox), `[data-testid="palette-results"]` with `[data-testid="palette-option"][data-id]` (`aria-selected` on the highlighted one) |
+| `[data-testid="log-search"]` | the activity log's search box |
+| `[data-testid="quiet-town-toggle"]` | Settings' Quiet town switch |
 | `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects; `data-need` is the level of what it needs you for; a lead's row holds its context in use in `[data-testid="crew-context"]` (hidden without one, §4.8); `[data-testid="agent-note"]` inside it, a note (an edit of a file another agent changed) |
 | `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn, stop, stuck alert or conflict aside; `[data-testid="agent-context"]` holds the exact context in use (§4.8); `[data-testid="inspector-note"]`, its newest note; `[data-testid="send-note-input"]` and `[data-testid="send-note"]` send a note to the agent (§4.15), `[data-testid="send-note-why"]` says why it cannot, `[data-testid="send-note-status"]` that it is being sent or why it was refused, `[data-testid="send-note-caution"]` that delivery is not confirmed, and `[data-testid="sent-notes"]` lists its notes, `[data-testid="sent-note"][data-status]` |
 | `[data-testid="waiting-for-you"]` | the masthead's "N need you" button (`data-level` is the most urgent level); click goes to the next item |

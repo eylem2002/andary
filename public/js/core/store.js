@@ -11,6 +11,7 @@ import { BUILDINGS, CREW_COLORS, hatForModel, modelLabel } from './catalog.js';
 import { LEAD_NAME, MAX_APPROVALS, MAX_RECENT, MAX_RETIRED, MAX_SPAWNS_PER_SESSION, boundedPush, createModel, helpersOf } from './store-model.js';
 import { agentFor, assignSpawn, attribute, dropAgent, nameCrew, personColor, place, pruneDoneHelpers, pruneEndedSessions, reconcileTeammate, repairGuesses, sessionFor, sessionStatus } from './crews.js';
 import { recordChange, rememberFile } from './changes.js';
+import { nextGoal } from './goals.js';
 import { hazardText } from './conflicts.js';
 import { NO_SESSION, normalize } from './events.js';
 import { gitAddsOf, gitCommitsOf, gitHazardOf } from './git-commands.js';
@@ -38,8 +39,12 @@ export { ACHIEVEMENTS };
 /**
  * @typedef {object} Session  one Claude Code session, shown as a crew
  * @property {string} id
- * @property {number} number         the crew's number in the HUD (keys 1–9): the lowest one free
- *   when it arrived, kept for as long as the crew is listed, even when older crews are pruned
+ * @property {number} number         the crew's number in the HUD (keys 1–9): the lowest one no crew
+ *   still in town holds when it arrived, kept while it works; an ended crew's number is free for
+ *   the next crew (the HUD lists ended crews without one), and a crew that comes back keeps its
+ *   number unless another crew took it meanwhile
+ * @property {string} [goal]         latest meaningful prompt, trimmed: "continue", "yes" and the
+ *   like keep the goal before them (core/goals.js)
  * @property {string} project        cwd basename
  * @property {string} cwd
  * @property {string} [title]
@@ -47,7 +52,6 @@ export { ACHIEVEMENTS };
  * @property {string} [model]
  * @property {string} [permissionMode]
  * @property {'working'|'waiting'|'idle'|'ended'} status
- * @property {string} [goal]         latest prompt, trimmed
  * @property {number} startedAt
  * @property {number} lastActivity
  * @property {string[]} agentKeys
@@ -273,13 +277,17 @@ function applySessionEnd(m, e, s) {
 
 /** @type {Apply} */
 function applyPrompt(m, e, s, a) {
-  const goal = clip(oneLine(e.data.prompt), 200);
-  if (goal) s.goal = goal;
+  const prompt = clip(oneLine(e.data.prompt), 200);
+  // "continue", "yes", "go on": the work goes on, and the goal stays what it was (core/goals.js).
+  const goal = nextGoal(s.goal, prompt);
+  const followUp = Boolean(prompt) && goal !== prompt;
+  s.goal = goal;
   if (e.data.title) s.title = e.data.title;
   a.status = 'working';
   m.turnFailed.delete(a.key);
   place(a, 'hall', 'think');
-  return { icon: '💬', text: goal ? `New goal: ${goal}` : 'New prompt', level: 'info' };
+  if (followUp) return { icon: '💬', text: `Prompt: ${prompt}`, level: 'info' };
+  return { icon: '💬', text: prompt ? `New goal: ${prompt}` : 'New prompt', level: 'info' };
 }
 
 /** @type {Apply} */

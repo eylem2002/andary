@@ -84,6 +84,8 @@ export function playEffects(ctx, effects, state) {
   let toasts = 0;
   for (const effect of effects) {
     if (effect.type === 'sound') ctx.sound.play(effect.name);
+    // A quiet town keeps its achievements in the log and the leaderboard, without a toast.
+    else if (effect.type === 'achievement' && ctx.prefs.quietTown) continue;
     else if (toasts++ < MAX_TOASTS_PER_FRAME) showToast(ctx, effect, state);
   }
 }

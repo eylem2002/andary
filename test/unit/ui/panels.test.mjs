@@ -4,7 +4,6 @@ import { describe, test } from 'node:test';
 import { entriesSince, iconForEntry, matchesFilter } from '../../../public/js/ui/activity.js';
 import { summarizeActivity } from '../../../public/js/ui/announcer.js';
 import { ANSWER_DELAY_MS, answerReady, pendingCount, resultText } from '../../../public/js/ui/approvals.js';
-import { visibleAgents } from '../../../public/js/ui/crews.js';
 import { busiestAgent, sameSelection } from '../../../public/js/ui/hud-actions.js';
 import { effectFor, FRESH_MS } from '../../../public/js/ui/hud-effects.js';
 import { noticeKind } from '../../../public/js/ui/hud.js';
@@ -48,6 +47,11 @@ describe('activity log', () => {
     assert.equal(matchesFilter(log[0], { sessionId: 'b', errorsOnly: false }), false);
     assert.equal(matchesFilter(log[1], { sessionId: 'b', errorsOnly: true }), true);
     assert.equal(matchesFilter(log[2], { sessionId: '', errorsOnly: true }), false);
+    const entry = fixture({ sessionId: 'a', level: 'info', agentName: 'Scout 2', text: '$ npm publish --tag next' });
+    assert.equal(matchesFilter(entry, { sessionId: '', errorsOnly: false, text: 'PUBLISH npm' }), true, 'every word, any case and order');
+    assert.equal(matchesFilter(entry, { sessionId: '', errorsOnly: false, text: 'scout publish' }), true, 'the agent\'s name counts');
+    assert.equal(matchesFilter(entry, { sessionId: '', errorsOnly: false, text: 'publish deploy' }), false);
+    assert.equal(matchesFilter(entry, { sessionId: '', errorsOnly: false, text: '   ' }), true);
   });
 
   test('icons come from the building or event, errors always warn', () => {
@@ -117,23 +121,6 @@ describe('send a note', () => {
     assert.equal(noteCaution(agent({}), fixture({ source: 'claude' })), '');
     assert.match(noteCaution(agent({ agentId: 'h1' }), undefined), /^A helper may not read notes yet/);
     assert.match(noteCaution(agent({}), fixture({ source: 'codex' })), /^Codex adds a note at its next safe point, or with the next turn when it is idle; a note still waiting when the session ends is dropped\.$/);
-  });
-});
-
-describe('crews', () => {
-  test('finished agents beyond the latest three fold away', () => {
-    const agents = {
-      'a:main': agent({ key: 'a:main', status: 'working' }),
-      'a:1': agent({ key: 'a:1', status: 'done', lastActivity: 1 }),
-      'a:2': agent({ key: 'a:2', status: 'done', lastActivity: 2 }),
-      'a:3': agent({ key: 'a:3', status: 'done', lastActivity: 3 }),
-      'a:4': agent({ key: 'a:4', status: 'done', lastActivity: 4 }),
-      'a:5': agent({ key: 'a:5', status: 'waiting' }),
-    };
-    const session = fixture({ agentKeys: ['a:main', 'a:1', 'a:2', 'a:3', 'a:4', 'a:5', 'a:gone'] });
-    const state = fixture({ agents });
-    assert.deepEqual(visibleAgents(session, state, false).map((a) => a.key), ['a:main', 'a:2', 'a:3', 'a:4', 'a:5']);
-    assert.equal(visibleAgents(session, state, true).length, 6);
   });
 });
 

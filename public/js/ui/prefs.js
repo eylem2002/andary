@@ -28,6 +28,7 @@ import { PLACE_NAMES } from '../core/place-names.js';
  * @property {'auto'|'always'|'off'} placeNames  labels on the buildings: names where they fit, always, or none (core/place-names.js)
  * @property {boolean} lookAsks      a teammate's "come look" shows a note (team towns)
  * @property {boolean} walkPad       the step pad in walk mode on phones
+ * @property {boolean} quietTown     no joke bubbles over the agents and no achievement toasts
  */
 
 /** @type {Readonly<Prefs>} */
@@ -53,6 +54,7 @@ export const DEFAULT_PREFS = Object.freeze({
   placeNames: 'auto',
   lookAsks: true,
   walkPad: true,
+  quietTown: false,
 });
 
 export const STORAGE_KEY = PREFS_STORAGE_KEY;

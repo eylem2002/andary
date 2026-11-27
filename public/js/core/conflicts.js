@@ -615,7 +615,9 @@ function agentName(state, key, beside) {
   const agent = state.agents[key];
   if (!agent) return null;
   const crew = agent.sessionId === beside ? null : state.sessions.find((s) => s.id === agent.sessionId);
-  return crew ? `${agent.name} (crew ${crew.number})` : agent.name;
+  // An ended crew's number may belong to another crew by now (core/crew-board.js shownNumber).
+  const number = crew && crew.status !== 'ended' ? crew.number : 0;
+  return number ? `${agent.name} (crew ${number})` : agent.name;
 }
 
 /** "Scout 1", "Scout 1 and Builder 2", "Scout 1 and 2 others". @param {string[]} names */

@@ -1,5 +1,6 @@
 // The Activity log: one row per log entry, newest at the bottom. Rendering is incremental (only
-// new entries are appended) and capped at 200 rows; filtering by crew or to errors rebuilds it.
+// new entries are appended) and capped at 200 rows; filtering by crew, to errors or by the words
+// in the search box rebuilds it.
 // The list is one tab stop: arrow keys move between rows, Enter points the camera at the agent.
 // Auto-scroll pauses while the pointer or keyboard focus is in the log so a row never moves away
 // from someone reading it.
@@ -91,6 +92,8 @@ export function iconForEntry(entry) {
  * @typedef {object} LogFilter
  * @property {string} sessionId   '' for every crew
  * @property {boolean} errorsOnly
+ * @property {string} [text]      search words: every one must appear in the entry's text or its
+ *   agent's name, in any case and order
  */
 
 /**
@@ -100,8 +103,22 @@ export function iconForEntry(entry) {
 export function matchesFilter(entry, filter) {
   if (filter.sessionId && entry.sessionId !== filter.sessionId) return false;
   if (filter.errorsOnly && entry.level !== 'error') return false;
-  return true;
+  return matchesWords(entry, filter.text ?? '');
 }
+
+/**
+ * @param {Pick<LogEntry, 'text'|'agentName'>} entry
+ * @param {string} query
+ */
+function matchesWords(entry, query) {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const haystack = `${entry.agentName ?? ''} ${entry.text ?? ''}`.toLowerCase();
+  return words.every((word) => haystack.includes(word));
+}
+
+/** How long typing pauses before the number of matches is read out. */
+const SEARCH_SAY_MS = 700;
 
 /**
  * The entries appended to `log` since `last` (an entry object previously seen), or null when `last`
@@ -120,7 +137,9 @@ export function entriesSince(log, last) {
 
 /** @param {HudContext} ctx */
 export function createActivityPanel(ctx) {
-  const filter = { sessionId: '', errorsOnly: ctx.prefs.errorsOnly };
+  /** @type {LogFilter} */
+  const filter = { sessionId: '', errorsOnly: ctx.prefs.errorsOnly, text: '' };
+  const search = /** @type {HTMLInputElement} */ (h('input', { type: 'search', class: 'hud-input hud-log__search', id: 'hud-log-search', placeholder: 'Words in the log, or a name', autocomplete: 'off', spellcheck: 'false', 'data-testid': 'log-search' }));
   const crewSelect = h('select', { class: 'hud-select', id: 'hud-log-crew' }, h('option', { value: '', text: 'All crews' }));
   const errorsBox = h('input', { type: 'checkbox', class: 'hud-check', id: 'hud-log-errors', checked: filter.errorsOnly });
   const paused = h('span', { class: 'hud-log__paused', hidden: true }, icon('pause', { size: 14 }), 'Paused while you read');
@@ -130,6 +149,7 @@ export function createActivityPanel(ctx) {
     h('h2', { class: 'hud-sr', text: 'Activity' }),
     h('div', { class: 'hud-filters' },
       // Labels hold only their text: a control inside a label would add its value to the name.
+      h('div', { class: 'hud-field hud-field--search' }, h('label', { class: 'hud-field__label', for: 'hud-log-search', text: 'Search' }), search),
       h('div', { class: 'hud-field' }, h('label', { class: 'hud-field__label', for: 'hud-log-crew', text: 'Crew' }), crewSelect),
       h('label', { class: 'hud-toggle', for: 'hud-log-errors' }, errorsBox, h('span', { text: 'Errors only' })),
       paused),
@@ -143,6 +163,11 @@ export function createActivityPanel(ctx) {
   let hovered = false;
   let focused = false;
 
+  onSearch(ctx, search, () => list.children.length, (text) => {
+    filter.text = text;
+    rebuild(ctx.store.getState());
+    settle();
+  });
   crewSelect.addEventListener('change', () => {
     filter.sessionId = /** @type {HTMLSelectElement} */ (crewSelect).value;
     rebuild(ctx.store.getState());
@@ -200,12 +225,12 @@ export function createActivityPanel(ctx) {
   function updateEmpty(state) {
     const nothing = list.children.length === 0;
     setHidden(empty, !nothing);
-    setText(empty, state.log.length && nothing ? 'No entries match these filters.' : 'Every tool call, prompt and result appears here as it happens.');
+    setText(empty, state.log.length && nothing ? (filter.text ? `Nothing in the log matches “${filter.text}”.` : 'No entries match these filters.') : 'Every tool call, prompt and result appears here as it happens.');
   }
 
   /** @param {StoreState} state */
   function updateCrewOptions(state) {
-    const options = [{ id: '', label: 'All crews' }, ...state.sessions.map((session) => ({ id: session.id, label: `${session.number}. ${session.project}` }))];
+    const options = [{ id: '', label: 'All crews' }, ...state.sessions.map((session) => ({ id: session.id, label: session.status === 'ended' ? `${session.project} (ended)` : `${session.number}. ${session.project}` }))];
     const select = /** @type {HTMLSelectElement} */ (crewSelect);
     if (select.options.length === options.length && options.every((option, i) => select.options[i].value === option.id && select.options[i].text === option.label)) return;
     select.replaceChildren(...options.map((option) => h('option', { value: option.id, text: option.label })));
@@ -253,7 +278,35 @@ export function createActivityPanel(ctx) {
     }
   }
 
-  return { el, render, settle, reset, tick };
+  /** Puts the keyboard in the search box (the command palette's "Search the activity log"). */
+  function focusSearch() {
+    search.focus();
+    search.select();
+  }
+
+  return { el, render, settle, reset, tick, focusSearch };
+}
+
+/**
+ * Filters the log as you type; once typing pauses, screen readers hear how many entries match.
+ * @param {HudContext} ctx
+ * @param {HTMLInputElement} search
+ * @param {() => number} shown  rows in the log now
+ * @param {(text: string) => void} apply
+ */
+function onSearch(ctx, search, shown, apply) {
+  /** @type {ReturnType<typeof setTimeout>|undefined} */
+  let sayTimer;
+  search.addEventListener('input', () => {
+    const text = search.value.trim();
+    apply(text);
+    clearTimeout(sayTimer);
+    sayTimer = setTimeout(() => {
+      if (!text) return;
+      const n = shown();
+      ctx.announcer.polite(n ? `${n === MAX_ROWS ? `${n} or more` : n} ${n === 1 ? 'entry matches' : 'entries match'}.` : 'No entries match.');
+    }, SEARCH_SAY_MS);
+  });
 }
 
 /**

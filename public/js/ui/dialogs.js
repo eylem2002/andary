@@ -126,37 +126,8 @@ export function createSettingsDialog(ctx) {
   placeNames.el.append(h('p', { class: 'hud-setting__help', text: 'Zoom in and more names fit. Agents always come first: a label fades while someone stands in front of it. Shortcut: P.' }));
   const quality = choice('hud-set-quality', 'Graphics', [['auto', 'Automatic'], ['high', 'High quality'], ['low', 'Low power']], ctx.prefs.quality, (value) => ctx.setPrefs({ quality: /** @type {any} */ (value) }));
 
-  const volume = /** @type {HTMLInputElement} */ (h('input', { type: 'range', class: 'hud-range', id: 'hud-set-volume', min: '0', max: '100', step: '5', value: String(Math.round(ctx.prefs.volume * 100)) }));
-  volume.addEventListener('input', () => {
-    ctx.setPrefs({ volume: Number(volume.value) / 100 });
-    ctx.sound.setVolume(Number(volume.value) / 100);
-  });
-  const volumeBlock = h('div', { class: 'hud-setting' },
-    settingRow('hud-set-volume', 'Sound volume', volume),
-    h('p', { class: 'hud-setting__help', text: 'Sound is off until you turn it on with the speaker button or M.' }));
-  const ambient = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-ambient', role: 'switch', checked: ctx.prefs.ambient, 'data-testid': 'ambient-toggle' }));
-  ambient.addEventListener('change', () => {
-    ctx.setPrefs({ ambient: ambient.checked });
-    ctx.sound.setAmbient({ wanted: ambient.checked });
-  });
-  const ambientBlock = h('div', { class: 'hud-setting' },
-    settingRow('hud-set-ambient', 'Ambient sound', ambient),
-    h('p', { class: 'hud-setting__help', text: 'While sound is on: waves, gulls by day and crickets by night, a city hum and soft chords that grow busier with the crews, and rain with the town\'s weather.' }));
-
-  const announce = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-announce', role: 'switch', checked: ctx.prefs.announce }));
-  announce.addEventListener('change', () => {
-    ctx.setPrefs({ announce: announce.checked });
-    ctx.announcer.setActivityEnabled(announce.checked);
-  });
-  const announceBlock = h('div', { class: 'hud-setting' },
-    settingRow('hud-set-announce', 'Read out activity', announce),
-    h('p', { class: 'hud-setting__help', text: 'Screen readers hear a short summary of new activity at most every five seconds.' }));
-
-  const weather = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-weather', role: 'switch', checked: ctx.prefs.weather, 'data-testid': 'weather-toggle' }));
-  weather.addEventListener('change', () => ctx.setPrefs({ weather: weather.checked }));
-  const weatherBlock = h('div', { class: 'hud-setting' },
-    settingRow('hud-set-weather', 'Town weather', weather),
-    h('p', { class: 'hud-setting__help', text: 'Rain when commands fail, a storm when they keep failing, a rainbow when tests pass again, fog while a crew thinks for a long time.' }));
+  const sound = soundBlocks(ctx);
+  const quiet = quietBlock(ctx);
 
   const notify = notifyBlocks(ctx);
   const teamText = h('p', { class: 'hud-setting__help', 'data-testid': 'team-text' });
@@ -171,7 +142,13 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [you.el, walking.el, teamBlock, remoteBlock, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    // Settings for the work come first; the town's looks and your character after them.
+    body: [
+      section('Work', remoteBlock, notify.desktop, notify.phone, quiet.el, teamBlock),
+      section('Sound and reading', sound.volume, sound.ambient, sound.announce, motion.el),
+      section('Town and looks', look.el, theme.el, placeNames.el, quality.el, sound.weather, you.el, walking.el),
+      h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton),
+    ],
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -209,8 +186,8 @@ export function createSettingsDialog(ctx) {
       placeNames.set(ctx.prefs.placeNames);
       look.set(LOOK);
       applyLook.disabled = true;
-      weather.checked = ctx.prefs.weather;
-      ambient.checked = ctx.prefs.ambient;
+      sound.sync();
+      quiet.sync();
       notify.sync();
       setHidden(notify.phone, !live || viewer);
       dialog.open();
@@ -219,6 +196,75 @@ export function createSettingsDialog(ctx) {
     sync() {
       remote.checked = Boolean(ctx.view.serverSettings.remoteApprovals);
       remote.disabled = ctx.view.connection !== 'live';
+    },
+  };
+}
+
+/**
+ * A titled group of settings.
+ * @param {string} title
+ * @param {...HTMLElement} blocks
+ */
+function section(title, ...blocks) {
+  return h('section', { class: 'hud-setting-group', 'aria-label': title }, h('h3', { class: 'hud-dialog__sub hud-setting-group__title', text: title }), ...blocks);
+}
+
+/**
+ * Quiet town: no joke bubbles over the agents and no achievement toasts. What the agents do, what
+ * needs you and every toast that asks something of you stay.
+ * @param {HudContext} ctx
+ */
+function quietBlock(ctx) {
+  const toggle = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-quiet', role: 'switch', checked: ctx.prefs.quietTown, 'data-testid': 'quiet-town-toggle', 'aria-describedby': 'hud-set-quiet-help' }));
+  toggle.addEventListener('change', () => ctx.setPrefs({ quietTown: toggle.checked }));
+  const el = h('div', { class: 'hud-setting' },
+    settingRow('hud-set-quiet', 'Quiet town', toggle),
+    h('p', { class: 'hud-setting__help', id: 'hud-set-quiet-help', text: 'No joke bubbles over the agents and no achievement toasts. Plain updates, approvals and new crews still show; achievements stay in the log and the leaderboard.' }));
+  return { el, sync: () => { toggle.checked = ctx.prefs.quietTown; } };
+}
+
+/**
+ * Sound, reading out activity, and the town's weather.
+ * @param {HudContext} ctx
+ */
+function soundBlocks(ctx) {
+  const volumeInput = /** @type {HTMLInputElement} */ (h('input', { type: 'range', class: 'hud-range', id: 'hud-set-volume', min: '0', max: '100', step: '5', value: String(Math.round(ctx.prefs.volume * 100)) }));
+  volumeInput.addEventListener('input', () => {
+    ctx.setPrefs({ volume: Number(volumeInput.value) / 100 });
+    ctx.sound.setVolume(Number(volumeInput.value) / 100);
+  });
+  const volume = h('div', { class: 'hud-setting' },
+    settingRow('hud-set-volume', 'Sound volume', volumeInput),
+    h('p', { class: 'hud-setting__help', text: 'Sound is off until you turn it on with the speaker button or M.' }));
+  const ambientSwitch = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-ambient', role: 'switch', checked: ctx.prefs.ambient, 'data-testid': 'ambient-toggle' }));
+  ambientSwitch.addEventListener('change', () => {
+    ctx.setPrefs({ ambient: ambientSwitch.checked });
+    ctx.sound.setAmbient({ wanted: ambientSwitch.checked });
+  });
+  const ambient = h('div', { class: 'hud-setting' },
+    settingRow('hud-set-ambient', 'Ambient sound', ambientSwitch),
+    h('p', { class: 'hud-setting__help', text: 'While sound is on: waves, gulls by day and crickets by night, a city hum and soft chords that grow busier with the crews, and rain with the town\'s weather.' }));
+  const announceSwitch = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-announce', role: 'switch', checked: ctx.prefs.announce }));
+  announceSwitch.addEventListener('change', () => {
+    ctx.setPrefs({ announce: announceSwitch.checked });
+    ctx.announcer.setActivityEnabled(announceSwitch.checked);
+  });
+  const announce = h('div', { class: 'hud-setting' },
+    settingRow('hud-set-announce', 'Read out activity', announceSwitch),
+    h('p', { class: 'hud-setting__help', text: 'Screen readers hear a short summary of new activity at most every five seconds.' }));
+  const weatherSwitch = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', class: 'hud-switch', id: 'hud-set-weather', role: 'switch', checked: ctx.prefs.weather, 'data-testid': 'weather-toggle' }));
+  weatherSwitch.addEventListener('change', () => ctx.setPrefs({ weather: weatherSwitch.checked }));
+  const weather = h('div', { class: 'hud-setting' },
+    settingRow('hud-set-weather', 'Town weather', weatherSwitch),
+    h('p', { class: 'hud-setting__help', text: 'Rain when commands fail, a storm when they keep failing, a rainbow when tests pass again, fog while a crew thinks for a long time.' }));
+  return {
+    volume,
+    ambient,
+    announce,
+    weather,
+    sync() {
+      weatherSwitch.checked = ctx.prefs.weather;
+      ambientSwitch.checked = ctx.prefs.ambient;
     },
   };
 }

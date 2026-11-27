@@ -829,9 +829,15 @@ body {
   border-top: 0;
 }
 
+/* A crew's head stays at the top of the list while its stations scroll under it, so a row is
+   never read without its crew's name. The paper behind it hides the rows going under. */
 .hud-line__head {
-  position: relative;
-  z-index: 2;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: -13px -12px 0 -14px;
+  padding: 13px 12px 4px 14px;
+  background: var(--paper);
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr) auto;
   align-items: center;
@@ -914,6 +920,18 @@ body {
   position: relative;
   z-index: 1;
   margin-top: 6px;
+}
+
+/* The crew's line leaves its roundel inside the head, which is opaque (it stays on top). */
+.hud-line:has(.hud-stations:not(:empty)) .hud-line__head::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  bottom: -1px;
+  left: 25px;
+  z-index: -1;
+  width: 4px;
+  background: var(--crew);
 }
 
 /* The crew's line runs from its roundel down through every station. */
@@ -1088,6 +1106,53 @@ body {
 
 .hud-line.is-ended {
   padding-bottom: 12px;
+}
+
+/* A crew that ended while you were reading the list keeps its place for now, dimmed. */
+.hud-lines:not(.hud-lines--ended) > .hud-line.is-ended {
+  opacity: 0.6;
+}
+
+.hud-lines--ended .hud-line:first-child {
+  border-top: 1px solid var(--hairline);
+}
+
+/* "Ended (3)": the crews that went home, folded under the crews at work. */
+.hud-ended__toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.hud-ended__toggle::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+.hud-ended__toggle[aria-expanded="true"]::before {
+  transform: rotate(45deg);
+}
+
+.hud-ended__toggle:hover {
+  color: var(--ink);
+}
+
+.hud-ended__toggle:focus-visible {
+  outline-offset: -3px;
 }
 
 .hud-line.is-ended .hud-line__name {
@@ -1363,6 +1428,20 @@ body {
 
 .hud-field .hud-select {
   max-width: 150px;
+}
+
+/* The log's search box takes a row of its own, above the crew and errors filters. */
+.hud-field--search {
+  flex: 1 1 100%;
+}
+
+.hud-log__search {
+  flex: 1;
+  min-width: 0;
+}
+
+.hud-log__search::placeholder {
+  color: var(--ink-3);
 }
 
 /* The whole label is the click target; at the select's height it clears WCAG 2.5.8's 24 px. */
@@ -2599,7 +2678,8 @@ body {
 
 /* ---- toasts ------------------------------------------------------------------------------- */
 
-/* Toasts sit at the top of the open middle of the town, clear of the side boards. */
+/* Toasts sit in the top right corner of the open middle of the town, beside the side board and
+   clear of the town's centre, where the action is. */
 .hud-toasts {
   position: fixed;
   /* Below the top row, so a toast never covers the buttons there ("waiting for you" above all). */
@@ -2608,7 +2688,7 @@ body {
   left: calc(var(--gap) * 2 + var(--left-w));
   z-index: 60;
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
   pointer-events: none;
 }
 
@@ -2824,6 +2904,24 @@ body {
 
 .hud-setting {
   padding: 14px 0;
+}
+
+/* Settings come in groups: the work first, then sound and reading, then the town's looks. */
+.hud-setting-group + .hud-setting-group {
+  margin-top: 10px;
+  border-top: 2px solid var(--hairline);
+}
+
+.hud-setting-group__title {
+  margin: 18px 0 0;
+  color: var(--ink-2);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hud-setting-group:first-child .hud-setting-group__title {
+  margin-top: 4px;
 }
 
 .hud-setting:not([hidden]) ~ .hud-setting {
@@ -3711,8 +3809,10 @@ body {
   }
 
   .hud-line__more,
+  .hud-ended__toggle,
   .hud-toggle,
-  .hud-select {
+  .hud-select,
+  .hud-log__search {
     min-height: 44px;
   }
 }
@@ -4033,4 +4133,118 @@ body {
 .hud-receipt__row[data-tone="warn"] dt::before {
   content: "⚠ ";
   color: var(--waiting);
+}
+
+/* ---- command palette (Ctrl-K) ------------------------------------------------------------- */
+
+/* Near the top of the screen, where the eye goes to type; the results scroll under the box. */
+.hud-palette {
+  width: min(640px, calc(100vw - 24px));
+  margin-top: max(48px, 12dvh);
+}
+
+.hud-palette .hud-dialog__head {
+  padding: 10px 10px 10px 18px;
+}
+
+.hud-palette .hud-dialog__title {
+  color: var(--ink-2);
+  font-size: 14px;
+}
+
+.hud-palette .hud-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 12px 10px;
+  overflow: hidden;
+}
+
+.hud-palette__input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 16px;
+}
+
+.hud-palette__list {
+  max-height: min(420px, 55dvh);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.hud-palette__option {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border-left: 4px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.hud-palette__option[aria-selected="true"] {
+  border-left-color: var(--focus);
+  background: var(--paper-3);
+}
+
+.hud-palette__kind {
+  justify-self: start;
+  padding: 1px 7px 0;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.hud-palette__text {
+  display: grid;
+  min-width: 0;
+}
+
+.hud-palette__label {
+  overflow: hidden;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hud-palette__detail {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hud-palette__key {
+  color: var(--ink-3);
+}
+
+.hud-palette__none {
+  padding: 12px 10px;
+}
+
+.hud-palette__hint {
+  color: var(--ink-3);
+  font-size: 12px;
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  .hud-palette {
+    margin-top: 12px;
+  }
+
+  .hud-palette__hint,
+  .hud-palette__key {
+    display: none;
+  }
 }

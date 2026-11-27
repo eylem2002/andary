@@ -3,7 +3,7 @@
 
 /**
  * @typedef {'follow'|'escape'|'rotate-left'|'rotate-right'|'zoom-in'|'zoom-out'|'reset-view'|
- *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|'director'|'toggle-panels'|'usage'|'leaderboard'|'place-names'|'needs-you'|'catch-up'|'walk-mode'|`crew-${number}`} ShortcutAction
+ *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|'director'|'toggle-panels'|'usage'|'leaderboard'|'place-names'|'needs-you'|'catch-up'|'walk-mode'|'palette'|`crew-${number}`} ShortcutAction
  */
 
 /**
@@ -11,6 +11,7 @@
  * @type {ReadonlyArray<{ keys: string[], label: string, demoOnly?: boolean }>}
  */
 export const SHORTCUT_HELP = Object.freeze([
+  { keys: ['Ctrl', 'K'], label: 'Find a crew, an agent or an action (on a Mac, ⌘ K)' },
   { keys: ['C'], label: 'Director camera: follow the action by itself' },
   { keys: ['H'], label: 'Full-screen town: put the side boards away or bring them back' },
   { keys: ['F'], label: 'Follow the selected agent (or the busiest one)' },
@@ -75,6 +76,8 @@ const ACTIVATES_ON_SPACE = new Set(['BUTTON', 'A', 'SUMMARY', 'SELECT']);
 /**
  * @typedef {object} KeyLike
  * @property {string} key
+ * @property {string} [code]
+ * @property {boolean} [shiftKey]
  * @property {boolean} [ctrlKey]
  * @property {boolean} [metaKey]
  * @property {boolean} [altKey]
@@ -92,12 +95,14 @@ const ACTIVATES_ON_SPACE = new Set(['BUTTON', 'A', 'SUMMARY', 'SELECT']);
 /**
  * Maps a key press to a HUD action, or null when the HUD should leave the key alone: modifier
  * chords (browser and OS shortcuts), typing in a text field, and Space on a control that Space
- * activates. Space only pauses in demo mode.
+ * activates. Space only pauses in demo mode. The one chord it takes is Ctrl-K (⌘-K on a Mac), the
+ * command palette, which works while typing too, as it does in other apps.
  * @param {KeyLike} event
- * @param {{ mode?: 'live'|'demo', target?: TargetLike|null }} [context]
+ * @param {{ mode?: 'live'|'demo', target?: TargetLike|null, mac?: boolean }} [context]
  * @returns {ShortcutAction|null}
  */
-export function shortcutFor(event, { mode = 'live', target = null } = {}) {
+export function shortcutFor(event, { mode = 'live', target = null, mac = false } = {}) {
+  if (isPaletteKey(event, mac)) return 'palette';
   if (event.ctrlKey || event.metaKey || event.altKey) return null;
   if (isTypingTarget(target)) return null;
   if (event.key === ' ' || event.key === 'Spacebar') {
@@ -106,6 +111,24 @@ export function shortcutFor(event, { mode = 'live', target = null } = {}) {
   }
   if (/^[1-9]$/.test(event.key)) return /** @type {ShortcutAction} */ (`crew-${event.key}`);
   return KEY_ACTIONS[event.key] ?? null;
+}
+
+/**
+ * The command palette's chord: ⌘-K on a Mac, where Ctrl-K in a text field deletes to the end of
+ * the line; Ctrl-K elsewhere. Never with Alt or Shift, which other apps' chords use. The key
+ * code counts too, so another keyboard layout's K still works.
+ * @param {KeyLike} event
+ * @param {boolean} mac
+ */
+export function isPaletteKey(event, mac) {
+  const chord = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+  return Boolean(chord) && !event.altKey && !event.shiftKey && (event.key === 'k' || event.key === 'K' || event.code === 'KeyK');
+}
+
+/** Whether this browser runs on a Mac (or an iPhone or iPad with a keyboard). */
+export function onMac() {
+  const nav = /** @type {Navigator & { userAgentData?: { platform?: string } }} */ (globalThis.navigator);
+  return /Mac|iP(hone|ad|od)/.test(nav?.userAgentData?.platform || nav?.platform || '');
 }
 
 /**
@@ -137,12 +160,13 @@ function activatesOnSpace(target) {
  * @returns {() => void} removes the listener
  */
 export function installShortcuts({ getMode, handle }) {
+  const mac = onMac();
   /** @param {KeyboardEvent} event */
   const onKey = (event) => {
     // The 3D view handles its own keys (arrows, +/-, Q/E) and marks them as handled.
     if (event.defaultPrevented || event.isComposing) return;
     const target = /** @type {HTMLElement|null} */ (event.target instanceof HTMLElement ? event.target : null);
-    const action = shortcutFor(event, { mode: getMode(), target: target && describeTarget(target) });
+    const action = shortcutFor(event, { mode: getMode(), target: target && describeTarget(target), mac });
     if (action && handle(action, event)) event.preventDefault();
   };
   document.addEventListener('keydown', onKey);

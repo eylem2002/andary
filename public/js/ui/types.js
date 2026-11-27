@@ -116,6 +116,7 @@
  * @property {ReturnType<typeof import('./cinema.js').createCinema>} cinema   the director camera
  * @property {ReturnType<typeof import('./needs-you.js').createNeedsYou>} needsYou  what needs the viewer (core/attention.js)
  * @property {(item: import('../core/attention.js').AttentionItem) => void} goToNeed  goes to one thing that needs the viewer
+ * @property {(sessionId: string) => void} revealCrew  scrolls the crews board to a crew
  * @property {ReturnType<typeof import('./catch-up.js').createCatchUp>} catchUp  Catch me up: the dialog and the masthead's offer
  */
 

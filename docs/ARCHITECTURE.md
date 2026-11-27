@@ -136,7 +136,9 @@ references may cross.
 | the team town on the internet (`--tunnel`) | `server/tunnel.mjs` (cloudflared), `server/tunnel-watchdog.mjs` (stops it with the town), `isTunnelled` in `server/auth.mjs`, `openTunnel` in `server/cli/start.mjs` |
 | plan limits (the andary-limits mod) | `mods/andary-limits/`, `server/limits.mjs`, `public/js/core/limits.js`, `ui/limits.js` |
 | how a hook becomes town events | `public/js/core/events.js`, `summaries.js` |
-| crews, agents, the log | `public/js/core/store.js`, `crews.js` |
+| crews, agents, the log | `public/js/core/store.js`, `crews.js`, `goals.js` (a "continue" keeps the goal) |
+| the crews board's order, folding and numbers | `public/js/core/crew-board.js`, `public/js/ui/crews.js` |
+| the command palette (Ctrl-K) | `public/js/ui/palette.js`, `public/js/core/fuzzy.js` |
 | what needs you, and when an agent seems stuck | `public/js/core/dialogs.js`, `store-dialogs.js`, `waits.js`, `attention.js`, `loops.js`, `public/js/ui/needs-you.js` |
 | how a shell command line reads (segments, programs, redirections, folders) | `public/js/core/shell.js` |
 | what a lead's turn did (turn receipts: files, tests after the last edit, cost) | `public/js/core/receipts.js`, `public/js/core/shell.js`, `public/js/ui/inspector.js` |
