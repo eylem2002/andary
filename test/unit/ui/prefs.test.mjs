@@ -71,3 +71,11 @@ describe('loadPrefs / savePrefs', () => {
     assert.deepEqual(loadPrefs(null), DEFAULT_PREFS);
   });
 });
+
+describe('quiet town', () => {
+  test('is off by default and kept when stored', () => {
+    assert.equal(parsePrefs(null).quietTown, false);
+    assert.equal(parsePrefs(JSON.stringify({ quietTown: true })).quietTown, true);
+    assert.equal(parsePrefs(JSON.stringify({ quietTown: 'yes' })).quietTown, false);
+  });
+});

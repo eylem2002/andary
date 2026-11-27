@@ -1414,3 +1414,53 @@ section.
      backpack, cup, beard, earrings) plus 24 helpers in 55–57 draw calls, one per figure as
      before. Frame rate is not meaningful under the software renderer here; on a phone it is
      bound by those draw calls, unchanged from PR 1's 58–60.
+269. **A prompt that only says to go on keeps the crew's goal.** Up to six words and 48
+     characters, every one from a short list ("continue", "go on", "yes", "ok", "please", "try
+     again", "lgtm"…), or a lone number of one or two digits (picking an option), counts as a
+     follow-up (`core/goals.js`). The goal stays the one before; with none yet, there is none. The
+     log still shows what was typed, as "Prompt: continue" instead of "New goal: …". "yes, but…"
+     and anything longer is a new goal.
+270. **An ended crew gives up its number.** Numbers are still never changed while a crew works,
+     but the next crew takes the lowest number no crew in town holds, so the crews at work stay
+     on `1`–`9`. Ended crews are listed without a number (Catch me up already hid it); a crew that
+     comes back keeps its number unless another crew took it meanwhile, then takes the lowest
+     free one. The 1–9 keys only reach crews at work.
+271. **The crews board's order** (`core/crew-board.js`): blocked or waiting for a permission,
+     then stopped, then an alert (stuck, same files), then a finished turn that counts, then
+     working, then idle; ties by crew number. Only counted "need you" items rank a crew (the same
+     list as the masthead). While the pointer or the keyboard is in the list the crews keep their
+     places (newcomers join at the end), so a row never moves under the hand or loses focus; the
+     order catches up when you leave. Ended crews are folded into "Ended (n)", newest first,
+     closed on every page load. The panel header counts the crews at work, the ones listed above
+     the group, matching the masthead's "n crews".
+272. **Finished helpers fold after 60 seconds** into "+n finished" (replacing "show the three
+     newest finished agents"): a helper that just finished stays in view for a minute so you see
+     it finish. The lead never folds. Unfolding is per crew and lasts until the page reloads.
+273. **The crews list opens at its top and `reveal` shows a crew's head**: the 1–9 keys, "need
+     you" and the palette scroll a crew fully into view when it fits, otherwise from its head,
+     never part-way down (the study's "opens mid-crew" came from scrolling to the nearest edge).
+     The head is sticky inside its own crew, with an opaque background.
+274. **The command palette searches what is in town now**: crews at work (most urgent first),
+     their agents (only once you type), and about twenty actions named for what they do now
+     ("Turn quiet town on"). Files and branches from the study's idea are left out (Andary does
+     not track branches yet; files are a long list best reached from an agent's details), as are
+     "send a note" and "copy resume", which need their own forms. **It never allows or denies a
+     request**: "Open approvals" takes you to the cards. Ctrl-K and ⌘-K work while typing in a
+     field and over other dialogs (it closes them), as in other apps; Ctrl-Shift-K and Alt
+     chords are left to the browser. A magnifier button beside Settings opens it on phones.
+275. **Quiet town** (off by default) removes every quip the director picks from `humor.js`
+     (arrivals, waits, successes, idle thoughts) and achievement and "town grew" toasts (with
+     their chime). Plain speech stays ("On it: <goal>", a turn's last message, errors' own
+     words), a short goal is always said plainly, and crew, approval and error toasts stay.
+     Achievements are still unlocked, logged and shown on the leaderboard.
+276. **Toasts moved to the top right of the open middle** of the town, beside the right board and
+     under the top row, instead of its top centre, where the director's shots and the camera's
+     focus are. The bottom centre was not used: the director caption, the building card and the
+     Walk panel already share it. Phones keep the full-width toasts under the sign.
+277. **Settings are grouped**: Work (remote approvals, notifications here and on the phone, Quiet
+     town, team town), then Sound and reading (volume, ambient, read out activity, motion), then
+     Town and looks (town look, theme, place names, graphics, weather, your character, walking).
+278. **The activity log's search** matches every typed word, in any case and order, in a row's
+     text or its agent's name, and combines with the crew and errors filters. It searches the
+     log the browser holds (the last 500 entries, 200 shown). Screen readers hear the number of
+     matches once typing pauses for 0.7 s. The query is not saved.

@@ -21,12 +21,14 @@ import { LEAD_NAME, MAX_DONE_PER_SESSION, MAX_ENDED_SESSIONS, ROLE_NAMES, TEAMMA
 // Sessions and agents.
 
 /**
- * The lowest crew number no listed crew holds. Numbers are never changed, so pruning an ended
- * crew does not renumber the others, and they stay small enough for the 1–9 keys.
+ * The lowest crew number no crew still in town holds. A crew keeps its number while it works;
+ * once it ends, its number is free for the next crew, so the crews at work stay on the 1–9 keys
+ * however many have come and gone (an ended crew is listed without its number).
  * @param {Model} m
+ * @param {Session|null} [except]  a crew coming back, which must not count its own number
  */
-function freeCrewNumber(m) {
-  const taken = new Set(m.state.sessions.map((s) => s.number));
+function freeCrewNumber(m, except = null) {
+  const taken = new Set(m.state.sessions.filter((s) => s.status !== 'ended' && s !== except).map((s) => s.number));
   let n = 1;
   while (taken.has(n)) n += 1;
   return n;
@@ -124,6 +126,8 @@ export function sessionFor(m, e) {
   s.status = 'idle';
   s.endedAt = undefined;
   s.endReason = undefined;
+  // Back at work: its old number, unless a newer crew took it meanwhile.
+  if (m.state.sessions.some((other) => other !== s && other.status !== 'ended' && other.number === s.number)) s.number = freeCrewNumber(m, s);
   createLead(m, s, e);
   return s;
 }

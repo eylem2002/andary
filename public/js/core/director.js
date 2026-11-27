@@ -52,6 +52,7 @@ import { agentState, contextFor, enqueue, makeVisit, pump, release, say, scoped,
  * @property {{subscribe: (listener: (change: StoreChange) => void) => () => void, getState: () => StoreState}} store
  * @property {{quip: (situation: string, context?: Record<string, unknown>, random?: () => number) => string}} [humor]
  * @property {() => number} [random]
+ * @property {() => boolean} [quiet]  a quiet town: no jokes, only plain information ("On it: …")
  * @property {() => number} [now]
  * @property {(fn: () => void, ms: number) => unknown} [setTimer]
  * @property {(handle: unknown) => void} [clearTimer]
@@ -230,6 +231,7 @@ function createContext(options) {
   const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(/** @type {any} */ (handle)));
   const humor = options.humor ?? defaultHumor;
   const random = options.random ?? Math.random;
+  const quiet = options.quiet ?? (() => false);
   const report = (/** @type {unknown} */ error) => console.error('andary director', error);
   /** @type {Set<unknown>} */
   const timers = new Set();
@@ -242,7 +244,9 @@ function createContext(options) {
     timers,
     clearTimer,
     /** @param {string} situation @param {Record<string, unknown>} [context] */
-    quip: (situation, context) => humor.quip(situation, context, random),
+    quiet,
+    // A quiet town says nothing a joke would have said; say() skips an empty line.
+    quip: (situation, context) => (quiet() ? '' : humor.quip(situation, context, random)),
     /** True while handling an event replayed from history: place agents, but no show. */
     historic: false,
     /** Whether the latest event was historic (achievement changes follow their event). */
@@ -892,7 +896,7 @@ function onPrompt(d, e) {
     if (d.historic) return;
     d.world.emote(rt.key, '📜');
     // Long goals read badly inside a joke, so only short ones are quoted in one.
-    const plain = goal && (goal.length > SHORT_GOAL || d.random() < INFORMATIVE_SHARE);
+    const plain = goal && (d.quiet() || goal.length > SHORT_GOAL || d.random() < INFORMATIVE_SHARE);
     const context = { ...contextFor(d, rt, e), goal: goal.length > SHORT_GOAL ? undefined : goal };
     say(d, rt, plain ? `On it: ${goal}` : d.quip('prompt', context), { priority: 'high', ms: 5000 });
   };

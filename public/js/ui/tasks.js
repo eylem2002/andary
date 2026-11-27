@@ -4,6 +4,7 @@ import { h, renderList, setAttr, setHidden, setText, srOnly } from './dom.js';
 import { icon } from './icons.js';
 import { progressOf, truncate } from './format.js';
 import { roundel, updateRoundel } from './parts.js';
+import { shownNumber } from '../core/crew-board.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -65,7 +66,7 @@ export function createTasksPanel(ctx) {
     shown.sort((a, b) => Number(a.status === 'ended') - Number(b.status === 'ended'));
     setText(empty, ctx.view.mode === 'demo' ? 'Goals and todo lists appear here as the demo crews plan their work.' : 'Each crew’s goal, todo list and team tasks appear here once it starts planning.');
     setHidden(empty, shown.length > 0);
-    renderList(list, shown, (session) => session.id, createGoal, (item, session) => updateGoal(item, session, session.number));
+    renderList(list, shown, (session) => session.id, createGoal, (item, session) => updateGoal(item, session, shownNumber(session)));
   }
 
   return { el, render };

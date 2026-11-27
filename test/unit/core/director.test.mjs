@@ -11,7 +11,7 @@ const MAIN = `${SESSION}:main`;
 /**
  * Store + director + recording world on one virtual clock. Quips are "[situation]" so the tests
  * can see which joke was asked for; random 0.1 makes bubbles informative, 0.9 makes them jokes.
- * @param {{manualWalks?: boolean, random?: () => number, world?: any}} [options]
+ * @param {{manualWalks?: boolean, random?: () => number, world?: any, quiet?: () => boolean}} [options]
  */
 function setup(options = {}) {
   const clock = createFakeClock();
@@ -23,6 +23,7 @@ function setup(options = {}) {
     store,
     humor,
     random: options.random ?? (() => 0.1),
+    quiet: options.quiet,
     now: clock.now,
     setTimer: (fn, ms) => clock.setTimeout(fn, ms),
     clearTimer: (handle) => clock.clearTimeout(handle),
@@ -80,6 +81,16 @@ describe('director: crews arrive, work and leave', () => {
     await clock.advance(100);
     assert.ok(calls('emote').some((c) => c[1] === MAIN && c[2] === '📜'));
     assert.deepEqual(says(), ['On it: Fix the flaky login test']);
+  });
+
+  it('a quiet town tells no jokes, but still says the goal', async () => {
+    const { send, clock, says } = setup({ random: () => 0.9, quiet: () => true });
+    await send(FIXTURES.SessionStart);
+    await clock.advance(3000);
+    assert.deepEqual(says(), [], 'no arrival joke, no achievement cheer');
+    await send(hook('UserPromptSubmit', { prompt: 'Fix it' }));
+    await clock.advance(3000);
+    assert.deepEqual(says(), ['On it: Fix it'], 'a short goal is said plainly, never as a quip');
   });
 
   it('a long goal is never squeezed into a joke', async () => {

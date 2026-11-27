@@ -73,7 +73,7 @@ function crewName(state, item) {
 /** " (crew 2)" for the crew an item is about, or nothing. @param {StoreState} state @param {AttentionItem} item */
 function crewNumber(state, item) {
   const session = state.sessions.find((s) => s.id === item.sessionId);
-  return session ? ` (crew ${session.number})` : '';
+  return session && session.status !== 'ended' ? ` (crew ${session.number})` : '';
 }
 
 /** Your crews still in town. @param {StoreState} state */

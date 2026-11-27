@@ -18,6 +18,7 @@ import { PERSON_COLOR_NAMES } from '../core/profile.js';
 import { goToNeed, handleShortcut, openDialog, panelsHidden, runAction, select, setFollow } from './hud-actions.js';
 import { FRESH_MS, createEffectQueue, playEffects } from './hud-effects.js';
 import { createInspector } from './inspector.js';
+import { createPalette } from './palette.js';
 import { createWeatherDriver } from '../core/town-weather.js';
 import { MILESTONES, unlockedAt } from '../core/growth.js';
 import { readAccounts } from '../core/limits.js';
@@ -82,6 +83,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     // Someone watching a team town (its view link, or a teammate's personal link) can answer nothing: nothing needs them.
     needsYou: createNeedsYou({ viewOnly: () => ['viewer', 'person'].includes(view.serverSettings.team?.role), onChange: () => ctx.refresh() }),
     goToNeed: (item) => goToNeed(hud, item),
+    revealCrew: (sessionId) => ui.crews.reveal(sessionId),
     // The director camera and the catch-up need the finished context, so they are attached right below.
     cinema: /** @type {any} */ (null),
     catchUp: /** @type {any} */ (null),
@@ -168,7 +170,7 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     setLimits: (limits) => showLimits(ctx, limits),
     ...modeFlags(ctx),
     ...peopleApi(hud, townPeople),
-    /** @param {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'character'} name */
+    /** @param {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'character'|'palette'} name */
     openDialog: (name) => openDialog(hud, name),
     /** Points a first-time visitor to the setup steps, unless they have seen them already. */
     offerSetup() {
@@ -184,6 +186,8 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     },
     /** @param {import('./toasts.js').ToastOptions} options */
     notify: (options) => ctx.toasts.show(options),
+    /** Quiet town (Settings): the director leaves out its jokes. */
+    quiet: () => ctx.prefs.quietTown,
     dispose() {
       stopShortcuts();
       stopTicker();
@@ -299,7 +303,7 @@ function showProgress({ ctx }, shell, raw) {
   shell.world?.setLandmarks?.(ids, { grow: fresh.length > 0 });
   for (const id of fresh) {
     const milestone = MILESTONES.find((m) => m.id === id);
-    if (!milestone) continue;
+    if (!milestone || ctx.prefs.quietTown) continue;
     ctx.toasts.show({ tone: 'achievement', icon: 'spark', title: 'The town grew', body: `${milestone.name} ${milestone.where}.`, group: 'achievement' });
     ctx.announcer.polite(`The town grew: ${milestone.name} ${milestone.where}.`);
   }
@@ -385,7 +389,20 @@ function createParts(ctx) {
     toolbar: createToolbar(ctx),
     notices: createNotices(ctx),
     walk: createWalk(ctx),
-    dialogs: { help: createHelpDialog(ctx), settings: createSettingsDialog(ctx), setup: createSetupDialog(ctx), diff: createDiffDialog(ctx), usage: createUsageDialog(ctx), leaderboard: createLeaderboard(ctx), catchUp: ctx.catchUp, character: createCharacterDialog(ctx) },
+    dialogs: {
+      help: createHelpDialog(ctx),
+      settings: createSettingsDialog(ctx),
+      setup: createSetupDialog(ctx),
+      diff: createDiffDialog(ctx),
+      usage: createUsageDialog(ctx),
+      leaderboard: createLeaderboard(ctx),
+      catchUp: ctx.catchUp,
+      character: createCharacterDialog(ctx),
+      palette: createPalette(ctx, { focusLogSearch: () => {
+        ctx.showTab('activity');
+        activity.focusSearch();
+      } }),
+    },
   };
 }
 

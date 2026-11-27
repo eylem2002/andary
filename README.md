@@ -165,6 +165,7 @@ building to see who is inside.
 
 | Key | Does |
 | --- | --- |
+| `Ctrl` `K` (`⌘` `K`) | Find a crew, an agent or an action (open approvals, catch me up, settings, quiet town…) |
 | `C` | Director camera on or off: it follows the most interesting thing by itself |
 | `H` | Full-screen town: put the side boards away or bring them back |
 | `F` / `Esc` | Follow the selected agent / stop following, close the open panel |
@@ -177,7 +178,7 @@ building to see who is inside.
 | `I` | Go to what needs you, most urgent first (again for the next) |
 | `W` | Catch me up: what your crews did since you last looked |
 | `A` | Go to approvals |
-| `1`–`9` | Jump to crew 1 to 9 |
+| `1`–`9` | Jump to crew 1 to 9 (crews at work: an ended crew's number goes to the next crew) |
 | `?` | All shortcuts |
 
 ### Answer permission prompts from the town
@@ -297,6 +298,20 @@ team town are theirs and left out.
 
 ### Everything else
 
+- **The crews board** puts the crew that needs you most at the top, then the crews at work, then
+  the idle ones (crews keep their places while your pointer or keyboard is in the list). A
+  helper that finished a minute ago folds into its crew's "+3 finished"; ended crews fold into
+  "Ended (2)" at the bottom and give up their numbers, so the crews at work stay on `1`–`9`. A
+  crew's name stays at the top of the list while its agents scroll under it. A crew's goal is its
+  latest real prompt: "continue", "go on", "yes" and the like keep the goal before them.
+- **Command palette:** `Ctrl` `K` (`⌘` `K` on a Mac), or the magnifier at the top right, finds
+  crews, agents and actions as you type. Arrow keys move, `Enter` goes. It never answers a
+  permission request: that stays on the card's own buttons.
+- **Activity log search:** type words or an agent's name in the log's search box; every word
+  must match.
+- **Quiet town:** Settings → Quiet town turns off the agents' joke bubbles and the achievement
+  toasts. Plain updates, approvals and new crews still show. Settings open on the work settings
+  (approvals, notifications, quiet town); sound and the town's looks come after.
 - **Cost and tokens:** each crew shows what it has cost so far, estimated at API list prices from
   Claude Code's own transcripts (on a Pro or Max plan, a measure of value, not a bill). `U` opens
   today's total and the last 14 days, and your plan limits with the

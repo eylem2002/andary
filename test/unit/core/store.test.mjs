@@ -142,7 +142,7 @@ describe('store: sessions and the lead', () => {
 });
 
 describe('store: crew numbers', () => {
-  it('numbers each crew once: pruning ended crews renumbers nobody, and a newcomer takes the lowest free number', () => {
+  it('an ended crew frees its number for the next crew, so the crews at work stay on 1–9', () => {
     const { send, state } = setup();
     const number = (/** @type {string} */ id) => state().sessions.find((s) => s.id === id)?.number;
     send(hook('SessionStart', { source: 'startup' }, { session: 'live' }));
@@ -151,13 +151,48 @@ describe('store: crew numbers', () => {
       send(hook('SessionEnd', { reason: 'other' }, { session: `s${i}` }));
     }
     send(hook('SessionStart', { source: 'startup' }, { session: 'late' }));
-    assert.deepEqual([number('live'), number('s0'), number('s9'), number('late')], [1, 2, 11, 12]);
-    // An eleventh ended crew: the oldest one (s0, number 2) is pruned.
-    send(hook('SessionEnd', { reason: 'other' }, { session: 'late' }));
-    assert.equal(number('s0'), undefined);
-    assert.deepEqual([number('live'), number('s9'), number('late')], [1, 11, 12], 'nobody is renumbered');
+    assert.deepEqual([number('live'), number('s0'), number('s9'), number('late')], [1, 2, 2, 2], 'each took the number the one before it left');
+    send(hook('SessionStart', { source: 'startup' }, { session: 'third' }));
+    assert.equal(number('third'), 3);
+    send(hook('SessionEnd', { reason: 'other' }, { session: 'live' }));
     send(hook('SessionStart', { source: 'startup' }, { session: 'new' }));
-    assert.equal(number('new'), 2);
+    assert.equal(number('new'), 1, 'the lowest number no crew at work holds');
+    assert.deepEqual([number('late'), number('third')], [2, 3], 'nobody at work is renumbered');
+  });
+
+  it('a crew that comes back keeps its number, or takes a free one when another crew holds it', () => {
+    const { send, state } = setup();
+    const number = (/** @type {string} */ id) => state().sessions.find((s) => s.id === id)?.number;
+    send(hook('SessionStart', { source: 'startup' }, { session: 'a' }));
+    send(hook('SessionStart', { source: 'startup' }, { session: 'b' }));
+    send(hook('SessionEnd', { reason: 'other' }, { session: 'b' }));
+    send(hook('UserPromptSubmit', { prompt: 'back again' }, { session: 'b' }));
+    assert.equal(number('b'), 2, 'nobody took it');
+    send(hook('SessionEnd', { reason: 'other' }, { session: 'b' }));
+    send(hook('SessionStart', { source: 'startup' }, { session: 'c' }));
+    assert.equal(number('c'), 2);
+    send(hook('UserPromptSubmit', { prompt: 'and again' }, { session: 'b' }));
+    assert.equal(number('b'), 3, 'crew c holds 2 now');
+    assert.equal(number('c'), 2);
+  });
+});
+
+describe('store: goals', () => {
+  it('keeps the goal when the prompt only says to go on', () => {
+    const { send, state } = setup();
+    const goal = () => state().sessions[0]?.goal;
+    send(hook('UserPromptSubmit', { prompt: 'continue' }));
+    assert.equal(goal(), undefined, 'no goal yet: "continue" is not one');
+    assert.ok(state().log.some((entry) => entry.text === 'Prompt: continue'), 'the log still says what was typed');
+    send(hook('UserPromptSubmit', { prompt: 'Add dark mode to the settings page' }));
+    assert.equal(goal(), 'Add dark mode to the settings page');
+    for (const prompt of ['continue', 'go on', 'Yes!', 'ok, go ahead please', '2', 'try again']) {
+      send(hook('UserPromptSubmit', { prompt }));
+      assert.equal(goal(), 'Add dark mode to the settings page', prompt);
+    }
+    assert.ok(state().log.some((entry) => entry.text === 'Prompt: try again'));
+    send(hook('UserPromptSubmit', { prompt: 'yes, but use CSS variables for the colours' }));
+    assert.equal(goal(), 'yes, but use CSS variables for the colours');
   });
 });
 

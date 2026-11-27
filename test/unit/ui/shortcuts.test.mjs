@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { SHORTCUT_HELP, isTypingTarget, shortcutFor } from '../../../public/js/ui/shortcuts.js';
+import { SHORTCUT_HELP, isPaletteKey, isTypingTarget, shortcutFor } from '../../../public/js/ui/shortcuts.js';
 
 describe('shortcutFor', () => {
   test('maps the documented keys', () => {
@@ -79,4 +79,16 @@ test('the help dialog lists every shortcut once', () => {
   assert.equal(new Set(labels).size, labels.length);
   assert.ok(SHORTCUT_HELP.find((item) => item.keys.includes('Space'))?.demoOnly);
   assert.match(SHORTCUT_HELP.find((item) => item.keys.includes('W'))?.label ?? '', /^Catch me up/);
+});
+
+describe('the command palette key', () => {
+  test('Ctrl-K and ⌘-K open it, even while typing; other chords do not', () => {
+    assert.equal(shortcutFor({ key: 'k', ctrlKey: true }), 'palette');
+    assert.equal(shortcutFor({ key: 'k', metaKey: true }), 'palette');
+    assert.equal(shortcutFor({ key: 'K', ctrlKey: true }, { target: { tagName: 'INPUT', type: 'text' } }), 'palette');
+    assert.equal(isPaletteKey({ key: 'k', ctrlKey: true, altKey: true }), false);
+    assert.equal(isPaletteKey({ key: 'k', ctrlKey: true, shiftKey: true }), false);
+    assert.equal(shortcutFor({ key: 'k' }), null, 'K alone is no shortcut');
+    assert.ok(SHORTCUT_HELP.some((item) => item.keys.join(' ') === 'Ctrl K'));
+  });
 });

@@ -3,6 +3,7 @@
 import { h, setAttr, setCrewColor, setText } from './dom.js';
 import { statusMark } from './icons.js';
 import { statusLabel } from './format.js';
+import { shownNumber } from '../core/crew-board.js';
 
 /**
  * @typedef {import('./types.js').StoreState} StoreState
@@ -52,12 +53,12 @@ export function kbd(text) {
 }
 
 /**
- * The crew's number (kept for its whole life, see Session.number), or 0 if unknown.
+ * The crew's number while it is at work (see Session.number), or 0 if ended or unknown.
  * @param {StoreState} state
  * @param {string} sessionId
  */
 export function crewNumber(state, sessionId) {
-  return findSession(state, sessionId)?.number ?? 0;
+  return shownNumber(findSession(state, sessionId));
 }
 
 /**

@@ -3,7 +3,7 @@
 
 /**
  * @typedef {'follow'|'escape'|'rotate-left'|'rotate-right'|'zoom-in'|'zoom-out'|'reset-view'|
- *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|'director'|'toggle-panels'|'usage'|'leaderboard'|'place-names'|'needs-you'|'catch-up'|'walk-mode'|`crew-${number}`} ShortcutAction
+ *   'cycle-time'|'toggle-sound'|'approvals'|'pause'|'help'|'director'|'toggle-panels'|'usage'|'leaderboard'|'place-names'|'needs-you'|'catch-up'|'walk-mode'|'palette'|`crew-${number}`} ShortcutAction
  */
 
 /**
@@ -11,6 +11,7 @@
  * @type {ReadonlyArray<{ keys: string[], label: string, demoOnly?: boolean }>}
  */
 export const SHORTCUT_HELP = Object.freeze([
+  { keys: ['Ctrl', 'K'], label: 'Find a crew, an agent or an action (⌘ K on a Mac)' },
   { keys: ['C'], label: 'Director camera: follow the action by itself' },
   { keys: ['H'], label: 'Full-screen town: put the side boards away or bring them back' },
   { keys: ['F'], label: 'Follow the selected agent (or the busiest one)' },
@@ -92,12 +93,14 @@ const ACTIVATES_ON_SPACE = new Set(['BUTTON', 'A', 'SUMMARY', 'SELECT']);
 /**
  * Maps a key press to a HUD action, or null when the HUD should leave the key alone: modifier
  * chords (browser and OS shortcuts), typing in a text field, and Space on a control that Space
- * activates. Space only pauses in demo mode.
+ * activates. Space only pauses in demo mode. The one chord it takes is Ctrl-K (⌘-K), the command
+ * palette, which works while typing too, as it does in other apps.
  * @param {KeyLike} event
  * @param {{ mode?: 'live'|'demo', target?: TargetLike|null }} [context]
  * @returns {ShortcutAction|null}
  */
 export function shortcutFor(event, { mode = 'live', target = null } = {}) {
+  if (isPaletteKey(event)) return 'palette';
   if (event.ctrlKey || event.metaKey || event.altKey) return null;
   if (isTypingTarget(target)) return null;
   if (event.key === ' ' || event.key === 'Spacebar') {
@@ -106,6 +109,14 @@ export function shortcutFor(event, { mode = 'live', target = null } = {}) {
   }
   if (/^[1-9]$/.test(event.key)) return /** @type {ShortcutAction} */ (`crew-${event.key}`);
   return KEY_ACTIONS[event.key] ?? null;
+}
+
+/**
+ * Ctrl-K, or ⌘-K: the command palette. Not with Alt or Shift, which other apps' chords use.
+ * @param {KeyLike & { shiftKey?: boolean }} event
+ */
+export function isPaletteKey(event) {
+  return Boolean(event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && (event.key === 'k' || event.key === 'K');
 }
 
 /**

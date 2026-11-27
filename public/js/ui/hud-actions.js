@@ -19,7 +19,7 @@ import { nextPlaceNames } from '../core/place-names.js';
  * @property {ReturnType<typeof import('./walk.js').createWalk>} walk
  */
 
-/** @typedef {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'catchUp'|'character'} DialogName */
+/** @typedef {'help'|'settings'|'setup'|'diff'|'usage'|'leaderboard'|'catchUp'|'character'|'palette'} DialogName */
 
 /** @typedef {{ ctx: HudContext, ui: HudParts }} Hud */
 
@@ -159,6 +159,7 @@ export function runAction(hud, action) {
     help: () => openDialog(hud, 'help'),
     usage: () => openDialog(hud, 'usage'),
     leaderboard: () => openDialog(hud, 'leaderboard'),
+    palette: () => openDialog(hud, 'palette'),
   };
   actions[action]?.();
 }
@@ -289,6 +290,12 @@ function cycleSpeed(ctx) {
  */
 export function handleShortcut(hud, action, event) {
   const { ctx, ui } = hud;
+  // Ctrl-K (⌘-K) opens the command palette from anywhere, over any dialog, and closes it again.
+  if (action === 'palette') {
+    if (ui.dialogs.palette.isOpen) ui.dialogs.palette.close();
+    else openDialog(hud, 'palette');
+    return true;
+  }
   // With a dialog open only "?" (to close help) applies; Escape is the dialog's own.
   if (Object.values(ui.dialogs).some((dialog) => dialog.isOpen)) {
     if (action === 'help' && ui.dialogs.help.isOpen) ui.dialogs.help.close();
@@ -336,7 +343,7 @@ function escape(hud) {
  */
 function selectCrew(hud, number) {
   const state = hud.ctx.store.getState();
-  const session = state.sessions.find((s) => s.number === number);
+  const session = state.sessions.find((s) => s.status !== 'ended' && s.number === number);
   const lead = session?.agentKeys.find((key) => state.agents[key]?.role === 'lead') ?? session?.agentKeys[0];
   if (!lead) return false;
   hud.ui.crews.reveal(session.id);
