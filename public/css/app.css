@@ -929,8 +929,70 @@ body {
   background: var(--crew);
 }
 
-.hud-line__goal:not([hidden]) + .hud-stations::before {
+.hud-line__goal:not([hidden]) + .hud-line__pr[hidden] + .hud-stations::before {
   top: -62px;
+}
+
+/* A crew's pull request and its CI (core/pr-status.js), one line under the goal. */
+.hud-line__pr {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0 8px;
+  align-items: baseline;
+  margin: 4px 0 0 38px;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.hud-line__pr[hidden] {
+  display: none;
+}
+
+.hud-line__pr-link {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.hud-line__pr-link:not([href]) {
+  text-decoration: none;
+}
+
+.hud-line__checks,
+.hud-line__review {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-line__checks::before,
+.hud-line__review::before {
+  content: '·';
+  margin-right: 8px;
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+.hud-line__pr[data-checks="failing"] .hud-line__checks {
+  color: var(--error);
+  font-weight: 800;
+}
+
+.hud-line__pr[data-checks="pending"] .hud-line__checks {
+  color: var(--waiting);
+}
+
+.hud-line__pr[data-checks="passing"] .hud-line__checks {
+  color: var(--done);
+}
+
+.hud-line__goal:not([hidden]) + .hud-line__pr:not([hidden]) + .hud-stations::before {
+  top: -84px;
+}
+
+.hud-line__goal[hidden] + .hud-line__pr:not([hidden]) + .hud-stations::before {
+  top: -56px;
 }
 
 .hud-station {

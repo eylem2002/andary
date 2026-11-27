@@ -106,7 +106,7 @@ export function socketUrl(pageUrl) {
 
 /**
  * @typedef {object} LiveOptions
- * @property {{ ingest: (e: any) => any, setApproval: (a: any) => void, setUsage?: (u: unknown, days?: unknown) => void, setNote?: (n: unknown) => void, reset: () => void }} store
+ * @property {{ ingest: (e: any) => any, setApproval: (a: any) => void, setUsage?: (u: unknown, days?: unknown) => void, setNote?: (n: unknown) => void, setPr?: (pr: unknown) => void, reset: () => void }} store
  * @property {boolean} [authenticated]   false starts in "Sign in" and waits for a valid sign-in
  * @property {(status: LinkStatus) => void} [onStatus]
  * @property {(settings: object) => void} [onSettings]
@@ -145,6 +145,7 @@ const MESSAGES = Object.freeze({
     if (m.a) to.store.setApproval(m.a);
   },
   note: (m, to) => to.store.setNote?.(m.n),
+  pr: (m, to) => to.store.setPr?.(m.pr),
   settings: (m, to) => to.onSettings(m.settings ?? {}),
   usage: (m, to) => to.store.setUsage?.(m.u, m.days),
   progress: (m, to) => to.onProgress(m.p),
@@ -179,6 +180,15 @@ function said(kind, m, to) {
  */
 function applyNotes(store, notes) {
   if (Array.isArray(notes)) for (const note of notes) store.setNote?.(note);
+}
+
+/**
+ * Each repository's pull request and CI from hello (§4.16): owners only; a viewer, and an older
+ * server, send none.
+ * @param {LiveOptions['store']} store @param {unknown} prs
+ */
+function applyPrs(store, prs) {
+  if (Array.isArray(prs)) for (const pr of prs) store.setPr?.(pr);
 }
 
 /** Where a server message goes when the page did not ask for it. */
@@ -287,6 +297,7 @@ export function connectLive({
     for (const envelope of message.history ?? []) ingest(envelope);
     for (const approval of message.approvals ?? []) store.setApproval(approval);
     applyNotes(store, message.notes);
+    applyPrs(store, message.prs);
     const usage = message.usage ?? {};
     for (const record of Array.isArray(usage.agents) ? usage.agents : []) store.setUsage?.(record);
     if (Array.isArray(usage.days)) store.setUsage?.(null, usage.days);
@@ -398,6 +409,10 @@ function requests(send) {
     /** @param {boolean} on */
     setRemoteApprovals(on) {
       return send({ t: 'settings', settings: { remoteApprovals: Boolean(on) } });
+    },
+    /** PR and CI status through the owner's gh (§4.16). @param {boolean} on */
+    setGh(on) {
+      return send({ t: 'settings', settings: { gh: Boolean(on) } });
     },
     /**
      * Saves this person's profile on the team host (§4.11); the answer comes to onProfile.

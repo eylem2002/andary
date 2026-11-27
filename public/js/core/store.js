@@ -17,6 +17,7 @@ import { gitAddsOf, gitCommitsOf, gitHazardOf } from './git-commands.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { rulesText } from './permission-rules.js';
 import { noteStateText } from './notes.js';
+import { MAX_PRS, prLogDraft, readPrStatus } from './pr-status.js';
 import { receiptLine } from './receipts.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
@@ -67,7 +68,7 @@ export { ACHIEVEMENTS };
  * @property {string} agentKey
  * @property {string} agentName
  * @property {string} color
- * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict' / 'receipt'
+ * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict' / 'receipt' / 'pr'
  * @property {string} icon
  * @property {string} text
  * @property {'info'|'success'|'warn'|'error'} level
@@ -153,6 +154,7 @@ export { ACHIEVEMENTS };
  * @property {Record<string, AgentUsage>} usage   agentKey → tokens and estimated cost (§4.8)
  * @property {UsageDay[]} usageDays             the last 30 days, oldest first
  * @property {Note[]} notes                       the owner's notes to agents (§4.15), oldest first
+ * @property {import('./pr-status.js').PrStatus[]} prs  each repository's pull request and CI, as the owner's gh last reported it (§4.16), oldest first
  * @property {readonly import('./receipts.js').Receipt[]} receipts  a receipt per lead's turn that ended, newest last
  */
 
@@ -170,7 +172,7 @@ export { ACHIEVEMENTS };
 /** @typedef {{ date: string, tokens: number, costUsd: number }} UsageDay */
 /** @typedef {import('./notes.js').Note} Note */
 
-/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'note', note: Note}|{type: 'people'}|{type: 'reset'}} StoreChange */
+/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'note', note: Note}|{type: 'pr', pr: import('./pr-status.js').PrStatus}|{type: 'people'}|{type: 'reset'}} StoreChange */
 
 /**
  * @typedef {object} Store
@@ -180,6 +182,7 @@ export { ACHIEVEMENTS };
  * @property {(record: unknown, days?: unknown) => void} setUsage  one agent's usage totals, and the day totals
  * @property {(people: unknown) => void} setPeople  a team town's people ({name, color, host}[], color an index into CREW_COLORS): their crews take their colour
  * @property {(note: unknown) => void} setNote  a note to an agent, as the server last told of it (§4.15)
+ * @property {(pr: unknown) => void} setPr  a repository's pull request and CI, as the server (or the demo) last told of it (§4.16)
  * @property {(listener: (change: StoreChange) => void) => () => void} subscribe
  * @property {() => StoreState} getState
  * @property {() => void} reset
@@ -964,6 +967,9 @@ export function createStore(options = {}) {
     }
   }
 
+  /** @param {import('./pr-status.js').PrStatus|null} pr */
+  const emitPr = (pr) => pr && emit({ type: 'pr', pr });
+
   /**
    * Records unlocked achievements (state and log first, so listeners see a consistent state).
    * @param {string[]} ids
@@ -1064,6 +1070,8 @@ export function createStore(options = {}) {
       const note = readNote(raw);
       if (note && noteChanged(m, note, now())) emit({ type: 'note', note });
     },
+    // A repository's pull request and CI (§4.16), read defensively; one that cannot be read changes nothing.
+    setPr: (raw) => void emitPr(prChanged(m, raw, now())),
     setUsage(record, days) {
       const key = applyUsage(m, record, days);
       if (key) emit({ type: 'usage', agentKey: key });
@@ -1072,9 +1080,7 @@ export function createStore(options = {}) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    getState() {
-      return m.state;
-    },
+    getState: () => m.state,
     setPeople(list) {
       people = readPeople(list);
       if (recolorPeople(m, people)) emit({ type: 'people' });
@@ -1161,6 +1167,30 @@ function noteChanged(m, note, ts) {
   const draft = { icon: '✉️', text: `${noteStateText(note)} — “${clip(oneLine(note.text), 60)}”`, level };
   pushLog(m, { ts, sessionId: note.sessionId, agentKey: key, kind: 'note' }, m.sessions.get(note.sessionId), m.state.agents[key], draft);
   return true;
+}
+
+/**
+ * Keeps a repository's latest status (one per work tree), read defensively, and logs a change of
+ * its checks under the crew that pushed last. Null when it could not be read.
+ * @param {Model} m @param {unknown} raw @param {number} ts
+ * @returns {import('./pr-status.js').PrStatus|null}
+ */
+function prChanged(m, raw, ts) {
+  const pr = readPrStatus(raw);
+  if (!pr) return null;
+  const list = m.state.prs;
+  const index = list.findIndex((p) => p.root === pr.root);
+  const previous = index >= 0 ? list[index] : null;
+  if (index >= 0) list.splice(index, 1);
+  boundedPush(list, pr, MAX_PRS);
+  const draft = prLogDraft(previous, pr);
+  const sessionId = pr.sessionIds.at(-1);
+  const s = sessionId === undefined ? undefined : m.sessions.get(sessionId);
+  if (draft && s) {
+    const key = agentKeyOf(s.id, null);
+    pushLog(m, { ts, sessionId: s.id, agentKey: key, kind: 'pr' }, s, m.state.agents[key], draft);
+  }
+  return pr;
 }
 
 /**

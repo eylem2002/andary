@@ -33,6 +33,7 @@ server/ingest.mjs            The one pipeline every event enters through, with a
 server/adapters/             Source adapters: Claude Code (as is) and Codex → the town's event contract
 server/clients.mjs           What differs between the agents Andary connects to (hooks file, events)
 server/notes.mjs             The owner's notes waiting for their agents' next step (§4.15)
+server/pr-watch.mjs          PR and CI status through the user's own gh, after a push (§4.16)
 server/cli/                  One module per CLI command, plus argument parsing
 hooks/hook.mjs               Hook forwarder copied to ~/.andary/hook.mjs by `install` (Claude Code and Codex)
 hooks/hooks.json             Hook config used when Andary is installed as a Claude Code plugin
@@ -317,7 +318,7 @@ shows up as a crew of its own.
 Server → browser:
 
 ```js
-{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits }, history: Envelope[], approvals: Approval[], notes: Note[] /* §4.15; [] for a viewer */, usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null,
+{ t: 'hello', version, serverTime, settings: { remoteApprovals, approvalTimeoutMs, notify, notifyLimits, gh: { on, available, hint } /* §4.16 */ }, history: Envelope[], approvals: Approval[], notes: Note[] /* §4.15; [] for a viewer */, prs: PrStatus[] /* §4.16; [] for a viewer */, usage: { agents: UsageRecord[], days: UsageDay[] }, limits: LimitsSnapshot /* §4.14 */, progress: { points, days }, notifyUrl: string|null, away: Away|null,
   people: Person[] /* §4.11, [] off a team host */, me: string|null /* the person this browser plays */ }
 { t: 'hook', e: Envelope }
 { t: 'approval', a: Approval }          // sent on create and on every status change
@@ -327,6 +328,7 @@ Server → browser:
 { t: 'usage', u: UsageRecord, days: UsageDay[] }   // §4.8, when an agent's totals change
 { t: 'progress', p: { points, days: string[] } }   // §4.9, when a point or a busy day is added
 { t: 'limits', limits: LimitsSnapshot }            // §4.14, owners only, after each report of the mod
+{ t: 'pr', pr: PrStatus }                          // §4.16, owners only, each time gh answered about a pushed branch's pull request
 { t: 'notify-test', ok: boolean }                  // §4.10, the answer to a test
 { t: 'away', away: Away }                          // §4.13, owners: an absence began or ended
 { t: 'digest', d: Digest }                         // §4.13, the answer to a digest request
@@ -355,7 +357,7 @@ Browser → server:
 ```js
 { t: 'decide', id, decision: 'allow'|'deny', message?: string /* ≤ 500 chars */, always?: number /* allow only: a suggestion's index */, stop?: true /* deny only: "Deny and stop" */ }
 { t: 'note', ref?: string /* the sender's own id, [\w-]{1,64}, echoed in note-reply */, sessionId, agentId?: string /* a helper; absent for the lead */, text: string /* ≤ 2,000 chars once cleaned */ }   // §4.15
-{ t: 'settings', settings: { remoteApprovals: boolean } }
+{ t: 'settings', settings: { remoteApprovals?: boolean, gh?: boolean /* §4.16 */ } }   // at least one
 { t: 'notify-test' }   // sends a test phone notification (rate limits apply)
 { t: 'digest', since: number }   // §4.13: what each crew did since then (ms, the server's clock; 0: all kept)
 { t: 'profile', p: Profile }     // §4.11: the sender's own profile (a person, or the owner as the host); at most one per 10 s
@@ -696,6 +698,8 @@ the WebSocket `hello`. Only this computer's events count (§4.11).
   the lead's next `Stop`. At most 100 sessions wait at once; the oldest gives way. Andary cannot
   see you typing in Codex, so a reply that takes over a minute still sends the note.
 - **Stopped**: `StopFailure` posts a limit or an error note.
+- **CI failed** (§4.16): "CI failed on a branch a crew pushed.", once per pull request head commit
+  whose checks are seen failing, while PR and CI status is on.
 - **Stuck**: "A crew seems stuck: the same step keeps failing." (rules 1 and 3) or "A crew seems
   stuck: it keeps repeating the same step." (rule 2), by the rule that started the episode, once
   per episode of the stuck rules (§5.1, `public/js/core/loops.js`, `stuckWords`), which the
@@ -1189,6 +1193,73 @@ Note = { id, status: 'queued'|'delivered'|'expired', sessionId, agentId: string|
   it with the reason (`[data-testid="send-note-status"]`), and no answer within 10 s gives it back.
   The demo has no notes.
 
+### 4.16 PR and CI status through the user's gh
+
+After a crew pushes, the town shows its pull request and CI on the crew's row, through the user's
+own GitHub CLI. Andary holds no token and makes no request of its own: `gh` runs with the sign-in
+it already has. `server/pr-watch.mjs` runs it; `public/js/core/pr-status.js` holds what both sides
+share.
+
+```js
+PrStatus = { root /* the work tree's top, forward slashes (§4.6 andary_root) */, sessionIds: string[] /* the crews that pushed there, ≤ 8, newest last */,
+             number: number|null /* null: no pull request for the branch yet */, url: string|null /* https only */,
+             state: 'OPEN'|'MERGED'|'CLOSED'|null, review: 'APPROVED'|'CHANGES_REQUESTED'|'REVIEW_REQUIRED'|null, branch, sha /* head commit */,
+             checks: { state: 'passing'|'failing'|'pending'|'none', total, failing, pending, failed: string[] /* ≤ 3 names */ },
+             at /* when gh answered */, failingSince: number|null /* first seen failing on this head commit */, watching: boolean }
+```
+
+- **What starts it.** A local `PostToolUse` of Bash or PowerShell whose line must have succeeded
+  for a sending `git push` (not `--dry-run`/`-n`, `--delete`/`-d` or `:branch`) or a
+  `gh pr create` to have (`pushSites()`, core/shell.js; a Codex command only with
+  `andary_exit_known`; never a background run). The work tree is the top (work-trees.mjs) of the
+  folder the command ran in, after `cd`. A teammate's events never start it (ingest
+  `POLICIES.team.prs` is false).
+- **What runs.** `gh pr view --json number,url,state,statusCheckRollup,reviewDecision,headRefName,headRefOid`
+  with the work tree as its folder (on Windows with backslashes), through `execFile` on gh's
+  absolute path (`findProgram`: `gh.exe` on Windows, never a `.cmd`, only absolute PATH entries;
+  no shell), a 15 s timeout, a 1 MiB output cap, `windowsHide`, and `GH_PROMPT_DISABLED=1`,
+  `GH_NO_UPDATE_NOTIFIER=1`, `NO_COLOR=1`. At most two at once; 32 work trees remembered.
+- **When.** 30 s after the push, then after 1, 2 and 5 minutes, then every 5, until the checks
+  have all finished (failing counts as finished once none is pending), the pull request is merged
+  or closed, no checks were reported three times, or an hour has passed. "No pull requests found"
+  keeps looking (one may still be opened); a folder that is not a GitHub repository is dropped;
+  three other failures in a row (a timeout, the network) end the watch until the next push, with
+  one log line. A work tree that is gone is dropped without running gh.
+- **Checks.** A check run that is not `COMPLETED` is pending; `FAILURE`, `TIMED_OUT`,
+  `ACTION_REQUIRED` and `STARTUP_FAILURE` fail; `NEUTRAL`, `SKIPPED`, `CANCELLED` and `STALE` do
+  not. A commit status fails on `FAILURE`/`ERROR` and is pending on `PENDING`/`EXPECTED`.
+- **Missing gh, not signed in.** Never an error. gh not on the PATH (or `ENOENT`) sets
+  `settings.gh.hint = 'missing'`; exit code 4 or "gh auth login" in its output sets `'signin'` and
+  stops every watch. Each is given once until the switch is turned on again, with one log line;
+  the next push tries again (and finds a gh installed meanwhile). A successful answer clears
+  `'signin'`.
+- **Setting.** `settings.gh = { on, available, hint }`: on by default when gh is on the PATH;
+  `andary start --no-gh` starts it off; `{t:'settings', settings:{gh}}` from an owner turns it on
+  (looking for gh again) or off (stopping every watch; what is known stays). Not kept across
+  restarts. Viewers and teammates always see `{ on: false, available: false, hint: null }`.
+- **Phone note.** When an open pull request's checks are first seen failing on a head commit,
+  `notifier.ciFailed()` sends "CI failed on a branch a crew pushed." (kind `ci`, the 30 s and
+  hourly limits apply): never the repository, branch or check.
+- **Browser.** `store.setPr(raw)` reads it (`readPrStatus`), keeps one per `root` (at most 32) in
+  `StoreState.prs`, and logs a line (`kind: 'pr'`) under the lead of the crew that pushed last
+  when a pull request is first seen, its CI starts failing, passes again, or it is merged or
+  closed (`prLogDraft`). The crew row shows `[data-testid="crew-pr"]` under the goal for the
+  newest pull request the crew pushed to (`prOfSession`): `PR #n` as a link
+  (`crew-pr-link`, `target=_blank`, `rel="noopener noreferrer"`, no link without an https URL),
+  then `[data-testid="crew-checks"]` ("CI failing (2)", "CI running", "CI passed", "No CI checks",
+  the failed names in its title) and the review ("changes requested", "approved", "merged",
+  "closed"). Failing CI on an open pull request is a "need you" item (kind `ci`, level `alert`,
+  counted, dismissable, id `ci:<root>:<number>:<sha>`) on the lead of the latest pushing crew still
+  in town, with a desktop notification "CI failed on a pull request <crew> (crew n) pushed." The
+  one-time hint is an info toast, once per browser and kind (prefs `ghMissingSeen`,
+  `ghSigninSeen`); Settings → "PR and CI status" (`gh-toggle`, `gh-help`) says what it does or
+  what it needs. The demo makes up a pull request for each push (`sources/demo-prs.js`): checks
+  run for 20 s of story time, then fail and pass in turn; no link.
+- **Tests.** `ANDARY_GH_POLL_MS` (tests only, ≥ 50) makes every pause that long. Tests fake gh:
+  unit tests inject `run`/`findGh` (`PrWatchOptions`); integration and e2e put
+  `e2e/helpers/fake-gh.mjs` first on the PATH (not on Windows: Andary runs `gh.exe` only); the
+  test town starts with `--no-gh` unless asked.
+
 ## 5. Browser: events, store, director
 
 `public/js/core/events.js` turns an Envelope into zero or more **TownEvents**:
@@ -1230,13 +1301,14 @@ Store {
   setApproval(approval: Approval): void          // from the server, or created by demo mode
   setUsage(record: UsageRecord|null, days?: UsageDay[]): void  // §4.8; null record: days only
   setNote(note: Note): void                      // §4.15, from the server; junk and repeats are ignored
+  setPr(pr: PrStatus): void                      // §4.16, from the server or the demo; junk is ignored
   subscribe(listener: (change: StoreChange) => void): () => void
   getState(): StoreState                         // plain objects; treat as read-only
   reset(): void
 }
 StoreChange = { type: 'event', event: TownEvent } | { type: 'approval', approval: Approval }
             | { type: 'achievement', achievement: Achievement } | { type: 'usage', agentKey: string }
-            | { type: 'note', note: Note } | { type: 'reset' }
+            | { type: 'note', note: Note } | { type: 'pr', pr: PrStatus } | { type: 'reset' }
 StoreState {
   sessions: Session[]                            // in order first seen
   agents: Record<agentKey, AgentState>
@@ -1249,6 +1321,7 @@ StoreState {
   usage: Record<agentKey, AgentUsage>            // §4.8
   usageDays: UsageDay[]
   notes: Note[]                                  // §4.15, oldest first
+  prs: PrStatus[]                                // §4.16, one per work tree, oldest first, ≤ 32
   receipts: Receipt[]                            // a receipt per lead's turn that ended, newest last, ≤ 60
 }
 AgentUsage { tokens: { input, output, cacheRead, cacheWrite }, costUsd, unpriced: boolean, model: string|null,
@@ -1326,8 +1399,8 @@ queued behind it starts none.
 
 ```js
 AttentionItem { id /* one per episode: dialog:agentKey:at:input, kind:agentKey:since, limit:since,
-                      conflict:<Hazard id> */,
-                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'finished',
+                      conflict:<Hazard id>, ci:<root>:<number>:<sha> */,
+                kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'ci'|'finished',
                 level: 'blocked'|'stopped'|'alert'|'ready', sessionId, agentKey,
                 agentKeys: string[] /* everyone it stands for */,
                 approvalId: string|null /* a request the town holds */, since, countedSince,
@@ -1346,7 +1419,9 @@ item for all their agents (two crews at least: a lead and its helper are one cre
 (below) is a `conflict` item of level `alert`, listed for every agent it names (`agentKeys`: the
 one who did it, then the others): a `write` or `git` hazard is counted and dismissable, an `edit`
 one is a note, neither counted nor dismissable. It is left out once `CONFLICT_MS` (30 minutes) old,
-or when the crew or agent that did it is gone or done; others that are, are left out of it. Ended
+or when the crew or agent that did it is gone or done; others that are, are left out of it. Failing
+CI on an open pull request (§4.16) is a `ci` item of level `alert`, counted and dismissable, on the
+lead of the latest crew that pushed there and is still in town. Ended
 sessions and teammates' crews are left out. `ui/needs-you.js` adds the viewer's dismissals (stops, stuck alerts, finished turns and
 conflicts, kept in `localStorage["andary:dismissed"]` for a day and shared with the town's other
 tabs; someone watching a team town with its view link gets no items, as they can answer nothing)
@@ -1831,9 +1906,13 @@ decision is treated as "answered in the terminal" and the story carries on as al
 - `npm run test:e2e` runs Playwright. In containers without Playwright's browser set
   `CHROME_PATH=/usr/bin/google-chrome`.
 - `e2e/helpers/town.mjs`:
-  `startTown({ remoteApprovals?, args?, env? }) → { baseUrl, loginUrl, port, home, secret, uiToken,
+  `startTown({ remoteApprovals?, gh?, args?, env? }) → { baseUrl, loginUrl, port, home, secret, uiToken,
   sendHook(payload) → Promise<{code, stdout}>, stop() }` — starts a real server on a free port with
   a temporary `ANDARY_HOME`; `sendHook` runs the real `hooks/hook.mjs` with the payload on stdin.
+  It passes `--no-gh` unless `gh: true` (§4.16), so no test asks the computer's own gh.
+- `ANDARY_GH_POLL_MS` (tests only, read by `andary start`; not a setting): every pause between two
+  looks at a pushed branch's pull request (§4.16), a whole number of milliseconds from 50 on.
+  `e2e/helpers/fake-gh.mjs` makes a fake `gh` script for the PATH that answers what the test set.
 - `ANDARY_AWAY_MS` (tests only, read by `andary start`; not a setting): how long without you
   counts as away (§4.13), a whole number of milliseconds from 100 on, so a test can start an
   absence in a second.
@@ -1863,10 +1942,12 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="login-hint"]` | shown when a server is running but the browser has no valid token |
 | `[data-testid="demo-button"]` | starts the simulation (shown when there is nothing live to watch) |
 | `[data-testid="crew-list"]` | crews panel; children `[data-testid="crew"][data-session-id]` |
+| `[data-testid="crew-pr"][data-checks]` | under a crew's goal, its pull request (§4.16): `[data-testid="crew-pr-link"]` "PR #n", `[data-testid="crew-checks"]` its CI in words (failed names in `title`) |
+| `[data-testid="gh-toggle"]`, `[data-testid="gh-help"]` | Settings: PR and CI status on or off, and what it does or needs |
 | `[data-testid="agent-row"][data-agent-key]` | one row per agent; contains the agent name; click selects; `data-need` is the level of what it needs you for; a lead's row holds its context in use in `[data-testid="crew-context"]` (hidden without one, §4.8); `[data-testid="agent-note"]` inside it, a note (an edit of a file another agent changed) |
 | `[data-testid="agent-inspector"]` | details drawer for the selected agent; `[data-testid="inspector-dismiss"]` sets its finished turn, stop, stuck alert or conflict aside; `[data-testid="agent-context"]` holds the exact context in use (§4.8); `[data-testid="inspector-note"]`, its newest note; `[data-testid="send-note-input"]` and `[data-testid="send-note"]` send a note to the agent (§4.15), `[data-testid="send-note-why"]` says why it cannot, `[data-testid="send-note-status"]` that it is being sent or why it was refused, `[data-testid="send-note-caution"]` that delivery is not confirmed, and `[data-testid="sent-notes"]` lists its notes, `[data-testid="sent-note"][data-status]` |
 | `[data-testid="waiting-for-you"]` | the masthead's "N need you" button (`data-level` is the most urgent level); click goes to the next item |
-| `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn, a stop, a stuck alert or a conflict aside |
+| `[data-testid="dismiss-need"]` | on an agent row: sets a finished turn, a stop, a stuck alert, a conflict or failing CI aside |
 | `[data-testid="catch-up-button"]` | the masthead's "Catch me up", offered after time away (`W` opens the dialog any time) |
 | `[data-testid="catch-up"]` | the Catch me up dialog: `[data-testid="catch-up-period"]`, one `[data-testid="catch-up-crew"][data-session-id]` per crew (with `[data-testid="catch-up-need"]` when it needs you), `[data-testid="catch-up-quiet"]` |
 | `[data-testid="activity-log"]` | log; children `[data-testid="log-entry"]` |

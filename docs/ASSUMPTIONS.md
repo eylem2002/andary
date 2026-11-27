@@ -1414,3 +1414,39 @@ section.
      backpack, cup, beard, earrings) plus 24 helpers in 55–57 draw calls, one per figure as
      before. Frame rate is not meaningful under the software renderer here; on a phone it is
      bound by those draw calls, unchanged from PR 1's 58–60.
+
+## PR and CI status through gh (feat/pr-ci)
+
+269. **On by default when `gh` is on the PATH**, as the brief asks (the study proposed opt-in
+     `--gh`): it only runs the user's own read-only `gh pr view`, after a push the agent already
+     made. `--no-gh` and the Settings switch turn it off. The switch is not kept across restarts,
+     like Remote approvals.
+270. **What starts a watch** is a successful sending `git push` or `gh pr create` seen in a local
+     hook (the same "must have succeeded" reading as the digest's push count). A push that said
+     "Everything up-to-date" still starts one: it costs a few `gh` runs and shows the current CI.
+     Pushes from outside an agent (your own terminal) are not seen.
+271. **The repository is the work tree the command ran in** (after `cd`), and `gh pr view` runs
+     there without a branch argument, so gh picks the branch checked out now. `git -C <dir> push`
+     counts for the hook's folder. A branch switched between the push and the look shows that
+     branch's pull request.
+272. **Polling** follows the study: 30 s, 1, 2 and 5 minutes, then every 5, for at most an hour;
+     it stops when no check is pending (a failure with others still running is shown at once but
+     followed until they finish), when the pull request is merged or closed, or after three
+     answers with no checks at all. At most two `gh` at once, 32 work trees.
+273. **Cancelled, skipped, neutral and stale checks are not failures**; timed out, action
+     required and startup failures are. A pending check with a failure elsewhere shows "failing".
+274. **Failing CI counts in "need you" on the lead of the latest crew that pushed there and is still
+     in town**; once every such crew has left, the badge is gone with the row and nothing counts.
+     It counts until set aside or a new head commit; merged or closed pull requests never count.
+     Phone note: once per head commit that is seen failing, worded without the repository.
+275. **The hint is a toast once per browser and kind**, and Settings keeps the reason in its help
+     text; the server logs one line per kind and stops looking until the next push. "Not signed
+     in" is exit code 4 or gh's "gh auth login" wording. No `andary doctor` check was added.
+276. **Windows**: Andary runs `gh.exe` by its absolute path from absolute PATH entries only (never a
+     `.cmd` shim, which Node cannot start without a shell), in the work tree with backslashes. The
+     fake gh used by integration and e2e tests is a script, so those tests skip on Windows; unit
+     tests cover the Windows path with an injected runner and file check.
+277. **The demo makes up pull requests** for its pushes (no link, checks fail and pass in turn) so
+     the badge and the "need you" item can be seen without gh.
+278. **Only GitHub, only the owner's crews**: a teammate's pushes in a team town are theirs to follow
+     with their own Andary; statuses are never relayed and viewers see none.

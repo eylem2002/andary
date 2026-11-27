@@ -5,13 +5,14 @@
 //                   (adapters/)                 (usage, growth,       (sanitize, history,
 //                                                notifications,        recording, broadcast)
 //                                                approvals, digest,
-//                                                relay)
+//                                                PR watch, relay)
 //
 // Which observers see an event depends on where it came from, and that is written down once, in
 // POLICIES, instead of in each route. Before any of them, a tool hook gets its call key
 // (`andary_key`, hook-steps.mjs), from its input as it arrived, and a local one the top of its
 // folder's work tree (`andary_root`, work-trees.mjs). The town, the phone notes and the approval
 // broker get the hook's own time (`ts`, hookTime) with it: hooks may arrive out of order.
+import { pushSites } from '../public/js/core/pr-status.js';
 import { toTownPayloads } from './adapters/index.mjs';
 import { hookTime, withCallKey } from './hook-steps.mjs';
 import { sanitize } from './sanitize.mjs';
@@ -26,12 +27,13 @@ import { withWorkTree } from './work-trees.mjs';
  * - local: this computer's agents, through the forwarder.
  * - team: a teammate's agents, relayed by their Andary (CONTRACTS §4.11). They grow the town, but
  *   their prompts are theirs to answer, their notifications and their catch-up (digest: what their
- *   crews did while they were away) theirs to get, and they are never relayed again.
- * @type {Readonly<Record<Origin, Readonly<{ growth: boolean, notify: boolean, approvals: boolean, digest: boolean, relay: boolean }>>>}
+ *   crews did while they were away) theirs to get, their pull requests theirs to follow (with their
+ *   own gh, on their own computer), and they are never relayed again.
+ * @type {Readonly<Record<Origin, Readonly<{ growth: boolean, notify: boolean, approvals: boolean, digest: boolean, prs: boolean, relay: boolean }>>>}
  */
 export const POLICIES = Object.freeze({
-  local: Object.freeze({ growth: true, notify: true, approvals: true, digest: true, relay: true }),
-  team: Object.freeze({ growth: true, notify: false, approvals: false, digest: false, relay: false }),
+  local: Object.freeze({ growth: true, notify: true, approvals: true, digest: true, prs: true, relay: true }),
+  team: Object.freeze({ growth: true, notify: false, approvals: false, digest: false, prs: false, relay: false }),
 });
 
 /** A teammate's queued events older than this arrive dated an hour ago. */
@@ -86,6 +88,7 @@ function admit(ctx, origin, item) {
   const event = withWorkTree(withCallKey(item.event), origin === 'local' ? ctx.workTrees : null);
   if (policy.growth) ctx.progress.observe(event);
   if (policy.notify) ctx.notifier.observe(event, item.ts);
+  if (policy.prs) watchPushes(ctx, event);
   const envelope = record(ctx, { ts: item.ts, event });
   // Sanitized, as what it counts (a turn's last message) goes to browsers; timed by arrival, so a
   // late hook still counts in the period a browser asks about.
@@ -97,6 +100,20 @@ function admit(ctx, origin, item) {
   // updates waiting approvals.
   if (policy.approvals && envelope.event.hook_event_name !== 'PermissionRequest') ctx.broker.observe(envelope.event, envelope.ts);
   return envelope;
+}
+
+/**
+ * A push or a new pull request from a work tree on this computer: its pull request's CI is
+ * followed from now (pr-watch.mjs). Where the command ran decides the work tree (`cd ../api &&
+ * git push`), as far as the line tells.
+ * @param {TownContext} ctx
+ * @param {Record<string, any>} event  before it is sanitized: the command as the agent ran it
+ */
+function watchPushes(ctx, event) {
+  for (const folder of pushSites(event)) {
+    const root = ctx.workTrees?.rootOf(folder);
+    if (root) ctx.prs.pushed({ root, sessionId: String(event.session_id ?? '') });
+  }
 }
 
 /**

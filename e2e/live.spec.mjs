@@ -1,10 +1,12 @@
 // Live mode end to end: a real server, the real hook forwarder, and the HUD in a browser
 // (CONTRACTS §8.1 test ids).
 import { spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { HOOK_SOURCE } from '../server/config.mjs';
+import { createFakeGh, prView } from './helpers/fake-gh.mjs';
 import { measureWithMod } from './helpers/mod.mjs';
 import { startTown } from './helpers/town.mjs';
 
@@ -413,6 +415,88 @@ test('a crew whose npm test fails three times with nothing changed seems stuck, 
   await town.sendHook(hook('PostToolUse', { tool_name: 'Edit', tool_use_id: 'e1', tool_input: { file_path: '/work/e2e-app/src/app.js', old_string: 'a', new_string: 'b' }, tool_response: {} }));
   await expect(button).toBeHidden();
   await expect(row).not.toContainText('Seems stuck');
+});
+
+test('a crew pushes: its pull request and CI show on its row, failing CI needs you, and Settings has the switch', async ({ page }) => {
+  test.skip(process.platform === 'win32', 'the fake gh is a script; Windows runs gh.exe only');
+  const root = mkdtempSync(join(tmpdir(), 'andary-e2e-gh-'));
+  try {
+    const repo = join(root, 'api-server');
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    const gh = createFakeGh(join(root, 'gh'));
+    gh.view(prView('pending'));
+    await town.stop();
+    town = await startTown({ gh: true, env: { ...gh.env, ANDARY_GH_POLL_MS: '300' } });
+    await signIn(page);
+    const crew = (/** @type {string} */ name, /** @type {Record<string, unknown>} */ extra = {}) => hook(name, { cwd: repo, ...extra });
+    for (const payload of [
+      crew('SessionStart', { source: 'startup' }),
+      crew('UserPromptSubmit', { prompt: 'Fix the login redirect and open a PR' }),
+      crew('PostToolUse', { tool_name: 'Bash', tool_use_id: 'p1', tool_input: { command: 'git push -u origin feat/login && gh pr create --fill' }, tool_response: { stdout: '' } }),
+    ]) {
+      expect(await town.sendHook(payload)).toMatchObject({ code: 0 });
+    }
+    const line = page.getByTestId('crew-pr');
+    await expect(line).toContainText('PR #123');
+    await expect(line).toContainText('CI running');
+    await expect(page.getByTestId('crew-pr-link')).toHaveAttribute('href', 'https://github.com/acme/api-server/pull/123');
+    await expect(page.getByTestId('crew-pr-link')).toHaveAttribute('rel', 'noopener noreferrer');
+    const button = page.getByTestId('waiting-for-you');
+    await expect(button).toBeHidden();
+
+    gh.view(prView('failing'));
+    await expect(line).toHaveAttribute('data-checks', 'failing');
+    await expect(page.getByTestId('crew-checks')).toHaveText('CI failing (1)');
+    await expect(page.getByTestId('crew-checks')).toHaveAttribute('title', 'Failed: test (ubuntu-latest)');
+    const words = 'CI failed on feat/login (PR #123): test (ubuntu-latest)';
+    await expect(button).toHaveAttribute('aria-label', `1 needs you. Next: ${words}`);
+    const row = page.locator('[data-testid="agent-row"][data-agent-key="e2e-session:main"]');
+    await expect(row).toContainText(words);
+    await expect(row).toHaveAttribute('data-need', 'alert');
+    await expect(page.getByTestId('log-entry').filter({ hasText: words })).toHaveCount(1);
+    expect(gh.calls()[0]).toEqual({ args: ['pr', 'view', '--json', 'number,url,state,statusCheckRollup,reviewDecision,headRefName,headRefOid'], cwd: repo, prompt: '1' });
+
+    // Set aside: it no longer counts; the badge stays.
+    await page.locator('.hud-stations__item:has([data-agent-key="e2e-session:main"]) [data-testid="dismiss-need"]').click();
+    await expect(button).toBeHidden();
+    await expect(line).toContainText('CI failing (1)');
+
+    // Settings: on, with what it does; off reaches the server.
+    await page.getByTestId('settings-button').click();
+    const toggle = page.getByTestId('gh-toggle');
+    await expect(toggle).toBeChecked();
+    await expect(page.getByTestId('gh-help')).toContainText('Andary never sees a token');
+    await toggle.uncheck();
+    await expect.poll(async () => (await (await fetch(`${town.baseUrl}/api/hello`)).json()).settings.gh.on).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('without gh signed in, one quiet hint and no error', async ({ page }) => {
+  test.skip(process.platform === 'win32', 'the fake gh is a script; Windows runs gh.exe only');
+  const root = mkdtempSync(join(tmpdir(), 'andary-e2e-gh-'));
+  try {
+    const repo = join(root, 'app');
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    const gh = createFakeGh(join(root, 'gh'));
+    gh.answer({ stderr: 'To get started with GitHub CLI, please run:  gh auth login', code: 4 });
+    await town.stop();
+    town = await startTown({ gh: true, env: { ...gh.env, ANDARY_GH_POLL_MS: '200' } });
+    await signIn(page);
+    for (const payload of [hook('SessionStart', { source: 'startup', cwd: repo }), hook('PostToolUse', { cwd: repo, tool_name: 'Bash', tool_use_id: 'p1', tool_input: { command: 'git push' }, tool_response: {} })]) {
+      expect(await town.sendHook(payload)).toMatchObject({ code: 0 });
+    }
+    await expect(page.getByText('gh is not signed in')).toHaveCount(1);
+    await expect(page.locator('.hud-toast--error')).toHaveCount(0);
+    await expect(page.getByTestId('crew-pr')).toBeHidden();
+    await page.reload();
+    await expect(page.getByTestId('connection-status')).toContainText('Live');
+    await page.waitForTimeout(500);
+    await expect(page.getByText('gh is not signed in')).toHaveCount(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('two crews in one folder: an edit of the same file is a note on both rows, a write over it needs you', async ({ page }) => {

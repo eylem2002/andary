@@ -62,6 +62,8 @@ const NOTES = Object.freeze({
   limit: { title: 'Andary', body: 'Claude Code stopped: it hit a usage or rate limit.', priority: 'high', tags: 'warning' },
   stopped: { title: 'Andary', body: 'Claude Code stopped with an error.', priority: 'high', tags: 'warning' },
   test: { title: 'Andary', body: 'This is a test notification from your town.', priority: 'default', tags: 'tada' },
+  // PR and CI status (pr-watch.mjs): never the repository, the branch or the checks' names.
+  ci: { title: 'Andary', body: 'CI failed on a branch a crew pushed.', priority: 'default', tags: 'x' },
 });
 
 /**
@@ -536,9 +538,7 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
   }
 
   return {
-    get on() {
-      return Boolean(url);
-    },
+    get on() { return Boolean(url); },
     url,
     /** Whether plan limits at 90% send a note (--notify-limits); the topic never changes. */
     limitNotes: Boolean(url) && limitNotes,
@@ -591,6 +591,11 @@ export function createNotifier({ url, fetchImpl = globalThis.fetch, now = Date.n
       for (const dialog of dialogs.decided(approval.id)) notes.delete(dialog.id);
       schedule();
     },
+    /**
+     * A pull request a crew pushed to started failing its CI (pr-watch.mjs calls this once per
+     * head commit). One note per 30 s like every kind; one held back is dropped.
+     */
+    ciFailed: () => void send(noteOf('ci')),
     /** A test note, from the town's Settings. */
     test: () => send(noteOf('test')),
     /** Drops every note still waiting and sends none afterwards (server shutdown). */

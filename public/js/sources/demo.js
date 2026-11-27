@@ -5,13 +5,14 @@
 // stands still while the demo is paused). Like the server, an approval offers the permission
 // rules the server would offer, and "Allow always" hands the chosen one back with the allow. It
 // also plays the server's part for "Catch me up": the same counts (core/digest.js) of the story's
-// crews, though nobody is ever away in a demo.
+// crews, though nobody is ever away in a demo, and a made-up pull request for each push (demo-prs.js).
 
 import { createDigest } from '../core/digest.js';
 import { normalizeAgentId } from '../core/ids.js';
 import { offerableSuggestions } from '../core/permission-rules.js';
 import { createDemoUsage } from './demo-usage.js';
 import { createDemoProgress } from './demo-progress.js';
+import { createDemoPrs } from './demo-prs.js';
 
 /** @typedef {import('../core/store.js').Approval} Approval */
 /** @typedef {import('../core/permission-rules.js').OfferedSuggestion} OfferedSuggestion */
@@ -32,7 +33,7 @@ export const DEMO_APPROVAL_MS = 25_000;
 
 /**
  * @typedef {object} DemoOptions
- * @property {{ ingest: (e: any) => any, setApproval: (a: Approval) => void, setUsage?: (u: unknown, days?: unknown) => void }} store
+ * @property {{ ingest: (e: any) => any, setApproval: (a: Approval) => void, setUsage?: (u: unknown, days?: unknown) => void, setPr?: (pr: unknown) => void }} store
  * @property {(options: { seed?: number, speed?: number, emit: (payload: any) => any }) => { start(): void, stop(): void, setSpeed(n: number): void, running: boolean }} createSimulation
  * @property {number} [seed]
  * @property {number} [speed]
@@ -56,6 +57,7 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
   const usage = createDemoUsage(store, now);
   const progress = onProgress ? createDemoProgress(onProgress, now) : () => {};
   const digest = createDigest({ startedAt: now() });
+  const prs = createDemoPrs(store, now, { speed: () => currentSpeed });
 
   /** @param {any} payload */
   function emit(payload) {
@@ -65,6 +67,7 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
     usage(payload);
     progress(payload);
     digest.observe(payload, ts);
+    prs.observe(payload);
     if (payload?.hook_event_name === 'PermissionRequest') return hold(payload, id, ts);
     return undefined;
   }
@@ -190,6 +193,7 @@ export function createDemo({ store, createSimulation, seed, speed = 1, approvalM
     /** Stops the simulation and lets anything still waiting carry on. */
     close() {
       simulation.stop();
+      prs.stop();
       for (const id of Array.from(waiting.keys())) settle(id, 'expired', 'timeout');
     },
   };

@@ -909,3 +909,36 @@ describe('store: notes to agents', () => {
     assert.deepEqual(state().notes, []);
   });
 });
+
+describe('pull requests and CI (§4.16)', () => {
+  /** @param {Record<string, any>} [extra] */
+  const prOf = (extra = {}) => ({
+    root: CWD, sessionIds: [SESSION], number: 7, url: 'https://github.com/acme/api/pull/7', state: 'OPEN', review: null, branch: 'fix/x', sha: 'a1',
+    checks: { state: 'pending', total: 2, failing: 0, pending: 2, failed: [] }, at: 1, failingSince: null, watching: true, ...extra,
+  });
+
+  it('keeps one status per work tree, logs what changed under the crew that pushed, and ignores junk', () => {
+    const { store, send, state, changes } = setup();
+    send(hook('SessionStart', { source: 'startup' }));
+    store.setPr(prOf());
+    store.setPr(prOf({ at: 2 }));
+    store.setPr(prOf({ at: 3, checks: { state: 'failing', total: 2, failing: 1, pending: 0, failed: ['lint'] }, failingSince: 3, watching: false }));
+    store.setPr({ root: 42 });
+    store.setPr(null);
+    assert.equal(state().prs.length, 1);
+    assert.equal(state().prs[0].checks.state, 'failing');
+    assert.deepEqual(changes.filter((c) => c.type === 'pr').length, 3);
+    const lines = state().log.filter((entry) => entry.kind === 'pr');
+    assert.deepEqual(lines.map((entry) => [entry.text, entry.level, entry.agentKey]), [
+      ['PR #7 (fix/x): CI running', 'info', MAIN],
+      ['CI failed on fix/x (PR #7): lint', 'warn', MAIN],
+    ]);
+  });
+
+  it('a reset forgets them: the server sends them again with hello', () => {
+    const { store, state } = setup();
+    store.setPr(prOf());
+    store.reset();
+    assert.deepEqual(state().prs, []);
+  });
+});

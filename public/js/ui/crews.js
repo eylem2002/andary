@@ -5,13 +5,15 @@
 // and a finished turn, a stop, a stuck alert or two agents on the same files can be set aside from
 // its row. A note (an edit of a file another agent changed) goes on a line of its own under what
 // the agent does. The lead's row also shows the crew's context in use, under its time, where it
-// takes no room from the crew's name.
+// takes no room from the crew's name. A crew that pushed to a pull request shows it under its goal:
+// its number (a link to it) and its CI, as the owner's gh last reported them (core/pr-status.js).
 import { nameWithRoster } from './town-people.js';
 import { contextShort, crewUsage, liveContext, usageShort } from './usage.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from './dom.js';
 import { icon } from './icons.js';
 import { modelLabel } from '../core/catalog.js';
 import { agentKeyOf } from '../core/ids.js';
+import { badgeParts, prOfSession } from '../core/pr-status.js';
 import { doingText, formatDuration, isCommandText, nameWithRole, plural, truncate } from './format.js';
 import { approvalAgentKey, roundel, setCurrent, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 import { itemsByAgent, notesByAgent, waitedText } from './needs-you.js';
@@ -73,6 +75,7 @@ export function createCrewsPanel(ctx) {
     const agent = h('span', { class: 'hud-line__member hud-line__member--agent', 'data-testid': 'crew-agent', text: 'Codex' });
     const cost = h('button', { type: 'button', class: 'hud-line__cost', 'data-testid': 'crew-cost', on: { click: () => ctx.openDialog('usage') } });
     const goal = h('p', { class: 'hud-line__goal' });
+    const pr = createPrLine();
     const stations = h('ol', { class: 'hud-stations' });
     const more = h('button', { type: 'button', class: 'hud-line__more' });
     more.addEventListener('click', () => {
@@ -81,8 +84,8 @@ export function createCrewsPanel(ctx) {
       render(ctx.store.getState());
     });
     const line = h('li', { class: 'hud-line', 'data-testid': 'crew', 'data-session-id': session.id },
-      h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, member, agent, model, cost)), goal, stations, more);
-    parts.set(line, { mark, number, title, name, model, cost, member, memberName, agent, goal, stations, more });
+      h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, member, agent, model, cost)), goal, pr.el, stations, more);
+    parts.set(line, { mark, number, title, name, model, cost, member, memberName, agent, goal, pr, stations, more });
     return line;
   }
 
@@ -113,6 +116,7 @@ export function createCrewsPanel(ctx) {
     setHidden(p.cost, !spent);
     setText(p.goal, session.goal ? truncate(session.goal, 140) : '');
     setHidden(p.goal, !session.goal || ended);
+    p.pr.update(prOfSession(state.prs ?? [], session.id));
     const showAll = unfolded.has(session.id);
     const shown = ended ? [] : visibleAgents(session, state, showAll);
     renderList(p.stations, shown, (agent) => agent.key, (agent) => createStation(ctx, parts, agent), (item, agent) => updateStation(ctx, parts, item, agent, facts));
@@ -155,6 +159,34 @@ export function createCrewsPanel(ctx) {
   }
 
   return { el, render, tick, reveal };
+}
+
+/**
+ * A crew's pull request under its goal: "PR #123" (a link, when gh gave one) and its CI and review
+ * in words ("CI failing (2) · changes requested"), the failed checks' names on hover.
+ */
+function createPrLine() {
+  const link = h('a', { class: 'hud-line__pr-link', target: '_blank', rel: 'noopener noreferrer', 'data-testid': 'crew-pr-link' });
+  const checks = h('span', { class: 'hud-line__checks', 'data-testid': 'crew-checks' });
+  const review = h('span', { class: 'hud-line__review' });
+  const el = h('p', { class: 'hud-line__pr', 'data-testid': 'crew-pr', hidden: true }, link, checks, review);
+  return {
+    el,
+    /** @param {import('../core/pr-status.js').PrStatus|null} pr */
+    update(pr) {
+      setHidden(el, !pr);
+      if (!pr) return;
+      const words = badgeParts(pr);
+      setText(link, words.pr);
+      setAttr(link, 'href', pr.url);
+      setAttr(link, 'aria-label', pr.url ? `Pull request ${pr.number}${pr.branch ? `, ${pr.branch}` : ''} (opens on GitHub)` : null);
+      setText(checks, words.checks);
+      setAttr(el, 'data-checks', pr.checks.state);
+      setAttr(checks, 'title', pr.checks.failed.length ? `Failed: ${pr.checks.failed.join(', ')}` : null);
+      setText(review, words.review);
+      setHidden(review, !words.review);
+    },
+  };
 }
 
 /**

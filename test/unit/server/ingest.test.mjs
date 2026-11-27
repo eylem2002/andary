@@ -31,9 +31,25 @@ const names = (/** @type {any[]} */ events) => events.map((e) => e.hook_event_na
 
 describe('ingest', () => {
   it('policies: local events reach every observer, a teammate\'s only grow the town', () => {
-    assert.deepEqual(POLICIES.local, { growth: true, notify: true, approvals: true, digest: true, relay: true });
-    assert.deepEqual(POLICIES.team, { growth: true, notify: false, approvals: false, digest: false, relay: false });
+    assert.deepEqual(POLICIES.local, { growth: true, notify: true, approvals: true, digest: true, prs: true, relay: true });
+    assert.deepEqual(POLICIES.team, { growth: true, notify: false, approvals: false, digest: false, prs: false, relay: false });
     assert.ok(Object.isFrozen(POLICIES) && Object.isFrozen(POLICIES.local));
+  });
+
+  it("a push from this computer starts following its work tree's pull request; a teammate's never does", () => {
+    const { ctx } = fakeContext();
+    /** @type {any[]} */
+    const pushes = [];
+    ctx.prs = { pushed: (/** @type {any} */ push) => pushes.push(push) };
+    ctx.workTrees = { rootOf: (/** @type {string} */ folder) => (folder.startsWith('/w/api') ? '/w/api' : folder.startsWith('/w/app') ? '/w/app' : null) };
+    const ran = (/** @type {string} */ command, extra = {}) => ({ hook_event_name: 'PostToolUse', session_id: 's1', cwd: '/w/app', tool_name: 'Bash', tool_input: { command }, ...extra });
+    ingestAt(ctx, { ts: 1, source: 'claude', event: ran('git push -u origin feat/x') });
+    ingestAt(ctx, { ts: 2, source: 'claude', event: ran('cd ../api && gh pr create --fill') });
+    ingestAt(ctx, { ts: 3, source: 'claude', event: ran('git push --dry-run') });
+    ingestAt(ctx, { ts: 4, source: 'claude', event: ran('git push', { hook_event_name: 'PostToolUseFailure' }) });
+    ingestAt(ctx, { ts: 5, source: 'claude', event: ran('cd /tmp && git push') });
+    ingestTeam(ctx, 'Lina', [{ ts: 6, event: ran('git push') }], 10_000);
+    assert.deepEqual(pushes, [{ root: '/w/app', sessionId: 's1' }, { root: '/w/api', sessionId: 's1' }]);
   });
 
   it('a local Claude Code hook: usage, growth, notifications, relay, approvals and the digest, then the browsers', () => {

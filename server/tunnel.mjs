@@ -5,10 +5,11 @@
 // stops it with the server. Everything that arrives that way is a request from the internet
 // (auth.isTunnelled): it needs a member key or the view token, never the owner's sign-in.
 import { spawn, spawnSync } from 'node:child_process';
-import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, isAbsolute, join } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { findProgram } from './programs.mjs';
 
 /** Runs cloudflared and stops it when the town's end closes its stdin (tunnel-watchdog.mjs). */
 const WATCHDOG = fileURLToPath(new URL('./tunnel-watchdog.mjs', import.meta.url));
@@ -44,29 +45,7 @@ export function parseTunnelUrl(text) {
  * @returns {string|null}
  */
 export function findCloudflared(env = process.env, platform = process.platform) {
-  const path = env.PATH ?? env.Path ?? '';
-  const name = platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
-  const absolute = platform === 'win32' ? (/** @type {string} */ dir) => /^(?:[a-z]:[\\/]|\\\\)/i.test(dir) : isAbsolute;
-  for (const dir of path.split(platform === 'win32' ? ';' : delimiter)) {
-    if (!dir || !absolute(dir)) continue;
-    const candidate = join(dir, name);
-    if (isProgram(candidate, platform)) return candidate;
-  }
-  return null;
-}
-
-/**
- * @param {string} file
- * @param {NodeJS.Platform} platform
- */
-function isProgram(file, platform) {
-  try {
-    if (!statSync(file).isFile()) return false;
-    if (platform !== 'win32') accessSync(file, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
+  return findProgram('cloudflared', env, platform);
 }
 
 /**

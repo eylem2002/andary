@@ -33,7 +33,10 @@ describe('public endpoints', () => {
     const hello = JSON.parse((await rawRequest(town.port, { path: '/api/hello' })).text);
     assert.equal(hello.app, 'andary');
     assert.equal(hello.authenticated, false);
-    assert.deepEqual(hello.settings, { remoteApprovals: false, approvalTimeoutMs: 120000, notify: false, notifyLimits: false });
+    // PR and CI status is off in tests (--no-gh); whether gh is there depends on the computer.
+    const { gh, ...settings } = hello.settings;
+    assert.deepEqual(settings, { remoteApprovals: false, approvalTimeoutMs: 120000, notify: false, notifyLimits: false });
+    assert.deepEqual([gh.on, gh.hint], [false, null]);
     assert.match(hello.version, /^\d+\.\d+\.\d+/);
   });
 

@@ -178,6 +178,19 @@ describe('connectLive', () => {
     assert.deepEqual(seen, [limits, { accounts: [], contexts: {} }, null]);
   });
 
+  test('pull requests (§4.16): from hello after its history, then each pr message; the switch goes out as a setting', () => {
+    const store = { ...fakeStore(), setPr: (/** @type {any} */ pr) => store.calls.push(['pr', pr.root]) };
+    const link = connectLive({ store, WebSocketImpl: /** @type {any} */ (FakeSocket), url: 'ws://x/ws' });
+    const socket = FakeSocket.all[0];
+    socket.open();
+    socket.receive({ t: 'hello', history: [{ id: 1 }], approvals: [], prs: [{ root: '/w/a' }] });
+    socket.receive({ t: 'pr', pr: { root: '/w/b' } });
+    socket.receive({ t: 'hello', history: [], approvals: [], prs: 'junk' });
+    assert.deepEqual(store.calls, [['reset'], ['ingest', 1], ['pr', '/w/a'], ['pr', '/w/b'], ['reset']]);
+    assert.equal(link.setGh(false), true);
+    assert.deepEqual(socket.sent.at(-1), { t: 'settings', settings: { gh: false } });
+  });
+
   test('decide and settings are sent only on an open socket', () => {
     const link = connectLive({ store: fakeStore(), WebSocketImpl: /** @type {any} */ (FakeSocket), url: 'ws://x/ws' });
     const socket = FakeSocket.all[0];

@@ -281,6 +281,26 @@ edit". A filtered run (`pytest -k`, one test file) passes only "selected tests",
 says who ran it. A turn the town joined midway says "at least" and "since the town joined", and has
 no cost.
 
+### Pull requests and CI
+
+When a crew pushes a branch (or opens a pull request with `gh pr create`), its row shows the
+pull request and its checks a little later: `PR #123 · CI failing (2) · changes requested`, with a
+link to it (hover the checks for the names of the failed ones). Failing CI on an open pull request
+counts in **need you** ("CI failed on feat/login (PR #123): test, lint") until you set it aside or
+push again, gets a line in the activity log, and with phone notes on sends one ("CI failed on a
+branch a crew pushed.", never the repository or the branch).
+
+- **How:** Andary asks your own [GitHub CLI](https://cli.github.com/) with
+  `gh pr view --json …` in that repository, 30 s after the push, then after 1, 2 and 5 minutes and
+  every 5 after that, and stops once the checks have finished, the pull request is merged or
+  closed, or an hour has passed. It uses the sign-in `gh` already has: Andary never sees a token
+  and sends nothing itself.
+- **On by default when `gh` is on your PATH.** Turn it off in Settings → PR and CI status, or start
+  with `andary start --no-gh`. Without `gh`, or with `gh` not signed in (`gh auth login`), the town
+  says so once, quietly, and Settings says what it needs.
+- **Not covered:** GitLab and other hosts, and your teammates' pushes in a team town (their own
+  Andary follows them).
+
 ### Catch up
 
 Away for a while? If 20 minutes pass with nothing from you in any session while your crews keep
@@ -477,6 +497,9 @@ Andary sees what your agents see, so it is locked down:
   sent; prompts and commands are never written to disk unless you pass `--record` (small state
   files in `~/.andary` keep usage totals with the transcript paths they came from, and the
   town's points);
+- PR and CI status runs your own `gh pr view` (no shell, a timeout, never a prompt) after a crew
+  pushes; Andary handles no GitHub token and makes no request to GitHub itself (`--no-gh` turns
+  it off);
 - a strict Content-Security-Policy, no third-party requests (fonts and three.js are bundled), and
   no event text is ever rendered as HTML;
 - the installer keeps a backup of every file it changes and writes through temporary files it
@@ -498,6 +521,7 @@ The full model: [docs/INTEGRATION.md](docs/INTEGRATION.md).
 | `--tunnel` says cloudflared is missing, or prints no address | Install `cloudflared` (it must work as `cloudflared --version` in a new terminal); Quick Tunnels need outbound port 7844 and sometimes fail on Cloudflare's side: try again. `andary doctor` shows the tunnel's state. |
 | No plan limits on the Usage button | Install the [andary-limits mod](#plan-limits-optional), then finish a turn in a session started afterwards (Claude Code v2.1.287 or newer; an API key has no plan limits). `andary doctor` says whether it reported. |
 | Plan limits never arrive, with `ANDARY_HOME` set | The mod looks for the town in Claude Code's own `ANDARY_HOME`, else `~/.andary`. Set `ANDARY_HOME` where Claude Code inherits it too (your shell profile), and restart Claude Code. |
+| No PR or CI on a crew that pushed | Settings → PR and CI status says why: install the GitHub CLI (`gh --version` in a new terminal) and run `gh auth login`, then push again. Only GitHub pull requests are shown, a little after the push. |
 | The 3D view is blank or slow | Settings → Graphics → Low power; the boards and log keep working without WebGL. |
 
 ## 8. Command reference
@@ -507,7 +531,7 @@ andary [command] [options]
 
   start                 start the town and open it (the default command)
                         --port <n>, --host <address>, --no-open, --detach, --record,
-                        --remote-approvals, --approval-timeout <s>, --notify, --notify-url <url>,
+                        --remote-approvals, --approval-timeout <s>, --no-gh, --notify, --notify-url <url>,
                         --notify-limits (a phone note at 90% of a plan limit),
                         --team [--name <you>] [--team-host <name>], --share-to <address> (key in ANDARY_TEAM_KEY),
                         --tunnel [--tunnel-allowed-mail <emails>] (with --team: a public address),

@@ -20,6 +20,7 @@ export const START_OPTIONS = Object.freeze({
   host: { type: 'string' },
   'no-open': { type: 'boolean' },
   'remote-approvals': { type: 'boolean' },
+  'no-gh': { type: 'boolean' },
   notify: { type: 'boolean' },
   'notify-url': { type: 'string' },
   'notify-limits': { type: 'boolean' },
@@ -43,6 +44,7 @@ export const START_OPTIONS = Object.freeze({
  * @property {string} host
  * @property {boolean} open
  * @property {boolean} remoteApprovals
+ * @property {boolean} gh              PR and CI status through gh (off with --no-gh)
  * @property {boolean} notify          --notify: a private ntfy.sh topic kept in ANDARY_HOME
  * @property {string|null} notifyUrl   --notify-url or ANDARY_NOTIFY_URL
  * @property {boolean} notifyLimits    --notify-limits: a phone note when a plan limit reaches 90%
@@ -85,6 +87,7 @@ function startSettings(values, io, demo) {
     shareTo,
     open: !values['no-open'],
     remoteApprovals: Boolean(values['remote-approvals']),
+    gh: !values['no-gh'],
     notify: Boolean(values.notify),
     notifyUrl,
     notifyLimits: Boolean(values['notify-limits']),
@@ -230,7 +233,7 @@ function linkFor(state, settings) {
 }
 
 /** Flags that only matter when a new server starts. */
-const SERVER_SHAPING = new Set(['port', 'host', 'remote-approvals', 'notify', 'notify-url', 'notify-limits', 'team', 'team-host', 'share-to', 'team-key', 'approval-timeout', 'tls-cert', 'tls-key', 'tunnel', 'tunnel-allowed-mail', 'record']);
+const SERVER_SHAPING = new Set(['port', 'host', 'remote-approvals', 'no-gh', 'notify', 'notify-url', 'notify-limits', 'team', 'team-host', 'share-to', 'team-key', 'approval-timeout', 'tls-cert', 'tls-key', 'tunnel', 'tunnel-allowed-mail', 'record']);
 
 /**
  * @param {import('../state-file.mjs').ServerState} state
@@ -265,6 +268,7 @@ async function runForeground(settings, home, io, cloudflared = null) {
       host: settings.host,
       home,
       remoteApprovals: settings.remoteApprovals,
+      gh: settings.gh,
       notifyUrl: settings.notifyUrl ?? (settings.notify ? savedTopicUrl(home) : null),
       notifyLimits: settings.notifyLimits,
       team: settings.team,
@@ -276,6 +280,7 @@ async function runForeground(settings, home, io, cloudflared = null) {
       tunnel: settings.tunnel,
       record: settings.record,
       awayMs: testAwayMs(io.env),
+      prWatch: testGhPollMs(io.env),
       presenceMs: testPresenceMs(io.env),
       log,
     });
@@ -311,6 +316,18 @@ async function runForeground(settings, home, io, cloudflared = null) {
 function testAwayMs(env) {
   const ms = Number(env.ANDARY_AWAY_MS);
   return Number.isInteger(ms) && ms >= 100 ? ms : undefined;
+}
+
+/**
+ * For tests only (CONTRACTS §8), not a setting: ANDARY_GH_POLL_MS makes every pause between two
+ * looks at a pushed branch's pull request that long (pr-watch.mjs POLL_DELAYS_MS), so a test with a
+ * fake gh need not wait 30 s. Anything but a whole number from 50 on is ignored.
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {{ delaysMs: number[] }|undefined}
+ */
+function testGhPollMs(env) {
+  const ms = Number(env.ANDARY_GH_POLL_MS);
+  return Number.isInteger(ms) && ms >= 50 ? { delaysMs: [ms] } : undefined;
 }
 
 /**
@@ -414,6 +431,7 @@ function printBanner(server, settings, io, tunnelView = null) {
   const { notifyUrl } = server;
   io.out(notifyUrl ? `  Phone notifications: on. In the free ntfy app, subscribe to ${notifyUrl}` : '  Phone notifications: off (start with --notify to get them in the free ntfy app)');
   if (notifyUrl && settings.notifyLimits) io.out('  Also when a Claude plan limit reaches 90% (with the andary-limits mod).');
+  io.out(`  PR and CI status: ${ghWords(server.ghSettings(), settings.gh)}`);
   if (server.viewUrl) {
     io.out(`  Team town: on. Invite a teammate (a home, a character and a personal link) with: ${cliInvocation()} team invite <name>`);
     io.out(`  Anyone else may watch (view only) at ${tunnelView ?? server.viewUrl}`);
@@ -533,12 +551,24 @@ function childEnv(settings, env) {
 }
 
 /**
+ * The banner's line on PR and CI status.
+ * @param {{ on: boolean, available: boolean }} gh  the server's
+ * @param {boolean} wanted  not --no-gh
+ */
+function ghWords(gh, wanted) {
+  if (!wanted) return 'off (--no-gh)';
+  if (gh.on) return 'on, through your own gh after a crew pushes (turn it off in the town\'s Settings, or start with --no-gh)';
+  return 'off: the GitHub CLI (gh) is not on your PATH';
+}
+
+/**
  * @param {StartSettings} settings
  * @returns {string[]}
  */
 function forwardedFlags(settings) {
   const flags = ['--port', String(settings.port), '--host', settings.host];
   if (settings.remoteApprovals) flags.push('--remote-approvals');
+  if (!settings.gh) flags.push('--no-gh');
   if (settings.notify) flags.push('--notify');
   if (settings.notifyLimits) flags.push('--notify-limits');
   if (settings.team) flags.push('--team');

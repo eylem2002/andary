@@ -943,3 +943,20 @@ test('a limit note names the account when two or more report, and a restart send
   third.notifier.limitsChanged(work, 1);
   assert.match(third.posts[0].body, /^Claude's 5-hour limit is 99\.5% used\./);
 });
+
+test('a pull request failing its CI sends one plain note (no repository, branch or check), at most one in 30 s', async () => {
+  const { notifier, posts, at } = testNotifier();
+  notifier.ciFailed();
+  notifier.ciFailed();
+  await at(1);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].body, 'CI failed on a branch a crew pushed.');
+  await at(31_000);
+  notifier.ciFailed();
+  await at(31_001);
+  assert.equal(posts.length, 2);
+  const off = testNotifier({ url: null });
+  off.notifier.ciFailed();
+  await off.at(1);
+  assert.equal(off.posts.length, 0);
+});
