@@ -6,6 +6,8 @@ import { createApprovalBroker } from './approvals.mjs';
 import { createUsageTracker } from './usage.mjs';
 import { createProgress } from './progress.mjs';
 import { createNotifier } from './notify.mjs';
+import { createLeftovers } from './leftovers.mjs';
+import { loadWatchSettings } from './watch-settings.mjs';
 import { createWorkTrees } from './work-trees.mjs';
 import { createTownDigest } from './digest.mjs';
 import { createNoteDesk } from './notes.mjs';
@@ -60,7 +62,8 @@ const NOTE_SWEEP_MS = 15_000;
  * @property {string} secret
  * @property {string} uiToken
  * @property {string} responseKey     signs /api/hook replies (see auth.signHookReply)
- * @property {{ remoteApprovals: boolean, approvalTimeoutMs: number }} settings
+ * @property {{ remoteApprovals: boolean, approvalTimeoutMs: number, watch: import('../public/js/core/watch.js').WatchSettings, watchFile: string|null }} settings
+ *   watch: the cost and long-turn alerts' settings (core/watch.js), kept in watchFile
  * @property {Set<string>} allowedHosts
  * @property {Set<string>} tunnelHosts    the Host names a tunnelled request may use (ADR 0019)
  * @property {Record<string, string>} headers
@@ -69,6 +72,7 @@ const NOTE_SWEEP_MS = 15_000;
  * @property {ReturnType<typeof createUsageTracker>} usage
  * @property {ReturnType<typeof createProgress>} progress
  * @property {ReturnType<typeof createNotifier>} notifier
+ * @property {ReturnType<typeof createLeftovers>} leftovers  what ended sessions left listening (§4.16)
  * @property {import('./work-trees.mjs').WorkTrees} [workTrees]  where local hooks' work trees start (andary_root)
  * @property {ReturnType<typeof createTownDigest>} digest   what your crews did while you were away
  * @property {ReturnType<typeof createLimitsTracker>} limits  plan limits from the andary-limits mod
@@ -266,7 +270,10 @@ function createHttpServer(ctx, tls, { tunnelled = false } = {}) {
  */
 function createContext(config, options) {
   const hub = createHub(LIMITS.wsClients);
+  const watchFile = config.writeState ? join(config.home, 'watch.json') : null;
+  const watch = loadWatchSettings(watchFile);
   const notifier = createNotifier({
+    watch,
     url: options.notifyUrl ?? null,
     log: config.log,
     delayMs: options.notifyDelayMs,
@@ -281,7 +288,7 @@ function createContext(config, options) {
     secret: generateToken(),
     uiToken: generateToken(),
     responseKey: generateToken(),
-    settings: { remoteApprovals: Boolean(options.remoteApprovals), approvalTimeoutMs: config.approvalTimeoutMs },
+    settings: { remoteApprovals: Boolean(options.remoteApprovals), approvalTimeoutMs: config.approvalTimeoutMs, watch, watchFile },
     allowedHosts: new Set(),
     tunnelHosts: new Set(),
     headers: securityHeaders(buildCsp(computeImportMapHashes(config.publicDir))),
@@ -308,9 +315,14 @@ function createContext(config, options) {
     usage: createUsageTracker({
       claudeDir: options.claudeDir ?? resolveClaudeConfigDir(),
       stateFile: config.writeState ? join(config.home, 'usage.json') : null,
-      onChange: (record, days) => hub.broadcastOwners({ t: 'usage', u: record, days }),
+      onChange: (record, days) => {
+        hub.broadcastOwners({ t: 'usage', u: record, days });
+        notifier.usageChanged(record);
+      },
     }),
     notifier,
+    // Commands and folders of your own sessions: owners only.
+    leftovers: createLeftovers({ onFound: (found) => hub.broadcastOwners({ t: 'leftovers', l: found }) }),
     workTrees: createWorkTrees(),
     // Per account, not per session: owners only, like costs; never relayed to a team host.
     limits: createLimitsTracker({
@@ -400,6 +412,7 @@ async function stopServer(ctx, listeners, config) {
   if (ctx.noteTimer) clearInterval(ctx.noteTimer);
   // First, so no phone note goes out while the server stops: whoever stops it is at the computer.
   ctx.notifier.dispose();
+  ctx.leftovers.dispose();
   ctx.digest.dispose();
   ctx.broker.releaseAll();
   // Last events to the team host, but never hold up shutdown for long.

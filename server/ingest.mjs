@@ -86,6 +86,8 @@ function admit(ctx, origin, item) {
   const event = withWorkTree(withCallKey(item.event), origin === 'local' ? ctx.workTrees : null);
   if (policy.growth) ctx.progress.observe(event);
   if (policy.notify) ctx.notifier.observe(event, item.ts);
+  // What a session left running is this computer's to look for (§4.16).
+  if (origin === 'local') ctx.leftovers?.observe(event);
   const envelope = record(ctx, { ts: item.ts, event });
   // Sanitized, as what it counts (a turn's last message) goes to browsers; timed by arrival, so a
   // late hook still counts in the period a browser asks about.

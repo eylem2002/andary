@@ -9,6 +9,7 @@ import { SHORTCUT_HELP } from './shortcuts.js';
 import { setDesktopNotify } from './notifications.js';
 import { LOOKS } from '../core/looks.js';
 import { LOOK } from '../page.js';
+import { watchBlock } from './watch-settings.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 
@@ -159,6 +160,7 @@ export function createSettingsDialog(ctx) {
     h('p', { class: 'hud-setting__help', text: 'Rain when commands fail, a storm when they keep failing, a rainbow when tests pass again, fog while a crew thinks for a long time.' }));
 
   const notify = notifyBlocks(ctx);
+  const watch = watchBlock(ctx);
   const teamText = h('p', { class: 'hud-setting__help', 'data-testid': 'team-text' });
   const teamBlock = h('div', { class: 'hud-setting' }, h('p', { class: 'hud-setting__name', text: 'Team town' }), teamText);
   const you = youBlock(ctx, () => dialog.close());
@@ -171,7 +173,7 @@ export function createSettingsDialog(ctx) {
   const dialog = createDialog({
     id: 'hud-settings',
     title: 'Settings',
-    body: [you.el, walking.el, teamBlock, remoteBlock, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
+    body: [you.el, walking.el, teamBlock, remoteBlock, watch.el, look.el, theme.el, motion.el, placeNames.el, quality.el, weatherBlock, notify.desktop, notify.phone, volumeBlock, ambientBlock, announceBlock, h('div', { class: 'hud-dialog__actions' }, helpButton, setupButton, leaveButton)],
   });
   helpButton.addEventListener('click', () => {
     dialog.close();
@@ -212,6 +214,7 @@ export function createSettingsDialog(ctx) {
       weather.checked = ctx.prefs.weather;
       ambient.checked = ctx.prefs.ambient;
       notify.sync();
+      watch.sync();
       setHidden(notify.phone, !live || viewer);
       dialog.open();
     },
@@ -219,6 +222,7 @@ export function createSettingsDialog(ctx) {
     sync() {
       remote.checked = Boolean(ctx.view.serverSettings.remoteApprovals);
       remote.disabled = ctx.view.connection !== 'live';
+      watch.sync();
     },
   };
 }
@@ -396,7 +400,7 @@ export function createSetupDialog(ctx) {
  * @param {HTMLElement} button
  * @param {HudContext} ctx
  */
-async function copyCommand(command, code, button, ctx) {
+export async function copyCommand(command, code, button, ctx) {
   const label = /** @type {HTMLElement} */ (button.lastElementChild);
   try {
     await navigator.clipboard.writeText(command);

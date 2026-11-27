@@ -5,7 +5,8 @@
 // and a finished turn, a stop, a stuck alert or two agents on the same files can be set aside from
 // its row. A note (an edit of a file another agent changed) goes on a line of its own under what
 // the agent does. The lead's row also shows the crew's context in use, under its time, where it
-// takes no room from the crew's name.
+// takes no room from the crew's name. An ended crew that left a server running says so under its
+// line, with a command to copy that would stop it (ui/leftovers.js).
 import { nameWithRoster } from './town-people.js';
 import { contextShort, crewUsage, liveContext, usageShort } from './usage.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from './dom.js';
@@ -15,6 +16,7 @@ import { agentKeyOf } from '../core/ids.js';
 import { doingText, formatDuration, isCommandText, nameWithRole, plural, truncate } from './format.js';
 import { approvalAgentKey, roundel, setCurrent, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 import { itemsByAgent, notesByAgent, waitedText } from './needs-you.js';
+import { createLeftoversBlock } from './leftovers.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -80,9 +82,10 @@ export function createCrewsPanel(ctx) {
       else unfolded.add(session.id);
       render(ctx.store.getState());
     });
+    const leftovers = createLeftoversBlock(ctx);
     const line = h('li', { class: 'hud-line', 'data-testid': 'crew', 'data-session-id': session.id },
-      h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, member, agent, model, cost)), goal, stations, more);
-    parts.set(line, { mark, number, title, name, model, cost, member, memberName, agent, goal, stations, more });
+      h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, member, agent, model, cost)), goal, stations, more, leftovers.el);
+    parts.set(line, { mark, number, title, name, model, cost, member, memberName, agent, goal, stations, more, leftovers });
     return line;
   }
 
@@ -120,6 +123,7 @@ export function createCrewsPanel(ctx) {
     setHidden(p.more, ended || hiddenCount === 0);
     setText(p.more, showAll ? 'Hide finished agents' : `Show ${plural(hiddenCount, 'more finished agent')}`);
     setAttr(p.more, 'aria-expanded', String(showAll));
+    p.leftovers.update(ended ? state.leftovers?.find((found) => found.sessionId === session.id) : undefined);
   }
 
   /** @param {StoreState} state */

@@ -3,7 +3,8 @@
 // stats; works out who each event belongs to (subagent labels, teammate names); keeps what each
 // agent has asked you (store-dialogs.js) or waits for you on (waits.js), whether it seems stuck
 // (loops.js), and where two agents work on the same files (conflicts.js); keeps a receipt of each
-// lead's turn (receipts.js); and unlocks achievements. The town may open mid-session, so every
+// lead's turn (receipts.js); watches each crew's spending, helpers and long turns (watch.js); keeps
+// what ended sessions left running, as the server found it (leftovers.js); and unlocks achievements. The town may open mid-session, so every
 // session or agent an event mentions is created on first sight.
 
 import { ACHIEVEMENTS, achievementFor } from './achievements.js';
@@ -18,6 +19,8 @@ import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { rulesText } from './permission-rules.js';
 import { noteStateText } from './notes.js';
 import { receiptLine } from './receipts.js';
+import { readLeftovers } from './leftovers.js';
+import { isEditCall } from './watch.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
 import { dialogsAfterApproval, dialogsAfterEvent } from './store-dialogs.js';
@@ -67,7 +70,7 @@ export { ACHIEVEMENTS };
  * @property {string} agentKey
  * @property {string} agentName
  * @property {string} color
- * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict' / 'receipt'
+ * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict' / 'receipt' / 'watch' / 'leftover'
  * @property {string} icon
  * @property {string} text
  * @property {'info'|'success'|'warn'|'error'} level
@@ -154,6 +157,10 @@ export { ACHIEVEMENTS };
  * @property {UsageDay[]} usageDays             the last 30 days, oldest first
  * @property {Note[]} notes                       the owner's notes to agents (§4.15), oldest first
  * @property {readonly import('./receipts.js').Receipt[]} receipts  a receipt per lead's turn that ended, newest last
+ * @property {{ alerts: import('./watch.js').WatchAlert[], turns: Record<string, import('./watch.js').WatchTurn>, settings: import('./watch.js').WatchSettings }} watch
+ *   the cost and helpers alerts, each crew's turn (for long turns), and the settings they follow (watch.js)
+ * @property {{ sessionId: string, at: number, items: import('./leftovers.js').Leftover[] }[]} leftovers
+ *   what ended sessions left listening, as the server found it (§4.16), oldest first
  */
 
 /**
@@ -170,7 +177,7 @@ export { ACHIEVEMENTS };
 /** @typedef {{ date: string, tokens: number, costUsd: number }} UsageDay */
 /** @typedef {import('./notes.js').Note} Note */
 
-/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'note', note: Note}|{type: 'people'}|{type: 'reset'}} StoreChange */
+/** @typedef {{type: 'event', event: TownEvent}|{type: 'approval', approval: Approval, previous?: string|null}|{type: 'achievement', achievement: Achievement}|{type: 'usage', agentKey: string}|{type: 'note', note: Note}|{type: 'people'}|{type: 'watch'}|{type: 'leftovers', sessionId: string}|{type: 'reset'}} StoreChange */
 
 /**
  * @typedef {object} Store
@@ -180,6 +187,8 @@ export { ACHIEVEMENTS };
  * @property {(record: unknown, days?: unknown) => void} setUsage  one agent's usage totals, and the day totals
  * @property {(people: unknown) => void} setPeople  a team town's people ({name, color, host}[], color an index into CREW_COLORS): their crews take their colour
  * @property {(note: unknown) => void} setNote  a note to an agent, as the server last told of it (§4.15)
+ * @property {(settings: unknown) => void} setWatchSettings  the cost and long-turn alerts' thresholds (watch.js); kept across resets
+ * @property {(leftovers: unknown) => void} setLeftovers  what an ended session left running (§4.16), from the server
  * @property {(listener: (change: StoreChange) => void) => () => void} subscribe
  * @property {() => StoreState} getState
  * @property {() => void} reset
@@ -616,7 +625,57 @@ function apply(m, input) {
   for (const change of newlyStuck) logStuck(m, e, s, change);
   for (const hazard of hazards) logHazard(m, e, s, hazard);
   if (a) followTurn(m, e, s, a);
+  if (!s.member) followWatch(m, e, s, a);
   return e;
+}
+
+/**
+ * What each event means for the cost, helpers and long-turn rules (watch.js): your prompt to a
+ * lead, a file changed, a helper started, the lead's turn ended, the session ended.
+ * @param {TownEvent} e @param {AgentState|undefined} a
+ * @returns {import('./watch.js').WatchStep['type']|null}
+ */
+function watchStepOf(e, a) {
+  const lead = a?.role === 'lead';
+  switch (e.kind) {
+    case 'prompt':
+      return lead ? 'prompt' : null;
+    case 'tool.end':
+      return isEditCall(e.data.tool, e.data.input) ? 'edit' : null;
+    case 'subagent.start':
+      return 'helper';
+    case 'turn.stop':
+    case 'turn.fail':
+      return lead ? 'stop' : null;
+    case 'session.end':
+      return 'end';
+    default:
+      return null;
+  }
+}
+
+/**
+ * Keeps the cost and helpers alerts on state.watch, with a line in the activity log when one starts.
+ * A teammate's crew (a team town) is theirs: its costs are never shared.
+ * @param {Model} m @param {TownEvent} e @param {Session} s @param {AgentState|undefined} a
+ */
+function followWatch(m, e, s, a) {
+  const type = watchStepOf(e, a);
+  if (!type) return;
+  logWatch(m, m.watch.record(/** @type {import('./watch.js').WatchStep} */ ({ type, sessionId: s.id, at: e.ts })), e.ts);
+}
+
+/**
+ * The watch's alerts and turns onto the state, and a warning in the log for each alert that started.
+ * @param {Model} m @param {import('./watch.js').WatchAlert[]} started @param {number} ts
+ */
+function logWatch(m, started, ts) {
+  m.state.watch = { alerts: m.watch.alerts(), turns: m.watch.turns(), settings: m.watch.settings() };
+  for (const alert of started) {
+    const s = m.sessions.get(alert.sessionId);
+    const key = agentKeyOf(alert.sessionId, null);
+    pushLog(m, { ts, sessionId: alert.sessionId, agentKey: key, kind: 'watch' }, s, m.state.agents[key], { icon: alert.kind === 'fan-out' ? '👥' : '💸', text: alert.text, level: 'warn' });
+  }
 }
 
 /**
@@ -952,6 +1011,7 @@ export function createStore(options = {}) {
   let m = createModel(localHour, maxLog);
   /** Kept across resets: the people do not change when the history is replayed. */
   let people = m.people;
+  const watching = watchApi(() => m, emit, now);
 
   /** @param {StoreChange} change */
   function emit(change) {
@@ -1007,22 +1067,8 @@ export function createStore(options = {}) {
    * @param {number} ts
    */
   function endIdleNoSession(ts) {
-    const s = m.sessions.get(NO_SESSION);
-    if (!s || s.status === 'ended' || ts - s.lastActivity < NO_SESSION_IDLE_MS) return;
-    commit({
-      id: `${NO_SESSION}-idle-${ts}`,
-      ts,
-      rx: ts,
-      kind: 'session.end',
-      sessionId: NO_SESSION,
-      agentKey: agentKeyOf(NO_SESSION, null),
-      agentId: null,
-      agentType: null,
-      cwd: s.cwd,
-      member: s.member ?? null,
-      source: s.source ?? 'claude',
-      data: { reason: 'idle' },
-    });
+    const end = idleEnd(m, ts);
+    if (end) commit(end);
   }
 
   return {
@@ -1065,9 +1111,10 @@ export function createStore(options = {}) {
       if (note && noteChanged(m, note, now())) emit({ type: 'note', note });
     },
     setUsage(record, days) {
-      const key = applyUsage(m, record, days);
+      const key = applyUsage(m, record, days, now());
       if (key) emit({ type: 'usage', agentKey: key });
     },
+    ...watching.methods,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -1081,22 +1128,29 @@ export function createStore(options = {}) {
     },
     reset() {
       m = Object.assign(createModel(localHour, maxLog), { people });
+      watching.restore(m);
       emit({ type: 'reset' });
     },
   };
 }
 
 /**
- * An agent's usage totals (and the last days'), from the server or the demo.
- * @param {Model} m @param {unknown} record @param {unknown} [days]
+ * An agent's usage totals (and the last days'), from the server or the demo. Its crew's spending
+ * goes to the cost alerts (watch.js), but not a teammate's crew's.
+ * @param {Model} m @param {unknown} record @param {unknown} days @param {number} at
  * @returns {string|null} the agent whose totals changed
  */
-function applyUsage(m, record, days) {
+function applyUsage(m, record, days, at) {
   const usage = readUsage(record);
   if (usage) {
     m.state.usage[usage.key] = usage.value;
     // The turn that ended last gets its cost as the transcript catches up.
     m.receipts.priced(usage.sessionId, m.state.usage);
+    if (!m.sessions.get(usage.sessionId)?.member) {
+      const t = usage.value.tokens;
+      const step = { type: /** @type {const} */ ('usage'), sessionId: usage.sessionId, agentKey: usage.key, costUsd: usage.value.costUsd, tokens: t.input + t.output + t.cacheRead + t.cacheWrite, at };
+      logWatch(m, m.watch.record(step), at);
+    }
   }
   if (Array.isArray(days)) m.state.usageDays = readDays(days);
   return usage ? usage.key : null;
@@ -1139,6 +1193,87 @@ function readPeople(list) {
     if (person.host === true) host = person.name;
   }
   return { host, colors, agents };
+}
+
+/**
+ * The store's setWatchSettings and setLeftovers, on its model of the moment. The thresholds are
+ * kept across resets (restore): they are the viewer's, not the history's.
+ * @param {() => Model} model @param {(change: StoreChange) => void} emit @param {() => number} now
+ */
+function watchApi(model, emit, now) {
+  /** @type {unknown} */
+  let settings = null;
+  return {
+    /** @param {Model} m */
+    restore(m) {
+      if (settings !== null) applyWatchSettings(m, settings, now());
+    },
+    methods: {
+      /** @param {unknown} raw */
+      setWatchSettings(raw) {
+        settings = raw;
+        applyWatchSettings(model(), raw, now());
+        emit({ type: 'watch' });
+      },
+      /** @param {unknown} raw */
+      setLeftovers(raw) {
+        const found = readLeftovers(raw);
+        if (found && leftoversChanged(model(), found, now())) emit({ type: 'leftovers', sessionId: found.sessionId });
+      },
+    },
+  };
+}
+
+/**
+ * The session end of the crew of events without a session id, once it has been quiet for
+ * NO_SESSION_IDLE_MS; null while it is not.
+ * @param {Model} m @param {number} ts
+ * @returns {TownEvent|null}
+ */
+function idleEnd(m, ts) {
+  const s = m.sessions.get(NO_SESSION);
+  if (!s || s.status === 'ended' || ts - s.lastActivity < NO_SESSION_IDLE_MS) return null;
+  return {
+    id: `${NO_SESSION}-idle-${ts}`,
+    ts,
+    rx: ts,
+    kind: 'session.end',
+    sessionId: NO_SESSION,
+    agentKey: agentKeyOf(NO_SESSION, null),
+    agentId: null,
+    agentType: null,
+    cwd: s.cwd,
+    member: s.member ?? null,
+    source: s.source ?? 'claude',
+    data: { reason: 'idle' },
+  };
+}
+
+/** New thresholds for the cost and long-turn rules (watch.js). @param {Model} m @param {unknown} raw @param {number} now */
+function applyWatchSettings(m, raw, now) {
+  m.watch.setSettings(raw);
+  logWatch(m, [], now);
+}
+
+/** Ended sessions whose leftovers are kept; the oldest give way. */
+const MAX_LEFTOVERS = 20;
+
+/**
+ * Keeps what an ended session left running, with a line in its crew's log for each. False when
+ * it is the same as before (a reconnect sends it again).
+ * @param {Model} m @param {{ sessionId: string, at: number, items: import('./leftovers.js').Leftover[] }} found @param {number} now
+ */
+function leftoversChanged(m, found, now) {
+  const list = m.state.leftovers;
+  const before = list.find((l) => l.sessionId === found.sessionId);
+  if (before && before.at === found.at) return false;
+  m.state.leftovers = [...list.filter((l) => l !== before), found].slice(-MAX_LEFTOVERS);
+  const s = m.sessions.get(found.sessionId);
+  const key = agentKeyOf(found.sessionId, null);
+  for (const item of found.items) {
+    pushLog(m, { ts: found.at || now, sessionId: found.sessionId, agentKey: key, kind: 'leftover' }, s, m.state.agents[key], { icon: '🔌', text: `Left running: ${item.command} (port ${item.port})`, level: 'warn' });
+  }
+  return true;
 }
 
 /** Notes the store keeps; the oldest give way. */

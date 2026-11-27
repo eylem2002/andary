@@ -1,13 +1,14 @@
 // The store's working memory (core/store.js): its state plus the indexes it keeps to attribute
 // events (recent spawns, role counters, hats handed out, retired helpers), the open dialogs, the
 // stuck rules' memory, who changed which file (for two agents on the same files), each lead's turn
-// for its receipt, and the limits on all of them. Internal to the store's modules.
+// for its receipt, the cost and long-turn alerts' memory, and the limits on all of them. Internal to the store's modules.
 import { createDialogs } from './dialogs.js';
 import { BUILDING_KEYS } from './catalog.js';
 import { createAchievementTracker } from './achievements.js';
 import { createConflicts } from './conflicts.js';
 import { createLoops } from './loops.js';
 import { createReceipts } from './receipts.js';
+import { WATCH_DEFAULTS, createWatch } from './watch.js';
 
 /** @typedef {import('./store.js').BuildingKey} BuildingKey */
 /** @typedef {import('./store.js').StoreState} StoreState */
@@ -58,7 +59,7 @@ export function createModel(localHour, maxLog) {
   const model = {
     maxLog,
     /** @type {StoreState} */
-    state: { sessions: [], agents: {}, approvals: [], dialogs: [], hazards: [], log: [], stats: freshStats(), achievements: [], usage: {}, usageDays: [], receipts: [], notes: [] },
+    state: { sessions: [], agents: {}, approvals: [], dialogs: [], hazards: [], log: [], stats: freshStats(), achievements: [], usage: {}, usageDays: [], receipts: [], notes: [], watch: { alerts: [], turns: {}, settings: WATCH_DEFAULTS }, leftovers: [] },
     /** What agents asked you and had no answer to yet (dialogs.js); state.dialogs is its list. */
     dialogs: createDialogs(),
     /** Who changed which file lately (conflicts.js); state.hazards is what it found. */
@@ -87,6 +88,8 @@ export function createModel(localHour, maxLog) {
     receipts: createReceipts(),
     /** the stuck rules' memory of each agent's recent steps (loops.js), behind AgentState.stuck */
     loops: createLoops(),
+    /** the cost, helpers and long-turn rules' memory of each crew (watch.js); state.watch is what it found */
+    watch: createWatch(),
     tracker: createAchievementTracker({ localHour }),
     view: /** @type {import('./achievements.js').TrackerView} */ (null),
   };

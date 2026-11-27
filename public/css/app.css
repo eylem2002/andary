@@ -4034,3 +4034,73 @@ body {
   content: "⚠ ";
   color: var(--waiting);
 }
+
+/* ---- what an ended crew left running (ui/leftovers.js) ------------------------------------ */
+
+.hud-leftovers {
+  margin: 6px 0 4px 34px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--waiting);
+  border-radius: 6px;
+  background: var(--code-bg);
+  font-size: 13px;
+}
+
+.hud-leftovers__title {
+  font-weight: 700;
+}
+
+.hud-leftovers__list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hud-leftovers__item + .hud-leftovers__item {
+  margin-top: 8px;
+}
+
+.hud-leftovers__item .hud-steps__command {
+  margin-top: 4px;
+  background: var(--paper);
+}
+
+.hud-leftovers__item .hud-steps__code {
+  overflow-wrap: normal;
+  word-break: break-word;
+  font-size: 12.5px;
+}
+
+.hud-leftovers__note {
+  margin: 6px 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+
+/* ---- Settings: cost and long-turn alerts (ui/watch-settings.js) ---------------------------- */
+
+.hud-watch__row {
+  margin-top: 8px;
+}
+
+.hud-watch__label {
+  font-size: 13px;
+}
+
+.hud-watch__value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.hud-watch__number {
+  width: 76px;
+  text-align: right;
+}
+
+.hud-watch__unit {
+  width: 16ch;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}

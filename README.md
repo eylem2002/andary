@@ -248,6 +248,27 @@ step that kept failing, the step working at last. Steps that wait by nature (rea
 task's output, `sleep` loops, `gh run watch` and other CI checks, health checks, `ps` or `docker
 ps`) never count.
 
+**Spending fast, many helpers, long turns.** A crew that spends $3 or more (estimated, from
+Claude Code's transcripts) within 10 minutes with no file changed, a turn that costs $10 or more,
+or a turn that starts 10 helpers or more gets an alert on its lead's row ("$3.10 (estimate, 1.2M
+tokens) in the last 10 min, no files changed", "Started 12 helpers this turn"), a line in the
+activity log, and counts in **need you** until you set it aside or give the crew a prompt. A crew
+gets at most one alert of a kind every 30 minutes. A lead working 30 minutes or more with no edit
+for 20 gets a quieter note under its row ("Working 42 min, no edits for 25 min") that counts for
+nothing. Settings → **Cost and long-turn alerts** sets every threshold (0 turns one off) and, with
+`--notify`, whether they also go to your phone ("A crew spent $3.10 (estimate) in a few minutes
+with no files changed."; off by default). On a Pro or Max plan the dollars are a measure of value,
+not a bill. Codex reports no cost, so its crews get the helpers alert only. A page reload forgets
+an alert.
+
+**Left running.** When a session ends, Andary looks once whether a dev server it started is still
+listening: `npm run dev`, `vite`, `python -m http.server 8000`, `rails s` and the like, or anything
+sent to the background with a port. It reads which ports listen (lsof; `/proc/net/tcp` on Linux
+without it; netstat on Windows) and shows what it finds under the ended crew's line: "`npm run dev`
+on port 5173", with a command to copy that would stop it (`kill $(lsof -t -iTCP:5173
+-sTCP:LISTEN)`). Andary never stops anything itself. A package script's port is never guessed: it
+is found by the listening process's working folder being the script's.
+
 **Two agents on the same files.** Several sessions in one repository can undo each other's work.
 When an agent writes a whole file over a change another agent made in the last half hour, or runs
 a git command that sweeps up or throws away another agent's uncommitted changes in that work tree

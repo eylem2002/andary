@@ -129,6 +129,8 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
       if (view.mode !== mode) view.progress = null;
       view.mode = mode;
       if (mode === 'live') view.paused = false;
+      // The demo has no server: this browser keeps the alerts' settings.
+      else store.setWatchSettings(ctx.prefs.watch);
       ctx.refresh();
     },
     /**
@@ -155,6 +157,8 @@ export function createHud({ store, prefs: initialPrefs, controls }) {
     /** @param {{ remoteApprovals?: boolean, approvalTimeoutMs?: number }} settings */
     setServerSettings(settings) {
       view.serverSettings = { ...view.serverSettings, ...settings };
+      // The server keeps the alerts' settings in the live town: the store follows them.
+      if (view.mode === 'live' && 'watch' in settings) store.setWatchSettings(/** @type {any} */ (settings).watch);
       ctx.refresh();
     },
     /**

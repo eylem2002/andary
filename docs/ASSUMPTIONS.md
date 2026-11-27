@@ -1414,3 +1414,47 @@ section.
      backpack, cup, beard, earrings) plus 24 helpers in 55–57 draw calls, one per figure as
      before. Frame rate is not meaningful under the software renderer here; on a phone it is
      bound by those draw calls, unchanged from PR 1's 58–60.
+269. **Cost alert defaults: $3 in 10 minutes with no file changed, $10 per turn, 10 helpers per
+     turn, 30 minutes between two alerts of a kind per crew.** The study's examples ("$3 in 10
+     min", "12 helpers") set the scale; $10 a turn is a long Opus turn at list prices. Each can be
+     changed or turned off (0) in Settings. The per-turn alert is on by default rather than opt-in:
+     a threshold that nobody sets helps nobody, and $10 is high enough to stay quiet.
+270. **"No files changed" means no edit within the window by any agent of the crew**: a file tool,
+     a patch, or a shell command that writes (the stuck rules' reading). A crew that edits now and
+     then while spending a lot is working, not burning; the per-turn cost alert still covers it.
+271. **What an agent had spent when the town first hears of it is not spending.** Usage records
+     are running totals; after a page load, a reconnect or a server restart the first total of
+     each agent only sets its starting point. So a reload forgets an alert (the history of usage
+     is not replayed), and a burn shortly after one is seen a little late. The phone note, if
+     on, is the server's and is not affected.
+272. **An alert ends at the crew's next prompt**, as well as when set aside or the session ends:
+     a new prompt means you have seen the crew. The cooldown still holds across the prompt.
+273. **The live town's thresholds are the server's, not the browser's**, kept in
+     `<ANDARY_HOME>/watch.json`: a phone or a second browser opening the town must not reset
+     them, and the phone notes have to follow the same numbers. The demo keeps its own in the
+     browser.
+274. **Phone notes for cost alerts are off by default** and switched on in Settings (shown only
+     when `--notify` is on), not with a new start flag: the alerts are new, and a burst of money
+     notes on an existing setup would be a surprise. They say dollars and helper counts, which
+     are no project detail, so they fit the phone rule.
+275. **Long turns are a note, not a count.** "Working 42 min, no edits for 25 min" is quieter than
+     stuck (as the study asks): it shows under the lead's row and never counts in "need you" or
+     pops up. Only while the crew is working: a lead waiting for your permission already counts.
+     A turn whose prompt the town missed says "at least".
+276. **Leftovers are looked for once, 1.5 s after `SessionEnd`, and only for sessions whose shell
+     calls started a server.** A crashed session sends no `SessionEnd` and is not looked at.
+     Claude Code may stop its own background shells when it exits; then nothing is found, which
+     is right. A finished `PostToolUse` is required: a foreground server that the tool's timeout
+     killed is not a candidate.
+277. **A package script's port is never guessed.** `npm run dev` may serve anywhere; instead every
+     port listened on by a process whose working folder is inside the command's folder counts.
+     This can include a server you started yourself in the same project; the command and port
+     are shown, and nothing is stopped, so you decide. Fixed defaults (vite 5173, next 3000, …)
+     are used only for tools whose default port is fixed.
+278. **The kill command finds the process by its port when you run it** (`kill $(lsof -t
+     -iTCP:5173 -sTCP:LISTEN)`, or `Stop-Process … Get-NetTCPConnection` on Windows) rather than
+     naming a process id, so a reused id is never hit; `kill <pid>` only where lsof is missing.
+     There is no kill button anywhere.
+279. **Leftovers are owners-only and local-only**: commands and ports of your own computer never
+     go to a teammate or a viewer, and a teammate's sessions are never probed (their processes are
+     on their computer).

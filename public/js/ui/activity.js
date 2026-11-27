@@ -45,6 +45,10 @@ const KIND_ICONS = {
   conflict: 'users',
   // A lead's turn ended: what it did (core/receipts.js).
   receipt: 'list',
+  // A crew spends fast, or starts many helpers (core/watch.js).
+  watch: 'coins',
+  // An ended session left a server running (core/leftovers.js).
+  leftover: 'terminal',
 };
 
 /** The store marks log lines with emoji (a building's sign emoji for tool calls). */
@@ -73,6 +77,9 @@ const EMOJI_ICONS = {
   '📦': 'box',
   '⌛': 'hourglass',
   '🏆': 'medal',
+  '💸': 'coins',
+  '👥': 'users',
+  '🔌': 'terminal',
 };
 
 /**
