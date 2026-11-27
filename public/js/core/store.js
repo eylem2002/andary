@@ -1107,13 +1107,15 @@ export function createStore(options = {}) {
 }
 
 /**
- * A repository's branch and changed files, from the server or the demo (§4.16).
+ * A repository's branch and changed files, from the server or the demo, or that it is gone (§4.16).
  * @param {Model} m @param {unknown} raw @param {(change: StoreChange) => void} emit
  */
 function applyGit(m, raw, emit) {
   const status = readGitStatus(raw);
   if (!status) return;
-  m.state.git = { ...m.state.git, [status.root]: status };
+  const { [status.root]: _old, ...rest } = m.state.git;
+  // A repository the server can no longer read: its line goes.
+  m.state.git = isObject(raw) && raw.gone === true ? rest : { ...rest, [status.root]: status };
   emit({ type: 'git', root: status.root });
 }
 

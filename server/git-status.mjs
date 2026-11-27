@@ -11,7 +11,9 @@
 // word is never older than that. What git said is kept per repository (at most MAX_REPOS) and
 // sent to browsers only when it changed. Only counts and names leave this module, never a file
 // name. A repository whose look timed out or said too much is looked at again without untracked
-// files (`--untracked-files=no`), and says so (`untracked: null`).
+// files (`--untracked-files=no`), and says so (`untracked: null`), until it tries them again a
+// few minutes later. A repository that showed a line and can no longer be read is said to be gone
+// (`{ root, gone: true }`), so its line goes.
 //
 // What asks for a look: a local hook that may have changed the working tree or its branch (a
 // session starting, a prompt, a turn or helper ending, a file tool or a shell command finishing),
@@ -30,6 +32,8 @@ export const MAX_REPOS = 64;
 const MAX_RUNNING = 2;
 /** What a look may print; more means a huge working tree: looked at again without untracked files. */
 const MAX_OUTPUT = 1024 * 1024;
+/** A repository looked at without untracked files tries them again after this long. */
+const SLOW_RETRY_MS = 5 * 60_000;
 /** A branch or upstream name, as kept. */
 const NAME_CHARS = 200;
 
@@ -87,7 +91,7 @@ export function parsePorcelain(stdout) {
  */
 export function runGit(root, { untracked, timeoutMs }) {
   const args = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', root, 'status', '--porcelain=v2', '--branch', `--untracked-files=${untracked ? 'normal' : 'no'}`];
-  const env = { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' };
+  const env = { ...withoutRepoOverrides(process.env), GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' };
   return new Promise((resolve) => {
     execFile('git', args, { timeout: timeoutMs, maxBuffer: MAX_OUTPUT, windowsHide: true, env, encoding: 'utf8' }, (error, stdout) => {
       if (!error) resolve({ stdout });
@@ -97,6 +101,20 @@ export function runGit(root, { untracked, timeoutMs }) {
       else resolve({ error: 'failed' });
     });
   });
+}
+
+/**
+ * Variables that would point git at another repository, index or config than the folder asked
+ * about (inherited from whatever started Andary, a git hook for one): left out.
+ */
+const REPO_OVERRIDES = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT', 'GIT_NAMESPACE', 'GIT_CEILING_DIRECTORIES'];
+
+/** @param {NodeJS.ProcessEnv} env @returns {NodeJS.ProcessEnv} */
+export function withoutRepoOverrides(env) {
+  const out = { ...env };
+  for (const name of REPO_OVERRIDES) delete out[name];
+  for (const name of Object.keys(out)) if (/^GIT_CONFIG_(KEY|VALUE)_\d+$/.test(name)) delete out[name];
+  return out;
 }
 
 /**
@@ -124,6 +142,7 @@ export function worktreeName(root) {
  * @property {boolean} running
  * @property {boolean} again       a hook came while it ran: look once more
  * @property {boolean} slow        untracked files are left out (a look timed out or said too much)
+ * @property {number} slowAt       when it became so: SLOW_RETRY_MS later it counts them again
  * @property {string|null|undefined} worktree  undefined until looked up
  * @property {ReturnType<typeof setTimeout>|null} timer
  */
@@ -131,6 +150,7 @@ export function worktreeName(root) {
 /**
  * @param {object} options
  * @param {(status: GitStatus) => void} options.onChange
+ * @param {(root: string) => void} [options.onGone]  a repository that showed a line can no longer be read
  * @param {import('./work-trees.mjs').WorkTrees} [options.workTrees]  finds a hook's work tree when it has no andary_root
  * @param {Runner} [options.run]
  * @param {(root: string) => string|null} [options.worktreeOf]
@@ -139,7 +159,7 @@ export function worktreeName(root) {
  * @param {number} [options.timeoutMs]
  * @param {(message: string) => void} [options.log]
  */
-export function createGitStatus({ onChange, workTrees, run = runGit, worktreeOf = worktreeName, now = Date.now, minIntervalMs = MIN_INTERVAL_MS, timeoutMs = TIMEOUT_MS, log = () => {} }) {
+export function createGitStatus({ onChange, onGone = () => {}, workTrees, run = runGit, worktreeOf = worktreeName, now = Date.now, minIntervalMs = MIN_INTERVAL_MS, timeoutMs = TIMEOUT_MS, log = () => {} }) {
   /** @type {Map<string, Repo>} the one asked about longest ago first */
   const repos = new Map();
   /** Repositories waiting for a free git process, in order. @type {Set<string>} */
@@ -150,7 +170,7 @@ export function createGitStatus({ onChange, workTrees, run = runGit, worktreeOf 
 
   /** @param {string} root @returns {Repo} */
   function repoOf(root) {
-    const repo = repos.get(root) ?? { status: null, lastRun: -Infinity, running: false, again: false, slow: false, worktree: undefined, timer: null };
+    const repo = repos.get(root) ?? { status: null, lastRun: -Infinity, running: false, again: false, slow: false, slowAt: 0, worktree: undefined, timer: null };
     repos.delete(root);
     repos.set(root, repo);
     while (repos.size > MAX_REPOS) {
@@ -191,6 +211,8 @@ export function createGitStatus({ onChange, workTrees, run = runGit, worktreeOf 
     running += 1;
     repo.running = true;
     repo.lastRun = now();
+    // A tree that was too big may have shrunk (a build folder cleaned, a .gitignore added).
+    if (repo.slow && repo.lastRun - repo.slowAt >= SLOW_RETRY_MS) repo.slow = false;
     const untracked = !repo.slow;
     const result = await run(root, { untracked, timeoutMs });
     running -= 1;
@@ -205,9 +227,14 @@ export function createGitStatus({ onChange, workTrees, run = runGit, worktreeOf 
       if (result.error === 'missing') {
         missing = true;
         log('git was not found: crews show no branch');
+      } else if (result.error === 'failed' && repo.status) {
+        // No longer readable (removed, no longer a repository, refused): its line goes.
+        repo.status = null;
+        onGone(root);
       } else if (untracked && (result.error === 'timeout' || result.error === 'too-much')) {
         // A huge working tree: look again at once, without untracked files.
         repo.slow = true;
+        repo.slowAt = now();
         repo.lastRun = -Infinity;
         repo.again = true;
       }

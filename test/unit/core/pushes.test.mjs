@@ -27,10 +27,10 @@ const ok = (command, id, response = { stdout: '', stderr: '' }, who = undefined)
   hook('PreToolUse', { tool_name: 'Bash', tool_input: { command }, tool_use_id: id }, who),
   hook('PostToolUse', { tool_name: 'Bash', tool_input: { command }, tool_use_id: id, tool_response: response }, who),
 ];
-/** @param {string} command @param {string} id @param {any} [who] */
-const fails = (command, id, who = undefined) => [
+/** @param {string} command @param {string} id @param {any} [who] @param {string} [error] */
+const fails = (command, id, who = undefined, error = 'Exit code 1\nFAIL test/login.test.ts') => [
   hook('PreToolUse', { tool_name: 'Bash', tool_input: { command }, tool_use_id: id }, who),
-  hook('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command }, tool_use_id: id, error: 'Exit code 1\nFAIL test/login.test.ts', is_interrupt: false }, who),
+  hook('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command }, tool_use_id: id, error, is_interrupt: false }, who),
 ];
 
 describe('pushed while the last test run failed', () => {
@@ -103,6 +103,30 @@ describe('pushed while the last test run failed', () => {
     team.send(fails('npm test', 't1').map((p) => ({ ...p, ...theirs })));
     team.send(ok('git push', 'p1').map((p) => ({ ...p, ...theirs })));
     assert.equal(team.red().length, 0);
+  });
+
+  test('read as Catch me up reads it: a timeout is no failure, and a result that proves nothing leaves the last proven one', () => {
+    const timedOut = setup();
+    timedOut.send(fails('npm test', 't1', undefined, 'Command timed out after 2m 0.0s'));
+    timedOut.send(ok('git push', 'p1'));
+    assert.equal(timedOut.red().length, 0);
+
+    const unknown = setup();
+    unknown.send(fails('npm test', 't1'));
+    unknown.send(ok('npm test | tail -5', 't2'));
+    unknown.send(ok('git push', 'p1'));
+    assert.equal(unknown.red().length, 1, 'the failed run still stands');
+  });
+
+  test('the warning is named by its crew and time, the same after a reload', () => {
+    const first = setup();
+    first.send(fails('npm test', 't1'));
+    first.send(ok('git push', 'p1'));
+    const again = setup();
+    again.send(fails('npm test', 't1'));
+    again.send(ok('git push', 'p1'));
+    assert.equal(first.red()[0].id, again.red()[0].id);
+    assert.equal(first.red()[0].id, `${SESSION}@${first.red()[0].at}`);
   });
 
   test('a test result that proves nothing is not a failure', () => {

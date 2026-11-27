@@ -277,7 +277,7 @@ function alertItems(state, yours, now) {
  */
 function pushedItem(red) {
   return {
-    id: `pushed:${red.sessionId}:${red.id}:${red.at}`,
+    id: `pushed:${red.id}`,
     kind: 'pushed',
     level: 'alert',
     sessionId: red.sessionId,

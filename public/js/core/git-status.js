@@ -25,8 +25,17 @@ const NAME_CHARS = 200;
 
 /** @param {unknown} n */
 const count = (n) => (typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0);
+/**
+ * Control characters, bidirectional overrides and isolates, zero-width characters: a branch name
+ * may hold them (git allows most), and they would reorder or hide what the line shows.
+ */
+const HIDDEN = /[\p{Cc}\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/gu;
+
 /** @param {unknown} value @returns {string|null} */
-const name = (value) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, NAME_CHARS) : null);
+const name = (value) => {
+  const text = typeof value === 'string' ? value.replace(HIDDEN, '').trim() : '';
+  return text ? text.slice(0, NAME_CHARS) : null;
+};
 
 /**
  * One repository from the network or the demo, read defensively; null when it is not one.
@@ -86,11 +95,21 @@ export function branchWords(g) {
  * @param {GitStatus} g
  */
 export function gitShort(g) {
+  const { name, counts } = gitParts(g);
+  return `${name} ${counts}`;
+}
+
+/**
+ * The line's two halves, so a long name can give way while the counts stay whole: the name
+ * ("b-git: feat/login") and the counts ("↑2 ↓1 · 5 changed").
+ * @param {GitStatus} g
+ */
+export function gitParts(g) {
   const ab = [g.ahead ? `↑${g.ahead}` : '', g.behind ? `↓${g.behind}` : ''].filter(Boolean).join(' ');
   const dirty = dirtyCount(g);
   const tree = dirty ? `${dirty} changed` : g.untracked === null ? 'no changes to tracked files' : 'clean';
   const where = g.worktree && g.worktree !== g.branch ? `${g.worktree}: ` : '';
-  return `${where}${branchWords(g)}${ab ? ` ${ab}` : ''} · ${tree}`;
+  return { name: `${where}${branchWords(g)}`, counts: `${ab ? `${ab} ` : ''}· ${tree}` };
 }
 
 /** @param {number} n @param {string} one @param {string} [many] */

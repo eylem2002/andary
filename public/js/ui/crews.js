@@ -12,7 +12,7 @@ import { contextShort, crewUsage, liveContext, usageShort } from './usage.js';
 import { h, renderList, setAttr, setCrewColor, setHidden, setText, srOnly } from './dom.js';
 import { icon } from './icons.js';
 import { modelLabel } from '../core/catalog.js';
-import { gitOf, gitSentence, gitShort } from '../core/git-status.js';
+import { gitOf, gitParts, gitSentence } from '../core/git-status.js';
 import { agentKeyOf } from '../core/ids.js';
 import { doingText, formatDuration, isCommandText, nameWithRole, plural, truncate } from './format.js';
 import { approvalAgentKey, roundel, setCurrent, statusChip, updateRoundel, updateStatusChip } from './parts.js';
@@ -76,9 +76,11 @@ export function createCrewsPanel(ctx) {
     const cost = h('button', { type: 'button', class: 'hud-line__cost', 'data-testid': 'crew-cost', on: { click: () => ctx.openDialog('usage') } });
     const goal = h('p', { class: 'hud-line__goal' });
     // The crew's branch and working tree (core/git-status.js): words for screen readers, signs for the eye.
-    const gitShown = h('span', { 'aria-hidden': 'true' });
+    // The name gives way to the counts: a long worktree or branch is cut, never "5 changed".
+    const gitName = h('span', { class: 'hud-line__git-name', 'aria-hidden': 'true', 'data-testid': 'crew-git-name' });
+    const gitCounts = h('span', { class: 'hud-line__git-counts', 'aria-hidden': 'true', 'data-testid': 'crew-git-counts' });
     const gitWords = srOnly('');
-    const git = h('p', { class: 'hud-line__git hud-mono', 'data-testid': 'crew-git', hidden: true }, icon('branch', { size: 14 }), gitShown, gitWords);
+    const git = h('p', { class: 'hud-line__git hud-mono', 'data-testid': 'crew-git', hidden: true }, icon('branch', { size: 14 }), gitName, gitCounts, gitWords);
     const stations = h('ol', { class: 'hud-stations' });
     const more = h('button', { type: 'button', class: 'hud-line__more' });
     more.addEventListener('click', () => {
@@ -88,7 +90,7 @@ export function createCrewsPanel(ctx) {
     });
     const line = h('li', { class: 'hud-line', 'data-testid': 'crew', 'data-session-id': session.id },
       h('div', { class: 'hud-line__head' }, mark, name, h('span', { class: 'hud-line__meta' }, member, agent, model, cost)), goal, git, stations, more);
-    parts.set(line, { mark, number, title, name, model, cost, member, memberName, agent, goal, git, gitShown, gitWords, stations, more });
+    parts.set(line, { mark, number, title, name, model, cost, member, memberName, agent, goal, git, gitName, gitCounts, gitWords, stations, more });
     return line;
   }
 
@@ -121,7 +123,9 @@ export function createCrewsPanel(ctx) {
     setHidden(p.goal, !session.goal || ended);
     // A teammate's folders are on their computer: a path like one here is not this repository.
     const repo = ended || session.member ? null : gitOf(state.git, session);
-    setText(p.gitShown, repo ? gitShort(repo) : '');
+    const gitText = repo ? gitParts(repo) : { name: '', counts: '' };
+    setText(p.gitName, gitText.name);
+    setText(p.gitCounts, gitText.counts);
     setText(p.gitWords, repo ? gitSentence(repo) : '');
     setAttr(p.git, 'title', repo ? gitSentence(repo) : null);
     setHidden(p.git, !repo);

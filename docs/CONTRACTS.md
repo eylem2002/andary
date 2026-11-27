@@ -1220,10 +1220,14 @@ git --no-optional-locks -c core.fsmonitor=false -C <root> status --porcelain=v2 
 - **Safely.** `execFile` with an argument list, never a shell; the folder is one argument. No
   optional locks (`--no-optional-locks`, `GIT_OPTIONAL_LOCKS=0`: not even the index's stat cache is
   written), no file-system monitor (a program a repository's config could name), no terminal
-  prompt, `LC_ALL=C`. A look is stopped after 2 s and may print at most 1 MiB; one that timed out
-  or printed more is made again at once without untracked files, and that repository is looked at
-  that way from then on (`untracked: null`). A failing look (not a repository, a `safe.directory`
-  refusal) sends nothing. With no `git` on the PATH, the server says so once in its log and never
+  prompt, `LC_ALL=C`, and none of the inherited variables that would point git at another
+  repository, index or config (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR`,
+  `GIT_OBJECT_DIRECTORY`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` with its keys and values…).
+  A look is stopped after 2 s and may print at most 1 MiB; one that timed out or printed more is
+  made again at once without untracked files (`untracked: null`), and that repository tries them
+  again 5 minutes later. A failing look (not a repository, a `safe.directory` refusal) sends
+  nothing, but a repository that had a line and can no longer be read sends
+  `{ t: 'git', g: { root, gone: true } }`, and its line goes. With no `git` on the PATH, the server says so once in its log and never
   runs it again.
 - **What is sent.** Counts and names only, never a file name, to owners only, only when something
   but `at` changed, and in their `hello`. Never relayed to a team host.
@@ -1238,10 +1242,13 @@ git --no-optional-locks -c core.fsmonitor=false -C <root> status --porcelain=v2 
   `worktrees/` (a submodule's points into `modules/` and is not one).
 - **Browser.** `store.setGit(status)` keeps the latest per root in `StoreState.git`; a crew's
   repository is its `Session.root` (the `andary_root` its tool hooks last carried), else the
-  deepest one holding its folder (`gitOf`). Its crew row (not a teammate's: a path like one here
-  is not this repository) shows `[data-testid="crew-git"]` under the goal: the worktree's name when it is one, the branch (or "detached at 1a2b3c4"), `↑ahead ↓behind`
-  and "N changed" (changed and new files) or "clean", with the same in words for screen readers
-  (`gitSentence`). The agent's details have a **Where** section (`[data-testid="agent-where"]`):
+  deepest one holding its folder (`gitOf`); `{ root, gone: true }` removes it. Its crew row (not a teammate's: a path like one here
+  is not this repository) shows `[data-testid="crew-git"]` under the goal,
+  in two parts (`gitParts`): the name, `[data-testid="crew-git-name"]` (the worktree's name when
+  it is one, then the branch, or "detached at 1a2b3c4"), cut with an ellipsis when long, and the
+  counts, `[data-testid="crew-git-counts"]` (`↑ahead ↓behind · N changed`, changed and new files,
+  or "clean"), never cut; with the same in words for screen readers (`gitSentence`). Control,
+  bidirectional and zero-width characters are dropped from names. The agent's details have a **Where** section (`[data-testid="agent-where"]`):
   the crew's folder, the branch sentence (not for a teammate's crew), the model ("Opus 5.5
   (claude-opus-5-5)"), and the session id (`[data-testid="agent-session-id"]`, without a
   teammate's `name~` prefix) with **Copy** (`[data-testid="copy-session-id"]`, the clipboard, or
@@ -1314,7 +1321,7 @@ StoreState {
   redPushes: RedPush[]                           // crews that pushed while their latest test run had failed, oldest first
   git: Record<root, GitStatus>                   // §4.16, each repository's branch and counts
 }
-RedPush { id, sessionId, agentKey /* who pushed */, at, test /* the failed run's command, ≤ 160 */, testAt, push /* the push's line, ≤ 160 */ }
+RedPush { id /* sessionId@at: the same after a reload */, sessionId, agentKey /* who pushed */, at, test /* the failed run's command, ≤ 160 */, testAt, push /* the push's line, ≤ 160 */ }
 AgentUsage { tokens: { input, output, cacheRead, cacheWrite }, costUsd, unpriced: boolean, model: string|null,
              context: { tokens, at } | null /* §4.8: the newest reading; null when unknown */,
              compactedAt: number|null /* §4.8: when it last compacted */ }
@@ -1391,7 +1398,7 @@ queued behind it starts none.
 
 ```js
 AttentionItem { id /* one per episode: dialog:agentKey:at:input, kind:agentKey:since, limit:since,
-                      conflict:<Hazard id>, pushed:sessionId:<RedPush id>:at */,
+                      conflict:<Hazard id>, pushed:<RedPush id> */,
                 kind: 'approval'|'terminal'|'question'|'plan'|'stopped'|'stuck'|'conflict'|'pushed'|'finished',
                 level: 'blocked'|'stopped'|'alert'|'ready', sessionId, agentKey,
                 agentKeys: string[] /* everyone it stands for */,
@@ -1588,8 +1595,9 @@ have changed 5 files" (two names, or the first and "N others").
 **Pushed while the last test run failed** (`core/pushes.js`, pure). The store runs
 `createPushChecks().record(event, { member })` after each event. A crew's latest test run is the
 last `Bash` or `PowerShell` call of any of its agents (lead or helper) that ran tests, read as a
-receipt reads it (`testRunOf`: `passed`, `failed` only when the failure is proven, else
-`unproven`, `started` or `interrupted`). A push is a `tool.end` of such a call whose line pushes
+Catch me up reads it (`testOutcome` in `core/digest.js`, shared by both: `passed`, or `failed`
+only when the failure is proven and was not a timeout; a run that proves neither, such as
+`npm test | tail`, a background run or an interrupt, leaves the last proven result standing). A push is a `tool.end` of such a call whose line pushes
 something and must have succeeded, as Catch me up counts pushes (`pushesSent`: not a dry run, a
 deletion or "Everything up-to-date"; nothing from one sent to the background, nor from Codex
 without its exit code). A push while the crew's latest run is `failed` raises a `RedPush` (one per
@@ -1963,7 +1971,7 @@ decision is treated as "answered in the terminal" and the story carries on as al
 | `[data-testid="usage-gauge"]` | the plan-limit gauge on the Usage button (`data-level`, `data-percent`); hidden without a reading |
 | `[data-testid="limit-gauge"][data-kind]` | one plan limit in the Usage dialog; `[data-testid="limits-note"]` says why there is none |
 | `[data-testid="agent-receipt"]` | in the inspector: the receipt of a lead's last turn |
-| `[data-testid="crew-git"]` | on a crew row: its branch and working tree (§4.16), hidden when the town knows no repository for it |
+| `[data-testid="crew-git"]` | on a crew row: its branch and working tree (§4.16), hidden when the town knows no repository for it; `[data-testid="crew-git-name"]` (cut when long) and `[data-testid="crew-git-counts"]` (never cut) |
 | `[data-testid="agent-where"]` | in the inspector's **Where**: folder, branch, model; `[data-testid="agent-session-id"]` and `[data-testid="copy-session-id"]` |
 | `[data-testid="catch-up-warning"]` | in a Catch me up crew line: a push while the tests were red, or a rate limit (§4.13) |
 | `[data-testid="director-caption"]` | the director camera's caption (plain text, not a live region); shown while it has a shot, hidden while you hold the camera or an agent is selected |

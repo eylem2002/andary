@@ -1,19 +1,19 @@
 // "Pushed while the last test run failed" (CONTRACTS §5.1): a crew that pushed with git while its
 // latest test run had failed. Pure: the store feeds it the events it applied.
 //
-// A crew's latest test run is any of its agents' (the lead's or a helper's), read as a turn
-// receipt reads it (core/receipts.js testRunOf): only a run whose failure is proven counts as
-// failed, so `npm test | tail` proves nothing either way. A push is one a shell call sent and
+// A crew's latest test result is any of its agents' (the lead's or a helper's), read as Catch me
+// up reads it (core/digest.js testOutcome): only a proven result counts, so `npm test | tail`
+// proves nothing either way and leaves the last proven result standing, and a run that timed out
+// is no failure. A push is one a shell call sent and
 // that must have succeeded (core/digest.js pushesSent: not a dry run, a deletion, or "Everything
 // up-to-date"); from Codex only when its exit code was found. Tests and a push on one line are
 // read in that order, so `npm test && git push` never counts.
 //
 // The warning stays until you set it aside, until the crew pushes again after a test run that
 // passed, or until the crew leaves. A teammate's crew (a team town) is theirs: it is not followed.
-import { pushesSent } from './digest.js';
-import { testRunOf } from './receipts.js';
+import { pushesSent, testOutcome } from './digest.js';
 import { shellCommands } from './shell.js';
-import { clip, oneLine } from './text.js';
+import { clip, oneLine, str } from './text.js';
 
 /**
  * @typedef {object} RedPush
@@ -42,10 +42,25 @@ function pushesOf(e) {
   return pushesSent(shellCommands(d.input?.command, { powershell: d.tool === 'PowerShell' }), d.response);
 }
 
+/**
+ * What a finished shell call proves of its tests, as Catch me up reads it.
+ * @param {TownEvent} e
+ */
+function testResultOf(e) {
+  const d = e.data;
+  return testOutcome({
+    tool: d.tool,
+    command: d.input?.command,
+    background: d.input?.run_in_background === true,
+    error: e.kind === 'tool.fail' ? str(d.errorText) || str(d.error) : null,
+    interrupted: d.isInterrupt === true,
+    exitUnknown: e.source === 'codex' && d.exitKnown !== true,
+  });
+}
+
 export function createPushChecks() {
   /** @type {Map<string, { test: { result: string, command: string, at: number }|null, red: RedPush|null }>} by session */
   const crews = new Map();
-  let seq = 0;
 
   /** @param {string} sessionId */
   const crewOf = (sessionId) => {
@@ -72,8 +87,9 @@ export function createPushChecks() {
       }
       if (member || (e.kind !== 'tool.end' && e.kind !== 'tool.fail') || !SHELL_TOOLS.has(e.data.tool)) return { changed: false, raised: null };
       const crew = crewOf(e.sessionId);
-      const run = testRunOf(e);
-      if (run) crew.test = { result: run.result, command: run.command, at: e.ts };
+      // Only a proven result counts: one that proves nothing leaves the last proven one standing.
+      const result = testResultOf(e);
+      if (result) crew.test = { result, command: clip(oneLine(e.data.input?.command), COMMAND_CHARS), at: e.ts };
       if (!pushesOf(e)) return { changed: false, raised: null };
       if (crew.test?.result !== 'failed') {
         const had = Boolean(crew.red);
@@ -81,8 +97,8 @@ export function createPushChecks() {
         if (crew.test?.result === 'passed') crew.red = null;
         return { changed: had && !crew.red, raised: null };
       }
-      seq += 1;
-      crew.red = { id: `p${seq}`, sessionId: e.sessionId, agentKey: e.agentKey, at: e.ts, test: crew.test.command, testAt: crew.test.at, push: clip(oneLine(e.data.input?.command), COMMAND_CHARS) };
+      // Named by the crew and the time of the push, so a reload names it the same (a set-aside holds).
+      crew.red = { id: `${e.sessionId}@${e.ts}`, sessionId: e.sessionId, agentKey: e.agentKey, at: e.ts, test: crew.test.command, testAt: crew.test.at, push: clip(oneLine(e.data.input?.command), COMMAND_CHARS) };
       return { changed: true, raised: crew.red };
     },
     /** The crews' warnings now, oldest first. @returns {RedPush[]} */

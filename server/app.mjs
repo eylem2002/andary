@@ -316,7 +316,12 @@ function createContext(config, options) {
     notifier,
     workTrees,
     // Your folders, your branches: owners only, never relayed to a team host.
-    git: createGitStatus({ workTrees, log: config.log, onChange: (status) => hub.broadcastOwners({ t: 'git', g: status }) }),
+    git: createGitStatus({
+      workTrees,
+      log: config.log,
+      onChange: (status) => hub.broadcastOwners({ t: 'git', g: status }),
+      onGone: (root) => hub.broadcastOwners({ t: 'git', g: { root, gone: true } }),
+    }),
     // Per account, not per session: owners only, like costs; never relayed to a team host.
     limits: createLimitsTracker({
       onChange: (snapshot, account) => {

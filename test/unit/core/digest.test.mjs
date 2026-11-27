@@ -136,6 +136,11 @@ describe('what each hook counts for', () => {
     assert.equal(crewAfter([red, ran('npm test'), ran('git push')])?.redPushes, 0);
     assert.equal(crewAfter([red, ran('npm test && git push')])?.redPushes, 0, 'the same line: tests first');
     assert.equal(crewAfter([ran('git push')])?.redPushes, 0, 'no test run known');
+    // As the store's warning reads it (core/pushes.js): a timeout is no failure, and a run that
+    // proves nothing leaves the last proven result standing.
+    const timedOut = ran('npm test', 'PostToolUseFailure', { error: 'Command timed out after 2m 0.0s' });
+    assert.equal(crewAfter([timedOut, ran('git push')])?.redPushes, 0);
+    assert.equal(crewAfter([red, ran('npm test | tail -5'), ran('git push')])?.redPushes, 1);
   });
 
   test('a Codex command proves a result only when its adapter found the exit code', () => {

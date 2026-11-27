@@ -449,19 +449,6 @@ function ran(turn, e, who) {
 }
 
 /**
- * The test run a finished shell call made, if it ran tests: its command and what its exit status
- * proves, read as a receipt reads it (core/pushes.js follows a crew's last one with it).
- * @param {TownEvent} e  a shell tool's tool.end or tool.fail
- * @returns {{ command: string, result: ReceiptRun['result'], why: string|null }|null}
- */
-export function testRunOf(e) {
-  const d = e.data;
-  if ((e.kind !== 'tool.end' && e.kind !== 'tool.fail') || !SHELL_TOOLS.has(d.tool)) return null;
-  const tests = segmentsOf(d).filter((c) => isTestRun(c.words) && !runsNoTests(c.words));
-  return tests.length ? { command: clip(oneLine(d.input?.command), COMMAND_CHARS), ...resultOf(e, tests) } : null;
-}
-
-/**
  * @param {TownEvent} e @param {import('./shell.js').Segment[]} relevant
  * @returns {Pick<ReceiptRun, 'result'|'why'>}
  */

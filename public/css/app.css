@@ -920,12 +920,16 @@ body {
   color: var(--ink-2);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.hud-line__git-name {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.hud-line__git > span:not(.hud-sr) {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.hud-line__git-counts {
+  flex: none;
 }
 
 .hud-line__git .hud-icon {

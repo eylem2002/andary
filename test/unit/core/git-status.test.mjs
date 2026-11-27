@@ -3,7 +3,7 @@
 // words; and the store keeping them.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { branchWords, dirtyCount, gitOf, gitSentence, gitShort, readGitStatus } from '../../../public/js/core/git-status.js';
+import { branchWords, dirtyCount, gitOf, gitParts, gitSentence, gitShort, readGitStatus } from '../../../public/js/core/git-status.js';
 import { createStore } from '../../../public/js/core/store.js';
 import { CWD, FIXTURES, envelope, hook } from './helpers.mjs';
 
@@ -40,6 +40,13 @@ describe('git status in the browser', () => {
     assert.equal(dirtyCount(status({ untracked: null })), 4);
   });
 
+  test('the name and the counts apart, so a long name gives way; hidden characters are dropped', () => {
+    assert.deepEqual(gitParts(status({ worktree: 'wt-feature', branch: 'feat/wt', ahead: 1, behind: 2, changed: 1, untracked: 0 })), { name: 'wt-feature: feat/wt', counts: '↑1 ↓2 · 1 changed' });
+    assert.deepEqual(gitParts(status({ ahead: 0, changed: 0, untracked: 0 })), { name: 'feat/login', counts: '· clean' });
+    assert.equal(readGitStatus({ root: '/w', branch: 'main\u202Egnp.exe\u200B\u0007', worktree: '\u2066wt\u2069' })?.branch, 'maingnp.exe');
+    assert.equal(readGitStatus({ root: '/w', worktree: '\u2066wt\u2069' })?.worktree, 'wt');
+  });
+
   test('the store keeps each repository by root, and each crew the work tree its tool hooks name', () => {
     const store = createStore({ localHour: () => 12 });
     /** @type {string[]} */
@@ -54,5 +61,7 @@ describe('git status in the browser', () => {
     assert.equal(gitOf(state.git, state.sessions[0])?.branch, 'main');
     assert.deepEqual(changes.filter((type) => type === 'git'), ['git']);
     assert.equal(state.sessions[0].cwd, CWD);
+    store.setGit({ root: '/home/dev/code', gone: true });
+    assert.equal(gitOf(store.getState().git, state.sessions[0]), null, 'a repository the server can no longer read loses its line');
   });
 });

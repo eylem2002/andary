@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
-import { MAX_REPOS, createGitStatus, parsePorcelain, runGit, worktreeName } from '../../../server/git-status.mjs';
+import { MAX_REPOS, createGitStatus, parsePorcelain, runGit, withoutRepoOverrides, worktreeName } from '../../../server/git-status.mjs';
 
 const hasGit = (() => {
   try {
@@ -161,6 +161,51 @@ describe('git status, how often', () => {
     tracker.dispose();
     assert.deepEqual(runs.map((r) => r.untracked), [true, false]);
     assert.deepEqual([sent.length, sent[0].changed, sent[0].untracked], [1, 1, null]);
+  });
+
+  test('a slow tree counts new files again a few minutes later', async () => {
+    let clock = 0;
+    let huge = true;
+    const { runs, run } = fakeGit((_root, untracked) => (untracked && huge ? { error: 'timeout' } : { stdout: '# branch.head main\n' }));
+    const tracker = createGitStatus({ onChange: () => {}, run, worktreeOf: () => null, now: () => clock, minIntervalMs: 0 });
+    const stop = { hook_event_name: 'Stop', andary_root: '/w/huge' };
+    tracker.observe(stop);
+    await settle();
+    clock = 60_000;
+    tracker.observe(stop);
+    await settle();
+    huge = false;
+    clock = 6 * 60_000;
+    tracker.observe(stop);
+    await settle();
+    tracker.dispose();
+    assert.deepEqual(runs.map((r) => r.untracked), [true, false, false, true]);
+    assert.equal(tracker.snapshot()[0].untracked, 0);
+  });
+
+  test('a repository that showed a line and can no longer be read is gone', async () => {
+    let readable = true;
+    const { run } = fakeGit(() => (readable ? { stdout: '# branch.head main\n' } : { error: 'failed' }));
+    /** @type {string[]} */
+    const gone = [];
+    const tracker = createGitStatus({ onChange: () => {}, onGone: (root) => gone.push(root), run, worktreeOf: () => null, minIntervalMs: 0 });
+    tracker.observe({ hook_event_name: 'Stop', andary_root: '/w/a' });
+    await settle();
+    readable = false;
+    tracker.observe({ hook_event_name: 'Stop', andary_root: '/w/a' });
+    await settle();
+    tracker.observe({ hook_event_name: 'Stop', andary_root: '/w/a' });
+    await settle();
+    tracker.observe({ hook_event_name: 'Stop', andary_root: '/w/never' });
+    await settle();
+    tracker.dispose();
+    assert.deepEqual(gone, ['/w/a'], 'once, and not for one that never showed');
+    assert.deepEqual(tracker.snapshot(), []);
+  });
+
+  test("variables that would point git elsewhere are not passed on", () => {
+    const env = withoutRepoOverrides({ PATH: '/bin', HOME: '/h', GIT_DIR: '/x/.git', GIT_WORK_TREE: '/x', GIT_INDEX_FILE: 'i', GIT_COMMON_DIR: 'c', GIT_OBJECT_DIRECTORY: 'o', GIT_CONFIG_PARAMETERS: "'core.fsmonitor=evil'", GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.fsmonitor', GIT_CONFIG_VALUE_0: 'evil' });
+    assert.deepEqual(env, { PATH: '/bin', HOME: '/h' });
   });
 
   test('git missing: said once, never run again', async () => {

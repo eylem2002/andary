@@ -184,6 +184,25 @@ function upToDate(response) {
 }
 
 /**
+ * What a finished shell call proves of the tests it ran, the one reading Catch me up and the
+ * store's "pushed while the last test run failed" (core/pushes.js) share: 'passed' when every test
+ * run of the line must have succeeded for the line to (and each runs tests), 'failed' when the
+ * line's failure can only be a test run's and it was not a timeout (core/summaries.js), and null
+ * when it proves neither (no test run, one sent to the background, a pipe whose status is another
+ * command's, a run that lists tests, an interrupt, a Codex command without its exit code).
+ * @param {{ tool: string, command: unknown, background?: boolean, error?: string|null, interrupted?: boolean, exitUnknown?: boolean }} call
+ *   error: set (even '') when the call failed
+ * @returns {'passed'|'failed'|null}
+ */
+export function testOutcome({ tool, command, background = false, error = null, interrupted = false, exitUnknown = false }) {
+  if (!SHELL_TOOLS.has(tool) || background || interrupted) return null;
+  const tests = shellCommands(command, { powershell: tool === 'PowerShell' }).filter((c) => isTestRun(c.words));
+  if (!tests.length || tests.some((c) => runsNoTests(c.words))) return null;
+  if (error === null) return !exitUnknown && tests.every((c) => c.succeeded) ? 'passed' : null;
+  return tests.some((c) => c.decides) && classifyError(error, false, 'test') === 'tests' ? 'failed' : null;
+}
+
+/**
  * A tool that ran: the file it changed, or what its shell command did. Tests passed when every
  * test run in the line must have succeeded for the line to (core/shell.js) and each runs tests;
  * each new commit and each push that sent something counts, when it must have succeeded. A Codex
@@ -196,11 +215,10 @@ function ranTool(event) {
   if (file) return { file };
   if (event.andary_source === 'codex' && event.andary_exit_known !== true) return null;
   const commands = commandsOf(event);
-  const tests = commands.filter((c) => isTestRun(c.words));
   const done = commands.filter((c) => c.succeeded);
   /** @type {Tally} */
   const tally = {};
-  if (tests.length && tests.every((c) => c.succeeded && !runsNoTests(c.words))) tally.passed = true;
+  if (testOutcome({ tool: str(event.tool_name), command: event.tool_input?.command, background: event.tool_input?.run_in_background === true }) === 'passed') tally.passed = true;
   const commits = done.filter((c) => isNewCommit(c.words)).length;
   const pushes = pushesSent(commands, event.tool_response);
   if (commits) tally.commits = commits;
@@ -217,8 +235,7 @@ function ranTool(event) {
  */
 function failedTool(event) {
   if (event.is_interrupt === true) return null;
-  const tests = commandsOf(event).filter((c) => isTestRun(c.words));
-  const red = tests.some((c) => c.decides) && !tests.some((c) => runsNoTests(c.words)) && classifyError(str(event.error), false, 'test') === 'tests';
+  const red = testOutcome({ tool: str(event.tool_name), command: isObject(event.tool_input) ? event.tool_input.command : '', background: isObject(event.tool_input) && event.tool_input.run_in_background === true, error: str(event.error) }) === 'failed';
   return one('failures', red ? { passed: false } : {});
 }
 

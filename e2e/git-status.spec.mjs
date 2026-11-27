@@ -64,7 +64,8 @@ test('a crew shows its branch; a push after a failed test run is a warning that 
   const crew = page.locator('[data-testid="crew"][data-session-id="git-e2e"]');
   const line = crew.getByTestId('crew-git');
   await expect(line).toBeVisible();
-  await expect(line).toContainText('fix/cart-total ↑1 · 2 changed');
+  await expect(line.getByTestId('crew-git-name')).toHaveText('fix/cart-total');
+  await expect(line.getByTestId('crew-git-counts')).toHaveText('↑1 · 2 changed');
   await expect(line).toContainText('On fix/cart-total. 1 commit ahead of origin/fix/cart-total. 1 changed file, 1 new file.');
 
   // The push while red: on the lead's row and counted in "need you".
@@ -103,4 +104,27 @@ test('a crew shows its branch; a push after a failed test run is a warning that 
     : page.locator('.hud-stations__item:has([data-agent-key="git-e2e:main"]) [data-testid="dismiss-need"]');
   await setAside.click();
   await expect(page.getByTestId('waiting-for-you')).toBeHidden();
+});
+
+test('a long worktree and branch name gives way: the counts on the crew row stay whole', async ({ page }) => {
+  if (test.info().project.name === 'desktop') await page.setViewportSize({ width: 1280, height: 800 });
+  const tree = join(dir, 'wt-a-very-long-worktree-folder-name-for-the-cart');
+  execFileSync('git', ['worktree', 'add', '-q', '-b', 'feat/an-equally-long-branch-name-for-the-cart-total-fix', tree], { cwd: repo, stdio: 'ignore' });
+  writeFileSync(join(tree, 'src', 'cart.ts'), 'export const total = 9;\n');
+  await page.goto(`${town.loginUrl}&world=fake`);
+  await expect(page.getByTestId('connection-status')).toContainText('Live');
+  const hook = (/** @type {string} */ name, /** @type {Record<string, unknown>} */ extra = {}) => ({ session_id: 'git-long', transcript_path: '/tmp/t.jsonl', cwd: tree, permission_mode: 'default', hook_event_name: name, ...extra });
+  for (const payload of [hook('SessionStart', { source: 'startup' }), hook('Stop', { last_assistant_message: 'Done.' })]) {
+    expect(await town.sendHook(payload)).toMatchObject({ code: 0 });
+  }
+  const line = page.locator('[data-testid="crew"][data-session-id="git-long"]').getByTestId('crew-git');
+  await expect(line.getByTestId('crew-git-counts')).toHaveText('· 1 changed');
+  await expect(line.getByTestId('crew-git-name')).toHaveText('wt-a-very-long-worktree-folder-name-for-the-cart: feat/an-equally-long-branch-name-for-the-cart-total-fix');
+  const box = await line.evaluate((el) => {
+    const name = /** @type {HTMLElement} */ (el.querySelector('[data-testid="crew-git-name"]'));
+    const counts = /** @type {HTMLElement} */ (el.querySelector('[data-testid="crew-git-counts"]'));
+    return { cut: name.scrollWidth > name.clientWidth, whole: counts.scrollWidth <= counts.clientWidth, inside: counts.getBoundingClientRect().right <= el.getBoundingClientRect().right + 0.5 };
+  });
+  expect(box).toEqual({ cut: true, whole: true, inside: true });
+  if (SHOTS && test.info().project.name === 'desktop') await line.screenshot({ path: join(SHOTS, 'git-long-names.png') });
 });
