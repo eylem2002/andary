@@ -7,6 +7,8 @@ import { createUsageTracker } from './usage.mjs';
 import { createProgress } from './progress.mjs';
 import { createNotifier } from './notify.mjs';
 import { createWorkTrees } from './work-trees.mjs';
+import { holdFilePath, readHoldRisky } from './hold.mjs';
+import { holdCheckInstalled } from './installer.mjs';
 import { createTownDigest } from './digest.mjs';
 import { createNoteDesk } from './notes.mjs';
 import { createLimitsTracker } from './limits.mjs';
@@ -60,7 +62,9 @@ const NOTE_SWEEP_MS = 15_000;
  * @property {string} secret
  * @property {string} uiToken
  * @property {string} responseKey     signs /api/hook replies (see auth.signHookReply)
- * @property {{ remoteApprovals: boolean, approvalTimeoutMs: number }} settings
+ * @property {{ remoteApprovals: boolean, approvalTimeoutMs: number, holdRisky: boolean }} settings
+ * @property {(refresh?: boolean) => boolean} holdCheckMissing  Claude Code's hooks here have no hold check (installed before it); cached 30 s
+ * @property {string|null} holdFile   where "Always hold risky commands for me" is kept (server/hold.mjs); null when nothing is written
  * @property {Set<string>} allowedHosts
  * @property {Set<string>} tunnelHosts    the Host names a tunnelled request may use (ADR 0019)
  * @property {Record<string, string>} headers
@@ -259,6 +263,31 @@ function createHttpServer(ctx, tls, { tunnelled = false } = {}) {
   );
 }
 
+/** How long whether the hold check is installed is kept before the files are read again. */
+const HOLD_CHECK_TTL_MS = 30_000;
+
+/**
+ * Whether Claude Code's hooks here lack the hold check, read from the settings files at most every
+ * 30 s (an `andary install` shows up within that), or at once when asked to refresh (the setting
+ * was just switched).
+ * @param {string} home
+ * @returns {(refresh?: boolean) => boolean}
+ */
+function cachedHoldCheck(home) {
+  let at = -Infinity;
+  let missing = false;
+  return (refresh = false) => {
+    if (!refresh && Date.now() - at < HOLD_CHECK_TTL_MS) return missing;
+    try {
+      missing = !holdCheckInstalled({ dir: process.cwd(), env: process.env, home });
+    } catch {
+      missing = false;
+    }
+    at = Date.now();
+    return missing;
+  };
+}
+
 /**
  * @param {{ home: string, publicDir: string, approvalTimeoutMs: number, writeState: boolean, log: (message: string) => void }} config
  * @param {ServerOptions} options
@@ -273,6 +302,8 @@ function createContext(config, options) {
     limitNotes: Boolean(options.notifyLimits),
     limitNotesFile: config.writeState ? join(config.home, 'limit-notes.json') : null,
   });
+  // "Always hold risky commands for me" outlasts a restart: it is a file beside server.json.
+  const holdFile = config.writeState ? holdFilePath(config.home) : null;
   // Your absences are yours: only signed-in browsers hear of them.
   const digest = createTownDigest({ awayMs: options.awayMs, onAway: (away) => hub.broadcastOwners({ t: 'away', away }) });
   /** @type {TownContext} */
@@ -281,7 +312,9 @@ function createContext(config, options) {
     secret: generateToken(),
     uiToken: generateToken(),
     responseKey: generateToken(),
-    settings: { remoteApprovals: Boolean(options.remoteApprovals), approvalTimeoutMs: config.approvalTimeoutMs },
+    settings: { remoteApprovals: Boolean(options.remoteApprovals), approvalTimeoutMs: config.approvalTimeoutMs, holdRisky: readHoldRisky(holdFile) },
+    holdFile,
+    holdCheckMissing: cachedHoldCheck(config.home),
     allowedHosts: new Set(),
     tunnelHosts: new Set(),
     headers: securityHeaders(buildCsp(computeImportMapHashes(config.publicDir))),

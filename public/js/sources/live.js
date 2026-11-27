@@ -14,7 +14,7 @@ import { confirmSignIn, readCredentials, signInHeaders, signInProtocols } from '
  * @property {string} app
  * @property {string} [version]
  * @property {boolean} authenticated
- * @property {{ remoteApprovals?: boolean, approvalTimeoutMs?: number }} [settings]
+ * @property {{ remoteApprovals?: boolean, approvalTimeoutMs?: number, holdRisky?: boolean }} [settings]
  */
 
 const HELLO_TIMEOUT_MS = 3000;
@@ -398,6 +398,10 @@ function requests(send) {
     /** @param {boolean} on */
     setRemoteApprovals(on) {
       return send({ t: 'settings', settings: { remoteApprovals: Boolean(on) } });
+    },
+    /** "Always hold risky commands for me" (server/hold.mjs). @param {boolean} on */
+    setHoldRisky(on) {
+      return send({ t: 'settings', settings: { holdRisky: Boolean(on) } });
     },
     /**
      * Saves this person's profile on the team host (§4.11); the answer comes to onProfile.

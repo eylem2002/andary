@@ -18,6 +18,7 @@ import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { rulesText } from './permission-rules.js';
 import { noteStateText } from './notes.js';
 import { receiptLine } from './receipts.js';
+import { riskCallKey, riskRunText } from './risk-runs.js';
 import { summarizeTool } from './summaries.js';
 import { clip, isObject, oneLine, own, relativePath, str } from './text.js';
 import { dialogsAfterApproval, dialogsAfterEvent } from './store-dialogs.js';
@@ -67,7 +68,7 @@ export { ACHIEVEMENTS };
  * @property {string} agentKey
  * @property {string} agentName
  * @property {string} color
- * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict' / 'receipt'
+ * @property {string} kind     TownEvent kind, or 'approval' / 'achievement' / 'stuck' / 'conflict' / 'risk' / 'receipt'
  * @property {string} icon
  * @property {string} text
  * @property {'info'|'success'|'warn'|'error'} level
@@ -147,6 +148,7 @@ export { ACHIEVEMENTS };
  * @property {Approval[]} approvals        pending first, then most recent
  * @property {readonly import('./dialogs.js').Dialog[]} dialogs  open: asked and not answered yet, oldest first
  * @property {readonly import('./conflicts.js').Hazard[]} hazards  two agents on the same files now, oldest first
+ * @property {readonly import('./risk-runs.js').RiskRun[]} risks  risky calls that ran without asking you (core/risk-runs.js), oldest first
  * @property {LogEntry[]} log              newest last
  * @property {Stats} stats
  * @property {Achievement[]} achievements
@@ -607,6 +609,7 @@ function apply(m, input) {
   if (!s.member && dialogsAfterEvent(m.dialogs, e, a ? a.agentId : e.agentId)) m.state.dialogs = m.dialogs.list();
   const newlyStuck = followLoops(m, e, s, a);
   const hazards = followConflicts(m, e, s, a);
+  const risky = followRisks(m, e, s, a);
   nameCrew(m, s, relabels);
   if (relabels.length) e.data.relabels = relabels;
   s.lastActivity = Math.max(s.lastActivity, e.ts);
@@ -615,6 +618,7 @@ function apply(m, input) {
   if (draft) pushLog(m, e, s, a, draft);
   for (const change of newlyStuck) logStuck(m, e, s, change);
   for (const hazard of hazards) logHazard(m, e, s, hazard);
+  if (risky) pushLog(m, { ...e, kind: 'risk' }, s, a, { icon: '⚠️', text: riskRunText(risky), level: 'warn' });
   if (a) followTurn(m, e, s, a);
   return e;
 }
@@ -762,6 +766,29 @@ function followConflicts(m, e, s, a) {
   const after = m.conflicts.list();
   if (after.length !== before.length || after.some((hazard, i) => hazard !== before[i])) m.state.hazards = after;
   return started;
+}
+
+/**
+ * Follows calls for risky ones that ran without asking (risk-runs.js): a permission request marks
+ * its call as asked; a call that ended without having asked, and is risky, is kept on
+ * state.risks. A teammate's crew (a team town) is theirs to watch.
+ * @param {Model} m @param {TownEvent} e @param {Session} s @param {AgentState|undefined} a
+ * @returns {import('./risk-runs.js').RiskRun|null} the run that just counted
+ */
+function followRisks(m, e, s, a) {
+  if (s.member) return null;
+  if (e.kind === 'session.end') {
+    if (m.risks.sessionEnded(s.id)) m.state.risks = m.risks.list();
+    return null;
+  }
+  if (!a) return null;
+  const key = riskCallKey(e.data.callKey, e.data.tool, e.data.input);
+  if (e.kind === 'permission.request') m.risks.asked(a.key, key);
+  if (e.kind === 'permission.denied') m.risks.refused(a.key, key);
+  if (e.kind !== 'tool.end' && !(e.kind === 'tool.fail' && e.data.isInterrupt !== true)) return null;
+  const run = m.risks.ended({ agent: a.key, session: s.id, key, toolUseId: e.data.toolUseId, tool: e.data.tool, input: e.data.input, at: e.ts, place: placeOf(e, s) });
+  if (run) m.state.risks = m.risks.list();
+  return run;
 }
 
 /**
@@ -928,6 +955,8 @@ function approvalChanged(m, approval, ts) {
   }
   if (approval.status === 'denied') {
     m.awaiting.delete(key);
+    // A request refused in the town never runs: its mark for the risk rules goes.
+    m.risks.refused(key, riskCallKey(approval.callKey, tool, approval.toolInput));
     // A git command refused in the town runs nothing: its alert ends.
     if (m.conflicts.refused({ agent: key, callKey: typeof approval.callKey === 'string' ? approval.callKey : null })) m.state.hazards = m.conflicts.list();
   }

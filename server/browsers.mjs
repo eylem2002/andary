@@ -9,6 +9,7 @@ import { WS_PROTOCOL, allowedHostsFor, browserRole, isTunnelled, offersAndaryPro
 import { validateProfile } from '../public/js/core/profile.js';
 import { LOTS } from '../public/js/core/town-map.js';
 import { LIMITS } from './config.mjs';
+import { writeHoldRisky } from './hold.mjs';
 import { createTokenBucket } from './rate-limit.mjs';
 import { isAllowedHost, isAllowedOrigin, isTunnelOrigin } from './security.mjs';
 import { acceptUpgrade, rejectUpgrade, validateUpgradeRequest } from './websocket.mjs';
@@ -108,11 +109,13 @@ export function createHub(maxClients) {
 
 /**
  * @param {import('./app.mjs').TownContext} ctx
- * @returns {{ remoteApprovals: boolean, approvalTimeoutMs: number, notify: boolean, notifyLimits: boolean }}
+ * @returns {{ remoteApprovals: boolean, approvalTimeoutMs: number, notify: boolean, notifyLimits: boolean, holdRisky: boolean, holdCheckMissing: boolean }}
  */
 export function publicSettings(ctx) {
   // Whether phone notifications are on, never the topic: /api/hello answers without signing in.
-  return { remoteApprovals: ctx.settings.remoteApprovals, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: ctx.notifier.on, notifyLimits: ctx.notifier.limitNotes };
+  // holdCheckMissing: holding is on, but Claude Code's hooks here have no hold check yet.
+  const holdCheckMissing = Boolean(ctx.settings.holdRisky && ctx.holdCheckMissing?.());
+  return { remoteApprovals: ctx.settings.remoteApprovals, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: ctx.notifier.on, notifyLimits: ctx.notifier.limitNotes, holdRisky: ctx.settings.holdRisky, holdCheckMissing };
 }
 
 /**
@@ -190,7 +193,7 @@ export function dropRemovedPeople(ctx) {
  * @param {BrowserRole} role
  */
 function settingsFor(ctx, role) {
-  const settings = role === 'owner' ? publicSettings(ctx) : { remoteApprovals: false, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: false, notifyLimits: false };
+  const settings = role === 'owner' ? publicSettings(ctx) : { remoteApprovals: false, approvalTimeoutMs: ctx.settings.approvalTimeoutMs, notify: false, notifyLimits: false, holdRisky: false, holdCheckMissing: false };
   return ctx.team ? { ...settings, team: teamSettings(ctx, role) } : settings;
 }
 
@@ -388,17 +391,26 @@ function handleBrowserMessage(ctx, connection, text) {
  * @param {any} settings
  */
 function applySettings(ctx, connection, settings) {
-  if (typeof settings?.remoteApprovals !== 'boolean') {
-    sendError(ctx, connection, 'settings.remoteApprovals must be true or false');
+  const remote = settings?.remoteApprovals;
+  const hold = settings?.holdRisky;
+  if ((remote !== undefined && typeof remote !== 'boolean') || (hold !== undefined && typeof hold !== 'boolean') || (remote === undefined && hold === undefined)) {
+    sendError(ctx, connection, 'settings.remoteApprovals and settings.holdRisky must be true or false');
     return;
   }
-  if (ctx.settings.remoteApprovals !== settings.remoteApprovals) {
-    ctx.settings.remoteApprovals = settings.remoteApprovals;
-    ctx.log(`Remote approvals turned ${settings.remoteApprovals ? 'on' : 'off'} from the town`);
+  if (remote !== undefined && ctx.settings.remoteApprovals !== remote) {
+    ctx.settings.remoteApprovals = remote;
+    ctx.log(`Remote approvals turned ${remote ? 'on' : 'off'} from the town`);
+  }
+  if (hold !== undefined && ctx.settings.holdRisky !== hold) {
+    ctx.settings.holdRisky = hold;
+    // Read the hook files again now: the switch is where the warning shows.
+    ctx.holdCheckMissing?.(true);
+    if (!writeHoldRisky(ctx.holdFile, hold)) ctx.log('Could not save "Always hold risky commands"; it holds until the server stops');
+    ctx.log(`Holding risky commands turned ${hold ? 'on' : 'off'} from the town`);
   }
   ctx.hub.broadcastOwners({ t: 'settings', settings: publicSettings(ctx) });
   // Nobody may answer from the town any more: give waiting prompts back to the terminal.
-  if (!settings.remoteApprovals) ctx.broker.releaseAll();
+  if (remote === false) ctx.broker.releaseAll();
 }
 
 /**

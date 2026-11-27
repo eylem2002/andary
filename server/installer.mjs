@@ -11,6 +11,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   statSync,
@@ -19,7 +20,7 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { CLIENTS } from './clients.mjs';
-import { HOOK_SOURCE } from './config.mjs';
+import { HOOK_SOURCE, resolveClaudeConfigDir } from './config.mjs';
 import { ensureHome } from './state-file.mjs';
 import { isObject } from '../public/js/core/text.js';
 
@@ -99,14 +100,42 @@ function hookEntry(command, registration) {
 }
 
 /**
+ * The command for one registration: with its own argument (`hold`) before the marker.
+ * @param {string} command
+ * @param {Registration} registration
+ */
+function commandFor(command, registration) {
+  if (!registration.argument) return command;
+  const at = command.search(/\s#\s*andary\s*$/);
+  return at < 0 ? `${command} ${registration.argument}` : `${command.slice(0, at)} ${registration.argument}${command.slice(at)}`;
+}
+
+/**
+ * One registration's matcher group: its matcher, if it has one, and its entry.
+ * @param {string} command
+ * @param {Registration} registration
+ * @returns {{ matcher?: string, hooks: Array<Record<string, any>> }}
+ */
+function groupFor(command, registration) {
+  return { ...(registration.matcher ? { matcher: registration.matcher } : {}), hooks: [hookEntry(commandFor(command, registration), registration)] };
+}
+
+/**
  * The `hooks` object Andary registers (also the content of the plugin's hooks/hooks.json).
- * Tool events have no matcher, so they match every tool.
+ * Tool events have no matcher, so they match every tool; the hold check (`hold`) runs for shell
+ * commands only, in a group of its own under PreToolUse.
  * @param {string} command
  * @param {HookClient} [client]
- * @returns {Record<string, Array<{ hooks: Array<Record<string, any>> }>>}
+ * @returns {Record<string, Array<{ matcher?: string, hooks: Array<Record<string, any>> }>>}
  */
 export function buildHooksConfig(command, client = CLIENTS.claude) {
-  return Object.fromEntries(client.registrations.map((r) => [r.event, [{ hooks: [hookEntry(command, r)] }]]));
+  /** @type {Record<string, Array<{ matcher?: string, hooks: Array<Record<string, any>> }>>} */
+  const config = {};
+  for (const registration of client.registrations) {
+    if (!Object.hasOwn(config, registration.event)) config[registration.event] = [];
+    config[registration.event].push(groupFor(command, registration));
+  }
+  return config;
 }
 
 /**
@@ -182,7 +211,7 @@ export function withAndaryHooks(settings, { command, hookPath, client = CLIENTS.
     if (!Array.isArray(groups)) {
       throw new SettingsError(`"hooks.${registration.event}" in the settings file is not a list; nothing was changed.`);
     }
-    hooks[registration.event] = [...groups, { hooks: [hookEntry(command, registration)] }];
+    hooks[registration.event] = [...groups, groupFor(command, registration)];
   }
   // Spreading keeps "hooks" at its old position when it already existed.
   return { ...settings, hooks };
@@ -263,6 +292,36 @@ function saveRecord(home, key, shape) {
   else return;
   ensureHome(home);
   writeFileAtomic(join(home, RECORD_FILE), `${JSON.stringify(records, null, 2)}\n`);
+}
+
+/**
+ * The registrations a settings file holds, as `event` or `event argument` for one with an
+ * argument of its own (the hold check: `PreToolUse hold`), so an install from before the hold
+ * check does not pass for a whole one.
+ * @param {Record<string, any>} settings
+ * @param {string} hookPath
+ * @returns {Set<string>}
+ */
+function registeredKeys(settings, hookPath) {
+  /** @type {Set<string>} */
+  const keys = new Set();
+  if (!isObject(settings.hooks)) return keys;
+  for (const [event, groups] of Object.entries(settings.hooks)) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (!isObject(group) || !Array.isArray(group.hooks)) continue;
+      for (const entry of group.hooks) {
+        if (!isAndaryHook(entry, hookPath)) continue;
+        keys.add(/\shold\s+#\s*andary\s*$/.test(String(entry.command)) ? `${event} hold` : event);
+      }
+    }
+  }
+  return keys;
+}
+
+/** @param {Registration} registration */
+function registrationKey(registration) {
+  return registration.argument ? `${registration.event} ${registration.argument}` : registration.event;
 }
 
 /**
@@ -502,7 +561,8 @@ export function refreshForwarder(home) {
  * @property {string} scope
  * @property {string} settingsPath
  * @property {string[]} events     events that have an Andary entry
- * @property {boolean} complete    all registrations present
+ * @property {boolean} complete    all registrations present (the hold check too)
+ * @property {boolean} holdMissing installed, but without the hold check ("Always hold risky commands")
  * @property {boolean} plugin      this file enables the Andary plugin
  * @property {boolean} limitsMod   this file enables the andary-limits mod (CONTRACTS §4.14)
  * @property {string|null} error   unreadable or malformed file
@@ -544,10 +604,67 @@ function inspectScope(client, scope, settingsPath, hookPath) {
   try {
     const { settings } = readSettingsFile(settingsPath);
     const events = registeredEvents(settings, hookPath);
-    const complete = client.registrations.every((r) => events.includes(r.event));
+    const keys = registeredKeys(settings, hookPath);
+    const missing = client.registrations.filter((r) => !keys.has(registrationKey(r)));
+    const complete = missing.length === 0;
+    const holdMissing = events.length > 0 && missing.some((r) => r.argument === 'hold');
     const claude = client.id === 'claude';
-    return { client, scope, settingsPath, events, complete, plugin: claude && pluginEnabledIn(settings), limitsMod: claude && enabledIn(settings, 'andary-limits'), error: null };
+    return { client, scope, settingsPath, events, complete, holdMissing, plugin: claude && pluginEnabledIn(settings), limitsMod: claude && enabledIn(settings, 'andary-limits'), error: null };
   } catch (error) {
-    return { client, scope, settingsPath, events: [], complete: false, plugin: false, limitsMod: false, error: error.message };
+    return { client, scope, settingsPath, events: [], complete: false, holdMissing: false, plugin: false, limitsMod: false, error: error.message };
+  }
+}
+
+/**
+ * Whether Claude Code runs the hold check ("Always hold risky commands for me", server/hold.mjs)
+ * for sessions started here: a settings file registers it, or the plugin is enabled and the copy
+ * Claude Code installed of it (under <config>/plugins) registers it. An older plugin copy, or
+ * one that cannot be found, does not count.
+ * @param {{ dir: string, env: NodeJS.ProcessEnv, home: string }} where
+ * @returns {boolean}
+ */
+export function holdCheckInstalled({ dir, env, home }) {
+  const { scopes, plugin } = inspectInstallations({ dir, env, home, clients: [CLIENTS.claude] });
+  if (scopes.some((scope) => scope.events.length > 0 && !scope.holdMissing)) return true;
+  return plugin && pluginHasHoldCheck(join(resolveClaudeConfigDir(env), 'plugins'));
+}
+
+/** Folders looked into for the plugin's installed copies, and how deep. */
+const PLUGIN_SCAN = Object.freeze({ maxFolders: 400, maxDepth: 6 });
+
+/**
+ * Whether an installed copy of the Andary plugin registers the hold check: a hooks/hooks.json
+ * under a folder named andary whose commands include `hold # andary`.
+ * @param {string} root  Claude Code's plugins folder
+ */
+function pluginHasHoldCheck(root) {
+  /** @type {Array<[string, number]>} */
+  const queue = [[root, 0]];
+  let seen = 0;
+  while (queue.length && seen < PLUGIN_SCAN.maxFolders) {
+    const [folder, depth] = /** @type {[string, number]} */ (queue.shift());
+    seen += 1;
+    let names;
+    try {
+      names = readdirSync(folder, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of names) {
+      if (!entry.isDirectory()) continue;
+      const path = join(folder, entry.name);
+      if (entry.name === 'hooks' && /[\\/]andary(?:[\\/]|$)/.test(folder) && hookFileHolds(join(path, 'hooks.json'))) return true;
+      if (depth < PLUGIN_SCAN.maxDepth && !entry.name.startsWith('.') && entry.name !== 'node_modules') queue.push([path, depth + 1]);
+    }
+  }
+  return false;
+}
+
+/** @param {string} file */
+function hookFileHolds(file) {
+  try {
+    return /\shold\s+#\s*andary"/.test(readFileSync(file, 'utf8'));
+  } catch {
+    return false;
   }
 }

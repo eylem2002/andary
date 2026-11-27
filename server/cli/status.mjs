@@ -43,7 +43,9 @@ export function describeScope(report) {
   const client = report.client.id === 'claude' ? '' : ` ${report.client.id}`;
   const scope = report.scope === 'user' ? '' : ` --scope ${report.scope}`;
   const again = `install${client}${scope}`;
-  return `${which}: partly installed, ${report.events.length} of ${report.client.registrations.length} events (${where}); run ${again} again`;
+  const events = new Set(report.client.registrations.map((r) => r.event)).size;
+  if (report.holdMissing && report.events.length === events) return `${which}: installed, but the hold check is missing (${where}); run ${again} again`;
+  return `${which}: partly installed, ${report.events.length} of ${events} events (${where}); run ${again} again`;
 }
 
 /**

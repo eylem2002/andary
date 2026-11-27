@@ -54,6 +54,8 @@
  * @property {(sessionId: string, agentId: string|null, text: string, ref: string) => boolean} sendNote  a note for one
  *   agent's next step (§4.15), answered with `ref` (Hud.noteReply); false when it cannot be sent (not connected, or the demo)
  * @property {(on: boolean) => void} setRemoteApprovals
+ * @property {(on: boolean) => void} [setHoldRisky]  "Always hold risky commands for me" (live)
+ * @property {(on: boolean) => void} [holdApprovals]  a card waiting for an answer shows in the Approvals panel (the demo holds its countdowns)
  * @property {() => void} startDemo
  * @property {() => void} leaveDemo
  * @property {(paused: boolean) => void} setPaused
@@ -79,7 +81,7 @@
  * @property {boolean} demoForced          the URL asked for the demo (?demo=1), e.g. `andary demo`
  * @property {boolean} hosted              a demo on a static host, with no server to connect to
  * @property {boolean} worldFailed         the 3D town could not start (no WebGL); the panels stay
- * @property {{ remoteApprovals?: boolean, approvalTimeoutMs?: number, notify?: boolean, notifyLimits?: boolean, notifyUrl?: string|null, team?: { role: 'owner'|'person'|'viewer', members: string[] }|null }} serverSettings
+ * @property {{ remoteApprovals?: boolean, approvalTimeoutMs?: number, holdRisky?: boolean, holdCheckMissing?: boolean, notify?: boolean, notifyLimits?: boolean, notifyUrl?: string|null, team?: { role: 'owner'|'person'|'viewer', members: string[] }|null }} serverSettings
  * @property {import('./town-people.js').PersonView[]} people  a team town's people (§4.11), or the demo's
  * @property {string|null} me   the person this browser plays, null when it plays nobody
  * @property {number} clockOffset  how far the server's clock is ahead of this browser's (walks are timed on it)

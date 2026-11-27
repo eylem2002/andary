@@ -5,6 +5,7 @@ import { TEAM_HEADER } from './team.mjs';
 import { offeredSuggestions } from './approvals.mjs';
 import { sourceOf } from './adapters/index.mjs';
 import { ingestHook, ingestTeam } from './ingest.mjs';
+import { holdOutput } from './hold.mjs';
 import { LIMITS_BODY_BYTES, parseLimitsReport } from './limits.mjs';
 import { APP_ID, LIMITS } from './config.mjs';
 import { publicSettings } from './browsers.mjs';
@@ -171,6 +172,7 @@ const API_ROUTES = {
   '/api/hello': { methods: ['GET', 'HEAD'], handle: handleHello },
   '/api/proof': { methods: ['GET'], handle: handleProof },
   '/api/hook': { methods: ['POST'], handle: handleHook },
+  '/api/hold': { methods: ['POST'], handle: handleHold },
   '/api/limits': { methods: ['POST'], handle: handleLimits },
   '/api/team': { methods: ['POST'], handle: handleTeam },
 };
@@ -191,7 +193,7 @@ function handleHello(ctx, req, res) {
   }
   const known = authenticated || Boolean(ctx.team?.memberOf(req.headers[TEAM_HEADER]));
   const { approvalTimeoutMs } = publicSettings(ctx);
-  const settings = { remoteApprovals: false, notify: false, notifyLimits: false, ...(known ? { approvalTimeoutMs } : {}) };
+  const settings = { remoteApprovals: false, notify: false, notifyLimits: false, holdRisky: false, holdCheckMissing: false, ...(known ? { approvalTimeoutMs } : {}) };
   sendJson(res, 200, { app: APP_ID, ...(known ? { version: ctx.version } : {}), authenticated, settings });
 }
 
@@ -355,6 +357,40 @@ async function handleHook(ctx, req, res) {
   }
   if (notes.texts.length) settleNotes(res, notes);
   sendHookReply(ctx, req, res, null, notes.texts);
+}
+
+/**
+ * POST /api/hold from the forwarder run as `hook.mjs hold` (CONTRACTS §4.3 step 4b): whether to
+ * make Claude Code ask before a risky shell command ("Always hold risky commands for me",
+ * server/hold.mjs). Authenticated and rate-limited like /api/hook; nothing is ingested (the
+ * ordinary PreToolUse hook reports the same call). The answer is signed: a PreToolUse `ask` with
+ * why, or null.
+ * @param {TownContext} ctx
+ * @param {Request} req
+ * @param {Response} res
+ */
+async function handleHold(ctx, req, res) {
+  if (!hasHookSecret(req, ctx.secret)) {
+    req.resume();
+    sendJson(res, 401, { error: 'Missing or wrong hook secret' });
+    return;
+  }
+  if (!ctx.hookLimiter.take()) {
+    req.resume();
+    sendJson(res, 429, { error: 'Too many hook events' }, { 'Retry-After': '1' });
+    return;
+  }
+  let body;
+  try {
+    body = parseHookBody(await readBody(req, LIMITS.hookBodyBytes));
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error;
+    sendJson(res, error.status, { error: error.message }, error.status === 413 ? { Connection: 'close' } : {});
+    return;
+  }
+  const event = body.event;
+  const output = ctx.settings.holdRisky ? holdOutput(event, { source: body.source, root: ctx.workTrees?.rootOf(event.cwd) ?? null }) : null;
+  sendHookReply(ctx, req, res, output);
 }
 
 /**

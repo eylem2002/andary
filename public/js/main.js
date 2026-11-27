@@ -29,6 +29,18 @@ const FIRST_CONTENT_MS = 800;
 
 /** @typedef {import('./ui/types.js').World} World */
 
+/**
+ * The HUD's switches that only some sources have: the demo holds its countdowns while a card is in
+ * view; a live town holds risky commands when asked to.
+ * @param {() => import('./sources/types.js').TownSource|null} source
+ */
+function sourceSwitches(source) {
+  return {
+    holdApprovals: (/** @type {boolean} */ on) => source()?.holdApprovals?.(on),
+    setHoldRisky: (/** @type {boolean} */ on) => source()?.setHoldRisky?.(on),
+  };
+}
+
 async function boot() {
   // A sign-in link leaves the address bar first, in the demo too: the page keeps it for later.
   readCredentials();
@@ -59,6 +71,7 @@ async function boot() {
         app.world?.setPaused(on);
       },
       setSpeed: (speed) => source?.setSpeed?.(speed),
+      ...sourceSwitches(() => source),
       notifyTest: () => source?.notifyTest?.() ?? false,
       requestDigest: (since) => source?.requestDigest(since) ?? false,
       saveProfile: (profile) => source?.saveProfile?.(profile) ?? false,

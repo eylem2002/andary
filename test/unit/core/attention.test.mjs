@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { CODEX_IDLE_MS, READY_MS, STALE_DIALOG_MS, attentionItems, countedItems } from '../../../public/js/core/attention.js';
+import { CODEX_IDLE_MS, READY_MS, RISK_MS, STALE_DIALOG_MS, attentionItems, countedItems } from '../../../public/js/core/attention.js';
 import { CONFLICT_MS } from '../../../public/js/core/conflicts.js';
 import { createStore } from '../../../public/js/core/store.js';
 import { CODEX_IDLE_MS as PHONE_CODEX_IDLE_MS } from '../../../server/notify.mjs';
@@ -509,5 +509,121 @@ describe('two agents on the same files (core/conflicts.js)', () => {
     team.store.ingest(envelope({ ...hook('PostToolUse', edit), andary_member: 'sam', session_id: 'sam~s1' }, T0));
     team.send('PostToolUse', write, T0 + 1000, other);
     assert.deepEqual(team.items(T0 + 2000), []);
+  });
+});
+
+describe('risky commands that ran without asking', () => {
+  /** @param {ReturnType<typeof town>} t @param {string} command @param {number} ts */
+  const ran = (t, command, ts) => {
+    t.send('PreToolUse', { tool_name: 'Bash', tool_input: { command }, tool_use_id: `u${ts}` }, ts);
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command }, tool_use_id: `u${ts}`, tool_response: {} }, ts + 10);
+  };
+
+  test('an allow rule let `git reset --hard` through: a notice that counts until set aside', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    ran(t, 'git reset --hard origin/main', T0);
+    const [item] = t.items(T0 + 20);
+    assert.deepEqual([item.kind, item.level, item.counted, item.dismissable], ['risk', 'alert', true, true]);
+    assert.equal(item.text, 'Ran without asking: git reset --hard origin/main (throws away uncommitted changes (reset --hard))');
+    assert.equal(countedItems(t.items(T0 + 20)).length, 1);
+    assert.deepEqual(t.items(T0 + 20, new Set([item.id])), [], 'set aside, it is gone');
+    assert.deepEqual(t.items(T0 + RISK_MS + 20), [], 'and it lapses after half an hour');
+    const log = t.store.getState().log.filter((entry) => entry.kind === 'risk');
+    assert.equal(log.length, 1);
+    assert.equal(log[0].level, 'warn');
+  });
+
+  test('a risky command you were asked about is no notice; the same one run later without asking is', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'rm -rf src' } }, T0);
+    ran(t, 'rm -rf src', T0 + 100);
+    assert.deepEqual(t.items(T0 + 200).filter((item) => item.kind === 'risk'), []);
+    ran(t, 'rm -rf src', T0 + 500);
+    assert.deepEqual(t.items(T0 + 600).filter((item) => item.kind === 'risk').map((item) => item.text), ['Ran without asking: rm -rf src (deletes recursively)']);
+  });
+
+  test('an ordinary command, or a risky one that was interrupted, is no notice', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    ran(t, 'npm test', T0);
+    t.send('PostToolUseFailure', { tool_name: 'Bash', tool_input: { command: 'rm -rf build' }, tool_use_id: 'x', error: 'Interrupted', is_interrupt: true }, T0 + 50);
+    assert.deepEqual(t.items(T0 + 100).filter((item) => item.kind === 'risk'), []);
+  });
+
+  test('a crew that left takes its notices with it', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    ran(t, 'git push --force', T0);
+    t.send('SessionEnd', { reason: 'other' }, T0 + 100);
+    assert.deepEqual(t.items(T0 + 200).filter((item) => item.kind === 'risk'), []);
+    assert.deepEqual(t.store.getState().risks, []);
+  });
+});
+
+describe('risky runs: which call asked', () => {
+  test('the server\'s call key ties a request to its call, also when an adapter renamed the tool', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    const patch = '*** Begin Patch\n*** Add File: /home/dev/.bashrc\n+x\n*** End Patch';
+    t.send('PermissionRequest', { tool_name: 'apply_patch', tool_input: { command: patch }, andary_key: 'k-patch' }, T0);
+    // Codex's patch arrives as a Write of the file it adds, with the same key.
+    t.send('PostToolUse', { tool_name: 'Write', tool_input: { file_path: '/home/dev/.bashrc', content: 'x' }, tool_use_id: 'p1', andary_key: 'k-patch', andary_tool: 'apply_patch', tool_response: {} }, T0 + 100);
+    assert.deepEqual(t.items(T0 + 200).filter((item) => item.kind === 'risk'), []);
+  });
+
+  test('a refused request takes its mark away, so the same command run later without asking counts', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    const input = { command: 'git push --force' };
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: input }, T0);
+    t.send('PermissionDenied', { tool_name: 'Bash', tool_input: input, tool_use_id: 'd1', reason: 'no' }, T0 + 50);
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: input, tool_use_id: 'd2', tool_response: {} }, T0 + 500);
+    assert.equal(t.items(T0 + 600).filter((item) => item.kind === 'risk').length, 1);
+  });
+
+  test('a request denied in the town takes its mark away too', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    const input = { command: 'git reset --hard' };
+    t.send('PermissionRequest', { tool_name: 'Bash', tool_input: input }, T0);
+    t.store.setApproval(approvalOf({ toolInput: input }));
+    t.store.setApproval(approvalOf({ toolInput: input, status: 'denied', decidedBy: 'town' }));
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: input, tool_use_id: 'd3', tool_response: {} }, T0 + 500);
+    assert.equal(t.items(T0 + 600).filter((item) => item.kind === 'risk').length, 1);
+  });
+
+  test('a rebuildable folder deleted without asking is no notice', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'rm -rf node_modules dist' }, tool_use_id: 'q1', tool_response: {} }, T0);
+    assert.deepEqual(t.items(T0 + 100).filter((item) => item.kind === 'risk'), []);
+  });
+});
+
+describe('risky runs: one request for a whole patch', () => {
+  test('every file of a Codex patch that asked once is covered by that one request', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    const patch = '*** Begin Patch\n*** Add File: ../other/notes.txt\n*** Add File: .env\n*** Add File: /home/dev/.bashrc\n*** End Patch';
+    t.send('PermissionRequest', { tool_name: 'apply_patch', tool_input: { command: patch }, andary_key: 'k-three' }, T0);
+    for (const [i, file] of ['/home/dev/code/other/notes.txt', '/home/dev/code/api-server/.env', '/home/dev/.bashrc'].entries()) {
+      const id = i === 0 ? 'call-1' : `call-1#${i + 1}`;
+      t.send('PostToolUse', { tool_name: 'Write', tool_input: { file_path: file, content: 'x' }, tool_use_id: id, andary_key: 'k-three', andary_tool: 'apply_patch', tool_response: {} }, T0 + 100 + i);
+    }
+    assert.deepEqual(t.items(T0 + 200).filter((item) => item.kind === 'risk'), []);
+    // The same patch again, as a call of its own that did not ask: it counts.
+    t.send('PostToolUse', { tool_name: 'Write', tool_input: { file_path: '/home/dev/code/api-server/.env', content: 'x' }, tool_use_id: 'call-2', andary_key: 'k-three', andary_tool: 'apply_patch', tool_response: {} }, T0 + 300);
+    assert.equal(t.items(T0 + 400).filter((item) => item.kind === 'risk').length, 1);
+  });
+
+  test('two risky runs in the same millisecond are two notices', () => {
+    const t = town();
+    t.send('SessionStart', { source: 'startup' }, T0 - 1000);
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'git push -f' }, tool_use_id: 'a', tool_response: {} }, T0);
+    t.send('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'git reset --hard' }, tool_use_id: 'b', tool_response: {} }, T0);
+    const ids = t.items(T0 + 10).filter((item) => item.kind === 'risk').map((item) => item.id);
+    assert.equal(new Set(ids).size, 2);
   });
 });

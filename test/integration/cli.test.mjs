@@ -338,7 +338,7 @@ describe('install, uninstall and doctor', () => {
 
       const uninstall = await runCli(['uninstall'], { env, cwd });
       assert.equal(uninstall.code, 0);
-      assert.match(uninstall.stdout, /Removed 19 Andary hook entries/);
+      assert.match(uninstall.stdout, /Removed 20 Andary hook entries/);
     } finally {
       await town.stop();
     }

@@ -8,7 +8,8 @@ import { join, resolve } from 'node:path';
 import { resolveClaudeConfigDir } from './config.mjs';
 
 /**
- * @typedef {{ event: string, async?: boolean, timeout?: number }} Registration
+ * @typedef {{ event: string, async?: boolean, timeout?: number, matcher?: string, argument?: string }} Registration
+ *   matcher: the tools it runs for (none: every tool); argument: one more word for the forwarder
  * @typedef {object} HookClient
  * @property {'claude'|'codex'} id
  * @property {string} name                       for people: "Claude Code", "Codex"
@@ -71,6 +72,9 @@ const CLAUDE = Object.freeze({
     Object.freeze({ event: 'PermissionRequest', timeout: 150 }),
     // Synchronous: async hooks may be killed while the session exits.
     Object.freeze({ event: 'SessionEnd', timeout: 3 }),
+    // Synchronous, shell commands only: "Always hold risky commands for me" (server/hold.mjs) may
+    // answer `ask`. With the setting off the forwarder exits at once and forwards nothing.
+    Object.freeze({ event: 'PreToolUse', matcher: 'Bash|PowerShell', argument: 'hold', timeout: 5 }),
   ]),
   argument: '',
   applyHint: 'Claude Code reads hooks when a session starts: restart running sessions to apply this.',
