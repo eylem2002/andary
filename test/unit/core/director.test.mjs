@@ -93,6 +93,19 @@ describe('director: crews arrive, work and leave', () => {
     assert.deepEqual(says(), ['On it: Fix it'], 'a short goal is said plainly, never as a quip');
   });
 
+  it('"continue" is said as carrying on with the goal kept, never "On it: continue"', async () => {
+    const { send, ready, says, clock } = setup();
+    await ready();
+    await send(hook('UserPromptSubmit', { prompt: 'continue' }));
+    await clock.advance(3000);
+    assert.deepEqual(says(), ['Carrying on']);
+    await send(hook('UserPromptSubmit', { prompt: 'Fix the clock' }));
+    await clock.advance(6000);
+    await send(hook('UserPromptSubmit', { prompt: 'go on' }));
+    await clock.advance(6000);
+    assert.deepEqual(says().slice(1), ['On it: Fix the clock', 'Carrying on: Fix the clock']);
+  });
+
   it('a long goal is never squeezed into a joke', async () => {
     const { send, ready, says, clock } = setup({ random: () => 0.9 });
     await ready();

@@ -1422,15 +1422,18 @@ section.
      and anything longer is a new goal.
 270. **An ended crew gives up its number.** Numbers are still never changed while a crew works,
      but the next crew takes the lowest number no crew in town holds, so the crews at work stay
-     on `1`–`9`. Ended crews are listed without a number (Catch me up already hid it); a crew that
+     on `1`–`9`. A number freed less than 60 seconds ago rests while another of 1–9 is free, so
+     a key does not jump to a new crew the moment its old crew leaves. Ended crews are listed without a number (Catch me up already hid it); a crew that
      comes back keeps its number unless another crew took it meanwhile, then takes the lowest
      free one. The 1–9 keys only reach crews at work.
 271. **The crews board's order** (`core/crew-board.js`): blocked or waiting for a permission,
      then stopped, then an alert (stuck, same files), then a finished turn that counts, then
      working, then idle; ties by crew number. Only counted "need you" items rank a crew (the same
-     list as the masthead). While the pointer or the keyboard is in the list the crews keep their
-     places (newcomers join at the end), so a row never moves under the hand or loses focus; the
-     order catches up when you leave. Ended crews are folded into "Ended (n)", newest first,
+     list as the masthead). While the pointer is over the list, or keyboard focus (`:focus-visible`)
+     is in it, the crews keep their places (newcomers join at the end), so a row never moves
+     under the hand or loses focus; the order catches up when you leave. Focus left on a row by
+     a click does not hold it. A crew that ends while the order is held stays in its place,
+     dimmed, and moves to "Ended (n)" when you leave. Ended crews are folded into "Ended (n)", newest first,
      closed on every page load. The panel header counts the crews at work, the ones listed above
      the group, matching the masthead's "n crews".
 272. **Finished helpers fold after 60 seconds** into "+n finished" (replacing "show the three
@@ -1445,9 +1448,12 @@ section.
      ("Turn quiet town on"). Files and branches from the study's idea are left out (Andary does
      not track branches yet; files are a long list best reached from an agent's details), as are
      "send a note" and "copy resume", which need their own forms. **It never allows or denies a
-     request**: "Open approvals" takes you to the cards. Ctrl-K and ⌘-K work while typing in a
-     field and over other dialogs (it closes them), as in other apps; Ctrl-Shift-K and Alt
-     chords are left to the browser. A magnifier button beside Settings opens it on phones.
+     request**: "Open approvals" takes you to the cards. The chord is ⌘-K on a Mac (an Apple
+     platform by `navigator.userAgentData.platform` or `navigator.platform`), where Ctrl-K in a
+     text field deletes to the end of the line, and Ctrl-K everywhere else (the Windows key is
+     left alone). It works while typing in a field and over other dialogs (it closes them), as in
+     other apps, and by key code too (another layout's K); Shift and Alt chords are left to the
+     browser. A magnifier button beside Settings opens it on phones.
 275. **Quiet town** (off by default) removes every quip the director picks from `humor.js`
      (arrivals, waits, successes, idle thoughts) and achievement and "town grew" toasts (with
      their chime). Plain speech stays ("On it: <goal>", a turn's last message, errors' own
@@ -1464,3 +1470,6 @@ section.
      text or its agent's name, and combines with the crew and errors filters. It searches the
      log the browser holds (the last 500 entries, 200 shown). Screen readers hear the number of
      matches once typing pauses for 0.7 s. The query is not saved.
+279. **A follow-up prompt is said as the work going on**: the Foreman's bubble reads "Carrying
+     on: <the kept goal>" (or "Carrying on" with none yet) instead of "On it: continue", in a
+     quiet town too.

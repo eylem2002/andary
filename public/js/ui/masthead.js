@@ -9,6 +9,7 @@ import { icon } from './icons.js';
 import { listJoin, plural } from './format.js';
 import { countedItems } from '../core/attention.js';
 import { needsYouLabel } from './needs-you.js';
+import { onMac } from './shortcuts.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -33,7 +34,7 @@ export function createMasthead(ctx) {
 
   const setupButton = h('button', { type: 'button', class: 'hud-btn hud-btn--board hud-setup-button', hidden: true, on: { click: () => ctx.openDialog('setup') } },
     icon('terminal', { size: 18 }), 'Use your own Claude Code');
-  const findButton = h('button', { type: 'button', class: 'hud-iconbtn hud-iconbtn--board', 'aria-label': 'Find a crew, an agent or an action', 'aria-keyshortcuts': 'Control+K Meta+K', title: 'Find (Ctrl K)', 'data-testid': 'palette-button', on: { click: () => ctx.openDialog('palette') } },
+  const findButton = h('button', { type: 'button', class: 'hud-iconbtn hud-iconbtn--board', 'aria-label': 'Find a crew, an agent or an action', 'aria-keyshortcuts': onMac() ? 'Meta+K' : 'Control+K', title: onMac() ? 'Find (⌘ K)' : 'Find (Ctrl K)', 'data-testid': 'palette-button', on: { click: () => ctx.openDialog('palette') } },
     icon('search'));
   const settingsButton = h('button', { type: 'button', class: 'hud-iconbtn hud-iconbtn--board', 'aria-label': 'Settings', 'data-testid': 'settings-button', on: { click: () => ctx.openDialog('settings') } },
     icon('settings'));

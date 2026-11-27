@@ -165,7 +165,7 @@ building to see who is inside.
 
 | Key | Does |
 | --- | --- |
-| `Ctrl` `K` (`⌘` `K`) | Find a crew, an agent or an action (open approvals, catch me up, settings, quiet town…) |
+| `Ctrl` `K` (on a Mac `⌘` `K`) | Find a crew, an agent or an action (open approvals, catch me up, settings, quiet town…) |
 | `C` | Director camera on or off: it follows the most interesting thing by itself |
 | `H` | Full-screen town: put the side boards away or bring them back |
 | `F` / `Esc` | Follow the selected agent / stop following, close the open panel |
@@ -304,7 +304,8 @@ team town are theirs and left out.
   "Ended (2)" at the bottom and give up their numbers, so the crews at work stay on `1`–`9`. A
   crew's name stays at the top of the list while its agents scroll under it. A crew's goal is its
   latest real prompt: "continue", "go on", "yes" and the like keep the goal before them.
-- **Command palette:** `Ctrl` `K` (`⌘` `K` on a Mac), or the magnifier at the top right, finds
+- **Command palette:** `Ctrl` `K` (on a Mac `⌘` `K`; there `Ctrl` `K` stays the text fields'
+  "delete to the end of the line"), or the magnifier at the top right, finds
   crews, agents and actions as you type. Arrow keys move, `Enter` goes. It never answers a
   permission request: that stays on the card's own buttons.
 - **Activity log search:** type words or an agent's name in the log's search box; every word

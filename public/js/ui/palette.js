@@ -12,7 +12,7 @@ import { h, setAttr, setHidden, setText, srOnly } from './dom.js';
 import { doingText, plural, statusLabel, truncate } from './format.js';
 import { kbd } from './parts.js';
 import { rankMatches } from '../core/fuzzy.js';
-import { arrangeCrews } from '../core/crew-board.js';
+import { arrangeCrews, needLevels } from '../core/crew-board.js';
 import { directorActive } from './cinema.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
@@ -47,7 +47,7 @@ const KIND_WORDS = Object.freeze({ crew: 'Crew', agent: 'Agent', action: 'Action
  */
 export function paletteItems(ctx, hooks) {
   const state = ctx.store.getState();
-  const { live } = arrangeCrews(state.sessions, new Map());
+  const { live } = arrangeCrews(state.sessions, needLevels(state, ctx.needsYou.items(state)));
   /** @type {PaletteItem[]} */
   const items = [];
   for (const session of live) {
@@ -153,7 +153,7 @@ export function createPalette(ctx, hooks) {
     spellcheck: 'false',
     'data-testid': 'palette-input',
   }));
-  const list = h('ul', { class: 'hud-palette__list', id: 'hud-palette-list', role: 'listbox', 'aria-label': 'Results', 'data-testid': 'palette-results' });
+  const list = h('ul', { class: 'hud-palette__list', id: 'hud-palette-list', role: 'listbox', 'aria-label': 'Results', tabindex: '-1', 'data-testid': 'palette-results' });
   const none = h('p', { class: 'hud-empty hud-palette__none', hidden: true });
   const status = h('p', { class: 'hud-sr', role: 'status' });
   const hint = h('p', { class: 'hud-palette__hint', 'aria-hidden': 'true' }, kbd('↑'), ' ', kbd('↓'), ' move  ', kbd('Enter'), ' go  ', kbd('Esc'), ' close');

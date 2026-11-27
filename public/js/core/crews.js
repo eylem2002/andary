@@ -20,15 +20,25 @@ import { LEAD_NAME, MAX_DONE_PER_SESSION, MAX_ENDED_SESSIONS, ROLE_NAMES, TEAMMA
 // ---------------------------------------------------------------------------------------------
 // Sessions and agents.
 
+/** A number freed this recently is not given out again while another of 1–9 is free. */
+const NUMBER_REST_MS = 60_000;
+const KEYED_NUMBERS = 9;
+
 /**
  * The lowest crew number no crew still in town holds. A crew keeps its number while it works;
  * once it ends, its number is free for the next crew, so the crews at work stay on the 1–9 keys
- * however many have come and gone (an ended crew is listed without its number).
+ * however many have come and gone (an ended crew is listed without its number). A number freed
+ * in the last minute rests while another key is free, so "2" does not jump to a new crew the
+ * moment the old crew 2 leaves.
  * @param {Model} m
+ * @param {number} now  the event's time
  * @param {Session|null} [except]  a crew coming back, which must not count its own number
  */
-function freeCrewNumber(m, except = null) {
-  const taken = new Set(m.state.sessions.filter((s) => s.status !== 'ended' && s !== except).map((s) => s.number));
+function freeCrewNumber(m, now, except = null) {
+  const others = m.state.sessions.filter((s) => s !== except);
+  const taken = new Set(others.filter((s) => s.status !== 'ended').map((s) => s.number));
+  const resting = new Set(others.filter((s) => s.status === 'ended' && now - (s.endedAt ?? 0) < NUMBER_REST_MS).map((s) => s.number));
+  for (let n = 1; n <= KEYED_NUMBERS; n++) if (!taken.has(n) && !resting.has(n)) return n;
   let n = 1;
   while (taken.has(n)) n += 1;
   return n;
@@ -86,7 +96,7 @@ export function newSession(m, e) {
   /** @type {Session} */
   const s = {
     id: e.sessionId,
-    number: freeCrewNumber(m),
+    number: freeCrewNumber(m, e.ts),
     project: projectName(e.cwd, e.sessionId),
     cwd: e.cwd,
     title: undefined,
@@ -127,7 +137,7 @@ export function sessionFor(m, e) {
   s.endedAt = undefined;
   s.endReason = undefined;
   // Back at work: its old number, unless a newer crew took it meanwhile.
-  if (m.state.sessions.some((other) => other !== s && other.status !== 'ended' && other.number === s.number)) s.number = freeCrewNumber(m, s);
+  if (m.state.sessions.some((other) => other !== s && other.status !== 'ended' && other.number === s.number)) s.number = freeCrewNumber(m, e.ts, s);
   createLead(m, s, e);
   return s;
 }

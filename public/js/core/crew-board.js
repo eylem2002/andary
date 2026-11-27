@@ -5,6 +5,10 @@
 /** @typedef {import('./store.js').Session} Session */
 /** @typedef {import('./store.js').AgentState} AgentState */
 /** @typedef {import('./attention.js').AttentionLevel} AttentionLevel */
+/** @typedef {import('./attention.js').AttentionItem} AttentionItem */
+/** @typedef {import('./store.js').StoreState} StoreState */
+
+import { countedItems } from './attention.js';
 
 /** A helper that finished this long ago folds away (its crew's "+n finished" brings it back). */
 export const FOLD_FINISHED_MS = 60_000;
@@ -79,4 +83,21 @@ export function foldFinished(agents, now) {
  */
 export function shownNumber(session) {
   return session && session.status !== 'ended' ? session.number : 0;
+}
+
+/**
+ * The most urgent counted "needs you" level of each crew (items come most urgent first); a
+ * shared item (one rate limit over several crews) counts for each of them.
+ * @param {StoreState} state
+ * @param {AttentionItem[]} items
+ * @returns {Map<string, AttentionLevel>}
+ */
+export function needLevels(state, items) {
+  /** @type {Map<string, AttentionLevel>} */
+  const levels = new Map();
+  for (const item of countedItems(items)) {
+    const sessions = new Set([item.sessionId, ...item.agentKeys.map((key) => state.agents[key]?.sessionId).filter((id) => id !== undefined)]);
+    for (const id of sessions) if (!levels.has(id)) levels.set(id, item.level);
+  }
+  return levels;
 }

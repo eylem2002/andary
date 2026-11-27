@@ -11,6 +11,7 @@ import { modelLabel } from './catalog.js';
 import { agentKeyOf, normalizeAgentId } from './ids.js';
 import { clip, oneLine, own, str } from './text.js';
 import * as defaultHumor from './humor.js';
+import { isFollowUp } from './goals.js';
 import { agentState, contextFor, enqueue, makeVisit, pump, release, say, scoped, sessionOf, settle, wake } from './director-queue.js';
 
 /** @typedef {import('./catalog.js').BuildingKey} BuildingKey */
@@ -891,10 +892,16 @@ function onPrompt(d, e) {
   rt.failStreak = 0;
   setStatus(d, rt, 'working');
   const goal = clip(oneLine(e.data.prompt), 80);
+  // "continue", "yes": the goal is the one before (core/goals.js), so that is what is said.
+  const kept = isFollowUp(goal) ? clip(oneLine(sessionOf(d, rt.sessionId)?.goal ?? ''), 80) : null;
   const react = () => {
     d.world.setActivity(rt.key, 'think');
     if (d.historic) return;
     d.world.emote(rt.key, '📜');
+    if (kept !== null) {
+      say(d, rt, kept ? `Carrying on: ${kept}` : 'Carrying on', { priority: 'high', ms: 5000 });
+      return;
+    }
     // Long goals read badly inside a joke, so only short ones are quoted in one.
     const plain = goal && (d.quiet() || goal.length > SHORT_GOAL || d.random() < INFORMATIVE_SHARE);
     const context = { ...contextFor(d, rt, e), goal: goal.length > SHORT_GOAL ? undefined : goal };

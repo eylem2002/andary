@@ -131,6 +131,41 @@ test('the crews board opens at its top and keeps a crew\'s name in view while it
   await page.screenshot({ path: test.info().outputPath('crews-board.png') });
 });
 
+/** Sends one hook to a crew of tenCrews. @param {import('@playwright/test').Page} page @param {string} session @param {Record<string, unknown>} payload */
+async function crewHook(page, session, payload) {
+  await page.evaluate(([sessionId, extra]) => {
+    const now = Date.now();
+    /** @type {any} */ (window).__andary.store.ingest({ id: 996_000 + Math.floor(Math.random() * 1000), ts: now, rx: now, event: { session_id: sessionId, cwd: '/home/dev/code/x', transcript_path: '/t.jsonl', permission_mode: 'default', ...extra } });
+  }, /** @type {const} */ ([session, payload]));
+}
+
+test('a row clicked with the mouse does not hold the order once the pointer leaves; an ending crew waits under the pointer', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'the desktop board, with a pointer');
+  await openDemo(page);
+  await tenCrews(page);
+  const body = page.locator('#hud-crews-body');
+  const row = body.locator('[data-session-id="e2e-6"]').getByTestId('agent-row');
+  await row.click();
+  const key = await row.getAttribute('data-agent-key');
+  await page.mouse.move(800, 500);
+  await crewHook(page, 'e2e-9', { hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'git push -f' } });
+  await expect.poll(async () => {
+    const live = await order(page, '.hud-lines:not(.hud-lines--ended)');
+    return live.indexOf('e2e-9') < live.indexOf('e2e-1');
+  }).toBe(true);
+  expect(await page.evaluate(() => /** @type {HTMLElement} */ (document.activeElement)?.dataset.agentKey)).toBe(key);
+
+  // Under the pointer, a crew that ends keeps its place, dimmed; it folds away once you leave.
+  await body.hover();
+  await crewHook(page, 'e2e-2', { hook_event_name: 'SessionEnd', reason: 'other' });
+  const ending = body.locator('.hud-lines:not(.hud-lines--ended) > [data-session-id="e2e-2"]');
+  await expect(ending).toHaveClass(/is-ended/);
+  await expect(page.getByTestId('crews-ended-toggle')).toHaveText('Ended (2)');
+  await page.mouse.move(800, 500);
+  await expect(ending).toHaveCount(0);
+  await expect(page.getByTestId('crews-ended-toggle')).toHaveText('Ended (3)');
+});
+
 test('a crew keeps its goal when the prompt is "continue"', async ({ page }) => {
   await openDemo(page);
   await tenCrews(page);

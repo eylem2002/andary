@@ -142,26 +142,44 @@ describe('store: sessions and the lead', () => {
 });
 
 describe('store: crew numbers', () => {
+  const MINUTE = 60_000;
+
   it('an ended crew frees its number for the next crew, so the crews at work stay on 1–9', () => {
-    const { send, state } = setup();
+    const { send, state, clock } = setup();
     const number = (/** @type {string} */ id) => state().sessions.find((s) => s.id === id)?.number;
     send(hook('SessionStart', { source: 'startup' }, { session: 'live' }));
     for (let i = 0; i < 10; i++) {
-      send(hook('SessionStart', { source: 'startup' }, { session: `s${i}` }));
+      send(hook('SessionStart', { source: 'startup' }, { session: `s${i}` }), clock.now + MINUTE);
       send(hook('SessionEnd', { reason: 'other' }, { session: `s${i}` }));
     }
-    send(hook('SessionStart', { source: 'startup' }, { session: 'late' }));
+    send(hook('SessionStart', { source: 'startup' }, { session: 'late' }), clock.now + MINUTE);
     assert.deepEqual([number('live'), number('s0'), number('s9'), number('late')], [1, 2, 2, 2], 'each took the number the one before it left');
     send(hook('SessionStart', { source: 'startup' }, { session: 'third' }));
     assert.equal(number('third'), 3);
     send(hook('SessionEnd', { reason: 'other' }, { session: 'live' }));
-    send(hook('SessionStart', { source: 'startup' }, { session: 'new' }));
+    send(hook('SessionStart', { source: 'startup' }, { session: 'new' }), clock.now + MINUTE);
     assert.equal(number('new'), 1, 'the lowest number no crew at work holds');
     assert.deepEqual([number('late'), number('third')], [2, 3], 'nobody at work is renumbered');
   });
 
+  it('a number freed less than a minute ago rests while another key is free', () => {
+    const { send, state, clock } = setup();
+    const number = (/** @type {string} */ id) => state().sessions.find((s) => s.id === id)?.number;
+    send(hook('SessionStart', { source: 'startup' }, { session: 'a' }));
+    send(hook('SessionStart', { source: 'startup' }, { session: 'b' }));
+    send(hook('SessionEnd', { reason: 'other' }, { session: 'a' }));
+    send(hook('SessionStart', { source: 'startup' }, { session: 'c' }));
+    assert.equal(number('c'), 3, '1 has just been freed');
+    send(hook('SessionStart', { source: 'startup' }, { session: 'd' }), clock.now + MINUTE);
+    assert.equal(number('d'), 1, 'a minute later it is given out again');
+    for (let i = 0; i < 6; i++) send(hook('SessionStart', { source: 'startup' }, { session: `x${i}` }));
+    send(hook('SessionEnd', { reason: 'other' }, { session: 'x5' }));
+    send(hook('SessionStart', { source: 'startup' }, { session: 'e' }));
+    assert.equal(number('e'), 9, 'with no other key free, the resting one is used');
+  });
+
   it('a crew that comes back keeps its number, or takes a free one when another crew holds it', () => {
-    const { send, state } = setup();
+    const { send, state, clock } = setup();
     const number = (/** @type {string} */ id) => state().sessions.find((s) => s.id === id)?.number;
     send(hook('SessionStart', { source: 'startup' }, { session: 'a' }));
     send(hook('SessionStart', { source: 'startup' }, { session: 'b' }));
@@ -169,7 +187,7 @@ describe('store: crew numbers', () => {
     send(hook('UserPromptSubmit', { prompt: 'back again' }, { session: 'b' }));
     assert.equal(number('b'), 2, 'nobody took it');
     send(hook('SessionEnd', { reason: 'other' }, { session: 'b' }));
-    send(hook('SessionStart', { source: 'startup' }, { session: 'c' }));
+    send(hook('SessionStart', { source: 'startup' }, { session: 'c' }), clock.now + MINUTE);
     assert.equal(number('c'), 2);
     send(hook('UserPromptSubmit', { prompt: 'and again' }, { session: 'b' }));
     assert.equal(number('b'), 3, 'crew c holds 2 now');

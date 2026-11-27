@@ -21,8 +21,7 @@ import { agentKeyOf } from '../core/ids.js';
 import { doingText, formatDuration, isCommandText, nameWithRole, plural, truncate } from './format.js';
 import { approvalAgentKey, roundel, setCurrent, statusChip, updateRoundel, updateStatusChip } from './parts.js';
 import { itemsByAgent, notesByAgent, waitedText } from './needs-you.js';
-import { FOLD_FINISHED_MS, arrangeCrews, foldFinished, holdOrder, shownNumber } from '../core/crew-board.js';
-import { countedItems } from '../core/attention.js';
+import { FOLD_FINISHED_MS, arrangeCrews, foldFinished, holdOrder, needLevels, shownNumber } from '../core/crew-board.js';
 
 /** @typedef {import('./types.js').HudContext} HudContext */
 /** @typedef {import('./types.js').StoreState} StoreState */
@@ -73,7 +72,12 @@ export function createCrewsPanel(ctx) {
   };
   body.addEventListener('pointerenter', () => { reading.hover = true; });
   body.addEventListener('pointerleave', () => { reading.hover = false; settle(); });
-  body.addEventListener('focusin', () => { reading.focus = true; });
+  // Only keyboard focus holds the order: a click leaves focus on a row, and the hold would then
+  // last until focus moved elsewhere. A pointer holds it while it is over the list.
+  body.addEventListener('focusin', (event) => {
+    const target = /** @type {Element|null} */ (event.target instanceof Element ? event.target : null);
+    reading.focus = Boolean(target?.matches(':focus-visible'));
+  });
   body.addEventListener('focusout', (event) => {
     if (body.contains(/** @type {Node|null} */ (event.relatedTarget))) return;
     reading.focus = false;
@@ -100,8 +104,17 @@ export function createCrewsPanel(ctx) {
   function render(state) {
     const now = Date.now();
     const items = ctx.needsYou.items(state);
-    const { live, ended } = arrangeCrews(state.sessions, needLevels(state, items));
-    const order = reading.hover || reading.focus ? holdOrder(live, shownOrder) : live;
+    const arranged = arrangeCrews(state.sessions, needLevels(state, items));
+    const { live } = arranged;
+    let { ended } = arranged;
+    let order = live;
+    if (reading.hover || reading.focus) {
+      // Held: a crew that ends meanwhile stays in its place, dimmed, until you leave the list.
+      const listed = new Set(shownOrder);
+      const ending = ended.filter((session) => listed.has(session.id));
+      ended = ended.filter((session) => !listed.has(session.id));
+      order = holdOrder([...live, ...ending], shownOrder);
+    }
     shownOrder = order.map((session) => session.id);
     setText(count, live.length ? `${live.length} active` : '');
     setText(empty, emptyText(ctx, ended.length));
@@ -137,7 +150,8 @@ export function createCrewsPanel(ctx) {
     for (const item of lines.querySelectorAll('.hud-stations__item')) {
       tickStation(parts, /** @type {HTMLElement} */ (item), now);
       const agent = parts.get(/** @type {HTMLElement} */ (item))?.agent;
-      if (agent && agent.role !== 'lead' && agent.status === 'done' && now - agent.lastActivity >= FOLD_FINISHED_MS) fold = true;
+      // An unfolded crew shows its finished helpers anyway: nothing changes there.
+      if (agent && !unfolded.has(agent.sessionId) && agent.role !== 'lead' && agent.status === 'done' && now - agent.lastActivity >= FOLD_FINISHED_MS) fold = true;
     }
     // A helper finished a minute ago: it folds into its crew's "+n finished".
     if (fold) ctx.refresh();
@@ -226,21 +240,6 @@ function updateLine({ ctx, parts }, line, session, state, facts) {
   setAttr(p.more, 'aria-expanded', folded.length ? String(showAll) : null);
 }
 
-/**
- * The most urgent counted "needs you" level of each crew (items come most urgent first); a
- * shared item (one rate limit over several crews) counts for each of them.
- * @param {StoreState} state
- * @param {import('../core/attention.js').AttentionItem[]} items
- * @returns {Map<string, import('../core/attention.js').AttentionLevel>}
- */
-function needLevels(state, items) {
-  const levels = new Map();
-  for (const item of countedItems(items)) {
-    const sessions = new Set([item.sessionId, ...item.agentKeys.map((key) => state.agents[key]?.sessionId).filter(Boolean)]);
-    for (const id of sessions) if (!levels.has(id)) levels.set(id, item.level);
-  }
-  return levels;
-}
 
 /**
  * @typedef {object} RowFacts  what the rows show besides each agent's own state, by agent key
